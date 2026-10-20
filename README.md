@@ -85,6 +85,12 @@ also be set as the variable `UNII_<KEY>`:
 - `compactor`: what writes the summaries (default
   `claude-api:haiku-5.5:high:slow`).
 - `agents`: what subagents run on (default: the chat's pick).
+- `fallback`: what calls go on with, in order, when theirs is out (busy
+  past its retries, out of credit or quota, a bad key): comma-separated
+  `vendor:model[:effort[:speed]]`, the call's effort and speed if unset
+  (default none), e.g. `openai-api:gpt-6.1-sol`. Turns, subagents and
+  summaries all use it, so may cost what the fallback costs. The chat
+  notes each switch and the way back.
 - `work`: the agents' working dirs on each device (default
   ~/.unii/work).
 - `rules`: a file appended to every system prompt.

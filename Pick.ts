@@ -8,7 +8,9 @@
 // model every vendor's models, effort, speed (a model lacking one takes
 // its fastest below), up and down the efforts, never the speed; given a
 // value (`to`), to the pick whose part it is. A saved pick the server
-// doesn't offer gives way to def, never to a pick like it.
+// doesn't offer gives way to def, never to a pick like it. A call's
+// fallbacks (config `fallback`, AskAI.ts) are models it goes on with,
+// in order, at its effort and speed unless they name their own.
 
 import type { Vendor } from "./AskAI.ts";
 
@@ -31,6 +33,9 @@ export type Model = { label: string; id: string; speeds: string[] };
 
 // what a server offers: vendors, and models by label
 export type Offer = { vendors: Vendor[]; models: string[] };
+
+// a fallback: a model, the effort and speed it names (none: the call's)
+export type Fall = { vendor: Vendor; model: Model; effort?: string; speed?: string };
 
 // Constants
 // =========
@@ -119,6 +124,25 @@ export namespace Pick {
   export function ask(pick: Pick): Pick {
     const model = Pick.model(pick.vendor, pick.model);
     return { ...pick, model: model?.id ?? pick.model };
+  }
+
+  // a pick as a call took it (Pick.ask), by its model's label again
+  export function named(run: Pick): Pick {
+    const model = MODELS[run.vendor].find((m) => m.id === run.model);
+    return { ...run, model: model?.label ?? run.model };
+  }
+
+  // what a call (as it takes its pick) runs on: its pick, then each
+  // fallback not on a model before it, as a call takes it: picks only,
+  // never the call's prompt or images (a Run event, which names them,
+  // may go to another process)
+  export function falls(run: Pick, falls: Fall[]): Pick[] {
+    const own = { vendor: run.vendor, model: run.model, effort: run.effort, speed: run.speed };
+    const list = falls.map((f) => {
+      const on = Pick.on(own, f.vendor, f.model);
+      return Pick.ask({ ...on, effort: f.effort ?? on.effort, speed: f.speed ?? on.speed });
+    });
+    return [own, ...list].filter((p, k, all) => all.findIndex((q) => q.vendor === p.vendor && q.model === p.model) === k);
   }
 
   // as the chat runs it; null: none
