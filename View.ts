@@ -170,8 +170,12 @@ export type Row =
 export type Tab = { name: string | null; here: boolean; text: string };
 
 // hint: what the knob's value means (a tooltip; the site's note when it
-// changes)
-export type Knob = { text: string; move: Move; hint: string };
+// changes); choices: its menu (the site's)
+export type Knob = { text: string; move: Move; hint: string; choices: Choice[] };
+
+// a value a knob can take: here, the pick's; note, what it costs; vendor,
+// the vendor of a model first of its vendor's (a model menu's groups)
+export type Choice = { text: string; move: Move; note: string; here: boolean; vendor: string | null };
 
 // a user's account, as /api/account gives it (Cloud.data): whether the
 // server bills; where it does, every purchase and every call paid,
@@ -547,10 +551,21 @@ export function view_pick(v: View): Knob[] {
   const rate  = Price.rate(Pick.ask(v.pick).model);
   const price = rate === undefined ? "" : ": $" + rate.input + "/M tokens in, $" + rate.output + "/M out";
   return [
-    { text: model, move: "model", hint: model + price },
-    { text: effort, move: "effort", hint: effort + " effort: how long it thinks first; more is smarter, slower and costs more" },
-    { text: speed, move: "speed", hint: speed + ": ×" + Price.times(speed) + " the price" },
+    { text: model, move: "model", hint: model + price, choices: view_choices(v.pick, "model", v) },
+    { text: effort, move: "effort", hint: effort + " effort: how long it thinks first; more is smarter, slower and costs more", choices: view_choices(v.pick, "effort", v) },
+    { text: speed, move: "speed", hint: speed + ": ×" + Price.times(speed) + " the price", choices: view_choices(v.pick, "speed", v) },
   ];
+}
+
+// every value of a knob, in the order a move steps through them; a
+// model's with its price per million tokens, a speed's with its factor
+function view_choices(pick: Pick, move: Move, v: View): Choice[] {
+  return Pick.options(pick, move, v).map(([text, to], i, all) => {
+    const rate   = move === "model" ? Price.rate(Pick.ask(to).model) : undefined;
+    const note   = rate !== undefined ? "$" + rate.input + " in · $" + rate.output + " out" : move === "speed" ? "×" + Price.times(text) : "";
+    const vendor = move === "model" && (i === 0 || all[i - 1][1].vendor !== to.vendor) ? to.vendor : null;
+    return { text, move, note, here: Pick.label(to) === Pick.label(pick), vendor };
+  });
 }
 
 export function view_count(v: View): number {
