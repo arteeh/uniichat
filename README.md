@@ -66,7 +66,9 @@ Other commands:
                                      # runs the server it carries
 
 Your chats live in ~/.unii/users/<id>, one JSON line per message
-(main/) and per summary (tree/). They are the memory: back them up.
+(main/) and per summary (tree/). They are the memory: back them up
+(`backup`, below). A user restores theirs from a backup on the account
+page (Restore a backup); a tar.gz of the dir made by hand works too.
 
 Config
 ------
@@ -93,6 +95,14 @@ also be set as the variable `UNII_<KEY>`:
 - `owner`: the accounts (emails or @logins, comma-separated) that may
   replace Unii's base prompt, for every user, on the account page.
   Compactions use it too: keep the built-in compaction rules in it.
+- `backup`: a dir for snapshots of each chat (default none: no
+  backups). Every `backup_every` hours (default 24), a chat changed
+  since its last snapshot gets a new one, `<backup>/<id>/<date>.tar.gz`;
+  the last `backup_keep` (default 7) are kept. `backup_run`, a shell
+  command, gets each new one's path as `$1` (e.g. `rclone copy "$1"
+  remote:unii`), killed after 10 minutes. A failure is a note in that
+  chat, tried again within the hour. Deleting an account deletes its
+  snapshots here.
 - `after`: a shell command run after each turn.
 - `workers`: how many processes serve the users (default none: one
   process). With a number, `Server.ts` only routes, behind a proxy that

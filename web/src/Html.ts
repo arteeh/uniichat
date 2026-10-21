@@ -150,7 +150,8 @@ export function fine_html(app: boolean): string {
 // the account page (/account): where the server bills, the balance and
 // credit to add, the use by day and the purchases; the user's SOUL.md,
 // and an owner's base prompt (soul: null, unread: a retry); then the
-// account's own acts; deleting asks first, in place (main.ts)
+// account's own acts; restoring a backup and deleting ask first, in
+// place (main.ts)
 export function account_html(a: View.Account, app: boolean, soul: View.Soul | null): string {
   const tops    = a.topups ?? [];
   const days    = View.account_days(a);
@@ -161,12 +162,14 @@ export function account_html(a: View.Account, app: boolean, soul: View.Soul | nu
   const item    = (what: string, note: string, act: string) => `<div class="item"><p>${what}${note === "" ? "" : `<small>${note}</small>`}</p>${act}</div>`;
   const closes  = a.bills ? `<p>This also closes your BendAI account (same sign-in). Credit you bought and didn't use goes back to your card.</p>` : "";
   const kill    = `<form class="kill" hidden>${closes}<p>Type <b>${esc(a.name)}</b> to confirm.</p><input name="name" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="${esc(a.name)}"><p class="why"></p><div><button type="button" class="chip keep">Cancel</button><button class="chip red" disabled>Delete for good</button></div></form>`;
+  const back    = `<form class="back-up" hidden><p>Replace your chat and Unii's memory with <b class="file"></b>? What they hold now is replaced.</p><p class="why"></p><div><button type="button" class="chip keep">Cancel</button><button class="chip red">Restore</button></div></form>`;
   const acts    = [
     item(esc(a.name), "", `<button class="chip out">Sign out</button>`),
     item("Export memory", "Chat and account, in one file.", `<a class="chip" href="/export">Download</a>`),
+    item("Restore a backup", "Chat and memory, from a .tar.gz backup.", `<button class="chip up">Upload</button><input class="pick" type="file" accept=".gz,.tgz,application/gzip" hidden>`),
     item("Delete account", "Erases chat and memory for good.", `<button class="chip red del">Delete</button>`),
   ];
-  const account = section_html("Sign-in and data", acts.join("") + kill);
+  const account = section_html("Sign-in and data", acts.join("") + back + kill);
   const unread  = item("Could not read your instructions.", "", `<button class="chip retry">Try again</button>`);
   const mine    = section_html("Your instructions", soul === null ? unread : prompt_html("soul", soul.soul, "Who you are, what Unii goes by, its tone: your SOUL.md, in every prompt Unii and its agents get.", "I'm Sam, a designer in Lisbon. Call yourself Kit. Be brief and warm."));
   const base    = soul?.base === undefined ? "" : section_html("Base prompt", prompt_html("base", soul.base, "Unii's prompt for every user of this server, in place of the built-in one (you own the server). Empty: the built-in one.", ""));
