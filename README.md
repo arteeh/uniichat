@@ -145,11 +145,11 @@ bottom of the Settings page (☰ menu, or /settings); see below.
 - `claude_sub`, `claude`: claude-sub's Claude Code config dir (default
   ~/.unii/claude-sub) and executable (default: the one `unii` carries,
   else the Agent SDK's in node_modules).
-- `claude_lanes`, `claude_idle`: how many claude-sub chat turns and
-  subagents may run at once, each on its own Claude Code (default 3;
-  about 250 MB each; summaries get one more, as a turn may wait on them)
-  and how long one may sit unused before it ends, in seconds (default
-  300).
+- `claude_lanes`, `claude_idle`: how many claude-sub Claude Codes may
+  run at once, all told (default 3; about 250 MB each). One is kept for
+  summaries, as a turn may wait on them, so chat turns and subagents
+  share the rest, and it must be at least 2. And how long one may sit
+  unused before it ends, in seconds (default 300).
 
 `vapid.json` in the server's dir is its Web Push key pair, made at first
 start; keep it, as a new one silences every browser until notifications
