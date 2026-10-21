@@ -1597,7 +1597,7 @@ function fine_html(app) {
   const fee = app ? "Paid at the App Store's price." : "+10% platform fee (min $0.80).";
   return `<p class="fine">${fee} Buying accepts the <a href="/terms.html" target="_blank">terms</a>.</p>`;
 }
-function account_html(a, app, soul) {
+function account_html(a, app, soul, notify = null) {
   const tops = a.topups ?? [];
   const days = account_days(a);
   const balance = a.credits === null ? "" : section_html("Balance", `<p class="big">${usd_show(a.credits)}</p>` + credit_html(app));
@@ -1610,6 +1610,7 @@ function account_html(a, app, soul) {
   const back = `<form class="back-up" hidden><p>Replace your chat and Unii's memory with <b class="file"></b>? What they hold now is replaced.</p><p class="why"></p><div><button type="button" class="chip keep">Cancel</button><button class="chip red">Restore</button></div></form>`;
   const acts = [
     item(esc(a.name), "", `<button class="chip out">Sign out</button>`),
+    ...notify === null ? [] : [notify_html(notify)],
     item("Export memory", "Chat and account, in one file.", `<a class="chip" href="/export">Download</a>`),
     item("Restore a backup", "Chat and memory, from a .tar.gz backup.", `<button class="chip up">Upload</button><input class="pick" type="file" accept=".gz,.tgz,application/gzip" hidden>`),
     item("Delete account", "Erases chat and memory for good.", `<button class="chip red del">Delete</button>`)
@@ -1624,6 +1625,16 @@ function account_html(a, app, soul) {
 function prompt_html(name, text, note, hint) {
   const area = `<textarea name="${name}" rows="8" spellcheck="false" placeholder="${esc(hint)}">${esc(text)}</textarea>`;
   return `<form class="prompt"><p class="note">${esc(note)}</p>${area}<div><p class="why"></p><button class="chip">Save</button></div></form>`;
+}
+function notify_html(notify) {
+  const note = {
+    off: "Replies on this device, when UniiChat isn't open.",
+    on: "Replies on this device, when UniiChat isn't open.",
+    blocked: "Blocked in this browser's settings for this site.",
+    home: "On iPhone and iPad: Share, then Add to Home Screen, and open it from there."
+  }[notify];
+  const button = notify === "home" ? "" : `<button class="chip notify"${notify === "blocked" ? " disabled" : ""}>${notify === "on" ? "Turn off" : "Turn on"}</button>`;
+  return `<div class="item"><p>Notifications<small>${note}</small></p>${button}</div>`;
 }
 function section_html(title, body) {
   return `<section><h2>${esc(title)}</h2>${body}</section>`;
@@ -1748,7 +1759,8 @@ var P = {
   found: new Map,
   done: {},
   off: new Set,
-  step: ""
+  step: "",
+  push: null
 };
 function $(sel) {
   return document.querySelector(sel);
@@ -1758,6 +1770,9 @@ function kept(fact) {
 }
 async function boot() {
   document.head.insertAdjacentHTML("beforeend", `<style>${theme_css()}</style>`);
+  if (APP === null) {
+    navigator.serviceWorker?.register("/sw.js").catch(() => {});
+  }
   const q = new URLSearchParams(location.search);
   history.replaceState(null, "", location.pathname === "/account" ? "/account" : "/");
   if (q.has("terminal")) {
@@ -1793,10 +1808,16 @@ async function boot() {
   }
 }
 async function boot_me() {
-  for (;; ) {
+  for (let k = 0;; k++) {
     const res = await fetch("/api/me").catch(() => null);
     if (res?.status === 200 || res?.status === 401) {
+      if (k > 0) {
+        $("#toast").hidden = true;
+      }
       return res.ok ? res.json() : null;
+    }
+    if (k === 0) {
+      toast("Can't reach UniiChat. Reconnecting…", true);
     }
     await new Promise((ok) => setTimeout(ok, RETRY));
   }
@@ -2532,7 +2553,8 @@ async function account() {
     el.innerHTML = `<p class="sub">Could not read your account. Try again in a moment.</p>`;
     return;
   }
-  el.innerHTML = account_html(a, APP !== null, soul);
+  const push = await notify_state().catch(() => null);
+  el.innerHTML = account_html(a, APP !== null, soul, push);
   el.querySelectorAll("form.prompt").forEach((form) => form.onsubmit = (ev) => {
     ev.preventDefault();
     account_prompt(form);
@@ -2553,6 +2575,11 @@ async function account() {
   account_restore();
   name.oninput = () => kill.querySelector(".red").disabled = name.value.trim().toLowerCase() !== a.name.toLowerCase();
   $("#account .out").onclick = signout;
+  const bell = document.querySelector("#account .notify");
+  bell?.addEventListener("click", () => {
+    bell.disabled = true;
+    notify(push !== "on");
+  });
   kill.onsubmit = (ev) => {
     ev.preventDefault();
     account_delete(kill);
@@ -2592,6 +2619,7 @@ function account_restore() {
   };
 }
 async function signout() {
+  await notify_sub().then((sub) => sub?.unsubscribe()).catch(() => {});
   await post("/api/logout", {});
   location.href = "/";
 }
@@ -2615,6 +2643,77 @@ async function account_delete(kill) {
   }
   kill.querySelector(".why").textContent = out.error;
 }
+async function notify_state() {
+  P.push = null;
+  if (APP !== null) {
+    return null;
+  }
+  if (navigator.serviceWorker === undefined || !("PushManager" in window) || !("Notification" in window)) {
+    return /iPhone|iPad/.test(navigator.userAgent) ? "home" : null;
+  }
+  if (Notification.permission === "denied") {
+    return "blocked";
+  }
+  const wait = new Promise((ok) => setTimeout(ok, 3000, undefined));
+  const reg = await navigator.serviceWorker.getRegistration() ?? await Promise.race([navigator.serviceWorker.ready, wait]);
+  const sub = await notify_sub();
+  const query = sub === null ? "" : "?endpoint=" + encodeURIComponent(sub.endpoint);
+  const res = await fetch("/api/webpush" + query).catch(() => null);
+  const out = res?.ok ? await res.json() : null;
+  if (reg === undefined || out === null || out.key === null) {
+    return null;
+  }
+  P.push = { reg, key: out.key };
+  return out.on && notify_keyed(sub, out.key) ? "on" : "off";
+}
+function notify_keyed(sub, key) {
+  const had = sub?.options.applicationServerKey;
+  return had != null && notify_bytes(key).join() === new Uint8Array(had).join();
+}
+function notify_bytes(key) {
+  return Uint8Array.from(atob(key.replace(/-/g, "+").replace(/_/g, "/")), (c) => c.charCodeAt(0));
+}
+async function notify_sub() {
+  const reg = await navigator.serviceWorker?.getRegistration();
+  return await reg?.pushManager.getSubscription() ?? null;
+}
+async function notify(on) {
+  const push = P.push;
+  if (push === null) {
+    return;
+  }
+  const what = on ? "on" : "off";
+  try {
+    const out = on ? await notify_on(push.reg, push.key) : await notify_off(push.reg);
+    toast(out.error ?? "Notifications are " + what + ".");
+  } catch (err) {
+    const denied = typeof Notification !== "undefined" && Notification.permission === "denied";
+    toast(denied ? "Notifications are blocked in this browser's settings." : "Could not turn notifications " + what + ": " + (err?.message ?? err));
+  }
+  account();
+}
+async function notify_on(reg, key) {
+  const bytes = notify_bytes(key);
+  const ask = () => reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: bytes });
+  const sub = await ask().catch(async (err) => {
+    const old = await reg.pushManager.getSubscription();
+    if (old === null || err?.name !== "InvalidStateError") {
+      throw err;
+    }
+    await old.unsubscribe();
+    return ask();
+  });
+  return post("/api/webpush", sub.toJSON());
+}
+async function notify_off(reg) {
+  const sub = await reg.pushManager.getSubscription();
+  if (sub !== null) {
+    const headers = { "content-type": "application/json" };
+    await fetch("/api/webpush", { method: "DELETE", headers, body: JSON.stringify({ endpoint: sub.endpoint }) });
+    await sub.unsubscribe();
+  }
+  return {};
+}
 async function topup2(usd) {
   if (APP !== null) {
     $("#wallet").hidePopover();
@@ -2631,12 +2730,12 @@ async function topup2(usd) {
   toast(out.error ?? "Could not start the payment.");
   return false;
 }
-function toast(text) {
+function toast(text, stay = false) {
   const el = $("#toast");
   el.textContent = text;
   el.hidden = false;
   clearTimeout(P.toast);
-  P.toast = setTimeout(() => el.hidden = true, 7000);
+  P.toast = stay ? 0 : setTimeout(() => el.hidden = true, 7000);
 }
 function intro_play() {
   const skip = new URLSearchParams(location.search).has("skip");
