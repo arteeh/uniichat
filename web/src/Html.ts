@@ -1,13 +1,16 @@
 // Html
 // ====
 // What View.ts draws and Md.ts's tokens, as HTML, every text escaped, one
-// element per row, knob or tab; and the account page's parts. A click's
+// element per row, knob or tab; and the account and settings pages'
+// parts. A click's
 // effect is in the markup: `data-act`, the View.Act it makes;
 // `data-copy`, what Copy copies; `data-usd`, the credit it buys
 // (main.ts), so `credit_html` works wherever it is put.
 
 import * as Call from "../../Call.ts";
 import * as Md from "../../Md.ts";
+import { EFFORTS, LABELS, Pick, VENDORS } from "../../Pick.ts";
+import type { Key, Page, Row } from "../../Settings.ts";
 import * as Theme from "../../Theme.ts";
 import * as Timer from "../../Timer.ts";
 import * as View from "../../View.ts";
@@ -168,9 +171,9 @@ export function fine_html(app: boolean): string {
 // credit to add, the use by day and the purchases; the user's SOUL.md,
 // and an owner's base prompt (soul: null, unread: a retry); then the
 // account's own acts (notify: this browser's notifications, null: none
-// to offer); restoring a backup and deleting ask first, in place
-// (main.ts)
-export function account_html(a: View.Account, app: boolean, soul: View.Soul | null, notify: Notify | null = null): string {
+// to offer; owner: the server's settings); restoring a backup and
+// deleting ask first, in place (main.ts)
+export function account_html(a: View.Account, app: boolean, soul: View.Soul | null, owner: boolean, notify: Notify | null = null): string {
   const tops    = a.topups ?? [];
   const days    = View.account_days(a);
   const balance = a.credits === null ? "" : section_html("Balance", `<p class="big">${View.usd_show(a.credits)}</p>` + credit_html(app));
@@ -184,6 +187,7 @@ export function account_html(a: View.Account, app: boolean, soul: View.Soul | nu
   const acts    = [
     item(esc(a.name), "", `<button class="chip out">Sign out</button>`),
     ...(notify === null ? [] : [notify_html(notify)]),
+    ...(owner ? [item("Server settings", "Models, keys and more of this server.", `<a class="chip" href="/settings" data-go="/settings">Open</a>`)] : []),
     item("Export memory", "Chat and account, in one file.", `<a class="chip" href="/export">Download</a>`),
     item("Restore a backup", "Chat and memory, from a .tar.gz backup.", `<button class="chip up">Upload</button><input class="pick" type="file" accept=".gz,.tgz,application/gzip" hidden>`),
     item("Delete account", "Erases chat and memory for good.", `<button class="chip red del">Delete</button>`),
@@ -212,6 +216,140 @@ function notify_html(notify: Notify): string {
   }[notify];
   const button = notify === "home" ? "" : `<button class="chip notify"${notify === "blocked" ? " disabled" : ""}>${notify === "on" ? "Turn off" : "Turn on"}</button>`;
   return `<div class="item"><p>Notifications<small>${note}</small></p>${button}</div>`;
+}
+
+// Settings
+// ========
+// The settings page (/settings, the server's owner's: Settings.ts): a
+// row a setting or a key, each its control (named by its key; a key's
+// "key.<name>"), where its value comes from and when a change applies,
+// a button back to the default (a key: out) if config.json sets it,
+// and a place for why a save was refused; one the page may not change
+// (set by the environment, or a server path or command) shows its value
+// only. main.ts reads the form and fills the picks' lists (picks_html).
+
+// what each setting is, as the page says it: its name, a line about it
+const SETTING: Record<string, [string, string]> = {
+  vendors   : ["Vendors", "Whose models the server offers."],
+  models    : ["Models", "The models offered, of those vendors."],
+  pick      : ["Default model", "What a chat runs on until it picks another."],
+  compactor : ["Compactor", "What writes the memory's summaries."],
+  agents    : ["Subagents", "What subagents run on."],
+  owner     : ["Owner", "Who may open this page: sign-in emails, comma-separated, named in config.json on the server only."],
+  site      : ["Site", "The server's address, for sign-in links."],
+  apple     : ["iOS App ID", "The app's team and bundle ID, whose sign-in links it opens."],
+  apns      : ["APNs key ID", "The ID of the key the app's pushes are signed with."],
+  workers   : ["Workers", "How many processes serve the users."],
+  work      : ["Work folder", "Where the agents work on each device."],
+  rules     : ["Rules", "A file added to every system prompt."],
+  after     : ["After each turn", "A shell command the server runs."],
+};
+
+const KEY: Record<string, [string, string]> = {
+  anthropic : ["Anthropic", "For claude-api's models."],
+  openai    : ["OpenAI", "For openai-api's models and dictation."],
+  resend    : ["Resend", "Emails sign-in links (none: the server prints them)."],
+  apns      : ["APNs key", "The .p8 key the iOS app's pushes are signed with."],
+};
+
+// each vendor's key
+export const VENDOR_KEY: Record<string, string> = { "claude-api": "anthropic", "openai-api": "openai" };
+
+const GROUPS: Array<[string, string[]]> = [
+  ["Models", ["vendors", "models", "pick", "compactor", "agents"]],
+  ["Server", ["owner", "site", "apple", "apns", "workers", "work", "rules", "after"]],
+];
+
+export function settings_html(page: Page): string {
+  const rows = new Map(page.settings.map((r) => [r.key, r]));
+  const groups = GROUPS.map(([title, keys]) => section_html(title, keys.map((k) => rows.get(k)).filter((r) => r !== undefined).map(setting_html).join("")));
+  const keys = section_html("Keys", `<p class="sub">A key set here is kept in keys.json in the server's folder, readable by the server's user only. It is never shown again, only its last characters.</p>` + page.keys.map(key_html).join(""));
+  const error = page.error === null ? "" : `<p class="why bad">${esc(page.error)}</p>`;
+  const save = `<div class="save"><p class="why"></p><button class="chip go"${page.error === null ? "" : " disabled"}>Save</button></div>`;
+  const head = `<a class="back" href="/account" data-go="/account">← Account</a><h1>Settings</h1><p class="sub">This server's settings, in config.json in its folder. Only its owner sees this page.</p>`;
+  return head + error + `<form class="settings" autocomplete="off">` + groups.slice(0, 1).join("") + keys + groups.slice(1).join("") + save + `</form>`;
+}
+
+function setting_html(r: Row): string {
+  const [name, about] = SETTING[r.key] ?? [r.key, ""];
+  const id = "set-" + r.key;
+  const off = r.from === "env" || !r.web;
+  const control = off ? `<code class="value">${esc(r.value === "" ? "(none)" : r.value)}</code>` : control_html(r, id);
+  const label = `<label for="${id}">${esc(name)}<small>${esc(about)} <code>${esc(r.key)}</code></small></label>`;
+  return `<div class="set" data-key="${esc(r.key)}">${label}<div class="field">${control}</div>${from_html(r)}<p class="err"></p></div>`;
+}
+
+function control_html(r: Row, id: string): string {
+  switch (r.key) {
+    case "vendors": {
+      return checks_html("vendors", VENDORS, list(r.value)) + `<p class="warn"></p>`;
+    }
+    case "models": {
+      return checks_html("models", LABELS, list(r.value));
+    }
+    case "pick":
+    case "compactor":
+    case "agents": {
+      return `<select id="${id}" name="${r.key}" data-value="${esc(r.value)}"></select>`;
+    }
+  }
+  return `<input id="${id}" name="${r.key}" value="${esc(r.value)}" placeholder="${esc(r.def)}" spellcheck="false" autocapitalize="off">`;
+}
+
+// a list setting's items
+export function list(text: string): string[] {
+  return text.split(",").map((x) => x.trim()).filter((x) => x !== "");
+}
+
+// a list as saved (`was`) and its items checked now (`now`, in the boxes'
+// order): null if the same items (in any order: no change); else the
+// items kept, in their order, then those added, in the boxes'
+export function list_changed(was: string[], now: string[]): string[] | null {
+  const same = was.length === now.length && was.every((x) => now.includes(x)) && now.every((x) => was.includes(x));
+  return same ? null : [...was.filter((x) => now.includes(x)), ...now.filter((x) => !was.includes(x))];
+}
+
+function checks_html(name: string, all: string[], on: string[]): string {
+  const box = (x: string) => `<label class="opt"><input type="checkbox" name="${name}" value="${esc(x)}"${on.includes(x) ? " checked" : ""}> ${esc(x)}</label>`;
+  const odd = on.filter((x) => !all.includes(x));
+  return `<div class="opts">${all.map(box).join("")}${odd.map(box).join("")}</div>`;
+}
+
+// where a value comes from, when a change applies, and the button back
+// to the default
+function from_html(r: Row): string {
+  const from = r.from === "env" ? `Set by <code>${esc(r.env)}</code> on the server` : r.from === "file" ? "From config.json" : "Default";
+  const apply = r.from === "env" ? "changed there only" : !r.web ? "changed in config.json on the server only" : r.apply === "now" ? "applies at once" : "applies on a restart";
+  const running = r.running === null ? "" : ` · running on <code>${esc(r.running === "" ? "(none)" : r.running)}</code> till then`;
+  const reset = r.from === "file" && r.web ? ` <button type="button" class="reset">Use the default</button>` : "";
+  return `<p class="from">${from} · ${apply}${running}${reset}</p>`;
+}
+
+function key_html(k: Key): string {
+  const [name, about] = KEY[k.name] ?? [k.name, ""];
+  const id = "set-key-" + k.name;
+  const field = k.name === "apns" ? `<textarea id="${id}" name="key.${k.name}" rows="3" placeholder="Paste a new key to set it" spellcheck="false"></textarea>` : `<input id="${id}" type="password" name="key.${k.name}" autocomplete="new-password" placeholder="Paste a new key to set it" spellcheck="false" autocapitalize="off">`;
+  const tail = k.tail === "" ? "" : `, ending in <code>${esc(k.tail)}</code>`;
+  const from = k.from === "env" ? `Set by <code>${esc(k.env)}</code> on the server${tail}` : k.from === "file" ? `Set${tail}, in keys.json` : "Not set";
+  const reset = k.from === "file" ? ` <button type="button" class="reset">Remove</button>` : "";
+  const control = k.from === "env" ? "" : `<div class="field">${field}</div>`;
+  const label = `<label for="${id}">${esc(name)}<small>${esc(about)} <code>${esc(k.env)}</code></small></label>`;
+  return `<div class="set key" data-key="key.${esc(k.name)}">${label}${control}<p class="from">${from}${reset}</p><p class="err"></p></div>`;
+}
+
+// a pick list's options: each pick the vendors and models checked offer,
+// by model; first `none` (agents: the chat's pick), and the value set if
+// none is it, said
+export function picks_html(vendors: string[], models: string[], value: string, none: string | null): string {
+  const groups = Pick.models(vendors.filter((v) => (VENDORS as string[]).includes(v)) as typeof VENDORS, models).map(([vendor, model]) => {
+    const opts = EFFORTS.flatMap((effort) => model.speeds.map((speed) => [vendor, model.label, effort, speed].join(":")));
+    const items = opts.map((o) => `<option value="${esc(o)}"${o === value ? " selected" : ""}>${esc(o.split(":").slice(1).join(" · "))}</option>`);
+    return { opts, html: `<optgroup label="${esc(vendor + " · " + model.label)}">${items.join("")}</optgroup>` };
+  });
+  const all = groups.flatMap((g) => g.opts);
+  const first = none === null ? "" : `<option value=""${value === "" ? " selected" : ""}>${esc(none)}</option>`;
+  const odd = value === "" || all.includes(value) ? "" : `<option value="${esc(value)}" selected>${esc(value)} (not offered)</option>`;
+  return odd + first + groups.map((g) => g.html).join("");
 }
 
 // a section of the account page: its title, then its markup

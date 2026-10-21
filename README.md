@@ -78,7 +78,9 @@ Config
 ------
 
 `~/.unii/config.json` (optional; the dir is `$UNII_DIR`). Each key may
-also be set as the variable `UNII_<KEY>`:
+also be set as the variable `UNII_<KEY>`, which wins over the file. The
+server's owner can also change most of them, and the keys, on the
+Settings page (☰ menu, or /settings); see below.
 
 - `site`: the server's origin, for sign-in links (default
   http://127.0.0.1:8788). Another port: `UNII_SITE=http://127.0.0.1:9000
@@ -103,9 +105,6 @@ also be set as the variable `UNII_<KEY>`:
   ~/.unii/work).
 - `rules`: a file appended to every system prompt. Each user's own
   instructions (their SOUL.md, set on the account page) come after it.
-- `owner`: the accounts (emails or @logins, comma-separated) that may
-  replace Unii's base prompt, for every user, on the account page.
-  Compactions use it too: keep the built-in compaction rules in it.
 - `backup`: a dir for snapshots of each chat (default none: no
   backups). Every `backup_every` hours (default 24), a chat changed
   since its last snapshot gets a new one, `<backup>/<id>/<date>.tar.gz`;
@@ -119,6 +118,11 @@ also be set as the variable `UNII_<KEY>`:
   process). With a number, `Server.ts` only routes, behind a proxy that
   honors its `x-unii-worker` header (Server.ts explains).
 - `apple`, `apns`: the iOS app's App ID and push key id (ios/).
+- `owner`: who may open the Settings page and replace Unii's base
+  prompt, for every user, on the account page (compactions use it too:
+  keep the built-in compaction rules in it): sign-in emails or @logins,
+  comma-separated (e.g. `"owner": "you@example.com"`). Set here or as
+  `UNII_OWNER` only, never on the page. None named: no one may.
 
 `vapid.json` in the server's dir is its Web Push key pair, made at first
 start; keep it, as a new one silences every browser until notifications
@@ -126,7 +130,15 @@ are turned on again. Installing and notifications need https (or 127.0.0.1).
 
 Keys are read from the environment: `ANTHROPIC_API_KEY`,
 `OPENAI_API_KEY`, `RESEND_API_KEY` (to email sign-in links; none: they
-print), `APNS_KEY`.
+print), `APNS_KEY`. One the environment doesn't set is read from
+`~/.unii/keys.json` (mode 600), where the Settings page puts them.
+
+The Settings page shows each setting, where it comes from and each key
+by its last 4 characters only; a save is checked as a start checks
+config.json and applies at once on every worker (vendors, models, pick,
+compactor, agents, keys) or on the next start (`site`, `apple`, `apns`).
+`owner`, `workers`, `work`, `rules`, `after` and what the environment
+sets are changed on the server only.
 
 With only an OpenAI key, set `vendors`, `pick` and `compactor` to
 `openai-api` models, e.g. `UNII_VENDORS=openai-api
