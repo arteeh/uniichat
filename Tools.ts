@@ -125,7 +125,7 @@ const JOB = "x-unii-job";
 // the master's prompt (a turn's and a compaction's): prompt.txt
 export const MASTER = PROMPT.trim();
 
-// the owner's base prompt (config.OWNERS), in place of MASTER for every
+// the owner's base prompt (config.OWNER), in place of MASTER for every
 // user, set on the account page (Server.ts)
 export const BASE = config.DIR + "/base.md";
 

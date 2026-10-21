@@ -790,6 +790,7 @@ function row_cells(line) {
 }
 
 // Pick.ts
+var VENDORS = ["claude-api", "openai-api"];
 var OPUS = { label: "opus-5.5", id: "claude-opus-5-5", speeds: ["slow", "fast"] };
 var SONNET = { label: "sonnet-5.5", id: "claude-sonnet-5-5", speeds: ["slow"] };
 var HAIKU = { label: "haiku-5.5", id: "claude-haiku-5-5", speeds: ["slow"] };
@@ -1597,7 +1598,7 @@ function fine_html(app) {
   const fee = app ? "Paid at the App Store's price." : "+10% platform fee (min $0.80).";
   return `<p class="fine">${fee} Buying accepts the <a href="/terms.html" target="_blank">terms</a>.</p>`;
 }
-function account_html(a, app, soul, notify = null) {
+function account_html(a, app, soul, owner, notify = null) {
   const tops = a.topups ?? [];
   const days = account_days(a);
   const balance = a.credits === null ? "" : section_html("Balance", `<p class="big">${usd_show(a.credits)}</p>` + credit_html(app));
@@ -1611,6 +1612,7 @@ function account_html(a, app, soul, notify = null) {
   const acts = [
     item(esc(a.name), "", `<button class="chip out">Sign out</button>`),
     ...notify === null ? [] : [notify_html(notify)],
+    ...owner ? [item("Server settings", "Models, keys and more of this server.", `<a class="chip" href="/settings" data-go="/settings">Open</a>`)] : [],
     item("Export memory", "Chat and account, in one file.", `<a class="chip" href="/export">Download</a>`),
     item("Restore a backup", "Chat and memory, from a .tar.gz backup.", `<button class="chip up">Upload</button><input class="pick" type="file" accept=".gz,.tgz,application/gzip" hidden>`),
     item("Delete account", "Erases chat and memory for good.", `<button class="chip red del">Delete</button>`)
@@ -1635,6 +1637,106 @@ function notify_html(notify) {
   }[notify];
   const button = notify === "home" ? "" : `<button class="chip notify"${notify === "blocked" ? " disabled" : ""}>${notify === "on" ? "Turn off" : "Turn on"}</button>`;
   return `<div class="item"><p>Notifications<small>${note}</small></p>${button}</div>`;
+}
+var SETTING = {
+  vendors: ["Vendors", "Whose models the server offers."],
+  models: ["Models", "The models offered, of those vendors."],
+  pick: ["Default model", "What a chat runs on until it picks another."],
+  compactor: ["Compactor", "What writes the memory's summaries."],
+  agents: ["Subagents", "What subagents run on."],
+  owner: ["Owner", "Who may open this page: sign-in emails, comma-separated, named in config.json on the server only."],
+  site: ["Site", "The server's address, for sign-in links."],
+  apple: ["iOS App ID", "The app's team and bundle ID, whose sign-in links it opens."],
+  apns: ["APNs key ID", "The ID of the key the app's pushes are signed with."],
+  workers: ["Workers", "How many processes serve the users."],
+  work: ["Work folder", "Where the agents work on each device."],
+  rules: ["Rules", "A file added to every system prompt."],
+  after: ["After each turn", "A shell command the server runs."]
+};
+var KEY = {
+  anthropic: ["Anthropic", "For claude-api's models."],
+  openai: ["OpenAI", "For openai-api's models and dictation."],
+  resend: ["Resend", "Emails sign-in links (none: the server prints them)."],
+  apns: ["APNs key", "The .p8 key the iOS app's pushes are signed with."]
+};
+var VENDOR_KEY = { "claude-api": "anthropic", "openai-api": "openai" };
+var GROUPS = [
+  ["Models", ["vendors", "models", "pick", "compactor", "agents"]],
+  ["Server", ["owner", "site", "apple", "apns", "workers", "work", "rules", "after"]]
+];
+function settings_html(page) {
+  const rows = new Map(page.settings.map((r) => [r.key, r]));
+  const groups = GROUPS.map(([title, keys]) => section_html(title, keys.map((k) => rows.get(k)).filter((r) => r !== undefined).map(setting_html).join("")));
+  const keys = section_html("Keys", `<p class="sub">A key set here is kept in keys.json in the server's folder, readable by the server's user only. It is never shown again, only its last characters.</p>` + page.keys.map(key_html).join(""));
+  const error = page.error === null ? "" : `<p class="why bad">${esc(page.error)}</p>`;
+  const save = `<div class="save"><p class="why"></p><button class="chip go"${page.error === null ? "" : " disabled"}>Save</button></div>`;
+  const head = `<a class="back" href="/account" data-go="/account">← Account</a><h1>Settings</h1><p class="sub">This server's settings, in config.json in its folder. Only its owner sees this page.</p>`;
+  return head + error + `<form class="settings" autocomplete="off">` + groups.slice(0, 1).join("") + keys + groups.slice(1).join("") + save + `</form>`;
+}
+function setting_html(r) {
+  const [name, about] = SETTING[r.key] ?? [r.key, ""];
+  const id = "set-" + r.key;
+  const off = r.from === "env" || !r.web;
+  const control = off ? `<code class="value">${esc(r.value === "" ? "(none)" : r.value)}</code>` : control_html(r, id);
+  const label = `<label for="${id}">${esc(name)}<small>${esc(about)} <code>${esc(r.key)}</code></small></label>`;
+  return `<div class="set" data-key="${esc(r.key)}">${label}<div class="field">${control}</div>${from_html(r)}<p class="err"></p></div>`;
+}
+function control_html(r, id) {
+  switch (r.key) {
+    case "vendors": {
+      return checks_html("vendors", VENDORS, list(r.value)) + `<p class="warn"></p>`;
+    }
+    case "models": {
+      return checks_html("models", LABELS, list(r.value));
+    }
+    case "pick":
+    case "compactor":
+    case "agents": {
+      return `<select id="${id}" name="${r.key}" data-value="${esc(r.value)}"></select>`;
+    }
+  }
+  return `<input id="${id}" name="${r.key}" value="${esc(r.value)}" placeholder="${esc(r.def)}" spellcheck="false" autocapitalize="off">`;
+}
+function list(text) {
+  return text.split(",").map((x) => x.trim()).filter((x) => x !== "");
+}
+function list_changed(was, now) {
+  const same = was.length === now.length && was.every((x) => now.includes(x)) && now.every((x) => was.includes(x));
+  return same ? null : [...was.filter((x) => now.includes(x)), ...now.filter((x) => !was.includes(x))];
+}
+function checks_html(name, all, on) {
+  const box = (x) => `<label class="opt"><input type="checkbox" name="${name}" value="${esc(x)}"${on.includes(x) ? " checked" : ""}> ${esc(x)}</label>`;
+  const odd = on.filter((x) => !all.includes(x));
+  return `<div class="opts">${all.map(box).join("")}${odd.map(box).join("")}</div>`;
+}
+function from_html(r) {
+  const from = r.from === "env" ? `Set by <code>${esc(r.env)}</code> on the server` : r.from === "file" ? "From config.json" : "Default";
+  const apply = r.from === "env" ? "changed there only" : !r.web ? "changed in config.json on the server only" : r.apply === "now" ? "applies at once" : "applies on a restart";
+  const running = r.running === null ? "" : ` · running on <code>${esc(r.running === "" ? "(none)" : r.running)}</code> till then`;
+  const reset = r.from === "file" && r.web ? ` <button type="button" class="reset">Use the default</button>` : "";
+  return `<p class="from">${from} · ${apply}${running}${reset}</p>`;
+}
+function key_html(k) {
+  const [name, about] = KEY[k.name] ?? [k.name, ""];
+  const id = "set-key-" + k.name;
+  const field = k.name === "apns" ? `<textarea id="${id}" name="key.${k.name}" rows="3" placeholder="Paste a new key to set it" spellcheck="false"></textarea>` : `<input id="${id}" type="password" name="key.${k.name}" autocomplete="new-password" placeholder="Paste a new key to set it" spellcheck="false" autocapitalize="off">`;
+  const tail = k.tail === "" ? "" : `, ending in <code>${esc(k.tail)}</code>`;
+  const from = k.from === "env" ? `Set by <code>${esc(k.env)}</code> on the server${tail}` : k.from === "file" ? `Set${tail}, in keys.json` : "Not set";
+  const reset = k.from === "file" ? ` <button type="button" class="reset">Remove</button>` : "";
+  const control = k.from === "env" ? "" : `<div class="field">${field}</div>`;
+  const label = `<label for="${id}">${esc(name)}<small>${esc(about)} <code>${esc(k.env)}</code></small></label>`;
+  return `<div class="set key" data-key="key.${esc(k.name)}">${label}${control}<p class="from">${from}${reset}</p><p class="err"></p></div>`;
+}
+function picks_html(vendors, models, value, none) {
+  const groups = Pick.models(vendors.filter((v) => VENDORS.includes(v)), models).map(([vendor, model]) => {
+    const opts = EFFORTS.flatMap((effort) => model.speeds.map((speed) => [vendor, model.label, effort, speed].join(":")));
+    const items = opts.map((o) => `<option value="${esc(o)}"${o === value ? " selected" : ""}>${esc(o.split(":").slice(1).join(" · "))}</option>`);
+    return { opts, html: `<optgroup label="${esc(vendor + " · " + model.label)}">${items.join("")}</optgroup>` };
+  });
+  const all = groups.flatMap((g) => g.opts);
+  const first = none === null ? "" : `<option value=""${value === "" ? " selected" : ""}>${esc(none)}</option>`;
+  const odd = value === "" || all.includes(value) ? "" : `<option value="${esc(value)}" selected>${esc(value)} (not offered)</option>`;
+  return odd + first + groups.map((g) => g.html).join("");
 }
 function section_html(title, body) {
   return `<section><h2>${esc(title)}</h2>${body}</section>`;
@@ -1748,6 +1850,7 @@ var BACK = $("#import [name=back]");
 var P = {
   id: "",
   guest: false,
+  owner: false,
   imgs: [],
   rec: null,
   shown: "",
@@ -1774,7 +1877,7 @@ async function boot() {
     navigator.serviceWorker?.register("/sw.js").catch(() => {});
   }
   const q = new URLSearchParams(location.search);
-  history.replaceState(null, "", location.pathname === "/account" ? "/account" : "/");
+  history.replaceState(null, "", PAGES.includes(location.pathname) ? location.pathname : "/");
   if (q.has("terminal")) {
     solo("Your terminal is signed in.", "You can close this tab and go back to it.");
     return;
@@ -1798,6 +1901,8 @@ async function boot() {
     return;
   }
   P.id = me.id;
+  P.owner = me.owner === true;
+  $("#menu .set").hidden = !P.owner;
   signed();
   route();
   v.bills = me.bills;
@@ -1822,6 +1927,7 @@ async function boot_me() {
     await new Promise((ok) => setTimeout(ok, RETRY));
   }
 }
+var PAGES = ["/account", "/settings"];
 function solo(title, sub) {
   document.body.className = "solo";
   document.body.innerHTML = `<main><h1>${title}</h1><p class="sub">${sub}</p></main>`;
@@ -2534,12 +2640,14 @@ function go(path) {
   route();
 }
 function route() {
-  const page = location.pathname === "/account";
+  const page = PAGES.includes(location.pathname);
   $("#log").hidden = page;
   document.body.classList.toggle("account", page);
   $("#account").hidden = !page;
   P.shown = location.pathname;
-  if (page) {
+  if (location.pathname === "/settings") {
+    settings();
+  } else if (page) {
     account();
   }
   draw(false);
@@ -2554,7 +2662,7 @@ async function account() {
     return;
   }
   const push = await notify_state().catch(() => null);
-  el.innerHTML = account_html(a, APP !== null, soul, push);
+  el.innerHTML = account_html(a, APP !== null, soul, P.owner, push);
   el.querySelectorAll("form.prompt").forEach((form) => form.onsubmit = (ev) => {
     ev.preventDefault();
     account_prompt(form);
@@ -2713,6 +2821,127 @@ async function notify_off(reg) {
     await sub.unsubscribe();
   }
   return {};
+}
+async function settings() {
+  const el = $("#account");
+  const res = await fetch("/api/settings").catch(() => null);
+  const page = res !== null && res.ok ? await res.json().catch(() => null) : null;
+  if (location.pathname !== "/settings") {
+    return;
+  }
+  if (page === null) {
+    const told = res?.status === 403 ? await res.json().then((r) => String(r.error ?? ""), () => "") : "";
+    const why = told || (res?.status === 403 ? "Only the server's owner can see its settings." : "Could not read the settings. Try again in a moment.");
+    el.innerHTML = `<a class="back" href="/account" data-go="/account">← Account</a><h1>Settings</h1><p class="sub">${esc(why)}</p>`;
+    return;
+  }
+  settings_draw(page);
+}
+function settings_draw(page) {
+  $("#account").innerHTML = settings_html(page);
+  const form = $("#account form.settings");
+  const rows = new Map(page.settings.map((r) => [r.key, r]));
+  const unset = new Set;
+  const row = (key) => form.querySelector(`.set[data-key="${key}"]`);
+  const listed = (key) => {
+    const boxes = [...form.querySelectorAll(`input[name="${key}"]`)];
+    return boxes.length === 0 ? list(rows.get(key).value) : boxes.filter((b) => b.checked).map((b) => b.value);
+  };
+  const picks = () => {
+    const vendors = listed("vendors");
+    for (const sel of form.querySelectorAll("select")) {
+      const value = sel.options.length > 0 ? sel.value : sel.dataset.value ?? "";
+      sel.innerHTML = picks_html(vendors, listed("models"), value, sel.name === "agents" ? "The chat's pick" : null);
+    }
+    const keyless = vendors.filter((v) => {
+      const name = VENDOR_KEY[v];
+      const key = page.keys.find((k) => k.name === name);
+      const typed = form.querySelector(`[name="key.${name}"]`)?.value.trim() ?? "";
+      return key !== undefined && (key.from === "default" || unset.has("key." + name)) && typed === "";
+    });
+    const warn = form.querySelector(".warn");
+    if (warn !== null) {
+      warn.textContent = keyless.length === 0 ? "" : keyless.join(" and ") + (keyless.length === 1 ? " has" : " have") + " no key set: its calls will fail till one is.";
+    }
+  };
+  form.oninput = (ev) => {
+    const el = ev.target.closest(".set");
+    if (el !== null) {
+      unset.delete(el.dataset.key);
+      el.classList.remove("unset");
+      el.querySelector(".err").textContent = "";
+    }
+    picks();
+  };
+  form.onclick = (ev) => {
+    const btn = ev.target.closest(".reset");
+    if (btn === null) {
+      return;
+    }
+    const el = btn.closest(".set");
+    const key = el.dataset.key;
+    const r = rows.get(key);
+    el.querySelectorAll("input[type=checkbox]").forEach((b) => b.checked = list(r.def).includes(b.value));
+    el.querySelectorAll("input:not([type=checkbox]), textarea").forEach((i) => i.value = r?.def ?? "");
+    el.querySelectorAll("select").forEach((sel) => {
+      sel.innerHTML = "";
+      sel.dataset.value = r.def;
+    });
+    picks();
+    unset.add(key);
+    el.classList.add("unset");
+    btn.hidden = true;
+    el.querySelector(".from").insertAdjacentText("beforeend", key.startsWith("key.") ? " · removed once saved" : " · the default once saved");
+  };
+  form.onsubmit = (ev) => {
+    ev.preventDefault();
+    settings_save(form, page, unset, listed);
+  };
+  picks();
+}
+async function settings_save(form, page, unset, listed) {
+  const set = {};
+  const keys = {};
+  for (const r of page.settings) {
+    if (r.from === "env" || !r.web) {
+      continue;
+    }
+    const field = form.querySelector(`[name="${r.key}"]`);
+    const now = r.key === "vendors" || r.key === "models" ? list_changed(list(r.value), listed(r.key))?.join(",") ?? r.value : field?.value.trim() ?? r.value;
+    if (unset.has(r.key)) {
+      set[r.key] = null;
+    } else if (now !== r.value) {
+      set[r.key] = now;
+    }
+  }
+  for (const k of page.keys) {
+    const typed = form.querySelector(`[name="key.${k.name}"]`)?.value.trim() ?? "";
+    if (unset.has("key." + k.name)) {
+      keys[k.name] = null;
+    } else if (typed !== "") {
+      keys[k.name] = typed;
+    }
+  }
+  const why = form.querySelector(".save .why");
+  form.querySelectorAll(".err").forEach((e) => e.textContent = "");
+  if (Object.keys(set).length === 0 && Object.keys(keys).length === 0) {
+    why.textContent = "Nothing changed.";
+    return;
+  }
+  const go = form.querySelector(".go");
+  go.disabled = true;
+  why.textContent = "";
+  const out = await post("/api/settings", { version: page.version, set, keys });
+  go.disabled = false;
+  if (!out.ok) {
+    const at = out.key === undefined ? null : form.querySelector(`.set[data-key="${out.key}"]`);
+    (at?.querySelector(".err") ?? why).textContent = out.error ?? "Could not save.";
+    (at ?? why).scrollIntoView({ block: "center" });
+    return;
+  }
+  const later = out.saved.filter((key) => page.settings.find((r) => r.key === key)?.apply === "restart");
+  settings_draw(out);
+  toast(later.length === 0 ? "Saved." : "Saved. " + later.join(", ") + " " + (later.length === 1 ? "applies" : "apply") + " once the server restarts.");
 }
 async function topup2(usd) {
   if (APP !== null) {
