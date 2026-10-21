@@ -877,52 +877,6 @@ var Pick;
   Pick2.load = load;
 })(Pick ||= {});
 
-// Price.ts
-var SEARCH = 0.01;
-var RATES = {
-  "claude-opus-5-5": { input: 4, write: 5, read: 0.2, output: 20 },
-  "claude-sonnet-5-5": { input: 2, write: 2.5, read: 0.1, output: 10 },
-  "claude-haiku-5-5": { input: 0.1, write: 0.125, read: 0.01, output: 0.5 },
-  "gpt-6-astra": { input: 10, write: 12.5, read: 1, output: 50 },
-  "gpt-6.1-sol": { input: 2, write: 2, read: 0.1, output: 10 },
-  "gpt-6-luna": { input: 0.1, write: 0.1, read: 0.01, output: 0.5 }
-};
-var PROMPT = 1e5;
-var LONG = {
-  "claude-haiku-5-5": { input: 0.5, write: 0.625, read: 0.05, output: 2.5 }
-};
-var MINUTES = {
-  "gpt-transcribe": 0.0045
-};
-var SPEEDS2 = { slow: 1, fast: 2, ultrafast: 6 };
-var Price;
-((Price2) => {
-  function usage(speed) {
-    return { input: 0, write: 0, read: 0, output: 0, searches: 0, seconds: 0, speed };
-  }
-  Price2.usage = usage;
-  function rate(model) {
-    return RATES[model];
-  }
-  Price2.rate = rate;
-  function times(speed) {
-    return SPEEDS2[speed] ?? 1;
-  }
-  Price2.times = times;
-  function cost(model, use) {
-    const long = use.input + use.write + use.read > PROMPT ? LONG[model] : undefined;
-    const rate = long ?? RATES[model];
-    const minute = MINUTES[model];
-    if (rate === undefined && minute === undefined) {
-      throw new Error("no price for " + model);
-    }
-    const tokens = rate === undefined ? 0 : use.input * rate.input + use.write * rate.write + use.read * rate.read + use.output * rate.output;
-    const audio = minute === undefined ? 0 : use.seconds / 60 * minute * 1e6;
-    return Math.ceil(tokens * Price.times(use.speed) + use.searches * SEARCH * 1e6 + audio);
-  }
-  Price2.cost = cost;
-})(Price ||= {});
-
 // View.ts
 var BROKE = "out of credit";
 var PACE = 0.0001;
@@ -1198,13 +1152,17 @@ function view_pick(v) {
     return [];
   }
   const { model, effort, speed } = v.pick;
-  const rate = Price.rate(Pick.ask(v.pick).model);
-  const price = rate === undefined ? "" : ": $" + rate.input + "/M tokens in, $" + rate.output + "/M out";
   return [
-    { text: model, move: "model", hint: model + price },
-    { text: effort, move: "effort", hint: effort + " effort: how long it thinks first; more is smarter, slower and costs more" },
-    { text: speed, move: "speed", hint: speed + ": ×" + Price.times(speed) + " the price" }
+    { text: model, move: "model", hint: model, choices: view_choices(v.pick, "model", v) },
+    { text: effort, move: "effort", hint: effort + " effort", choices: view_choices(v.pick, "effort", v) },
+    { text: speed, move: "speed", hint: speed, choices: view_choices(v.pick, "speed", v) }
   ];
+}
+function view_choices(pick, move, v) {
+  return Pick.options(pick, move, v).map(([text, to], i, all) => {
+    const vendor = move === "model" && (i === 0 || all[i - 1][1].vendor !== to.vendor) ? to.vendor : null;
+    return { text: move === "model" ? to.model : text, to: text, move, here: Pick.label(to) === Pick.label(pick), vendor };
+  });
 }
 function view_count(v) {
   return v.parts.reduce((end, [id, n]) => Math.max(end, id + n), 0);
@@ -1496,9 +1454,17 @@ function images_html(names) {
   return names.length === 0 ? "" : `<div class="pics">${pics.join("")}</div>`;
 }
 function pick_html(fold, on, knobs) {
-  const parts = knobs.map((k) => `<button title="${esc(k.hint)}"${act_html({ $: "Move", move: k.move })}>${esc(k.text)}</button>`);
+  const parts = knobs.map((k) => [
+    `<button title="${esc(k.hint)}" data-knob="${k.move}" popovertarget="pick-${k.move}" aria-haspopup="menu">${esc(k.text)}</button>`,
+    `<div id="pick-${k.move}" class="choices" popover role="menu" aria-label="${k.move[0].toUpperCase() + k.move.slice(1)}">${k.choices.map(choice_html).join("")}</div>`
+  ]);
   const all = fold === null ? [] : [`<button class="all"${act_html({ $: "Fold", on })}>${esc(fold)}</button>`];
-  return [...all, `<span class="rule"></span>`, ...parts.flatMap((part, i) => i === 0 ? [part] : [`<span class="dot">·</span>`, part])];
+  return [...all, `<span class="rule"></span>`, ...parts.flatMap((part, i) => i === 0 ? part : [`<span class="dot">·</span>`, ...part])];
+}
+function choice_html(c) {
+  const head = c.vendor === null ? "" : `<p>${esc(c.vendor)}</p>`;
+  const act = c.here ? " autofocus" : act_html({ $: "Move", move: c.move, to: c.to });
+  return `${head}<button role="menuitemradio" aria-checked="${c.here}"${act}>${esc(c.text)}</button>`;
 }
 function tabs_html(tabs) {
   return tabs.map((tab) => {
@@ -1769,6 +1735,8 @@ function chat() {
     submit();
   };
   $(".attach").onclick = () => file.click();
+  $("#pick").onkeydown = roam;
+  $("#pick").addEventListener("focusout", left);
   $("#menu .out").onclick = signout;
   $(".mic").onclick = mic;
   file.onchange = () => {
@@ -1863,11 +1831,16 @@ function act(a) {
   draw(a.$ === "Send");
 }
 function click(ev) {
-  const el = ev.target.closest("[data-act], [data-copy], [data-go], [data-usd]");
+  const el = ev.target.closest("[data-act], [data-copy], [data-go], [data-usd], [data-knob], .choices > button");
   const sel = getSelection();
   if (el === null || sel !== null && !sel.isCollapsed && el.contains(sel.focusNode)) {
     return;
   }
+  if (el.dataset.knob !== undefined) {
+    place(el);
+    return;
+  }
+  el.closest(".choices")?.hidePopover();
   const { act: a, copy: text, go: path, usd } = el.dataset;
   const menu = el.closest("#menu") !== null;
   if (menu) {
@@ -1885,6 +1858,41 @@ function click(ev) {
   }
   if (text !== undefined) {
     navigator.clipboard.writeText(text).then(() => copied(el), () => toast("Could not copy."));
+  }
+}
+function place(knob) {
+  const menu = $("#pick-" + knob.dataset.knob);
+  const box = knob.getBoundingClientRect();
+  const { clientWidth: w, clientHeight: h } = document.documentElement;
+  const right = Math.max(8, w - box.right);
+  menu.style.right = right + "px";
+  menu.style.bottom = h - box.top + 4 + "px";
+  menu.style.maxWidth = w - right - 8 + "px";
+  menu.style.maxHeight = box.top - 12 + "px";
+}
+function roam(ev) {
+  const menu = ev.target.closest(".choices");
+  if (menu !== null && ev.key === "Tab" && ev.shiftKey && ev.target === menu.querySelector("button")) {
+    ev.preventDefault();
+    menu.hidePopover();
+    menu.previousElementSibling.focus();
+    return;
+  }
+  if (menu === null || !["ArrowDown", "ArrowUp", "Home", "End"].includes(ev.key)) {
+    return;
+  }
+  ev.preventDefault();
+  const rows = [...menu.querySelectorAll("button")];
+  const n = rows.length;
+  const at = rows.indexOf(document.activeElement);
+  const to = { ArrowDown: at + 1, ArrowUp: at - 1 + n, Home: 0, End: n - 1 };
+  rows[to[ev.key] % n].focus();
+}
+function left(ev) {
+  const menu = ev.target.closest(".choices:popover-open");
+  const to = ev.relatedTarget;
+  if (menu !== null && to !== null && !menu.contains(to) && to !== menu.previousElementSibling) {
+    menu.hidePopover();
   }
 }
 function copied(button) {
@@ -2336,7 +2344,11 @@ function bars() {
   $(".mic").classList.toggle("rec", P.rec !== null);
   $(".composer").classList.toggle("off", !on);
   $(".composer").classList.toggle("rec", P.rec !== null);
+  const knob = document.activeElement?.dataset?.knob;
   markup($("#pick"), pick_html(view_fold(v), v.fold === null, view_pick(v)));
+  if (knob !== undefined) {
+    $("#pick [data-knob=" + knob + "]").focus();
+  }
   $("#tabs").hidden = tabs.length < 2;
   markup($("#tabs"), tabs_html(tabs));
   import_bar();

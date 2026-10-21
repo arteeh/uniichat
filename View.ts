@@ -14,7 +14,6 @@ import { topup } from "./Import.ts";
 import * as Call from "./Call.ts";
 import * as Md from "./Md.ts";
 import { LABELS, type Move, Pick } from "./Pick.ts";
-import { Price } from "./Price.ts";
 import { GLYPH, WHO } from "./Theme.ts";
 
 // Types
@@ -169,9 +168,14 @@ export type Row =
 
 export type Tab = { name: string | null; here: boolean; text: string };
 
-// hint: what the knob's value means (a tooltip; the site's note when it
-// changes)
-export type Knob = { text: string; move: Move; hint: string };
+// hint: the knob's value, named (a tooltip; the site's note when it
+// changes); choices: its menu (the site's)
+export type Knob = { text: string; move: Move; hint: string; choices: Choice[] };
+
+// a value a knob can take: text, as shown (a model by its label alone,
+// its vendor heading its group); to, as the move takes it; here, the
+// pick's; vendor, the vendor of a model first of its vendor's
+export type Choice = { text: string; to: string; move: Move; here: boolean; vendor: string | null };
 
 // a user's account, as /api/account gives it (Cloud.data): whether the
 // server bills; where it does, every purchase and every call paid,
@@ -544,13 +548,19 @@ export function view_pick(v: View): Knob[] {
     return [];
   }
   const { model, effort, speed } = v.pick;
-  const rate  = Price.rate(Pick.ask(v.pick).model);
-  const price = rate === undefined ? "" : ": $" + rate.input + "/M tokens in, $" + rate.output + "/M out";
   return [
-    { text: model, move: "model", hint: model + price },
-    { text: effort, move: "effort", hint: effort + " effort: how long it thinks first; more is smarter, slower and costs more" },
-    { text: speed, move: "speed", hint: speed + ": ×" + Price.times(speed) + " the price" },
+    { text: model, move: "model", hint: model, choices: view_choices(v.pick, "model", v) },
+    { text: effort, move: "effort", hint: effort + " effort", choices: view_choices(v.pick, "effort", v) },
+    { text: speed, move: "speed", hint: speed, choices: view_choices(v.pick, "speed", v) },
   ];
+}
+
+// every value of a knob, in the order a move steps through them
+function view_choices(pick: Pick, move: Move, v: View): Choice[] {
+  return Pick.options(pick, move, v).map(([text, to], i, all) => {
+    const vendor = move === "model" && (i === 0 || all[i - 1][1].vendor !== to.vendor) ? to.vendor : null;
+    return { text: move === "model" ? to.model : text, to: text, move, here: Pick.label(to) === Pick.label(pick), vendor };
+  });
 }
 
 export function view_count(v: View): number {
