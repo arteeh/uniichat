@@ -1,19 +1,21 @@
 // Pick
 // ====
 // What a chat's calls run on, kept in its log: a vendor (claude-api,
-// openai-api), a model of its, an effort and a speed; label
-// vendor:model:effort:speed. A chat that saved none takes the config's
-// (`def`). A move steps one part along the picks that differ in it
-// (`options`), wrapping (up and down stop at the ends): next, prev and
-// model every vendor's models, effort, speed (a model lacking one takes
-// its fastest below), up and down the efforts, never the speed; given a
-// value (`to`), to the pick whose part it is. A saved pick the server
-// doesn't offer gives way to def, never to a pick like it. A profile
-// (config `profiles`) is a pick too, first in the model's list: a name
-// and the models it ranks; picked, it runs on its first, and a call
-// goes on with the next as one fails (AskAI.ts), each at the pick's
-// effort and speed unless it names its own. A model picked has no
-// fallback.
+// openai-api, openai-sub: a ChatGPT plan), a model of its, an effort
+// and a speed; label vendor:model:effort:speed. A chat that saved none
+// takes the config's (`def`). A move steps one part along the picks
+// that differ in it (`options`), wrapping (up and down stop at the
+// ends): next, prev and model every vendor's models, effort, speed (a
+// model lacking one takes its fastest below), up and down the efforts,
+// never the speed; given a value (`to`), to the pick whose part it is.
+// A model two vendors offer (openai-api's and openai-sub's) is shown
+// with its vendor (`shown`); given by its label alone, the pick's
+// vendor's, if it offers it. A saved pick the server doesn't offer
+// gives way to def, never to a pick like it. A profile (config
+// `profiles`) is a pick too, first in the model's list: a name and the
+// models it ranks; picked, it runs on its first, and a call goes on
+// with the next as one fails (AskAI.ts), each at the pick's effort and
+// speed unless it names its own. A model picked has no fallback.
 
 import type { Vendor } from "./AskAI.ts";
 
@@ -44,7 +46,7 @@ export type Fall = { vendor: Vendor; model: Model; effort?: string; speed?: stri
 // Constants
 // =========
 
-export const VENDORS: Vendor[] = ["claude-api", "openai-api"];
+export const VENDORS: Vendor[] = ["claude-api", "openai-api", "openai-sub"];
 
 const OPUS  : Model = { label: "opus-5.5",   id: "claude-opus-5-5",   speeds: ["slow", "fast"] };
 const SONNET: Model = { label: "sonnet-5.5", id: "claude-sonnet-5-5", speeds: ["slow"] };
@@ -55,10 +57,14 @@ const OPENAI: Model[] = [
   { label: "gpt-6-astra", id: "gpt-6-astra", speeds: ["slow", "fast", "ultrafast"] },
 ];
 
+// a ChatGPT plan's (ChatGPT.ts): fast is its priority tier, no ultrafast
+const PLAN: Model[] = OPENAI.map((m) => ({ ...m, speeds: m.speeds.filter((s) => s !== "ultrafast") }));
+
 // each vendor's models, at the speeds it runs them
 const MODELS: Record<Vendor, Model[]> = {
   "claude-api": [OPUS, SONNET, HAIKU],
   "openai-api": OPENAI,
+  "openai-sub": PLAN,
 };
 
 export const EFFORTS = ["low", "medium", "high", "xhigh", "max"];
@@ -91,7 +97,7 @@ export namespace Pick {
   export function options(pick: Pick, move: Move, offer: Offer): Array<[string, Pick]> {
     const speeds = Pick.model(pick.vendor, pick.model)?.speeds ?? [];
     const { profile: _, ...plain } = pick;
-    const all = Pick.models(offer.vendors, offer.models).map(([v, m]): [string, Pick] => [m.label, Pick.on(plain, v, m)]);
+    const all = Pick.models(offer.vendors, offer.models).map(([v, m]): [string, Pick] => [Pick.shown({ ...plain, vendor: v, model: m.label }, offer), Pick.on(plain, v, m)]);
     const profiles = Object.keys(offer.profiles ?? {}).map((name): [string, Pick] => [name, Pick.profile(name, offer, pick.effort, pick.speed)!]);
     switch (move) {
       case "next":
@@ -118,7 +124,8 @@ export namespace Pick {
     const ends = move === "up" || move === "down";
     const next = ends ? Math.max(0, Math.min(n - 1, at + d)) : (at + d + n) % n;
     const like = list.filter(([part]) => part.toLowerCase().includes(String(to).toLowerCase()));
-    const hit  = to === undefined ? list[next] : list.find(([part]) => part === to) ?? (like.length === 1 ? like[0] : undefined);
+    const mine = (["next", "prev", "model"].includes(move) ? list : []).find(([, p]) => p.profile === undefined && p.vendor === pick.vendor && p.model === to);
+    const hit  = to === undefined ? list[next] : list.find(([part]) => part === to) ?? mine ?? (like.length === 1 ? like[0] : undefined);
     return hit === undefined ? null : hit[1];
   }
 
@@ -127,6 +134,13 @@ export namespace Pick {
   export function to_model(pick: Pick, label: string, vendors: Vendor[], { models }: Offer): Pick | null {
     const hit = Pick.models(vendors, models).find(([, m]) => m.label === label);
     return hit === undefined ? null : Pick.on(pick, hit[0], hit[1]);
+  }
+
+  // its model as shown: its label, and its vendor if another offered
+  // has a model so labelled
+  export function shown(pick: Pick, { vendors, models }: Offer): string {
+    const twin = vendors.some((v) => v !== pick.vendor && models.includes(pick.model) && Pick.model(v, pick.model) !== undefined);
+    return twin ? pick.model + " (" + pick.vendor + ")" : pick.model;
   }
 
   export function label(pick: Pick): string {

@@ -575,7 +575,8 @@ export function view_pick(v: View): Knob[] {
   if (v.pick === null) {
     return [];
   }
-  const { model, effort, speed, profile } = v.pick;
+  const { effort, speed, profile } = v.pick;
+  const model = Pick.shown(v.pick, v);
   const ranks = (v.profiles?.[profile ?? ""] ?? []).map((f) => f.model.label).join(", ");
   return [
     { text: profile ?? model, move: "model", hint: profile === undefined ? model : profile + ": " + ranks, choices: view_choices(v.pick, "model", v) },

@@ -1,7 +1,8 @@
 // Agent
 // =====
-// claude-api and openai-api in Unii's own loop; a Wire (Anthropic.ts,
-// OpenAI.ts) shapes requests and reads streams. Each step sends every
+// claude-api, openai-api and openai-sub in Unii's own loop; a Wire
+// (Anthropic.ts, OpenAI.ts, ChatGPT.ts) shapes requests and reads
+// streams. Each step sends every
 // item and streams one output; tool calls run in order, a message sent
 // mid-run follows the next results, and the call ends at a step with no
 // tools and nothing sent. A request goes again, TRIES times at most (a
@@ -44,6 +45,7 @@
 import { AGAIN, AskAI, type Grant, type Cost, type Ask, type Block, type Flight, type Try, type End, type Event, type Img, type Kind, type Say } from "./AskAI.ts";
 import { Anthropic } from "./Anthropic.ts";
 import { OpenAI } from "./OpenAI.ts";
+import { ChatGPT } from "./ChatGPT.ts";
 import { Price, type Usage } from "./Price.ts";
 import { live_push } from "./View.ts";
 import { Machine, type Spec } from "./Machine.ts";
@@ -89,24 +91,36 @@ export type Use = { id: string; name: string; input: unknown };
 
 export type Entry = { kind: Kind; text: string; of?: string };
 
-// note: what it did other than asked; off: down for every call (End.off)
+// note: what it did other than asked; off: down for every call (End.off);
+// refusal: the vendor's, if down by one
 export type Step = {
-  out     : unknown[];
-  uses    : Use[];
-  entries : Entry[];
-  stop    : "done" | "tools" | "again" | "busy" | "limit" | "down" | "lost" | "fail";
-  why     : string;
-  note    : string;
-  off?    : boolean;
+  out      : unknown[];
+  uses     : Use[];
+  entries  : Entry[];
+  stop     : "done" | "tools" | "again" | "busy" | "limit" | "down" | "lost" | "fail";
+  why      : string;
+  note     : string;
+  off?     : boolean;
+  refusal? : Refusal;
 };
+
+// a refusal asking again soon won't change (a ChatGPT plan's usage
+// limit): why (logged), what the user reads, and when it lifts, if told
+// (ms since 1970)
+export type Refusal = { why: string; say: string; until?: number };
 
 export type Emit = (kind: Kind, text: string, fresh?: boolean) => void;
 
-// an API: its key's name in config.KEYS, a body's input tokens as it
-// counts them (null: not told), and how its stream reads into a step (S:
-// what it read so far)
+// an API: its key's name in config.KEYS (or `auth`: a signed-in
+// account's token for each try, refused: the one a 401 refused, which it
+// refreshes; an error with `busy` set: none for now), a body's input
+// tokens as it counts them (null: not told), how its stream reads into a
+// step (S: what it read so far), and which error responses are refusals
+// (null: not one)
 export type Wire<S> = {
   key     : string;
+  auth?   : (refused: string | undefined) => Promise<string>;
+  refusal?: (res: Response, body: string) => Refusal | null;
   idle    : number;
   url     : string;
   headers : (key: string, ask: Ask) => Record<string, string>;
@@ -154,7 +168,8 @@ const ROOMS = new Map<string, Room>();
 
 // the requests sent whose answers are not read to their end: a process
 // ends only once none is (Server.ts Main.leave), as a paid one goes on
-// after a stop and is billed only at its end
+// after a stop and is billed only at its end (and a sign-in's token being
+// got: Agent.token)
 export const READING = { n: 0 };
 
 // Agent
@@ -177,6 +192,8 @@ export namespace Agent {
       try {
         if (ask.vendor === "claude-api") {
           await Agent.loop(Anthropic.wire, run);
+        } else if (ask.vendor === "openai-sub") {
+          await Agent.loop(ChatGPT.wire, run);
         } else {
           await Agent.loop(OpenAI.wire, run);
         }
@@ -193,8 +210,8 @@ export namespace Agent {
   export async function loop<S>(wire: Wire<S>, run: Run): Promise<void> {
     const { ask, on, end } = run;
     const signal = run.abort.signal;
-    const key = config.KEYS[wire.key];
-    if (!key) {
+    const key = wire.auth ? "" : config.KEYS[wire.key];
+    if (!key && !wire.auth) {
       throw new Error("no API key: set " + wire.key.toUpperCase() + "_API_KEY");
     }
     const tools = await Agent.server(run);
@@ -206,9 +223,10 @@ export namespace Agent {
         on({ $: "Entry", ...entry });
       }
       if (step.stop === "down" || step.stop === "lost" || step.stop === "fail") {
-        end.text ||= step.stop === "down" ? BUSY : step.why;
+        end.text ||= step.stop === "down" ? step.refusal?.say ?? BUSY : step.why;
         end.stop = step.stop;
         end.off = step.off;
+        end.until = step.refusal?.until;
         return;
       }
       items.push({ $: "Turn", out: step.out });
@@ -266,15 +284,25 @@ export namespace Agent {
     const tries = run.ask.probe === true && items.length === 1 ? 1 : TRIES;
     let asking = false;
     let parked = false;
+    let refused: string | undefined;
     try {
       for (let k = 0, n = 0; !signal.aborted; ) {
         await Agent.yielded(run, own, asking);
         const seen: Entry[] = [];
-        const got = await Agent.race(Agent.request(wire, run, key, make, cost, seen), signal);
+        const token = await Agent.race(Agent.token(wire, key, refused), signal);
+        if (token === null) {
+          return Agent.fail("stopped", seen);
+        }
+        const sent = typeof token === "string" ? Agent.request(wire, run, token, make, cost, seen) : Promise.resolve({ res: null, step: token });
+        const got = await Agent.race(sent, signal);
         if (got === null) {
           return Agent.fail("stopped", seen);
         }
         const { res, step } = got;
+        if (res?.status === 401 && wire.auth && refused === undefined) {
+          refused = token as string;
+          continue;
+        }
         const limit = step.stop === "limit";
         k += step.stop === "busy" ? 1 : 0;
         n += limit ? 1 : 0;
@@ -381,6 +409,27 @@ export namespace Agent {
     return after?.[1] ?? (told.length > 0 ? Math.max(...told.map(([, t]) => t)) : null);
   }
 
+  // a try's key, or a signed-in wire's token (refused: the one a 401
+  // refused); one it can't get for now, a busy step. Getting it counts in
+  // READING even once the call stopped: a refresh spends its refresh
+  // token, so the process lives till the new ones are saved
+  export async function token<S>(wire: Wire<S>, key: string, refused: string | undefined): Promise<string | Step> {
+    if (wire.auth === undefined) {
+      return key;
+    }
+    READING.n += 1;
+    try {
+      return await wire.auth(refused);
+    } catch (err: any) {
+      if (err?.busy !== true) {
+        throw err;
+      }
+      return Agent.fail(err.message, [], "busy");
+    } finally {
+      READING.n -= 1;
+    }
+  }
+
   export function room(key: string): Room {
     const room = ROOMS.get(key) ?? { busy: 0, asking: 0, wait: [] };
     ROOMS.set(key, room);
@@ -476,11 +525,12 @@ export namespace Agent {
         timeout : false,
       } as RequestInit);
       const text = res.ok && res.body ? null : await res.text();
+      const refusal = text === null ? null : wire.refusal?.(res, text) ?? null;
       const spent = text !== null && SPENT.test(text);
-      const why = "HTTP " + res.status + ": " + Agent.reason(text ?? "");
-      const off = spent || OFF.includes(res.status);
-      const stop = text !== null && Agent.limited(res, text) && !spent ? "limit" : text !== null && Agent.passing(res) && !spent ? "busy" : "down";
-      step = text !== null ? { ...Agent.fail(why, [], stop), off } : await Agent.stream(wire, run, res.body!, timer, seen, st, flight.begun, read);
+      const why = refusal?.why ?? "HTTP " + res.status + ": " + Agent.reason(text ?? "");
+      const off = spent || OFF.includes(res.status) || refusal !== null;
+      const stop = refusal !== null ? "down" : text !== null && Agent.limited(res, text) && !spent ? "limit" : text !== null && Agent.passing(res) && !spent ? "busy" : "down";
+      step = text !== null ? { ...Agent.fail(why, [], stop), off, refusal: refusal ?? undefined } : await Agent.stream(wire, run, res.body!, timer, seen, st, flight.begun, read);
     } catch (err: any) {
       step = Agent.fail(err.message, [], "busy");
     }
@@ -506,10 +556,12 @@ export namespace Agent {
   }
 
   // a failed request's why: the API's message (Anthropic's and OpenAI's
-  // errors are {error: {message}}), else the start of its body
+  // errors are {error: {message}}, the ChatGPT backend's some {detail}),
+  // else the start of its body
   export function reason(body: string): string {
     try {
-      const why = JSON.parse(body)?.error?.message;
+      const json = JSON.parse(body);
+      const why = json?.error?.message ?? json?.detail;
       return typeof why === "string" ? why : body.slice(0, 2000);
     } catch {
       return body.slice(0, 2000);
