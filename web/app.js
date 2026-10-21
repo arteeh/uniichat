@@ -1745,8 +1745,10 @@ function chat() {
     if (!P.guest) {
       sessionStorage.setItem(kept("draft"), BOX.value);
     }
-    BOX.style.height = "auto";
-    BOX.style.height = Math.min(BOX.scrollHeight, innerHeight * 0.4) + "px";
+    if (BOX.offsetParent !== null) {
+      BOX.style.height = "auto";
+      BOX.style.height = Math.min(BOX.scrollHeight, innerHeight * 0.4) + "px";
+    }
     draw(true);
   };
   BOX.onkeydown = (ev) => {
@@ -1776,7 +1778,12 @@ function chat() {
     attach([...ev.dataTransfer?.files ?? []]);
   };
   document.onclick = click;
-  visualViewport.onresize = () => draw(true);
+  visualViewport.onresize = () => {
+    if (document.activeElement === BOX && BOX.selectionStart === BOX.value.length) {
+      BOX.scrollTop = BOX.scrollHeight;
+    }
+    draw(true);
+  };
   document.onscroll = () => {
     P.end = innerHeight + scrollY >= document.documentElement.scrollHeight - 1;
     mine_show();
