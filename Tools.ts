@@ -139,8 +139,8 @@ export const MASTER = PROMPT.trim();
 // a user's SOUL.md until they write their own, before MASTER
 export const SOUL_DEFAULT = "You are Unii, an AI agent that works for one user in a single chat that never ends.";
 
-// the owner's base prompt (config.OWNERS), in place of MASTER for every
-// user, set on the account page (Server.ts)
+// the owner's base prompt (config.OWNER), in place of MASTER for every
+// user, set on the Settings page (Server.ts)
 export const BASE = config.DIR + "/base.md";
 
 const SUB_HEAD = `You are a subagent of Unii, an AI agent that works for one user in a
