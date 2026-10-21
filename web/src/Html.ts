@@ -12,6 +12,13 @@ import * as Theme from "../../Theme.ts";
 import * as Timer from "../../Timer.ts";
 import * as View from "../../View.ts";
 
+// Types
+// =====
+
+// this browser's notifications (main.ts notify_state): off, on, blocked
+// in its settings, or only once on the Home Screen (an iPhone's Safari)
+export type Notify = "off" | "on" | "blocked" | "home";
+
 // Constants
 // =========
 
@@ -160,9 +167,10 @@ export function fine_html(app: boolean): string {
 // the account page (/account): where the server bills, the balance and
 // credit to add, the use by day and the purchases; the user's SOUL.md,
 // and an owner's base prompt (soul: null, unread: a retry); then the
-// account's own acts; restoring a backup and deleting ask first, in
-// place (main.ts)
-export function account_html(a: View.Account, app: boolean, soul: View.Soul | null): string {
+// account's own acts (notify: this browser's notifications, null: none
+// to offer); restoring a backup and deleting ask first, in place
+// (main.ts)
+export function account_html(a: View.Account, app: boolean, soul: View.Soul | null, notify: Notify | null = null): string {
   const tops    = a.topups ?? [];
   const days    = View.account_days(a);
   const balance = a.credits === null ? "" : section_html("Balance", `<p class="big">${View.usd_show(a.credits)}</p>` + credit_html(app));
@@ -175,6 +183,7 @@ export function account_html(a: View.Account, app: boolean, soul: View.Soul | nu
   const back    = `<form class="back-up" hidden><p>Replace your chat and Unii's memory with <b class="file"></b>? What they hold now is replaced.</p><p class="why"></p><div><button type="button" class="chip keep">Cancel</button><button class="chip red">Restore</button></div></form>`;
   const acts    = [
     item(esc(a.name), "", `<button class="chip out">Sign out</button>`),
+    ...(notify === null ? [] : [notify_html(notify)]),
     item("Export memory", "Chat and account, in one file.", `<a class="chip" href="/export">Download</a>`),
     item("Restore a backup", "Chat and memory, from a .tar.gz backup.", `<button class="chip up">Upload</button><input class="pick" type="file" accept=".gz,.tgz,application/gzip" hidden>`),
     item("Delete account", "Erases chat and memory for good.", `<button class="chip red del">Delete</button>`),
@@ -191,6 +200,18 @@ export function account_html(a: View.Account, app: boolean, soul: View.Soul | nu
 function prompt_html(name: string, text: string, note: string, hint: string): string {
   const area = `<textarea name="${name}" rows="8" spellcheck="false" placeholder="${esc(hint)}">${esc(text)}</textarea>`;
   return `<form class="prompt"><p class="note">${esc(note)}</p>${area}<div><p class="why"></p><button class="chip">Save</button></div></form>`;
+}
+
+// the account page's notifications item: its note, and its button
+function notify_html(notify: Notify): string {
+  const note = {
+    off     : "Replies on this device, when UniiChat isn't open.",
+    on      : "Replies on this device, when UniiChat isn't open.",
+    blocked : "Blocked in this browser's settings for this site.",
+    home    : "On iPhone and iPad: Share, then Add to Home Screen, and open it from there.",
+  }[notify];
+  const button = notify === "home" ? "" : `<button class="chip notify"${notify === "blocked" ? " disabled" : ""}>${notify === "on" ? "Turn off" : "Turn on"}</button>`;
+  return `<div class="item"><p>Notifications<small>${note}</small></p>${button}</div>`;
 }
 
 // a section of the account page: its title, then its markup
