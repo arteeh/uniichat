@@ -116,6 +116,9 @@ export const BACKUP_EVERY = config_number("backup_every", "24");
 export const BACKUP_KEEP  = config_number("backup_keep", "7");
 export const BACKUP_RUN   = config_get("backup_run", "");
 
+// openai-sub's ChatGPT sign-in (ChatGPT.ts)
+export const CHATGPT    = config_path(config_get("chatgpt", DIR + "/chatgpt.json"));
+
 // the keys the environment gave (removed from it), and every key as used:
 // the environment's, else keys.json's
 const ENV_KEYS: Record<string, string> = Object.fromEntries(Object.entries(VARS).map(([name, v]) => [name, config_key(v)]));

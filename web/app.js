@@ -790,7 +790,7 @@ function row_cells(line) {
 }
 
 // Pick.ts
-var VENDORS = ["claude-api", "openai-api"];
+var VENDORS = ["claude-api", "openai-api", "openai-sub"];
 var OPUS = { label: "opus-5.5", id: "claude-opus-5-5", speeds: ["slow", "fast"] };
 var SONNET = { label: "sonnet-5.5", id: "claude-sonnet-5-5", speeds: ["slow"] };
 var HAIKU = { label: "haiku-5.5", id: "claude-haiku-5-5", speeds: ["slow"] };
@@ -799,9 +799,11 @@ var OPENAI = [
   { label: "gpt-6.1-sol", id: "gpt-6.1-sol", speeds: ["slow", "fast"] },
   { label: "gpt-6-astra", id: "gpt-6-astra", speeds: ["slow", "fast", "ultrafast"] }
 ];
+var PLAN = OPENAI.map((m) => ({ ...m, speeds: m.speeds.filter((s) => s !== "ultrafast") }));
 var MODELS = {
   "claude-api": [OPUS, SONNET, HAIKU],
-  "openai-api": OPENAI
+  "openai-api": OPENAI,
+  "openai-sub": PLAN
 };
 var EFFORTS = ["low", "medium", "high", "xhigh", "max"];
 var SPEEDS = ["slow", "fast", "ultrafast"];
@@ -825,7 +827,7 @@ var Pick;
   function options(pick, move, offer) {
     const speeds = Pick.model(pick.vendor, pick.model)?.speeds ?? [];
     const { profile: _, ...plain } = pick;
-    const all = Pick.models(offer.vendors, offer.models).map(([v, m]) => [m.label, Pick.on(plain, v, m)]);
+    const all = Pick.models(offer.vendors, offer.models).map(([v, m]) => [Pick.shown({ ...plain, vendor: v, model: m.label }, offer), Pick.on(plain, v, m)]);
     const profiles = Object.keys(offer.profiles ?? {}).map((name) => [name, Pick.profile(name, offer, pick.effort, pick.speed)]);
     switch (move) {
       case "next":
@@ -852,7 +854,8 @@ var Pick;
     const ends = move === "up" || move === "down";
     const next = ends ? Math.max(0, Math.min(n - 1, at + d)) : (at + d + n) % n;
     const like = list.filter(([part]) => part.toLowerCase().includes(String(to).toLowerCase()));
-    const hit = to === undefined ? list[next] : list.find(([part]) => part === to) ?? (like.length === 1 ? like[0] : undefined);
+    const mine = (["next", "prev", "model"].includes(move) ? list : []).find(([, p]) => p.profile === undefined && p.vendor === pick.vendor && p.model === to);
+    const hit = to === undefined ? list[next] : list.find(([part]) => part === to) ?? mine ?? (like.length === 1 ? like[0] : undefined);
     return hit === undefined ? null : hit[1];
   }
   Pick2.move = move;
@@ -861,6 +864,11 @@ var Pick;
     return hit === undefined ? null : Pick.on(pick, hit[0], hit[1]);
   }
   Pick2.to_model = to_model;
+  function shown(pick, { vendors, models }) {
+    const twin = vendors.some((v) => v !== pick.vendor && models.includes(pick.model) && Pick.model(v, pick.model) !== undefined);
+    return twin ? pick.model + " (" + pick.vendor + ")" : pick.model;
+  }
+  Pick2.shown = shown;
   function label(pick) {
     return [pick.vendor, pick.model, pick.effort, pick.speed].join(":");
   }
@@ -1198,7 +1206,8 @@ function view_pick(v) {
   if (v.pick === null) {
     return [];
   }
-  const { model, effort, speed, profile } = v.pick;
+  const { effort, speed, profile } = v.pick;
+  const model = Pick.shown(v.pick, v);
   const ranks = (v.profiles?.[profile ?? ""] ?? []).map((f) => f.model.label).join(", ");
   return [
     { text: profile ?? model, move: "model", hint: profile === undefined ? model : profile + ": " + ranks, choices: view_choices(v.pick, "model", v) },
