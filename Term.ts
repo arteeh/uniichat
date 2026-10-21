@@ -76,7 +76,7 @@ const SERVE  = ARGS.includes("serve");
 const PORT   = SERVE ? ARGS.find((a) => /^\d+$/.test(a)) : undefined;
 const SUB    = ARGS.includes("chatgpt");
 const CLAUDE = ARGS.includes("claude");
-const WORDS  = ["login", "help", "--help", "-h", "version", "update", "serve", "chatgpt", "claude", ...(SUB ? ["device", "logout"] : []), ...(CLAUDE ? ["logout", "status"] : [])];
+const WORDS  = ["login", "help", "--help", "-h", "version", "update", "serve", "chatgpt", "claude", ...(SUB ? ["logout"] : []), ...(CLAUDE ? ["logout", "status"] : [])];
 const WEB    = /^https?:\/\//;
 const ODD    = ARGS.find((a) => !WORDS.includes(a) && !WEB.test(a) && a !== PORT);
 const HOME   = process.env.UNII_HOME || os.homedir() + "/.unii";
@@ -93,10 +93,9 @@ const USAGE = `Usage: unii [url]           the chat (url: $UNII_URL, else https:
                             (another port: set UNII_SITE to its address too),
                             on your ANTHROPIC_API_KEY and OPENAI_API_KEY;
                             chat with it: unii http://127.0.0.1:8788
-       unii chatgpt [device]
-                            sign the server unii serve runs here in to a
-                            ChatGPT plan (its openai-sub vendor), in a
-                            browser (device: by a code, from another one)
+       unii chatgpt         sign the server unii serve runs here in to a
+                            ChatGPT plan (its openai-sub vendor), by a
+                            code entered in any browser
        unii chatgpt logout  sign it out
        unii claude [logout|status]
                             sign the server unii serve runs here in to a
