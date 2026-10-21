@@ -139,6 +139,16 @@ export const BACKUP_RUN   = config_get("backup_run", "");
 // openai-sub's ChatGPT sign-in (ChatGPT.ts)
 export const CHATGPT    = config_path(config_get("chatgpt", DIR + "/chatgpt.json"));
 
+// claude-sub's Claude Code (ClaudeSub.ts): its config dir, where its
+// sign-in is kept; the executable ("": the one unii carries, else the
+// Agent SDK's); how many chat turns and subagents may run at once (each
+// its own; summaries get one more); how long one may sit unused before
+// it ends, in seconds
+export const CLAUDE_SUB   = config_path(config_get("claude_sub", DIR + "/claude-sub"));
+export const CLAUDE       = config_path(config_get("claude", ""));
+export const CLAUDE_LANES = Math.max(1, Number(config_get("claude_lanes", "3")) || 3);
+export const CLAUDE_IDLE  = Math.max(1, Number(config_get("claude_idle", "300")) || 300);
+
 // the keys the environment gave (removed from it), and every key as used:
 // the environment's, else keys.json's
 const ENV_KEYS: Record<string, string> = Object.fromEntries(Object.entries(VARS).map(([name, v]) => [name, config_key(v)]));

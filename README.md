@@ -65,9 +65,9 @@ Other commands:
 
     bun run test                     # the tests, each file on its own
     bun run web                      # rebuilds web/app.js from web/src
-    bun build --compile Term.ts --outfile unii
-                                     # one `unii` executable; `unii serve`
-                                     # runs the server it carries
+    bun run build                    # one `unii` executable; `unii serve`
+                                     # runs the server it carries, and
+                                     # claude-sub's Claude Code (Build.ts)
 
 Your chats live in ~/.unii/users/<id>, one JSON line per message
 (main/) and per summary (tree/). They are the memory: back them up
@@ -86,7 +86,8 @@ bottom of the Settings page (☰ menu, or /settings); see below.
   http://127.0.0.1:8788). Another port: `UNII_SITE=http://127.0.0.1:9000
   bun Server.ts 9000`.
 - `vendors`: what the server offers, comma-separated: `claude-api`
-  (default), `openai-api`, `openai-sub` (a ChatGPT plan, below).
+  (default), `openai-api`, `openai-sub` (a ChatGPT plan, below),
+  `claude-sub` (a Claude plan, below).
 - `models`: the models offered, by label (Pick.ts; default all).
 - `pick`: what a chat runs on until it picks another,
   `vendor:model:effort:speed` (default `claude-api:sonnet-5.5:medium:slow`).
@@ -141,6 +142,14 @@ bottom of the Settings page (☰ menu, or /settings); see below.
   server's rights: every user of the server gets them. `/mcp <name>` or
   the site's ☰ menu turns one off or on in a chat. Plain `http` sends
   headers unencrypted: use it on a network you trust.
+- `claude_sub`, `claude`: claude-sub's Claude Code config dir (default
+  ~/.unii/claude-sub) and executable (default: the one `unii` carries,
+  else the Agent SDK's in node_modules).
+- `claude_lanes`, `claude_idle`: how many claude-sub chat turns and
+  subagents may run at once, each on its own Claude Code (default 3;
+  about 250 MB each; summaries get one more, as a turn may wait on them)
+  and how long one may sit unused before it ends, in seconds (default
+  300).
 
 `vapid.json` in the server's dir is its Web Push key pair, made at first
 start; keep it, as a new one silences every browser until notifications
@@ -169,6 +178,12 @@ With a ChatGPT plan instead, run `unii chatgpt` (or `bun ChatGPT.ts`;
 `openai-sub` the same way. The sign-in is the server's: every user's
 calls run on that one plan, so offer it only on a server for yourself.
 A server that bills refuses to start with it.
+
+With a Claude plan instead, run `unii claude` (`logout`, `status`;
+from source: `bun install`, then `bun Term.ts claude`) to sign in
+through Claude Code, and use `claude-sub` the same way. Every user's calls then run on your
+plan: Anthropic allows no one to offer others their Claude plan, so
+offer it only on a server for yourself. A server that bills refuses it.
 
 A self-hosted server is free: it bills no one, shows no prices, and calls
 only the model vendors. Billing.ts is the one place a hosted server
