@@ -1665,7 +1665,25 @@ function settings_html(page) {
   const error = page.error === null ? "" : `<p class="why bad">${esc(page.error)}</p>`;
   const save = `<div class="save"><p class="why"></p><button class="chip go"${page.error === null ? "" : " disabled"}>Save</button></div>`;
   const head = `<p class="sub">You own this server: what follows is its settings, in config.json in its folder, seen by you only.</p>`;
-  return head + error + `<form class="settings" autocomplete="off">` + group(GROUPS[0]) + keys + group(GROUPS[1]) + save + `</form>`;
+  const profiles = page.profiles === null ? "" : section_html("Profiles", `<div class="set profiles" data-key="profiles"><div class="field"></div><p class="err"></p></div>`);
+  return head + error + `<form class="settings" autocomplete="off">` + group(GROUPS[0]) + profiles + keys + group(GROUPS[1]) + save + `</form>`;
+}
+function offered(vendors, models) {
+  return Pick.models(VENDORS.filter((v) => vendors.includes(v)), models).map(([v, m]) => v + ":" + m.label);
+}
+function profiles_html(profiles, offered) {
+  const model = (m, i, j) => {
+    const [vendor = "", label = m, ...rest] = m.split(":");
+    const more = rest.length === 0 ? "" : ` <small>${esc(rest.join(" · "))}</small>`;
+    return `<li data-j="${j}"><button type="button" class="grip" data-i="${i}" data-j="${j}" aria-label="Move ${esc(label)}">⠿</button><span>${esc(label)}${more} <small>${esc(vendor)}</small></span><button type="button" class="out" data-i="${i}" data-j="${j}" aria-label="Remove ${esc(label)}">×</button></li>`;
+  };
+  const add = (list, i) => {
+    const left = offered.filter((m) => !list.some((x) => x.split(":").slice(0, 2).join(":") === m));
+    const groups = [...new Set(left.map((m) => m.split(":")[0]))].map((v) => `<optgroup label="${esc(v)}">${left.filter((m) => m.startsWith(v + ":")).map((m) => `<option value="${esc(m)}">${esc(m.split(":")[1])}</option>`).join("")}</optgroup>`);
+    return left.length === 0 ? "" : `<select class="add" data-i="${i}" aria-label="Add model"><option value="">Add model</option>${groups.join("")}</select>`;
+  };
+  const one = ([name, list], i) => `<div class="prof" data-i="${i}"><div class="name"><input class="pname" data-i="${i}" value="${esc(name)}" aria-label="Name" maxlength="60" spellcheck="false" autocapitalize="off"><button type="button" class="chip red pdel" data-i="${i}">Delete</button></div><ol>${list.map((m, j) => model(m, i, j)).join("")}</ol>${add(list, i)}</div>`;
+  return profiles.map(one).join("") + `<button type="button" class="chip pnew">Add profile</button>`;
 }
 function setting_html(r) {
   const [name, about] = SETTING[r.key] ?? [r.key, ""];
@@ -1719,7 +1737,7 @@ function key_html(k) {
   const label = `<label for="${id}">${esc(name)}<small>${esc(about)} <code>${esc(k.env)}</code></small></label>`;
   return `<div class="set key" data-key="key.${esc(k.name)}">${label}<div class="field">${field}</div><p class="from">${from}${reset}</p><p class="err"></p></div>`;
 }
-function picks_html(key, vendors, models, value, none) {
+function picks_html(key, vendors, models, value, none, profiles = []) {
   const [vendor = "", model = "", effort = "", speed = ""] = value === "" ? [] : value.split(":");
   const known = VENDORS.includes(vendor);
   const offered = VENDORS.filter((v) => vendors.includes(v));
@@ -1730,11 +1748,14 @@ function picks_html(key, vendors, models, value, none) {
     const items = opts.map(([v, text]) => `<option value="${esc(v)}"${v === on ? " selected" : ""}>${esc(text)}</option>`).join("");
     return `<select id="set-${key}-${part}" name="${key}.${part}" aria-label="${name}">${items}</select>`;
   };
-  const head = select("vendor", "Vendor", offered, vendor, none);
-  return vendor === "" ? head : head + select("model", "Model", labels, model, null) + select("effort", "Effort", EFFORTS, effort, null) + select("speed", "Speed", speeds, speed, null);
+  const head = select("vendor", "Vendor", [...offered, ...profiles], vendor, none);
+  return vendor === "" || profiles.includes(vendor) ? head : head + select("model", "Model", labels, model, null) + select("effort", "Effort", EFFORTS, effort, null) + select("speed", "Speed", speeds, speed, null);
 }
-function pick_mend(parts, models) {
+function pick_mend(parts, models, profiles = []) {
   const [vendor = "", model = "", effort = "", speed = ""] = parts;
+  if (profiles.includes(vendor)) {
+    return vendor;
+  }
   if (!VENDORS.includes(vendor)) {
     return vendor === "" ? "" : parts.join(":");
   }
@@ -2839,6 +2860,9 @@ function settings_draw(page) {
   const form = $("#account form.settings");
   const rows = new Map(page.settings.map((r) => [r.key, r]));
   const unset = new Set;
+  const profs = Object.entries(page.profiles ?? {});
+  const box = form.querySelector(".profiles .field");
+  const names = () => profs.map(([name]) => name.trim()).filter((name) => name !== "");
   const listed = (key) => {
     const boxes = [...form.querySelectorAll(`input[name="${key}"]`)];
     return boxes.length === 0 ? list(rows.get(key).value) : boxes.filter((b) => b.checked).map((b) => b.value);
@@ -2851,7 +2875,7 @@ function settings_draw(page) {
       const four = value?.parentElement.querySelector(".four");
       if (value && four) {
         const focus = document.activeElement?.name;
-        four.innerHTML = picks_html(key, vendors, listed("models"), value.value, key === "agents" ? "The chat's pick" : null);
+        four.innerHTML = picks_html(key, vendors, listed("models"), value.value, key === "agents" ? "The chat's pick" : null, names());
         four.querySelector(`select[name="${focus}"]`)?.focus();
       }
     }
@@ -2876,9 +2900,12 @@ function settings_draw(page) {
     el.querySelector(".err").textContent = "";
     const value = el.querySelector("input[type=hidden]");
     if (value !== null) {
-      value.value = pick_mend([...el.querySelectorAll("select")].map((s) => s.value), listed("models"));
+      value.value = pick_mend([...el.querySelectorAll("select")].map((s) => s.value), listed("models"), names());
     }
     picks();
+    if (el.dataset.key === "vendors" || el.dataset.key === "models") {
+      profs_draw();
+    }
   };
   form.onclick = (ev) => {
     const btn = ev.target.closest(".reset");
@@ -2898,11 +2925,104 @@ function settings_draw(page) {
   };
   form.onsubmit = (ev) => {
     ev.preventDefault();
-    settings_save(form, page, unset, listed);
+    settings_save(form, page, unset, listed, profs);
   };
+  const profs_draw = (focus) => {
+    if (box !== null) {
+      box.innerHTML = profiles_html(profs, offered(listed("vendors"), listed("models")));
+      (focus === undefined ? null : box.querySelector(focus) ?? box.querySelector(".pnew"))?.focus();
+    }
+  };
+  const profs_changed = (focus) => {
+    profs_draw(focus);
+    box.closest(".set").querySelector(".err").textContent = "";
+    picks();
+  };
+  const renamed = (was, now) => {
+    for (const key of PICKS) {
+      const value = form.querySelector(`input[name="${key}"]`);
+      if (value !== null && was.trim() !== "" && now !== "" && value.value === was.trim()) {
+        value.value = now;
+      }
+    }
+  };
+  box?.addEventListener("click", (ev) => {
+    const b = ev.target.closest("button");
+    const [i, j] = [Number(b?.dataset.i), Number(b?.dataset.j)];
+    if (b?.classList.contains("pnew")) {
+      profs.push(["", []]);
+      profs_changed(`.pname[data-i="${profs.length - 1}"]`);
+    } else if (b?.classList.contains("pdel")) {
+      profs.splice(i, 1);
+      profs_changed(".pnew");
+    } else if (b?.classList.contains("out")) {
+      profs[i][1].splice(j, 1);
+      profs_changed(`.add[data-i="${i}"]`);
+    }
+  });
+  box?.addEventListener("change", (ev) => {
+    const add = ev.target.closest("select.add");
+    if (add !== null && add.value !== "") {
+      const i = Number(add.dataset.i);
+      profs[i][1].push(add.value);
+      profs_changed(`.add[data-i="${i}"]`);
+    }
+  });
+  box?.addEventListener("input", (ev) => {
+    const name = ev.target.closest("input.pname");
+    if (name !== null) {
+      const i = Number(name.dataset.i);
+      renamed(profs[i][0], name.value.trim());
+      profs[i][0] = name.value;
+    }
+  });
+  box?.addEventListener("keydown", (ev) => {
+    const grip = ev.target.closest(".grip");
+    if (grip === null || ev.key !== "ArrowUp" && ev.key !== "ArrowDown") {
+      return;
+    }
+    ev.preventDefault();
+    const [i, j] = [Number(grip.dataset.i), Number(grip.dataset.j)];
+    const k = j + (ev.key === "ArrowUp" ? -1 : 1);
+    const list = profs[i][1];
+    if (k >= 0 && k < list.length) {
+      [list[j], list[k]] = [list[k], list[j]];
+      profs_changed(`.grip[data-i="${i}"][data-j="${k}"]`);
+    }
+  });
+  box?.addEventListener("pointerdown", (ev) => {
+    const grip = ev.target.closest(".grip");
+    if (grip === null || ev.button !== 0) {
+      return;
+    }
+    ev.preventDefault();
+    const li = grip.closest("li");
+    const ol = li.parentElement;
+    const [i, from] = [Number(grip.dataset.i), Number(grip.dataset.j)];
+    li.classList.add("drag");
+    const move = (e) => {
+      const below = [...ol.children].find((c) => c !== li && e.clientY < c.getBoundingClientRect().top + c.getBoundingClientRect().height / 2);
+      if (below !== li.nextElementSibling || below === undefined) {
+        ol.insertBefore(li, below ?? null);
+      }
+    };
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      window.removeEventListener("pointercancel", up);
+      const to = [...ol.children].indexOf(li);
+      const list = profs[i][1];
+      list.splice(to, 0, ...list.splice(from, 1));
+      profs_changed(`.grip[data-i="${i}"][data-j="${to}"]`);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+    window.addEventListener("pointercancel", up);
+  });
+  profs_draw();
   picks();
 }
-async function settings_save(form, page, unset, listed) {
+async function settings_save(form, page, unset, listed, profs) {
   const set = {};
   const keys = {};
   for (const r of page.settings) {
@@ -2927,14 +3047,28 @@ async function settings_save(form, page, unset, listed) {
   }
   const why = form.querySelector(".save .why");
   form.querySelectorAll(".err").forEach((e) => e.textContent = "");
-  if (Object.keys(set).length === 0 && Object.keys(keys).length === 0) {
+  let profiles;
+  if (page.profiles != null) {
+    const now = profs.map(([name, list]) => [name.trim(), list]);
+    const all = now.map(([name]) => name);
+    const bad = all.includes("") ? "Name each profile." : all.some((name, k) => all.indexOf(name) !== k) ? "Two profiles have the same name." : now.some(([, list]) => list.length === 0) ? "Add a model to each profile." : null;
+    if (bad !== null) {
+      const at = form.querySelector(".profiles");
+      at.querySelector(".err").textContent = bad;
+      at.scrollIntoView({ block: "center" });
+      return;
+    }
+    const was = JSON.stringify(page.profiles);
+    profiles = JSON.stringify(Object.fromEntries(now)) === was ? undefined : Object.fromEntries(now);
+  }
+  if (Object.keys(set).length === 0 && Object.keys(keys).length === 0 && profiles === undefined) {
     why.textContent = "Nothing changed.";
     return;
   }
   const go = form.querySelector(".go");
   go.disabled = true;
   why.textContent = "";
-  const out = await post("/api/settings", { version: page.version, set, keys });
+  const out = await post("/api/settings", { version: page.version, set, keys, ...profiles === undefined ? {} : { profiles } });
   go.disabled = false;
   if (!out.ok) {
     const at = out.key === undefined ? null : form.querySelector(`.set[data-key="${out.key}"]`);

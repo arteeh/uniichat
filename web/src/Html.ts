@@ -281,7 +281,34 @@ export function settings_html(page: Page): string {
   const error = page.error === null ? "" : `<p class="why bad">${esc(page.error)}</p>`;
   const save = `<div class="save"><p class="why"></p><button class="chip go"${page.error === null ? "" : " disabled"}>Save</button></div>`;
   const head = `<p class="sub">You own this server: what follows is its settings, in config.json in its folder, seen by you only.</p>`;
-  return head + error + `<form class="settings" autocomplete="off">` + group(GROUPS[0]) + keys + group(GROUPS[1]) + save + `</form>`;
+  const profiles = page.profiles === null ? "" : section_html("Profiles", `<div class="set profiles" data-key="profiles"><div class="field"></div><p class="err"></p></div>`);
+  return head + error + `<form class="settings" autocomplete="off">` + group(GROUPS[0]) + profiles + keys + group(GROUPS[1]) + save + `</form>`;
+}
+
+// the models the vendors and models checked offer, as "vendor:model"
+export function offered(vendors: string[], models: string[]): string[] {
+  return Pick.models(VENDORS.filter((v) => vendors.includes(v)), models).map(([v, m]) => v + ":" + m.label);
+}
+
+// the profile editor (main.ts fills .profiles .field and keeps the
+// list): each profile its name, Delete, its models in order (each a
+// handle to drag, or move by arrow keys, and Remove) and a list to add
+// one of `offered` ("vendor:model", the vendors' and models checked);
+// then Add profile
+export function profiles_html(profiles: Array<[string, string[]]>, offered: string[]): string {
+  const model = (m: string, i: number, j: number) => {
+    const [vendor = "", label = m, ...rest] = m.split(":");
+    const more = rest.length === 0 ? "" : ` <small>${esc(rest.join(" · "))}</small>`;
+    return `<li data-j="${j}"><button type="button" class="grip" data-i="${i}" data-j="${j}" aria-label="Move ${esc(label)}">⠿</button><span>${esc(label)}${more} <small>${esc(vendor)}</small></span><button type="button" class="out" data-i="${i}" data-j="${j}" aria-label="Remove ${esc(label)}">×</button></li>`;
+  };
+  const add = (list: string[], i: number) => {
+    const left = offered.filter((m) => !list.some((x) => x.split(":").slice(0, 2).join(":") === m));
+    const groups = [...new Set(left.map((m) => m.split(":")[0]))].map((v) => `<optgroup label="${esc(v)}">${left.filter((m) => m.startsWith(v + ":")).map((m) => `<option value="${esc(m)}">${esc(m.split(":")[1])}</option>`).join("")}</optgroup>`);
+    return left.length === 0 ? "" : `<select class="add" data-i="${i}" aria-label="Add model"><option value="">Add model</option>${groups.join("")}</select>`;
+  };
+  const one = ([name, list]: [string, string[]], i: number) =>
+    `<div class="prof" data-i="${i}"><div class="name"><input class="pname" data-i="${i}" value="${esc(name)}" aria-label="Name" maxlength="60" spellcheck="false" autocapitalize="off"><button type="button" class="chip red pdel" data-i="${i}">Delete</button></div><ol>${list.map((m, j) => model(m, i, j)).join("")}</ol>${add(list, i)}</div>`;
+  return profiles.map(one).join("") + `<button type="button" class="chip pnew">Add profile</button>`;
 }
 
 function setting_html(r: Row): string {
@@ -355,8 +382,10 @@ function key_html(k: Key): string {
 // `value` (vendor:model:effort:speed): the vendors and the models checked
 // (`vendors`, `models`), the vendor's models, the model's speeds; first
 // `none` (agents: the chat's pick, value ""), which shows the vendor's
-// list only. A part they don't offer shows, said.
-export function picks_html(key: string, vendors: string[], models: string[], value: string, none: string | null): string {
+// list only. A part they don't offer shows, said. The profiles' names
+// (`profiles`) follow the vendors in the first list; one picked is
+// the whole value, so no other list shows.
+export function picks_html(key: string, vendors: string[], models: string[], value: string, none: string | null, profiles: string[] = []): string {
   const [vendor = "", model = "", effort = "", speed = ""] = value === "" ? [] : value.split(":");
   const known = (VENDORS as string[]).includes(vendor);
   const offered = (VENDORS as string[]).filter((v) => vendors.includes(v));
@@ -367,15 +396,18 @@ export function picks_html(key: string, vendors: string[], models: string[], val
     const items = opts.map(([v, text]) => `<option value="${esc(v)}"${v === on ? " selected" : ""}>${esc(text)}</option>`).join("");
     return `<select id="set-${key}-${part}" name="${key}.${part}" aria-label="${name}">${items}</select>`;
   };
-  const head = select("vendor", "Vendor", offered, vendor, none);
-  return vendor === "" ? head : head + select("model", "Model", labels, model, null) + select("effort", "Effort", EFFORTS, effort, null) + select("speed", "Speed", speeds, speed, null);
+  const head = select("vendor", "Vendor", [...offered, ...profiles], vendor, none);
+  return vendor === "" || profiles.includes(vendor) ? head : head + select("model", "Model", labels, model, null) + select("effort", "Effort", EFFORTS, effort, null) + select("speed", "Speed", speeds, speed, null);
 }
 
 // a pick of its four parts as chosen: a model its vendor lacks gives way
 // to the vendor's first checked, a speed the model lacks to its first, no
-// effort to medium; no vendor: none ("")
-export function pick_mend(parts: string[], models: string[]): string {
+// effort to medium; no vendor: none (""); a profile (`profiles`): its name
+export function pick_mend(parts: string[], models: string[], profiles: string[] = []): string {
   const [vendor = "", model = "", effort = "", speed = ""] = parts;
+  if (profiles.includes(vendor)) {
+    return vendor;
+  }
   if (!(VENDORS as string[]).includes(vendor)) {
     return vendor === "" ? "" : parts.join(":");
   }

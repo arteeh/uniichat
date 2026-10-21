@@ -112,3 +112,28 @@ test("files broken by hand: nothing saved or dropped, no secret told, what ran k
   expect(config.PICK).toBe(pick);
   expect(file()).toBe("{ not json");
 });
+
+test("profiles saved apply at once; one a start would refuse, or a pick on one gone, is not saved", async () => {
+  const profiles = (body: object) => Settings.save(post({ version: config.config_version(), set: {}, keys: {}, ...body }));
+  expect((await profiles({ profiles: { " Daily ": ["claude-api:opus-5.5", "claude-api:haiku-5.5:low"] } })).status).toBe(200);
+  expect(JSON.parse(file()).profiles).toEqual({ Daily: ["claude-api:opus-5.5", "claude-api:haiku-5.5:low"] });
+  expect(Object.keys(config.OFFER.profiles ?? {})).toEqual(["Daily"]);
+  expect(Settings.page().profiles).toEqual({ Daily: ["claude-api:opus-5.5", "claude-api:haiku-5.5:low"] });
+  expect((await save({ pick: "Daily" })).status).toBe(200);
+  expect(config.PICK.profile).toBe("Daily");
+  const saved = file();
+  // a model the vendors checked don't offer; a profile the pick is on, gone
+  const bad = await profiles({ profiles: { Daily: ["openai-api:gpt-6-luna"] } });
+  expect([bad.status, (bad.body as any).key]).toEqual([400, "profiles"]);
+  expect((await profiles({ profiles: null })).status).toBe(400);
+  expect((await profiles({ profiles: { "a:b": ["claude-api:opus-5.5"] } })).status).toBe(400);
+  expect((await profiles({ profiles: JSON.parse('{"__proto__": ["claude-api:opus-5.5"]}') })).status).toBe(400);
+  expect(file()).toBe(saved);
+  process.env.UNII_PROFILES = "{}";
+  try {
+    expect(Settings.page().profiles).toBeNull();
+    expect((await profiles({ profiles: {} })).status).toBe(409);
+  } finally {
+    delete process.env.UNII_PROFILES;
+  }
+});

@@ -14,7 +14,8 @@
 // doesn't name kept) written and read again (config_reload; with
 // workers, by every one: Server.ts). A save made on files changed since
 // the page read them (another tab, a hand edit: `version`) is refused,
-// so none undoes another unseen.
+// so none undoes another unseen. The profiles (config `profiles`, a
+// JSON object: Pick.ts) are saved whole, checked as a start checks them.
 
 import * as fs from "node:fs";
 import * as config from "./Config.ts";
@@ -44,9 +45,11 @@ export type Row = {
 // show any)
 export type Key = { name: string; env: string; from: config.From; tail: string };
 
-// the page: the files' version, the settings, the keys; why the page
-// can't save (config.json unreadable; null: it can)
-export type Page = { version: string; settings: Row[]; keys: Key[]; error: string | null };
+// the page: the files' version, the settings, the keys, the profiles
+// (config.json's, by name, each its models in order; null: set by
+// UNII_PROFILES, not shown); why the page can't save (config.json
+// unreadable; null: it can)
+export type Page = { version: string; settings: Row[]; keys: Key[]; profiles: Record<string, string[]> | null; error: string | null };
 
 // a save's answer: its status and body (refused: why, and the setting
 // or "key.<name>" it is about), what it changed (`saved`), and whether
@@ -60,6 +63,11 @@ type Out = { status: number; body: object; saved: string[]; wrote: boolean };
 const BODY  = 2 ** 16;
 const VALUE = 4096;
 const KEY   = 16384;
+
+// the most profiles, models a profile ranks, and characters a name has
+const PROFILES = 50;
+const RANKS    = 20;
+const NAME     = 60;
 
 // a key shows its last TAIL characters, if it has MASK or more (fewer
 // would say too much of it)
@@ -106,7 +114,8 @@ export namespace Settings {
       const key = from === "env" ? config.KEYS[name] : keys[name] ?? "";
       return { name, env, from, tail: Settings.tail(key) };
     });
-    return { version: snap.version, settings, keys: shown, error };
+    const profiles = process.env.UNII_PROFILES !== undefined ? null : Settings.profiles(file.profiles) ?? {};
+    return { version: snap.version, settings, keys: shown, profiles, error };
   }
 
   // a key's last characters, as shown: its letters and digits only (a
@@ -140,6 +149,7 @@ export namespace Settings {
     }
     const set = Settings.record(body?.set);
     const keys = Settings.record(body?.keys);
+    const profiles = body?.profiles === undefined ? undefined : body.profiles === null ? null : Settings.profiles(body.profiles);
     let snap: config.Snapshot;
     try {
       snap = config.config_snapshot();
@@ -183,6 +193,19 @@ export namespace Settings {
       }
       next[key] = value.trim();
     }
+    if (profiles !== undefined) {
+      if (process.env.UNII_PROFILES !== undefined) {
+        return refuse(409, "UNII_PROFILES sets the profiles: unset it on the server to change them here.", "profiles");
+      }
+      if (body.profiles !== null && profiles === null) {
+        return refuse(400, "Each profile needs a name (up to " + NAME + " characters, no \":\") and one to " + RANKS + " models.", "profiles");
+      }
+      if (profiles === null || Object.keys(profiles).length === 0) {
+        delete next.profiles;
+      } else {
+        next.profiles = profiles;
+      }
+    }
     for (const [name, value] of Object.entries(keys)) {
       if (!Object.hasOwn(config.VARS, name)) {
         return refuse(400, "No key " + JSON.stringify(name) + ".");
@@ -202,7 +225,7 @@ export namespace Settings {
       }
       kept[name] = key;
     }
-    const why = Settings.check(next, new Set(Object.keys(set)));
+    const why = Settings.check(next, new Set([...Object.keys(set), ...(profiles === undefined ? [] : ["profiles"])]));
     if (why !== null) {
       return refuse(400, why.error, why.key);
     }
@@ -210,7 +233,7 @@ export namespace Settings {
       if (Object.keys(keys).length > 0) {
         config.config_write(config.KEYS_PATH, config.keys_text(kept), 0o600);
       }
-      if (Object.keys(set).length > 0) {
+      if (Object.keys(set).length > 0 || profiles !== undefined) {
         const mode = snap.file === null ? 0o600 : fs.statSync(config.FILE_PATH).mode & 0o777;
         config.config_write(config.FILE_PATH, JSON.stringify(next, null, 2) + "\n", mode);
       }
@@ -219,8 +242,28 @@ export namespace Settings {
       const out = refuse(500, "The settings couldn't be saved (" + (err?.code ?? String(err?.message ?? err).replace(/^config: /, "")) + "). Reload to see what is saved.");
       return { ...out, wrote: true };
     }
-    const saved = [...Object.keys(set), ...Object.keys(keys).map((name) => "key." + name)];
+    const saved = [...Object.keys(set), ...(profiles === undefined ? [] : ["profiles"]), ...Object.keys(keys).map((name) => "key." + name)];
     return { status: 200, body: { ...Settings.page(), saved }, saved, wrote: saved.length > 0 };
+  }
+
+  // profiles as config.json keeps them (a name, trimmed, and its models,
+  // each one line, in order); null: not that, or too many, or two names
+  // the same once trimmed
+  export function profiles(x: unknown): Record<string, string[]> | null {
+    const all = Object.entries(Settings.record(x));
+    if (x === null || typeof x !== "object" || Array.isArray(x) || all.length > PROFILES) {
+      return null;
+    }
+    const line = (t: unknown) => typeof t === "string" && t.trim() !== "" && t.length <= VALUE && !/[\x00-\x1f\x7f]/.test(t);
+    const out: Array<[string, string[]]> = [];
+    for (const [name, list] of all) {
+      const key = name.trim();
+      if (!line(key) || key.length > NAME || key.includes(":") || key === "__proto__" || out.some(([k]) => k === key) || !Array.isArray(list) || list.length === 0 || list.length > RANKS || !list.every(line)) {
+        return null;
+      }
+      out.push([key, list.map((m: string) => m.trim())]);
+    }
+    return Object.fromEntries(out);
   }
 
   // an object's own fields (anything else: none)
@@ -244,7 +287,7 @@ export namespace Settings {
       config.config_make(file);
     } catch (err: any) {
       const text = String(err?.message ?? err).replace(/^config: /, "");
-      const key = config.SETTINGS.find((s) => text.startsWith(s.key + " "))?.key;
+      const key = text.startsWith("profile") ? "profiles" : config.SETTINGS.find((s) => text.startsWith(s.key + " "))?.key;
       const pick = key === "pick" || key === "compactor" || key === "agents";
       const error = pick ? config.config_value(file, key) + " isn't offered by the vendors and models checked: pick another." : key === "vendors" ? "There is no vendor " + text.replace(/^vendors can't offer /, "") + "." : text + ".";
       return { error, key };
