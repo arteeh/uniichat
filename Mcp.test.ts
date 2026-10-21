@@ -288,7 +288,7 @@ function terminal(tools: any, host: string) {
       Machine.run(job, dir + "/dev", abort.signal).then((out) => (jobs.delete(msg.id), Tools.done(tools, host, msg.id, out)));
     }
   };
-  Tools.attach(tools, "term-" + host, host, "me", { send, live: () => true, computer: false, work: "" });
+  Tools.attach(tools, "term-" + host, host, "me", { send, live: () => true, computer: false, work: "", shell: null });
 }
 
 test("a stdio server on a device: runs there; one that died there starts again at the next call", async () => {
