@@ -1135,7 +1135,11 @@ ${Memory.cut(line)}| ← LIMIT`;
     yield "}}\n";
   }
 
-  // /tree: a section for the view, the messages and each level
+  // /tree: a section for the view, and the tree as a bracket: a column
+  // for the messages, then one per level, each node beside the two it
+  // merges; the script lays out the cards near the screen (a chat has
+  // thousands), the leftmost column in view packed, those right of it
+  // spread to match
   export function* page(mem: Memory): Generator<string> {
     const esc  = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;");
     const item = (head: string[], text: string) => "<h4>" + esc(head.join(" · ")) + "</h4><pre>" + esc(text) + "</pre>";
@@ -1146,30 +1150,126 @@ ${Memory.cut(line)}| ← LIMIT`;
       const head = ["LVL" + part.l + " #" + a + "-" + b, when(a, b), Memory.bytes(text) + " B"];
       return item(head, text);
     };
-    const levels = Memory.levels(mem);
-    const menu = ["VIEW", "ROOT", ...levels.map((l) => "LVL" + l)].map((name) => `<a href="#${name}">${name}</a>`);
-    yield `<!doctype html><meta charset="utf-8"><title>UniiChat memory</title>
+    const card = (part: Part, html: string, kind = "") => `<div class="s${part.l > 0 ? " m" : ""} ${kind}" data-a=${Memory.span(part)[0]} data-n=${2 ** part.l}><div class=c>${html}</div></div>`;
+    yield `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>UniiChat memory</title>
+<link rel="stylesheet" href="/style.css">
 <style>
-body { font: 13px/1.4 ui-monospace, monospace; margin: 2em; } nav a { margin-right: 1em; }
-section { display: none; } section:target { display: block; }
-h4 { margin: .8em 0 .2em; color: #888; font-weight: normal; } pre { margin: 0; white-space: pre-wrap; font: inherit; }
+body { height: 100dvh; display: flex; flex-direction: column; }
+header > a { display: grid; place-items: center; text-decoration: none; } header > .here { background: var(--ink); color: var(--paper); }
+#back { margin-left: auto; } header > button:disabled { opacity: .4; cursor: default; }
+section { display: none; flex: 1; overflow: auto; padding: 0 20px 20px; outline: none; font: 15px/1.55 var(--serif); text-wrap: pretty; } section:target { display: block; }
+h4 { margin: .8em 0 .2em; font: 600 11.5px/1.5 var(--sans); color: var(--mid); } pre { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; }
+#TREE { --g: 2em; gap: var(--g); scroll-snap-type: x mandatory; scroll-padding: 0 20px; } #TREE:target { display: flex; }
+.col { flex: 0 0 min(22em, 65vw); position: relative; scroll-snap-align: start; }
+.col h3 { position: sticky; top: 0; z-index: 2; margin: 0; height: 3em; font: 600 .8em/3em var(--sans); letter-spacing: .06em; color: var(--mid); background: var(--paper); cursor: pointer; } .col h3:hover { color: var(--ink); }
+.s { display: none; position: absolute; left: 0; right: 0; height: 9.5em; } .s.on { display: block; }
+.col + .col .s::after { content: ""; position: absolute; left: calc(0px - var(--g)); right: 100%; top: 50%; border-top: 1px solid var(--frame); }
+.m::before { content: ""; position: absolute; left: calc(0px - var(--g)); width: calc(var(--g) / 2); top: calc(50% - var(--b)); height: calc(2 * var(--b)); border: 1px solid var(--frame); border-left: 0; }
+.col + .col .m::after { left: calc(var(--g) / -2); }
+.c { height: 100%; overflow: hidden; padding: 0 14px; border-radius: 10px; background: var(--block); mask-image: linear-gradient(#000 75%, transparent); cursor: pointer; } .c:hover { background: var(--hover); }
+.c:focus-visible { outline: 2px solid var(--ink); outline-offset: -2px; }
+.s.user pre, .s.unii pre { font: 16px/1.55 var(--sans); } .s.tool pre, .s.echo pre { font: 12.5px/1.5 var(--mono); }
+.c h4 { margin-top: .7em; } .c.full { position: relative; z-index: 1; height: auto; padding-bottom: .7em; mask-image: none; box-shadow: var(--shadow); }
+@media (max-width: 600px) { section { padding: 0 14px 14px; } #TREE { scroll-padding: 0 14px; } }
 </style>
-<script>location.hash = location.hash || "VIEW";</script>
-<nav>${menu.join("")}</nav>
+<noscript><style>.s { display: block; position: static; height: auto; margin-bottom: 1em; } .s::before, .s::after { content: none !important; } .c { mask-image: none; }</style></noscript>
+<script>["#VIEW", "#TREE"].includes(location.hash) || (location.hash = "TREE");</script>
+<header><a href="#VIEW">VIEW</a><a href="#TREE">TREE</a><button id=back>‹</button><button id=next>›</button></header>
 <section id="VIEW">`;
     yield mem.view.parts.map((part) => node(part, Memory.text(mem, part))).join("");
-    yield '</section>\n<section id="ROOT">';
+    yield '</section>\n<section id="TREE"><div class=col><h3 tabindex=0>ROOT</h3>';
     for (let i = 0; i < mem.count; i++) {
       const r = Memory.message(mem, i)!;
-      yield item(["ROOT #" + i, when(i, i), r.kind, r.size + " B"], r.text);
+      yield card({ l: 0, i }, item(["ROOT #" + i, when(i, i), r.kind, r.size + " B"], r.text), r.kind);
     }
-    for (const l of levels) {
-      yield '</section>\n<section id="LVL' + l + '">';
+    for (const l of Memory.levels(mem)) {
+      yield "</div><div class=col><h3 tabindex=0>LVL" + l + "</h3>";
       for (const [part, text] of Memory.level(mem, l)) {
-        yield node(part, text);
+        yield card(part, node(part, text));
       }
     }
-    yield "</section>\n";
+    // a message is k * 10em tall (a card and a gap): 1 as the messages'
+    // column or level 0's is leftmost, halving a level; as a scroll ends,
+    // k eases out to the leftmost column's in 300 ms, as Google's bracket
+    // does, the message at the top of the screen staying there
+    yield `</div></section>
+<script>
+const tree = document.getElementById("TREE"), cols = [...tree.children], em = parseFloat(getComputedStyle(tree).fontSize);
+const cards = cols.map((col) => [...col.querySelectorAll(".s")].map((s) => (s.t = [s, +s.dataset.a, +s.dataset.n])));
+const step = () => (cols[1] ?? cols[0]).offsetLeft - cols[0].offsetLeft || 1;
+let k = 1, aim = 1, wait, shown = [], open = new Set();
+const lay = (y = tree.scrollTop) => {
+  const u = 10 * em * k, from = (y - tree.clientHeight) / u, to = (y + 2 * tree.clientHeight) / u;
+  const c0 = Math.floor(tree.scrollLeft / step()), c1 = (tree.scrollLeft + tree.clientWidth) / step();
+  const put = ([s, a, n]) => {
+    s.style.top = 2.4 * em + (a + n / 2) * u - 4.75 * em + "px";
+    s.style.setProperty("--b", n * u / 4 + "px");
+    s.firstChild.tabIndex = 0;
+    s.classList.add("on");
+    shown.push(s);
+  };
+  shown.forEach((s) => s.classList.remove("on"));
+  shown = [];
+  cards.forEach((list, c) => {
+    cols[c].style.height = 2.4 * em + cards[0].length * u + "px";
+    // only the columns in view: those left of it hold nearly every card
+    if (c < c0 || c > c1) return;
+    let i = 0, j = list.length;
+    while (i < j) {
+      const m = (i + j) >> 1;
+      list[m][1] + list[m][2] < from ? (i = m + 1) : (j = m);
+    }
+    for (; i < list.length && list[i][1] <= to; i++) {
+      put(list[i]);
+    }
+  });
+  // an open card stays, however far down its text reaches
+  open.forEach(put);
+  y !== tree.scrollTop && (tree.scrollTop = y);
+  back.disabled = tree.scrollLeft < 1;
+  next.disabled = tree.scrollLeft + tree.clientWidth >= tree.scrollWidth - 1;
+};
+const pack = () => {
+  const to = 1 / 2 ** Math.max(0, Math.min(cols.length - 1, Math.round(tree.scrollLeft / step())) - 1), from = k, t0 = performance.now();
+  const frame = (now) => {
+    const e = Math.min(1, (now - t0) / 300), top = tree.scrollTop / k;
+    if (aim === to) {
+      k = from + (to - from) * (1 - (1 - e) ** 3);
+      lay(top * k);
+      e < 1 && requestAnimationFrame(frame);
+    }
+  };
+  aim !== to && requestAnimationFrame(frame);
+  aim = to;
+};
+const end = "onscrollend" in tree;
+tree.addEventListener(end ? "scrollend" : "scroll", () => { clearTimeout(wait); wait = setTimeout(pack, end ? 0 : 150); });
+tree.addEventListener("scroll", () => lay());
+onload = onresize = onhashchange = () => {
+  back.hidden = next.hidden = location.hash !== "#TREE";
+  document.querySelectorAll("header a").forEach((a) => a.classList.toggle("here", a.hash === location.hash));
+  lay();
+};
+onhashchange();
+back.onclick = () => tree.scrollBy({ left: -step(), behavior: "smooth" });
+next.onclick = () => tree.scrollBy({ left: step(), behavior: "smooth" });
+const act = (t) => {
+  const col = t.closest("h3")?.parentNode, c = t.closest(".c");
+  if (col) {
+    tree.scrollTo({ left: col.offsetLeft - cols[0].offsetLeft, behavior: "smooth" });
+  } else if (c && getSelection().isCollapsed) {
+    c.classList.toggle("full") ? open.add(c.parentNode.t) : open.delete(c.parentNode.t);
+  }
+};
+tree.onclick = (e) => act(e.target);
+tree.onkeydown = (e) => {
+  if ((e.key === "Enter" || e.key === " ") && e.target.matches(".c, h3")) {
+    e.preventDefault();
+    act(e.target);
+  }
+};
+</script>
+`;
   }
 
   // Agents
