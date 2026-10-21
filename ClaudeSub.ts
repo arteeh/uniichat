@@ -11,8 +11,8 @@
 // pipe: never on its command line) and web search, always; Claude Code's
 // own tools, settings, skills, memory and compaction off. It runs the
 // tool loop; we log what it streams. A message sent mid-run goes in once
-// its turn ends. Not signed in, the call ends as the vendor's (`down`),
-// saying how to sign in.
+// its turn ends. Not signed in, the call ends as one its vendor can't
+// be asked for here (no stop, as with no API key), saying how to sign in.
 //
 // A Claude Code per call: each call starts its own (~235 MB while it
 // runs), which exits as the call ends; a stop kills it (its tool jobs
@@ -28,8 +28,8 @@
 // once; a wait of LONG or more parks it (a Limit event tells till when),
 // and a message sent, a wake or a stop ends the wait. One that ran no
 // tool of ours (nor took a message) and has a fallback (AskAI.ts) goes on
-// with it instead, as when its vendor is out (`off`: also not signed
-// in); else it asks again in a new Claude Code. One that did keeps its
+// with it instead, as when its vendor is out; else it asks again in a
+// new Claude Code. One that did keeps its
 // Claude Code, idle, and at the reset is told to go on (ON): its
 // conversation as it was, tool results in, so no tool runs again. Usage billed past the plan (isUsingOverage: extra usage) is a
 // limit too: the turn is interrupted at once (an answer already whole is
@@ -665,7 +665,7 @@ export namespace ClaudeSub {
       }
       if (msg.type === "assistant" && msg.error === "authentication_failed") {
         await ClaudeSub.settle(code);
-        return { text: SIGN_IN, stop: "down", off: true };
+        return { text: SIGN_IN };
       }
       hit ||= msg.type === "assistant" && msg.error === "rate_limit";
       if (msg.type === "user" && Array.isArray(msg.message.content)) {
