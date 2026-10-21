@@ -998,6 +998,7 @@ function view_new() {
     importing: null,
     limits: {},
     timers: [],
+    mcp: [],
     parts: [],
     turn: Infinity,
     fold: null,
@@ -1161,6 +1162,16 @@ function view_act(v, act) {
     }
     case "Unschedule": {
       return [{ $: "unschedule", id: act.id }];
+    }
+    case "Plug": {
+      const asked = v.out.flatMap((p) => p.msg.$ === "mcp" && p.msg.name === act.name ? [p.msg.on] : []).at(-1);
+      const on = asked ?? v.mcp.find((p) => p.name === act.name)?.on;
+      if (on === undefined) {
+        const names = v.mcp.map((p) => p.name).join(", ");
+        v.notes.push("No MCP server " + act.name + (names === "" ? "; the server's config sets none." : "; one of: " + names + "."));
+        return [];
+      }
+      return [{ $: "mcp", name: act.name, on: !on }];
     }
   }
 }
@@ -1586,6 +1597,13 @@ function choice_html(c) {
   const head = c.vendor === null ? "" : `<p>${esc(c.vendor)}</p>`;
   const act = c.here ? " autofocus" : act_html({ $: "Move", move: c.move, to: c.text });
   return `${head}<button role="menuitemradio" aria-checked="${c.here}"${act}><span>${esc(c.text)}</span><span class="note">${esc(c.note)}</span></button>`;
+}
+function mcp_html(plugs) {
+  const one = (p) => {
+    const hint = "Its tools are " + (p.on ? "on" : "off") + " in this chat; click to turn them " + (p.on ? "off" : "on") + ".";
+    return `<button class="${p.on ? "on" : "off"}" title="${esc(hint)}"${act_html({ $: "Plug", name: p.name })}>${esc(p.name)}<span>${p.on ? "on" : "off"}</span></button>`;
+  };
+  return plugs.length === 0 ? [] : [`<p>MCP servers</p>`, ...plugs.map(one)];
 }
 function tabs_html(tabs) {
   return tabs.map((tab) => {
@@ -2617,6 +2635,7 @@ function bars() {
   if (knob !== undefined) {
     $("#pick [data-knob=" + knob + "]").focus();
   }
+  markup($("#menu .mcp"), mcp_html(v.mcp));
   $("#tabs").hidden = tabs.length < 2;
   markup($("#tabs"), tabs_html(tabs));
   import_bar();
