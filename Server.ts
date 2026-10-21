@@ -97,6 +97,9 @@ type Batch = Kept & { micros: number[][]; open: number[]; left: number; all: num
 // post runs); writes, held: the posts logging, one after another, and
 // the logging held meanwhile (null: none); wallet: what pays its calls;
 // limits: the calls waiting for a usage limit, by TURN or agent name
+// fell: the fallback its calls ("") or an agent's (by name, till it
+// reports) run on (Chat.ran), forgotten as a pick is picked, moving
+// with the chat
 type Chat = {
   acct  : Account;
   mem   : Memory;
@@ -124,15 +127,17 @@ type Chat = {
   held  : Array<() => void> | null;
   wallet: Wallet;
   limits: Record<string, Parked>;
+  fell  : Map<string, string>;
 };
 
 // a chat as it moves to another process (Chat.move): its user (an id:
 // a chat moved is never new, so no hello needs their name, and they may
 // have signed out since), their credit as their billing last told it,
-// its turn (its call and goal check's by their refs, Main.away), the
-// tools' part, its summaries running
+// its turn (its call and goal check's by their refs, Main.away; the
+// fallbacks its calls run on, Chat.fell), the tools' part, its
+// summaries running
 type Moved = { user: string; credit: number | undefined; turn: Turn; tools: Kit; sums: Given[] };
-type Turn = { busy: boolean; call: string | null; model: string; check: Check<string> | null; sent: Msg[]; wait: Msg[]; asked: boolean; open: number; live: Live[]; calls: Record<string, string>; eye: Eye };
+type Turn = { busy: boolean; call: string | null; model: string; check: Check<string> | null; sent: Msg[]; wait: Msg[]; asked: boolean; open: number; live: Live[]; calls: Record<string, string>; eye: Eye; fell: [string, string][] };
 
 // another process (the one this gives its chats to or takes them from,
 // or one a call is fed from or to), by a line of JSON a message
@@ -312,14 +317,15 @@ export namespace Chat {
     const chat: Chat = {
       acct, mem, tools, pick, socks: new Set(), acts: new Map(), busy: false, posts: 1, call: null, model: "", check: null, asked: false, open: 0, sent: [], wait: [],
       halt: new AbortController(), live: [], calls: {}, eye: { parts: [], from: 0 }, after: Promise.resolve(), batch: null, ending: null,
-      writes: Promise.resolve(), held: null, wallet, limits: {},
+      writes: Promise.resolve(), held: null, wallet, limits: {}, fell: new Map(),
     };
-    // a saved pick not offered gave way: told once
-    const saved = mem.pick === null ? null : Pick.label(mem.pick as Pick);
-    if (saved !== null && saved !== Pick.label(pick)) {
+    // a saved pick (a profile, by name) not offered gave way: told once
+    const shown = (p: Pick) => p.profile ?? Pick.label(p);
+    const saved = mem.pick === null ? null : shown(mem.pick as Pick);
+    if (saved !== null && saved !== shown(pick)) {
       mem.pick = pick;
       Memory.save(mem);
-      Chat.note(chat, saved + " isn't offered here, so the chat now runs on " + Pick.label(pick) + ".");
+      Chat.note(chat, saved + " isn't offered here, so the chat now runs on " + shown(pick) + ".");
     }
     mem.pay = tools.pay = wallet.pay;
     if (mem.count === 0) {
@@ -681,6 +687,10 @@ export namespace Chat {
     if (ev.$ === "Limit") {
       return Chat.limit(chat, name ?? TURN, ev.limit);
     }
+    if (ev.$ === "Run") {
+      Chat.ran(chat, agent, ev);
+      return;
+    }
     if (agent === null) {
       Chat.asks(chat, ev);
     }
@@ -715,6 +725,28 @@ export namespace Chat {
       chat.limits[name] = limit;
     }
     Chat.all(chat, Chat.state(chat));
+  }
+
+  // a call answers on a fallback, or back on its pick (AskAI.ts Run): a
+  // note in the chat (an agent's log) as that changes; the turn's wait
+  // names the model it runs on
+  export function ran(chat: Chat, agent: Agent | null, ev: Extract<Event, { $: "Run" }>): void {
+    const who = agent?.name ?? "";
+    const was = chat.fell.get(who) ?? null;
+    const now = ev.from === null ? null : Pick.label(ev.run);
+    if (agent === null) {
+      chat.model = ev.run.model;
+    }
+    if (now === was) {
+      return;
+    }
+    if (now === null) {
+      chat.fell.delete(who);
+    } else {
+      chat.fell.set(who, now);
+    }
+    const text = ev.from === null ? "Back on " + Pick.label(ev.run) + "." : Pick.label(ev.from) + " failed: " + ev.why.replace(/\.$/, "") + ". Going on with " + now + ".";
+    Chat.hold(chat, () => Chat.push(chat, agent, "note", text));
   }
 
   // what streams once an entry came: the tool calls awaiting their
@@ -759,6 +791,7 @@ export namespace Chat {
   // and its turn
   export function report(chat: Chat, agent: Agent, text: string, stopped: boolean): void {
     delete chat.limits[agent.name];
+    chat.fell.delete(agent.name);
     Chat.unanswered(chat, agent);
     Chat.live(chat, agent, []);
     Chat.hold(chat, () => {
@@ -1093,7 +1126,7 @@ export namespace Chat {
     const far = (call: Call) => Main.away(peer, call);
     const { busy, model, sent, wait, asked, open, live, calls, eye } = chat;
     const check = chat.check && { call: far(chat.check.call), goal: chat.check.goal };
-    const turn = { busy, call: chat.call && far(chat.call), model, check, sent, wait, asked, open, live, calls, eye };
+    const turn = { busy, call: chat.call && far(chat.call), model, check, sent, wait, asked, open, live, calls, eye, fell: [...chat.fell] };
     const tools = Tools.give(chat.tools, url, far);
     if (chat.batch !== null) {
       Chat.keep(chat.batch, chat);
@@ -1109,9 +1142,10 @@ export namespace Chat {
   // a chat moved here (Chat.move) goes on: its turn, agents and summaries,
   // each call running there by Main.far
   export function arrive(chat: Chat, moved: Moved, peer: Peer): void {
-    const { call, check, ...turn } = moved.turn;
+    const { call, check, fell, ...turn } = moved.turn;
     const far = (id: string, on: (ev: Event) => void, bill?: Bill) => Main.far(peer, id, chat.tools.key, on, bill);
     Object.assign(chat, turn);
+    chat.fell = new Map(fell ?? []);
     Tools.take(chat.tools, moved.tools, far);
     Memory.take(chat.mem, moved.sums, (id, bill) => far(id, () => {}, bill));
     if (turn.busy) {
@@ -1355,6 +1389,7 @@ export namespace Chat {
           return { error: "No pick " + JSON.stringify(msg.to) + "." };
         }
         chat.pick = chat.mem.pick = pick;
+        chat.fell.clear();
         Memory.save(chat.mem);
         Chat.change(chat);
         return {};

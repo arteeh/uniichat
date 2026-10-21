@@ -114,7 +114,7 @@ export namespace OpenAI {
         return true;
       }
       case "error": {
-        st.error = ev;
+        st.error = ev.error ?? ev;
         return true;
       }
     }

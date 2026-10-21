@@ -817,14 +817,16 @@ var Pick;
     return vendors.flatMap((v) => MODELS[v].filter((m) => labels.includes(m.label)).map((m) => [v, m]));
   }
   Pick2.models = models;
-  function options(pick, move, { vendors, models }) {
+  function options(pick, move, offer) {
     const speeds = Pick.model(pick.vendor, pick.model)?.speeds ?? [];
-    const all = (vs) => Pick.models(vs, models).map(([v, m]) => [m.label, Pick.on(pick, v, m)]);
+    const { profile: _, ...plain } = pick;
+    const all = Pick.models(offer.vendors, offer.models).map(([v, m]) => [m.label, Pick.on(plain, v, m)]);
+    const profiles = Object.keys(offer.profiles ?? {}).map((name) => [name, Pick.profile(name, offer, pick.effort, pick.speed)]);
     switch (move) {
       case "next":
       case "prev":
       case "model": {
-        return all(vendors);
+        return [...profiles, ...all];
       }
       case "up":
       case "down":
@@ -840,7 +842,7 @@ var Pick;
   function move(pick, move, offer, to) {
     const list = Pick.options(pick, move, offer);
     const n = list.length;
-    const at = list.findIndex(([, p]) => Pick.label(p) === Pick.label(pick));
+    const at = list.findIndex(([, p]) => Pick.label(p) === Pick.label(pick) && p.profile === pick.profile);
     const d = move === "prev" || move === "down" ? -1 : 1;
     const ends = move === "up" || move === "down";
     const next = ends ? Math.max(0, Math.min(n - 1, at + d)) : (at + d + n) % n;
@@ -863,7 +865,33 @@ var Pick;
     return { ...pick, model: model?.id ?? pick.model };
   }
   Pick2.ask = ask;
+  function named(run) {
+    const model = MODELS[run.vendor].find((m) => m.id === run.model);
+    return { ...run, model: model?.label ?? run.model };
+  }
+  Pick2.named = named;
+  function falls(run, falls) {
+    const own = { vendor: run.vendor, model: run.model, effort: run.effort, speed: run.speed };
+    const list = falls.map((f) => {
+      const on = Pick.on(own, f.vendor, f.model);
+      return Pick.ask({ ...on, effort: f.effort ?? on.effort, speed: f.speed ?? on.speed });
+    });
+    return [own, ...list].filter((p, k, all) => all.findIndex((q) => q.vendor === p.vendor && q.model === p.model) === k);
+  }
+  Pick2.falls = falls;
+  function profile(name, offer, effort, speed) {
+    const first = Object.hasOwn(offer.profiles ?? {}, name) ? offer.profiles[name][0] : undefined;
+    if (first === undefined) {
+      return null;
+    }
+    const on = Pick.on({ vendor: first.vendor, model: first.model.label, effort, speed }, first.vendor, first.model);
+    return { ...on, effort: first.effort ?? effort, speed: first.speed ?? on.speed, profile: name };
+  }
+  Pick2.profile = profile;
   function read(x, offer) {
+    if (x.profile !== undefined) {
+      return typeof x.profile === "string" && EFFORTS.includes(x.effort) ? Pick.profile(x.profile, offer, x.effort, String(x.speed)) : null;
+    }
     const model = offer.vendors.includes(x.vendor) && offer.models.includes(x.model) ? Pick.model(x.vendor, x.model) : undefined;
     if (model === undefined || !EFFORTS.includes(x.effort) || !model.speeds.includes(x.speed)) {
       return null;
@@ -1161,17 +1189,20 @@ function view_pick(v) {
   if (v.pick === null) {
     return [];
   }
-  const { model, effort, speed } = v.pick;
+  const { model, effort, speed, profile } = v.pick;
+  const ranks = (v.profiles?.[profile ?? ""] ?? []).map((f) => f.model.label).join(", ");
   return [
-    { text: model, move: "model", hint: model, choices: view_choices(v.pick, "model", v) },
+    { text: profile ?? model, move: "model", hint: profile === undefined ? model : profile + ": " + ranks, choices: view_choices(v.pick, "model", v) },
     { text: effort, move: "effort", hint: effort + " effort", choices: view_choices(v.pick, "effort", v) },
     { text: speed, move: "speed", hint: speed, choices: view_choices(v.pick, "speed", v) }
   ];
 }
 function view_choices(pick, move, v) {
   return Pick.options(pick, move, v).map(([text, to], i, all) => {
-    const vendor = move === "model" && (i === 0 || all[i - 1][1].vendor !== to.vendor) ? to.vendor : null;
-    return { text: move === "model" ? to.model : text, to: text, move, here: Pick.label(to) === Pick.label(pick), vendor };
+    const head = (p) => p.profile !== undefined ? "profiles" : p.vendor;
+    const vendor = move === "model" && (i === 0 || head(all[i - 1][1]) !== head(to)) ? head(to) : null;
+    const here = move !== "model" ? Pick.label(to) === Pick.label(pick) : to.profile !== undefined ? to.profile === pick.profile : pick.profile === undefined && Pick.label(to) === Pick.label(pick);
+    return { text: move === "model" ? to.profile ?? to.model : text, to: text, move, here, vendor };
   });
 }
 function view_count(v) {
