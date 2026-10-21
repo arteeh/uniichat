@@ -91,6 +91,13 @@ export namespace OpenAI {
         OpenAI.live(ev.item, on);
         return false;
       }
+      // a search's query comes only with its item done
+      case "response.output_item.done": {
+        if (ev.item.type === "web_search_call") {
+          on("tool", JSON.stringify(ev.item.action ?? {}));
+        }
+        return false;
+      }
       case "response.function_call_arguments.delta": {
         on("tool", ev.delta);
         return false;
