@@ -593,11 +593,12 @@ export function view_pick(v: View): Knob[] {
   if (v.pick === null) {
     return [];
   }
-  const { effort, speed, profile } = v.pick;
-  const model = Pick.shown(v.pick, v);
+  const { model, effort, speed, profile } = v.pick;
   const ranks = (v.profiles?.[profile ?? ""] ?? []).map((f) => f.model.label).join(", ");
+  // a model two vendors offer: its vendor in the hint, not in its name
+  const whose = Pick.twin(v.pick.vendor, model, v.vendors) ? ", " + v.pick.vendor : "";
   return [
-    { text: profile ?? model, move: "model", hint: profile === undefined ? model : profile + ": " + ranks, choices: view_choices(v.pick, "model", v) },
+    { text: profile ?? model, move: "model", hint: profile === undefined ? model + whose : profile + ": " + ranks, choices: view_choices(v.pick, "model", v) },
     { text: effort, move: "effort", hint: effort + " effort", choices: view_choices(v.pick, "effort", v) },
     { text: speed, move: "speed", hint: speed, choices: view_choices(v.pick, "speed", v) },
   ];
@@ -611,7 +612,9 @@ function view_choices(pick: Pick, move: Move, v: View): Choice[] {
     const head = (p: Pick) => p.profile !== undefined ? "profiles" : p.vendor;
     const vendor = move === "model" && (i === 0 || head(all[i - 1][1]) !== head(to)) ? head(to) : null;
     const here = move !== "model" ? Pick.label(to) === Pick.label(pick) : to.profile !== undefined ? to.profile === pick.profile : pick.profile === undefined && Pick.label(to) === Pick.label(pick);
-    return { text: move === "model" ? to.profile ?? to.model : text, to: text, move, here, vendor };
+    // a model by "vendor:model" (two vendors may offer one)
+    const by = move === "model" && to.profile === undefined ? to.vendor + ":" + text : text;
+    return { text: move === "model" ? to.profile ?? to.model : text, to: by, move, here, vendor };
   });
 }
 
