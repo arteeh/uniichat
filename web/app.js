@@ -1550,12 +1550,14 @@ function account_html(a, app, soul) {
   const item = (what, note, act) => `<div class="item"><p>${what}${note === "" ? "" : `<small>${note}</small>`}</p>${act}</div>`;
   const closes = a.bills ? `<p>This also closes your BendAI account (same sign-in). Credit you bought and didn't use goes back to your card.</p>` : "";
   const kill = `<form class="kill" hidden>${closes}<p>Type <b>${esc(a.name)}</b> to confirm.</p><input name="name" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="${esc(a.name)}"><p class="why"></p><div><button type="button" class="chip keep">Cancel</button><button class="chip red" disabled>Delete for good</button></div></form>`;
+  const back = `<form class="back-up" hidden><p>Replace your chat and Unii's memory with <b class="file"></b>? What they hold now is replaced.</p><p class="why"></p><div><button type="button" class="chip keep">Cancel</button><button class="chip red">Restore</button></div></form>`;
   const acts = [
     item(esc(a.name), "", `<button class="chip out">Sign out</button>`),
     item("Export memory", "Chat and account, in one file.", `<a class="chip" href="/export">Download</a>`),
+    item("Restore a backup", "Chat and memory, from a .tar.gz backup.", `<button class="chip up">Upload</button><input class="pick" type="file" accept=".gz,.tgz,application/gzip" hidden>`),
     item("Delete account", "Erases chat and memory for good.", `<button class="chip red del">Delete</button>`)
   ];
-  const account = section_html("Sign-in and data", acts.join("") + kill);
+  const account = section_html("Sign-in and data", acts.join("") + back + kill);
   const unread = item("Could not read your instructions.", "", `<button class="chip retry">Try again</button>`);
   const mine = section_html("Your instructions", soul === null ? unread : prompt_html("soul", soul.soul, "Who you are, what Unii goes by, its tone: your SOUL.md, in every prompt Unii and its agents get.", "I'm Sam, a designer in Lisbon. Call yourself Kit. Be brief and warm."));
   const base = soul?.base === undefined ? "" : section_html("Base prompt", prompt_html("base", soul.base, "Unii's prompt for every user of this server, in place of the built-in one (you own the server). Empty: the built-in one.", ""));
@@ -2272,8 +2274,8 @@ function import_draw(status) {
   const plan = import_plan2();
   const msgs = plan.msgs;
   const add = import_add(plan);
-  const left2 = reads.reduce((n, read) => n + read.moved, 0);
-  const moved = left2 === 0 ? "" : " (" + left2 + (left2 === 1 ? " file" : " files") + " changed while read: choose the folder again to add them)";
+  const left = reads.reduce((n, read) => n + read.moved, 0);
+  const moved = left === 0 ? "" : " (" + left + (left === 1 ? " file" : " files") + " changed while read: choose the folder again to add them)";
   const has = add > 0 ? " · you have " + usd_show(v.credits) : "";
   const found = sessions.length === 0 ? "" : plan.first === "" ? OLD : import_count(msgs, "new ") + (msgs > 0 ? " · about " + guess_usd(plan.guess) + has : "");
   const day = (at) => new Date(at).getUTCDate() + " " + new Date(at).toLocaleDateString("en-US", { month: "short", year: "numeric", timeZone: "UTC" });
@@ -2326,8 +2328,8 @@ function markup(el, htmls) {
     had.set(html, same);
   }
   const kids = htmls.map((html) => had.get(html)?.shift() ?? html_parse(html));
-  for (const left2 of had.values()) {
-    left2.forEach((child) => child.remove());
+  for (const left of had.values()) {
+    left.forEach((child) => child.remove());
   }
   let at = el.firstElementChild;
   for (const kid of kids) {
@@ -2484,12 +2486,46 @@ async function account() {
     sure(true);
     name.focus();
   };
-  $("#account .keep").onclick = () => sure(false);
+  $("#account .kill .keep").onclick = () => sure(false);
+  account_restore();
   name.oninput = () => kill.querySelector(".red").disabled = name.value.trim().toLowerCase() !== a.name.toLowerCase();
   $("#account .out").onclick = signout;
   kill.onsubmit = (ev) => {
     ev.preventDefault();
     account_delete(kill);
+  };
+}
+function account_restore() {
+  const form = $("#account .back-up");
+  const pick = $("#account .pick");
+  const up = $("#account .up");
+  const sure = (open2) => {
+    form.hidden = !open2;
+    up.hidden = open2;
+    form.querySelector(".why").textContent = "";
+  };
+  up.onclick = () => pick.click();
+  pick.onchange = () => {
+    form.querySelector(".file").textContent = pick.files?.[0]?.name ?? "";
+    sure(pick.files?.length === 1);
+  };
+  form.querySelector(".keep").onclick = () => {
+    pick.value = "";
+    sure(false);
+  };
+  form.onsubmit = async (ev) => {
+    ev.preventDefault();
+    const go = form.querySelector(".red");
+    [go.disabled, go.textContent] = [true, "Restoring…"];
+    form.querySelector(".why").textContent = "";
+    const res = await fetch("/api/restore", { method: "POST", headers: { "content-type": "application/gzip" }, body: pick.files[0] }).catch(() => null);
+    const out = res === null ? { error: "Can't reach the server." } : await res.json().catch(() => res.ok ? {} : { error: "HTTP " + res.status });
+    [go.disabled, go.textContent] = [false, "Restore"];
+    if (res?.ok === true) {
+      location.href = "/";
+      return;
+    }
+    form.querySelector(".why").textContent = out.error;
   };
 }
 async function signout() {
