@@ -198,7 +198,7 @@ const CUT = { ok: false, text: "stopped", left: [], stop: "lost", cut: true };
 const texts = () => Array.from({ length: chat.mem.count }, (_, i) => Memory.message(chat.mem, i).kind + ": " + Memory.message(chat.mem, i).text);
 Chat.take(chat, Chat.push(chat, null, "user", "hi"));
 await Bun.sleep(10);
-const name = Tools.start(chat.tools, { $: "sub", effort: null }, "a task", []);
+const name = Tools.start(chat.tools, { $: "sub", effort: null, model: null }, "a task", []);
 calls[0].feed.end(CUT);
 await Bun.sleep(10);
 out.turn = calls.length === 3 && texts().at(-1) === "note: " + Tools.restarted([TURN]);
