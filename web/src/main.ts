@@ -72,6 +72,7 @@ const BOX = $<HTMLTextAreaElement>("textarea");
 const BACK = $<HTMLInputElement>("#import [name=back]");
 
 // the page's: end: at its bottom; stick: the next draw may keep it;
+// y: its scroll when last scrolled;
 // frame: awaited (0: none); rows: the log's rows changed, to draw;
 // found: the sources read, by name; done: sessions imported before; off:
 // left out (Import.Want); step: the import's
@@ -84,6 +85,7 @@ const P = {
   shown : "",
   end   : true,
   stick : true,
+  y     : 0,
   frame : 0,
   rows  : true,
   toast : 0,
@@ -231,8 +233,13 @@ function chat(): void {
       sessionStorage.setItem(kept("draft"), BOX.value);
     }
     if (BOX.offsetParent !== null) {
+      // measured with the footer held at its height: the page never
+      // shrinks meanwhile, which would scroll it off its bottom
+      const foot = $("footer");
+      foot.style.minHeight = foot.offsetHeight + "px";
       BOX.style.height = "auto";
       BOX.style.height = Math.min(BOX.scrollHeight, innerHeight * 0.4) + "px";
+      foot.style.minHeight = "";
     }
     draw(true);
   };
@@ -276,12 +283,28 @@ function chat(): void {
     }
     draw(true);
   };
+  // the page leaves its bottom only as it scrolls up (the user's swipe,
+  // wheel, keys or scrollbar: a page that grows or shrinks at its bottom
+  // stays at it); one that grows (the box, a reply, an image) is kept
+  // there
   document.onscroll = () => {
-    P.end = innerHeight + scrollY >= document.documentElement.scrollHeight - 1;
+    if (at_end()) {
+      P.end = true;
+    } else if (scrollY < P.y) {
+      P.end = false;
+    }
+    P.y = scrollY;
     mine_show();
   };
   $(".mine").onclick = mine;
   $(".down").onclick = down;
+  const keep = new ResizeObserver(() => {
+    if (P.end && $("#account").hidden && !at_end()) {
+      scrollTo(0, document.documentElement.scrollHeight);
+    }
+  });
+  keep.observe($("#log"));
+  keep.observe($("footer"));
   draw(true);
 }
 
@@ -962,6 +985,7 @@ function paint(): void {
   markup($("#log .tail"), View.view_tail(v).map(Html.row_html));
   if (shown !== P.shown) {
     P.shown = shown;
+    P.end = v.fold === null;
     scrollTo(0, v.fold === null ? doc.scrollHeight : 0);
     return;
   }
@@ -976,7 +1000,13 @@ function paint(): void {
   const el = rows.filter((r) => Number(r.dataset.a) <= at.a).pop();
   if (el !== undefined) {
     scrollBy(0, el.getBoundingClientRect().top - at.top);
+    P.end = at_end();
   }
+}
+
+// the page at its bottom
+function at_end(): boolean {
+  return innerHeight + scrollY >= document.documentElement.scrollHeight - 1;
 }
 
 // the header's and the footer's parts that change, and the notes, a
