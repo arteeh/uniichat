@@ -281,7 +281,7 @@ export function settings_html(page: Page): string {
   const error = page.error === null ? "" : `<p class="why bad">${esc(page.error)}</p>`;
   const save = `<div class="save"><p class="why"></p><button class="chip go"${page.error === null ? "" : " disabled"}>Save</button></div>`;
   const head = `<p class="sub">You own this server: what follows is its settings, in config.json in its folder, seen by you only.</p>`;
-  const profiles = page.profiles === null ? "" : section_html("Profiles", `<div class="set profiles" data-key="profiles"><div class="field"></div><p class="err"></p></div>`);
+  const profiles = page.profiles === null ? "" : section_html("Profiles", `<p class="sub">Ranked models: a chat on a profile runs on the first and falls back to the next when one is out.</p><div class="set profiles" data-key="profiles"><div class="field"></div><p class="err"></p></div>`);
   return head + error + `<form class="settings" autocomplete="off">` + group(GROUPS[0]) + profiles + keys + group(GROUPS[1]) + save + `</form>`;
 }
 
