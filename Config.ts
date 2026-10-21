@@ -120,6 +120,9 @@ export const BACKUP_RUN   = config_get("backup_run", "");
 // in order, once its pick fails (AskAI.ts)
 export const FALLBACK   = config_falls(config_get("fallback", ""));
 
+// openai-sub's ChatGPT sign-in (ChatGPT.ts)
+export const CHATGPT    = config_path(config_get("chatgpt", DIR + "/chatgpt.json"));
+
 // the keys the environment gave (removed from it), and every key as used:
 // the environment's, else keys.json's
 const ENV_KEYS: Record<string, string> = Object.fromEntries(Object.entries(VARS).map(([name, v]) => [name, config_key(v)]));
