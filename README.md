@@ -105,11 +105,8 @@ bottom of the Settings page (☰ menu, or /settings); see below.
 - `work`: the agents' working dirs on each device (default
   ~/.unii/work).
 - `rules`: a file appended to every system prompt. Each user's SOUL.md
-  (set on the account page; until then "You are Unii, an AI agent...")
+  (set on the Settings page; until then "You are Unii, an AI agent...")
   starts Unii's prompt; one they wrote ends their agents' too.
-- `owner`: the accounts (emails or @logins, comma-separated) that may
-  replace Unii's base prompt, for every user, on the account page.
-  Compactions use it too: keep the built-in compaction rules in it.
 - `backup`: a dir for snapshots of each chat (default none: no
   backups). Every `backup_every` hours (default 24), a chat changed
   since its last snapshot gets a new one, `<backup>/<id>/<date>.tar.gz`;
@@ -123,9 +120,11 @@ bottom of the Settings page (☰ menu, or /settings); see below.
   process). With a number, `Server.ts` only routes, behind a proxy that
   honors its `x-unii-worker` header (Server.ts explains).
 - `apple`, `apns`: the iOS app's App ID and push key id (ios/).
-- `owner`: who may open the Settings page: sign-in emails,
-  comma-separated (e.g. `"owner": "you@example.com"`). Set here or as
-  `UNII_OWNER` only, never on the page. None named: no one may.
+- `owner`: who may see the server's part of the Settings page and
+  replace Unii's base prompt there, for every user (compactions use it
+  too: keep the built-in compaction rules in it): sign-in emails or
+  @logins, comma-separated (e.g. `"owner": "you@example.com"`). Set here
+  or as `UNII_OWNER` only, never on the page. None named: no one may.
 - `chatgpt`: where the ChatGPT sign-in is kept (default
   ~/.unii/chatgpt.json).
 - `mcp`: MCP servers whose tools the AI and its subagents get beside
