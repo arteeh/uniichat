@@ -1779,7 +1779,9 @@ function chat() {
   visualViewport.onresize = () => draw(true);
   document.onscroll = () => {
     P.end = innerHeight + scrollY >= document.documentElement.scrollHeight - 1;
+    mine_show();
   };
+  $(".mine").onclick = mine;
   draw(true);
 }
 function signed() {
@@ -2258,7 +2260,10 @@ function html_parse(html) {
 function draw(stick) {
   P.stick = P.stick && stick;
   if (P.frame === 0) {
-    P.frame = requestAnimationFrame(paint);
+    P.frame = requestAnimationFrame(() => {
+      paint();
+      mine_show();
+    });
   }
 }
 function paint() {
@@ -2331,6 +2336,18 @@ function anchor() {
     }
   }
   return null;
+}
+function mine() {
+  const rows = [...document.querySelectorAll("#log .msg.user")];
+  rows.findLast(mine_above)?.scrollIntoView();
+  mine_show();
+}
+function mine_show() {
+  const first = document.querySelector("#log .msg.user");
+  $(".mine").hidden = first === null || !mine_above(first);
+}
+function mine_above(el) {
+  return el.getBoundingClientRect().top < $("header").getBoundingClientRect().bottom;
 }
 function go(path) {
   if (location.pathname !== path) {
