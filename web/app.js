@@ -523,8 +523,7 @@ var SPAN = new RegExp([
   /(?<![*\w])\*([^*\s][^*\n]*?)\*(?![\w*])/.source,
   /(?<![^\s(])(https?:\/\/[^\s<)]+[^\s<).,;:!?])/.source
 ].join("|"), "g");
-var LIST = /^\s*([-*+]|\d+[.)])\s+/;
-var MORE = /^\s{2,}\S/;
+var LIST = /^ {0,3}([-*+]|\d{1,9}[.)])(?=[ \t]|$)/;
 var FENCE = /^\s*```/;
 var HEAD = /^(#{1,6})\s+(.*)$/;
 var RULE = /^\s*([-*_])(\s*\1){2,}\s*$/;
@@ -534,6 +533,8 @@ var BAR = /^\s*\|?[\s:|-]*-[\s:|-]*\|?\s*$/;
 var NEW = /^\+\+\+ (.*)$/;
 var READ = /^\[(lines (\d+)-\d+ of \d+[^\]]*)\]$/;
 var HUNK = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/;
+var MARKS = /^(?:\s*(?:[-*+]|\d{1,9}[.)])(?:[ \t]+|$)|\s*>\s?)*/;
+var DEEP = 16;
 function Text(x) {
   return { $: "Text", x };
 }
@@ -653,68 +654,113 @@ function hunk_parse(lines, j, h) {
   return [out, j];
 }
 function md_parse(src) {
-  const lines = src.replace(/\r/g, "").split(`
-`);
+  return blocks_parse(src.replace(/\r/g, "").split(`
+`), 0)[0];
+}
+function blocks_parse(lines, d) {
   const out = [];
-  let i = 0;
+  let [i, gap, apart] = [0, false, false];
   while (i < lines.length) {
-    const [block, next] = block_parse(lines, i);
-    if (block !== null) {
+    const [block, next] = block_parse(lines, i, d);
+    if (block === null) {
+      gap = out.length > 0;
+    } else {
+      [apart, gap] = [apart || gap, false];
       out.push(block);
     }
     i = next;
   }
-  return out;
+  return [out, apart];
 }
-function block_parse(lines, i) {
+function block_parse(lines, i, d) {
   const line = lines[i];
   const head = HEAD.exec(line);
-  const numbered = list_numbered(line);
   const runs = (test) => lines_run(lines, i, test);
   if (line.trim() === "") {
     return [null, i + 1];
   }
   if (FENCE.test(line)) {
-    const end2 = runs((l) => !FENCE.test(l));
+    const end = runs((l) => !FENCE.test(l));
     const k = line.trim().slice(3).trim();
-    const x2 = lines.slice(i + 1, end2).join(`
+    const x = lines.slice(i + 1, end).join(`
 `);
-    return [{ $: "Code", k, x: x2 }, end2 + 1];
+    return [{ $: "Code", k, x }, end + 1];
   }
   if (head !== null) {
-    const x2 = span_parse(head[2]);
-    return [{ $: "Head", k: head[1].length, x: x2 }, i + 1];
+    const x = span_parse(head[2]);
+    return [{ $: "Head", k: head[1].length, x }, i + 1];
   }
   if (RULE.test(line)) {
     return [{ $: "Rule" }, i + 1];
   }
   if (QUOT.test(line)) {
-    const end2 = runs((l) => QUOT.test(l));
-    const body = lines.slice(i, end2).map((l) => l.replace(QUOT, ""));
-    return [{ $: "Quot", x: md_parse(body.join(`
-`)) }, end2];
+    const end = runs((l) => QUOT.test(l));
+    const body = lines.slice(i, end).map((l) => l.replace(QUOT, ""));
+    return [{ $: "Quot", x: blocks_parse(body, d + 1)[0] }, end];
   }
-  if (numbered !== null) {
-    const item = (l) => list_numbered(l) === numbered;
-    const end2 = runs((l) => item(l) || MORE.test(l));
-    const items = [];
-    for (const l of lines.slice(i, end2)) {
-      if (item(l)) {
-        items.push(l.replace(LIST, ""));
-      } else {
-        items[items.length - 1] += " " + l.trim();
-      }
-    }
-    return [{ $: "List", k: numbered, x: items.map(span_parse) }, end2];
+  if (list_kind(line) !== null && d < DEEP) {
+    return list_parse(lines, i, d);
   }
   if (ROW.test(line) && BAR.test(lines[i + 1] ?? "")) {
-    const end2 = lines_run(lines, i + 1, (l) => ROW.test(l));
-    const rows = [line, ...lines.slice(i + 2, end2)];
-    return [{ $: "Tabl", x: rows.map(row_cells) }, end2];
+    const end = lines_run(lines, i + 1, (l) => ROW.test(l));
+    const rows = [line, ...lines.slice(i + 2, end)];
+    return [{ $: "Tabl", x: rows.map(row_cells) }, end];
   }
   const end = runs((l, j) => l.trim() !== "" && !block_starts(lines, j));
   const x = lines.slice(i, end).map(span_parse);
   return [{ $: "Para", x }, end];
+}
+function list_parse(lines, i, d) {
+  const kind = list_kind(lines[i]);
+  const items = [];
+  let [end, w, blank, open2, para, fenced, loose] = [i, 0, 0, true, false, false, false];
+  for (let j = i;j < lines.length; j++) {
+    const l = untab(lines[j]);
+    const at = indent(l);
+    if (at === l.length) {
+      [blank, para] = [blank + 1, false];
+      continue;
+    }
+    if (list_kind(l) === kind && (items.length === 0 || at < w)) {
+      const mark = LIST.exec(l)[0];
+      const rest = l.slice(mark.length);
+      const pad = indent(rest);
+      w = mark.length + (rest.trim() === "" || pad > 4 ? 1 : pad);
+      open2 = rest.trim() !== "" || (lines[j + 1] ?? "").trim() !== "";
+      loose = loose || blank > 0 && items.length > 0;
+      items.push([l.slice(w)]);
+      [para, fenced] = item_line(l.slice(w), false);
+    } else if (open2 && at >= w) {
+      for (;blank > 0; blank--) {
+        items[items.length - 1].push("");
+      }
+      items[items.length - 1].push(l.slice(w));
+      [para, fenced] = item_line(l.slice(w), fenced);
+    } else if (open2 && para && blank === 0 && !LIST.test(l) && !block_starts(lines, j)) {
+      items[items.length - 1].push(l.trimStart());
+    } else {
+      break;
+    }
+    [blank, end] = [0, j + 1];
+  }
+  const first = LIST.exec(lines[i])[1];
+  const k = /\d/.test(first);
+  const parts = items.map((x) => blocks_parse(x, d + 1));
+  const t = !loose && !parts.some((p) => p[1]);
+  return [{ $: "List", k, n: k ? Number(first.slice(0, -1)) : 1, t, x: parts.map((p) => p[0]) }, end];
+}
+function item_line(s, fenced) {
+  const x = RULE.test(s) ? "" : s.replace(MARKS, "");
+  if (FENCE.test(x)) {
+    return [false, !fenced];
+  }
+  return [!fenced && x.trim() !== "" && !HEAD.test(x) && !RULE.test(x) && !ROW.test(x), fenced];
+}
+function untab(l) {
+  return l.replace(/^[ \t]*(?:(?:[-*+]|\d{1,9}[.)])[ \t]+)*/, (pre) => [...pre].reduce((out, c) => out + (c === "\t" ? " ".repeat(4 - out.length % 4) : c), ""));
+}
+function indent(l) {
+  return l.search(/\S|$/);
 }
 function lines_run(lines, i, test) {
   let j = i + 1;
@@ -725,11 +771,13 @@ function lines_run(lines, i, test) {
 }
 function block_starts(lines, j) {
   const l = lines[j];
-  return FENCE.test(l) || HEAD.test(l) || RULE.test(l) || QUOT.test(l) || LIST.test(l) || ROW.test(l) && BAR.test(lines[j + 1] ?? "");
-}
-function list_numbered(l) {
   const m = LIST.exec(l);
-  return m === null ? null : /\d/.test(m[1]);
+  const item = m !== null && l.slice(m[0].length).trim() !== "" && (!/\d/.test(m[1]) || Number(m[1].slice(0, -1)) === 1);
+  return FENCE.test(l) || HEAD.test(l) || RULE.test(l) || QUOT.test(l) || item || ROW.test(l) && BAR.test(lines[j + 1] ?? "");
+}
+function list_kind(l) {
+  const m = LIST.exec(l);
+  return m === null || RULE.test(l) ? null : m[1].slice(-1);
 }
 function row_cells(line) {
   const cells = line.trim().replace(/^\||(?<!\\)\|$/g, "").split(/(?<!\\)\|/);
@@ -753,25 +801,25 @@ var EFFORTS = ["low", "medium", "high", "xhigh", "max"];
 var SPEEDS = ["slow", "fast", "ultrafast"];
 var LABELS = [...new Set(Object.values(MODELS).flat().map((m) => m.label))];
 var Pick;
-((Pick) => {
-  function model(vendor, label2) {
-    return MODELS[vendor].find((m) => m.label === label2);
+((Pick2) => {
+  function model(vendor, label) {
+    return MODELS[vendor].find((m) => m.label === label);
   }
-  Pick.model = model;
-  function on(pick, vendor, model2) {
+  Pick2.model = model;
+  function on(pick, vendor, model) {
     const below = SPEEDS.slice(0, SPEEDS.indexOf(pick.speed) + 1);
-    const speed = below.filter((s) => model2.speeds.includes(s)).pop() ?? "slow";
-    return { ...pick, vendor, model: model2.label, speed };
+    const speed = below.filter((s) => model.speeds.includes(s)).pop() ?? "slow";
+    return { ...pick, vendor, model: model.label, speed };
   }
-  Pick.on = on;
+  Pick2.on = on;
   function models(vendors, labels) {
     return vendors.flatMap((v) => MODELS[v].filter((m) => labels.includes(m.label)).map((m) => [v, m]));
   }
-  Pick.models = models;
-  function options(pick, move2, { vendors, models: models2 }) {
+  Pick2.models = models;
+  function options(pick, move, { vendors, models }) {
     const speeds = Pick.model(pick.vendor, pick.model)?.speeds ?? [];
-    const all = (vs) => Pick.models(vs, models2).map(([v, m]) => [m.label, Pick.on(pick, v, m)]);
-    switch (move2) {
+    const all = (vs) => Pick.models(vs, models).map(([v, m]) => [m.label, Pick.on(pick, v, m)]);
+    switch (move) {
       case "next":
       case "prev":
       case "model": {
@@ -787,40 +835,40 @@ var Pick;
       }
     }
   }
-  Pick.options = options;
-  function move(pick, move2, offer, to) {
-    const list = Pick.options(pick, move2, offer);
+  Pick2.options = options;
+  function move(pick, move, offer, to) {
+    const list = Pick.options(pick, move, offer);
     const n = list.length;
     const at = list.findIndex(([, p]) => Pick.label(p) === Pick.label(pick));
-    const d = move2 === "prev" || move2 === "down" ? -1 : 1;
-    const ends = move2 === "up" || move2 === "down";
+    const d = move === "prev" || move === "down" ? -1 : 1;
+    const ends = move === "up" || move === "down";
     const next = ends ? Math.max(0, Math.min(n - 1, at + d)) : (at + d + n) % n;
     const like = list.filter(([part]) => part.toLowerCase().includes(String(to).toLowerCase()));
     const hit = to === undefined ? list[next] : list.find(([part]) => part === to) ?? (like.length === 1 ? like[0] : undefined);
     return hit === undefined ? null : hit[1];
   }
-  Pick.move = move;
+  Pick2.move = move;
   function label(pick) {
     return [pick.vendor, pick.model, pick.effort, pick.speed].join(":");
   }
-  Pick.label = label;
+  Pick2.label = label;
   function ask(pick) {
-    const model2 = Pick.model(pick.vendor, pick.model);
-    return { ...pick, model: model2?.id ?? pick.model };
+    const model = Pick.model(pick.vendor, pick.model);
+    return { ...pick, model: model?.id ?? pick.model };
   }
-  Pick.ask = ask;
+  Pick2.ask = ask;
   function read(x, offer) {
-    const model2 = offer.vendors.includes(x.vendor) && offer.models.includes(x.model) ? Pick.model(x.vendor, x.model) : undefined;
-    if (model2 === undefined || !EFFORTS.includes(x.effort) || !model2.speeds.includes(x.speed)) {
+    const model = offer.vendors.includes(x.vendor) && offer.models.includes(x.model) ? Pick.model(x.vendor, x.model) : undefined;
+    if (model === undefined || !EFFORTS.includes(x.effort) || !model.speeds.includes(x.speed)) {
       return null;
     }
     return { vendor: x.vendor, model: x.model, effort: x.effort, speed: x.speed };
   }
-  Pick.read = read;
+  Pick2.read = read;
   function load(saved, offer, def) {
     return Pick.read(saved ?? def, offer) ?? def;
   }
-  Pick.load = load;
+  Pick2.load = load;
 })(Pick ||= {});
 
 // Price.ts
@@ -842,31 +890,31 @@ var MINUTES = {
 };
 var SPEEDS2 = { slow: 1, fast: 2, ultrafast: 6 };
 var Price;
-((Price) => {
+((Price2) => {
   function usage(speed) {
     return { input: 0, write: 0, read: 0, output: 0, searches: 0, seconds: 0, speed };
   }
-  Price.usage = usage;
+  Price2.usage = usage;
   function rate(model) {
     return RATES[model];
   }
-  Price.rate = rate;
+  Price2.rate = rate;
   function times(speed) {
     return SPEEDS2[speed] ?? 1;
   }
-  Price.times = times;
+  Price2.times = times;
   function cost(model, use) {
     const long = use.input + use.write + use.read > PROMPT ? LONG[model] : undefined;
-    const rate2 = long ?? RATES[model];
+    const rate = long ?? RATES[model];
     const minute = MINUTES[model];
-    if (rate2 === undefined && minute === undefined) {
+    if (rate === undefined && minute === undefined) {
       throw new Error("no price for " + model);
     }
-    const tokens = rate2 === undefined ? 0 : use.input * rate2.input + use.write * rate2.write + use.read * rate2.read + use.output * rate2.output;
+    const tokens = rate === undefined ? 0 : use.input * rate.input + use.write * rate.write + use.read * rate.read + use.output * rate.output;
     const audio = minute === undefined ? 0 : use.seconds / 60 * minute * 1e6;
     return Math.ceil(tokens * Price.times(use.speed) + use.searches * SEARCH * 1e6 + audio);
   }
-  Price.cost = cost;
+  Price2.cost = cost;
 })(Price ||= {});
 
 // View.ts
@@ -1282,8 +1330,8 @@ function part_rows(v, id, n, t, talk) {
   }
   const text = n === 1 ? "fold" : GLYPH.open + " " + n + "x · fold";
   if (n > 1) {
-    const rows2 = [...part_rows(v, id, half, t, talk), ...part_rows(v, id + half, half, t, talk)];
-    return [{ $: "Box", id, n, text, rows: rows2 }];
+    const rows = [...part_rows(v, id, half, t, talk), ...part_rows(v, id + half, half, t, talk)];
+    return [{ $: "Box", id, n, text, rows }];
   }
   const rows = entry === undefined ? [] : whole_rows(id, entry);
   return [{ $: "Box", id, n, text, rows }];
@@ -1380,7 +1428,7 @@ var ESC = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" };
 var TALL = 4000;
 var SHEETS = `<svg viewBox="0 0 16 16" width="15" height="15"><rect x="5.5" y="5.5" width="8" height="8" rx="1.8"/><path d="M10.5 3.5v-.2A1.8 1.8 0 0 0 8.7 1.5H4.3A1.8 1.8 0 0 0 2.5 3.3v4.4a1.8 1.8 0 0 0 1.8 1.8h.2"/></svg>`;
 var CHECK = `<svg viewBox="0 0 16 16" width="15" height="15"><path d="M3 8.5l3.2 3L13 4.5"/></svg>`;
-var MARKS = { " ": "", "-": "del", "+": "add" };
+var MARKS2 = { " ": "", "-": "del", "+": "add" };
 function esc(s) {
   return s.replace(/[&<>"]/g, (c) => ESC[c]);
 }
@@ -1508,8 +1556,9 @@ function block_html(b) {
     }
     case "List": {
       const tag = b.k ? "ol" : "ul";
-      const items = b.x.map((item) => `<li>${spans_html(item)}</li>`);
-      return `<${tag}>${items.join("")}</${tag}>`;
+      const start = b.k && b.n !== 1 ? ` start="${b.n}"` : "";
+      const items = b.x.map((item) => `<li>${item_html(item, b.t)}</li>`);
+      return `<${tag}${start}>${items.join("")}</${tag}>`;
     }
     case "Tabl": {
       const rows = b.x.map((row, i) => {
@@ -1527,13 +1576,16 @@ function block_html(b) {
     }
   }
 }
+function item_html(blocks, tight) {
+  return blocks.map((b) => tight && b.$ === "Para" ? b.x.map(spans_html).join("<br>") : block_html(b)).join("");
+}
 function diff_html(file, hunks) {
   const all = hunks.flat();
   const nw = all.reduce((w, l) => Math.max(w, String(l.n).length), 0);
   const adds = all.filter((l) => l.s === "+").length;
   const dels = all.filter((l) => l.s === "-").length;
   const head = `<span class="lang">${esc(file)} <b class="add">+${adds}</b> <b class="del">-${dels}</b></span>`;
-  const line = (l) => `<span class="${MARKS[l.s]}"><i>${l.n}</i>${l.s} ${esc(l.x)}</span>`;
+  const line = (l) => `<span class="${MARKS2[l.s]}"><i>${l.n}</i>${l.s} ${esc(l.x)}</span>`;
   const lines = hunks.map((h) => h.map(line).join("")).join(`<span class="gap">⋯</span>`);
   return `<pre class="diff" style="--nw:${nw}ch">${head}<code>${lines}</code></pre>`;
 }
@@ -1883,8 +1935,8 @@ function meter(stream, rec) {
   requestAnimationFrame(frame);
 }
 function words(audio) {
-  const act2 = { $: "voice", type: audio.type, body: () => audio };
-  link_send(v, act2, heard);
+  const act = { $: "voice", type: audio.type, body: () => audio };
+  link_send(v, act, heard);
   draw(false);
 }
 function heard(out) {
