@@ -125,6 +125,20 @@ Settings page (☰ menu, or /settings); see below.
   `UNII_OWNER` only, never on the page. None named: no one may.
 - `chatgpt`: where the ChatGPT sign-in is kept (default
   ~/.unii/chatgpt.json).
+- `mcp`: MCP servers whose tools the AI and its subagents get beside
+  their own, named `<server>__<tool>`. The shape of Claude's
+  `mcpServers` (its `.mcp.json` works as is), as JSON or a file's path:
+  a program (`command`, `args`, `env`, `cwd`) or a URL (`"type":
+  "http"`, `url`, `headers`; streamable HTTP). `${VAR}` reads the
+  environment. `timeout`: seconds a call may take (600). `"device":
+  "<name>"` runs a program on that device instead; while it isn't open,
+  its tools are left out. E.g. `{"fs": {"command": "npx", "args": ["-y",
+  "@modelcontextprotocol/server-filesystem", "/srv/notes"]}}`. A program
+  gets only `HOME`, `PATH`, `USER`, `LANG` and a few more of unii's
+  variables, plus its `env`. Each chat runs its own copy, with the
+  server's rights: every user of the server gets them. `/mcp <name>` or
+  the site's ☰ menu turns one off or on in a chat. Plain `http` sends
+  headers unencrypted: use it on a network you trust.
 
 `vapid.json` in the server's dir is its Web Push key pair, made at first
 start; keep it, as a new one silences every browser until notifications

@@ -1015,6 +1015,7 @@ function bars(): void {
   if (knob !== undefined) {
     $("#pick [data-knob=" + knob + "]").focus();
   }
+  markup($("#menu .mcp"), Html.mcp_html(v.mcp));
   $("#tabs").hidden = tabs.length < 2;
   markup($("#tabs"), Html.tabs_html(tabs));
   import_bar();
