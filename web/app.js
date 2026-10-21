@@ -1886,6 +1886,7 @@ var P = {
   shown: "",
   end: true,
   stick: true,
+  y: 0,
   frame: 0,
   rows: true,
   toast: 0,
@@ -2000,8 +2001,11 @@ function chat() {
       sessionStorage.setItem(kept("draft"), BOX.value);
     }
     if (BOX.offsetParent !== null) {
+      const foot = $("footer");
+      foot.style.minHeight = foot.offsetHeight + "px";
       BOX.style.height = "auto";
       BOX.style.height = Math.min(BOX.scrollHeight, innerHeight * 0.4) + "px";
+      foot.style.minHeight = "";
     }
     draw(true);
   };
@@ -2041,11 +2045,23 @@ function chat() {
     draw(true);
   };
   document.onscroll = () => {
-    P.end = innerHeight + scrollY >= document.documentElement.scrollHeight - 1;
+    if (at_end()) {
+      P.end = true;
+    } else if (scrollY < P.y) {
+      P.end = false;
+    }
+    P.y = scrollY;
     mine_show();
   };
   $(".mine").onclick = mine;
   $(".down").onclick = down;
+  const keep = new ResizeObserver(() => {
+    if (P.end && $("#account").hidden && !at_end()) {
+      scrollTo(0, document.documentElement.scrollHeight);
+    }
+  });
+  keep.observe($("#log"));
+  keep.observe($("footer"));
   draw(true);
 }
 function signed() {
@@ -2590,6 +2606,7 @@ function paint() {
   markup($("#log .tail"), view_tail(v).map(row_html));
   if (shown !== P.shown) {
     P.shown = shown;
+    P.end = v.fold === null;
     scrollTo(0, v.fold === null ? doc.scrollHeight : 0);
     return;
   }
@@ -2604,7 +2621,11 @@ function paint() {
   const el = rows.filter((r) => Number(r.dataset.a) <= at.a).pop();
   if (el !== undefined) {
     scrollBy(0, el.getBoundingClientRect().top - at.top);
+    P.end = at_end();
   }
+}
+function at_end() {
+  return innerHeight + scrollY >= document.documentElement.scrollHeight - 1;
 }
 function bars() {
   for (const note of v.notes.splice(0)) {
