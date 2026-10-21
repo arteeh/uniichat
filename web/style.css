@@ -421,7 +421,7 @@ header > .imping { display: flex; flex-direction: column; justify-content: cente
 .kill p, .back-up p { margin: 0 0 8px; font-size: 14.5px; }
 .kill .why, .back-up .why { color: var(--red); }
 .kill .why:empty, .back-up .why:empty { display: none; }
-.kill .chip:disabled, .back-up .chip:disabled { opacity: .4; cursor: default; }
+.kill .chip:disabled, .back-up .chip:disabled, #account .notify:disabled { opacity: .4; cursor: default; }
 /* a prompt's editor (SOUL.md, an owner's base prompt): its note, its
    text (16px on touch, as above), then what saving said beside Save
    (red: refused) */
