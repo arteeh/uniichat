@@ -9,7 +9,7 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import type { Vendor } from "./AskAI.ts";
-import { LABELS, VENDORS, Pick, type Offer } from "./Pick.ts";
+import { EFFORTS, LABELS, VENDORS, Pick, type Fall, type Offer } from "./Pick.ts";
 
 // Constants
 // =========
@@ -48,6 +48,9 @@ export const BACKUP       = config_path(config_get("backup", ""));
 export const BACKUP_EVERY = config_number("backup_every", "24");
 export const BACKUP_KEEP  = config_number("backup_keep", "7");
 export const BACKUP_RUN   = config_get("backup_run", "");
+// what every call (a turn's, an agent's, a compaction's) goes on with,
+// in order, once its pick fails (AskAI.ts)
+export const FALLBACK   = config_falls(config_get("fallback", ""));
 
 // the iOS app (ios/, Cloud.ts): its App ID, the team's then the bundle's
 // ("TEAM.com.example.uniichat"), whose app sign-in links open; and
@@ -90,6 +93,20 @@ function config_run(key: string, text: string): Pick {
     throw new Error("config: " + key + " is no vendor:model:effort:speed offered here: " + text);
   }
   return pick;
+}
+
+// vendor:model, then an effort and a speed if not the call's; comma-separated
+function config_falls(text: string): Fall[] {
+  return text.split(",").map((f) => f.trim()).filter((f) => f !== "").map((f) => {
+    const parts = f.split(":");
+    const [vendor, label, effort, speed] = parts as [Vendor, string, string?, string?];
+    const model = OFFER.vendors.includes(vendor) && OFFER.models.includes(label) ? Pick.model(vendor, label) : undefined;
+    const bad = parts.length > 4 || (effort !== undefined && !EFFORTS.includes(effort)) || (speed !== undefined && !model?.speeds.includes(speed));
+    if (model === undefined || bad) {
+      throw new Error("config: fallback has no vendor:model[:effort[:speed]] offered here: " + f);
+    }
+    return { vendor, model, effort, speed };
+  });
 }
 
 function config_vendors(text: string): Vendor[] {

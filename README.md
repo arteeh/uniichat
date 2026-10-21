@@ -88,6 +88,13 @@ also be set as the variable `UNII_<KEY>`:
   `claude-api:haiku-5.5:high:slow`).
 - `agents`: what subagents run on (default: the chat's pick). A
   subagent spawned with a model runs on that with the model swapped.
+- `fallback`: what calls go on with, in order, when theirs is out (busy
+  past its retries, out of credit or quota, a bad key, a usage limit
+  that resets in a minute or more): comma-separated
+  `vendor:model[:effort[:speed]]`, the call's effort and speed if unset
+  (default none), e.g. `openai-api:gpt-6.1-sol`. Turns, subagents and
+  summaries all use it, so may cost what the fallback costs. The chat
+  notes each switch and the way back.
 - `work`: the agents' working dirs on each device (default
   ~/.unii/work).
 - `rules`: a file appended to every system prompt. Each user's own
