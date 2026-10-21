@@ -16,6 +16,7 @@ import * as Md from "./Md.ts";
 import { LABELS, type Move, Pick } from "./Pick.ts";
 import { Price } from "./Price.ts";
 import { GLYPH, WHO } from "./Theme.ts";
+import type { Timer } from "./Timer.ts";
 
 // Types
 // =====
@@ -58,7 +59,8 @@ export type Wait = string;
 // agents: those at work; vendors and models: those offered; bills:
 // whether the server bills (Billing.ts); credits: what the user may
 // spend (null: free, or not told); limits: the calls waiting for a usage
-// limit, by TURN or agent name
+// limit, by TURN or agent name; timers: the chat's schedules, each
+// message's head (Server.ts Chat.state)
 export type State = {
   busy      : boolean;
   wait      : Wait;
@@ -70,6 +72,7 @@ export type State = {
   credits   : number | null;
   importing : Progress | null;
   limits    : Record<string, Parked>;
+  timers    : Timer[];
 };
 
 // fold: the tops shown (null: not folded); nodes and whole: the summaries
@@ -134,6 +137,7 @@ export type Client =
   | { $: "go"; on: boolean } // the import's: resume (true) or pause
   | { $: "pick"; to: Pick }
   | { $: "out"; job: string; out: object }
+  | { $: "unschedule"; id: string } // a schedule cancelled
   | { $: "zoom"; part: Part }
   | { $: "root" }
   | { $: "agent"; name: string }
@@ -161,6 +165,7 @@ export type Act =
   | { $: "Shut"; id: number; n: number }        // a click on an open block's bar
   | { $: "Fold"; on: boolean }                  // fold all, unfold all
   | { $: "Goto"; name: string | null }          // a tab, a name, the logo (null: UniiChat)
+  | { $: "Unschedule"; id: string }             // a schedule's Cancel
 
 // what a page draws, top to bottom
 export type Row =
@@ -287,6 +292,7 @@ export function view_new(): View {
     credits   : null,
     importing : null,
     limits    : {},
+    timers    : [],
     parts     : [],
     turn      : Infinity,
     fold      : null,
@@ -455,6 +461,9 @@ export function view_act(v: View, act: Act): Client[] {
       v.page = known ?? { name: act.name, log: null, live: [] };
       v.pages.set(act.name, v.page);
       return known === undefined ? [{ $: "agent", name: act.name }] : [];
+    }
+    case "Unschedule": {
+      return [{ $: "unschedule", id: act.id }];
     }
   }
 }
