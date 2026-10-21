@@ -49,6 +49,7 @@ import { JOBS, Memory, SOUL, type Given, type Msg as Log, type Share } from "./M
 import { OpenAI, TRANSCRIBER } from "./OpenAI.ts";
 import { Pick } from "./Pick.ts";
 import { Price } from "./Price.ts";
+import { Reap } from "./Reap.ts";
 import { Settings } from "./Settings.ts";
 import * as Timer from "./Timer.ts";
 import { BASE, MASTER, SEARCHES, SOUL_DEFAULT, Tools, type Agent, type Live, type Moved as Kit } from "./Tools.ts";
@@ -2779,6 +2780,7 @@ export async function serve(port: number, run: string[] | null): Promise<void> {
   Main.count = run === null ? 1 : config.WORKERS;
   Main.index = Number(worker ?? 0);
   if (worker === undefined) {
+    Reap.start();
     await Main.lock();
   }
   if (worker === undefined && run !== null) {
