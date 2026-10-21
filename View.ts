@@ -13,7 +13,7 @@ import type { Kind, Parked, Vendor } from "./AskAI.ts";
 import { topup } from "./Import.ts";
 import * as Call from "./Call.ts";
 import * as Md from "./Md.ts";
-import { LABELS, type Move, Pick } from "./Pick.ts";
+import { LABELS, type Fall, type Move, Pick } from "./Pick.ts";
 import { GLYPH, WHO } from "./Theme.ts";
 
 // Types
@@ -54,7 +54,7 @@ export const OPENING = 3;
 export const SUMMARIES = "summaries";
 export type Wait = string;
 
-// agents: those at work; vendors and models: those offered; bills:
+// agents: those at work; vendors, models, profiles: those offered; bills:
 // whether the server bills (Billing.ts); credits: what the user may
 // spend (null: free, or not told); limits: the calls waiting for a usage
 // limit, by TURN or agent name
@@ -65,6 +65,7 @@ export type State = {
   pick      : Pick | null;
   vendors   : Vendor[];
   models    : string[];
+  profiles? : Record<string, Fall[]>;
   bills     : boolean;
   credits   : number | null;
   importing : Progress | null;
@@ -565,19 +566,24 @@ export function view_pick(v: View): Knob[] {
   if (v.pick === null) {
     return [];
   }
-  const { model, effort, speed } = v.pick;
+  const { model, effort, speed, profile } = v.pick;
+  const ranks = (v.profiles?.[profile ?? ""] ?? []).map((f) => f.model.label).join(", ");
   return [
-    { text: model, move: "model", hint: model, choices: view_choices(v.pick, "model", v) },
+    { text: profile ?? model, move: "model", hint: profile === undefined ? model : profile + ": " + ranks, choices: view_choices(v.pick, "model", v) },
     { text: effort, move: "effort", hint: effort + " effort", choices: view_choices(v.pick, "effort", v) },
     { text: speed, move: "speed", hint: speed, choices: view_choices(v.pick, "speed", v) },
   ];
 }
 
-// every value of a knob, in the order a move steps through them
+// every value of a knob, in the order a move steps through them; the
+// model's: the profiles first (headed "profiles", each by its name),
+// then the models, each vendor's headed by it
 function view_choices(pick: Pick, move: Move, v: View): Choice[] {
   return Pick.options(pick, move, v).map(([text, to], i, all) => {
-    const vendor = move === "model" && (i === 0 || all[i - 1][1].vendor !== to.vendor) ? to.vendor : null;
-    return { text: move === "model" ? to.model : text, to: text, move, here: Pick.label(to) === Pick.label(pick), vendor };
+    const head = (p: Pick) => p.profile !== undefined ? "profiles" : p.vendor;
+    const vendor = move === "model" && (i === 0 || head(all[i - 1][1]) !== head(to)) ? head(to) : null;
+    const here = move !== "model" ? Pick.label(to) === Pick.label(pick) : to.profile !== undefined ? to.profile === pick.profile : pick.profile === undefined && Pick.label(to) === Pick.label(pick);
+    return { text: move === "model" ? to.profile ?? to.model : text, to: text, move, here, vendor };
   });
 }
 
