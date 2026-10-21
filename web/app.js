@@ -383,7 +383,7 @@ var READS = new Map([
   ["edit", (x) => Array.isArray(x.edits) ? { head: edits_files(x.edits), blocks: [] } : input_shown(x)],
   ["zoom", (x) => ({ head: msg_show(x.id, x.n) + (x.at === undefined ? "" : " from char " + x.at), blocks: [] })],
   ["date", (x) => ({ head: msg_show(x.id, 1), blocks: [] })],
-  ["spawn", (x) => ({ head: tasks_show(x.tasks, x.effort), blocks: (Array.isArray(x.tasks) ? x.tasks : []).flatMap(text_block) })],
+  ["spawn", (x) => ({ head: tasks_show(x.tasks, x.model, x.effort), blocks: (Array.isArray(x.tasks) ? x.tasks : []).flatMap(text_block) })],
   ["tell", (x) => ({ head: String(x.name ?? ""), blocks: text_block(x.message) })],
   ["computer", (x) => ({ head: "", blocks: text_block(x.task) })]
 ]);
@@ -435,9 +435,10 @@ function msg_show(id, n) {
   const many = typeof n === "number" && n > 1 ? "+" + n : "";
   return typeof id === "number" ? "#" + id + many : String(id ?? "");
 }
-function tasks_show(tasks, effort) {
+function tasks_show(tasks, model, effort) {
   const n = Array.isArray(tasks) ? tasks.length : 0;
-  return n + (n === 1 ? " agent" : " agents") + (typeof effort === "string" ? " · " + effort : "");
+  const knobs = [model, effort].filter((k) => typeof k === "string").map((k) => " · " + k).join("");
+  return n + (n === 1 ? " agent" : " agents") + knobs;
 }
 function lines_show(offset, limit) {
   const from = typeof offset === "number" ? offset : 1;
@@ -848,6 +849,11 @@ var Pick;
     return hit === undefined ? null : hit[1];
   }
   Pick2.move = move;
+  function to_model(pick, label, vendors, { models }) {
+    const hit = Pick.models(vendors, models).find(([, m]) => m.label === label);
+    return hit === undefined ? null : Pick.on(pick, hit[0], hit[1]);
+  }
+  Pick2.to_model = to_model;
   function label(pick) {
     return [pick.vendor, pick.model, pick.effort, pick.speed].join(":");
   }
