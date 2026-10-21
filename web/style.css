@@ -492,3 +492,21 @@ header > .imping { display: flex; flex-direction: column; justify-content: cente
 .settings .go:hover { background: var(--mid); }
 .settings .go:disabled { opacity: .4; }
 @media (max-width: 600px) { .set .four { grid-template-columns: 1fr 1fr; } }
+/* the profile editor: each profile its name and Delete, its models in
+   order (a handle to drag, its name and vendor, Remove), Add model */
+.profiles .prof { padding: 10px 0; }
+.profiles .prof:first-child { padding-top: 0; }
+.profiles .prof + .prof { border-top: 1px solid var(--hair); }
+.profiles .name { display: flex; gap: 8px; }
+.profiles .name input { flex: 1; min-width: 0; }
+.profiles ol { margin: 8px 0; padding: 0; list-style: none; }
+.profiles li { display: flex; align-items: center; gap: 8px; min-height: 40px; padding: 0 4px; background: var(--paper); }
+.profiles li + li { border-top: 1px solid var(--hair); }
+.profiles li.drag { border-radius: 9px; background: var(--hover); }
+.profiles li > span { flex: 1; overflow-wrap: anywhere; }
+.profiles li small { color: var(--mid); font-size: 13px; }
+.profiles :is(.grip, .out) { flex: none; width: 36px; height: 36px; border-radius: 8px; color: var(--mid); font-size: 18px; }
+.profiles .grip { cursor: grab; touch-action: none; }
+.profiles :is(.grip, .out):is(:hover, :focus-visible) { background: var(--hover); color: var(--ink); }
+.profiles .pnew { margin-top: 6px; }
+@media (pointer: coarse) { .profiles :is(.grip, .out) { width: 44px; height: 44px; } }

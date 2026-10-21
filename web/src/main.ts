@@ -1300,6 +1300,12 @@ function settings_draw(page: any): void {
   const form = $<HTMLFormElement>("#account form.settings");
   const rows = new Map<string, any>(page.settings.map((r: any) => [r.key, r]));
   const unset = new Set<string>();
+  // the profiles as edited (none shown: UNII_PROFILES sets them), each
+  // its name and models in order; drawn anew as one changes, the focus
+  // put back on what it was on
+  const profs: Array<[string, string[]]> = Object.entries(page.profiles ?? {});
+  const box = form.querySelector<HTMLElement>(".profiles .field");
+  const names = () => profs.map(([name]) => name.trim()).filter((name) => name !== "");
   // a list's items: its boxes checked, or (not shown) its value
   const listed = (key: string) => {
     const boxes = [...form.querySelectorAll<HTMLInputElement>(`input[name="${key}"]`)];
@@ -1315,7 +1321,7 @@ function settings_draw(page: any): void {
       const four = value?.parentElement!.querySelector<HTMLElement>(".four");
       if (value && four) {
         const focus = (document.activeElement as HTMLSelectElement | null)?.name;
-        four.innerHTML = Html.picks_html(key, vendors, listed("models"), value.value, key === "agents" ? "The chat's pick" : null);
+        four.innerHTML = Html.picks_html(key, vendors, listed("models"), value.value, key === "agents" ? "The chat's pick" : null, names());
         four.querySelector<HTMLSelectElement>(`select[name="${focus}"]`)?.focus();
       }
     }
@@ -1340,9 +1346,12 @@ function settings_draw(page: any): void {
     el.querySelector(".err")!.textContent = "";
     const value = el.querySelector<HTMLInputElement>("input[type=hidden]");
     if (value !== null) {
-      value.value = Html.pick_mend([...el.querySelectorAll("select")].map((s) => s.value), listed("models"));
+      value.value = Html.pick_mend([...el.querySelectorAll("select")].map((s) => s.value), listed("models"), names());
     }
     picks();
+    if (el.dataset.key === "vendors" || el.dataset.key === "models") {
+      profs_draw();
+    }
   };
   form.onclick = (ev) => {
     const btn = (ev.target as HTMLElement).closest<HTMLButtonElement>(".reset");
@@ -1362,12 +1371,110 @@ function settings_draw(page: any): void {
   };
   form.onsubmit = (ev) => {
     ev.preventDefault();
-    settings_save(form, page, unset, listed);
+    settings_save(form, page, unset, listed, profs);
   };
+  const profs_draw = (focus?: string) => {
+    if (box !== null) {
+      box.innerHTML = Html.profiles_html(profs, Html.offered(listed("vendors"), listed("models")));
+      (focus === undefined ? null : box.querySelector<HTMLElement>(focus) ?? box.querySelector<HTMLElement>(".pnew"))?.focus();
+    }
+  };
+  const profs_changed = (focus: string) => {
+    profs_draw(focus);
+    box!.closest(".set")!.querySelector(".err")!.textContent = "";
+    picks();
+  };
+  // a pick on a profile renamed follows it
+  const renamed = (was: string, now: string) => {
+    for (const key of Html.PICKS) {
+      const value = form.querySelector<HTMLInputElement>(`input[name="${key}"]`);
+      if (value !== null && was.trim() !== "" && now !== "" && value.value === was.trim()) {
+        value.value = now;
+      }
+    }
+  };
+  box?.addEventListener("click", (ev) => {
+    const b = (ev.target as HTMLElement).closest<HTMLButtonElement>("button");
+    const [i, j] = [Number(b?.dataset.i), Number(b?.dataset.j)];
+    if (b?.classList.contains("pnew")) {
+      profs.push(["", []]);
+      profs_changed(`.pname[data-i="${profs.length - 1}"]`);
+    } else if (b?.classList.contains("pdel")) {
+      profs.splice(i, 1);
+      profs_changed(".pnew");
+    } else if (b?.classList.contains("out")) {
+      profs[i][1].splice(j, 1);
+      profs_changed(`.add[data-i="${i}"]`);
+    }
+  });
+  box?.addEventListener("change", (ev) => {
+    const add = (ev.target as HTMLElement).closest<HTMLSelectElement>("select.add");
+    if (add !== null && add.value !== "") {
+      const i = Number(add.dataset.i);
+      profs[i][1].push(add.value);
+      profs_changed(`.add[data-i="${i}"]`);
+    }
+  });
+  box?.addEventListener("input", (ev) => {
+    const name = (ev.target as HTMLElement).closest<HTMLInputElement>("input.pname");
+    if (name !== null) {
+      const i = Number(name.dataset.i);
+      renamed(profs[i][0], name.value.trim());
+      profs[i][0] = name.value;
+    }
+  });
+  // a model moved by its handle: arrow keys a place up or down
+  box?.addEventListener("keydown", (ev) => {
+    const grip = (ev.target as HTMLElement).closest<HTMLButtonElement>(".grip");
+    if (grip === null || (ev.key !== "ArrowUp" && ev.key !== "ArrowDown")) {
+      return;
+    }
+    ev.preventDefault();
+    const [i, j] = [Number(grip.dataset.i), Number(grip.dataset.j)];
+    const k = j + (ev.key === "ArrowUp" ? -1 : 1);
+    const list = profs[i][1];
+    if (k >= 0 && k < list.length) {
+      [list[j], list[k]] = [list[k], list[j]];
+      profs_changed(`.grip[data-i="${i}"][data-j="${k}"]`);
+    }
+  });
+  // or dragged (a mouse, a finger, a pen): its row follows the pointer
+  // among the others, and stays where it is let go
+  box?.addEventListener("pointerdown", (ev) => {
+    const grip = (ev.target as HTMLElement).closest<HTMLButtonElement>(".grip");
+    if (grip === null || ev.button !== 0) {
+      return;
+    }
+    ev.preventDefault();
+    const li = grip.closest("li")!;
+    const ol = li.parentElement!;
+    const [i, from] = [Number(grip.dataset.i), Number(grip.dataset.j)];
+    li.classList.add("drag");
+    const move = (e: PointerEvent) => {
+      const below = [...ol.children].find((c) => c !== li && e.clientY < c.getBoundingClientRect().top + c.getBoundingClientRect().height / 2);
+      if (below !== li.nextElementSibling || below === undefined) {
+        ol.insertBefore(li, below ?? null);
+      }
+    };
+    // on the window: a row moved loses its pointer capture
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      window.removeEventListener("pointercancel", up);
+      const to = [...ol.children].indexOf(li);
+      const list = profs[i][1];
+      list.splice(to, 0, ...list.splice(from, 1));
+      profs_changed(`.grip[data-i="${i}"][data-j="${to}"]`);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+    window.addEventListener("pointercancel", up);
+  });
+  profs_draw();
   picks();
 }
 
-async function settings_save(form: HTMLFormElement, page: any, unset: Set<string>, listed: (key: string) => string[]): Promise<void> {
+async function settings_save(form: HTMLFormElement, page: any, unset: Set<string>, listed: (key: string) => string[], profs: Array<[string, string[]]>): Promise<void> {
   const set: Record<string, string | null> = {};
   const keys: Record<string, string | null> = {};
   for (const r of page.settings) {
@@ -1395,14 +1502,29 @@ async function settings_save(form: HTMLFormElement, page: any, unset: Set<string
   }
   const why = form.querySelector(".save .why")!;
   form.querySelectorAll(".err").forEach((e) => (e.textContent = ""));
-  if (Object.keys(set).length === 0 && Object.keys(keys).length === 0) {
+  // the profiles, sent whole if changed; each named, once, with a model
+  let profiles: Record<string, string[]> | undefined;
+  if (page.profiles != null) {
+    const now = profs.map(([name, list]): [string, string[]] => [name.trim(), list]);
+    const all = now.map(([name]) => name);
+    const bad = all.includes("") ? "Name each profile." : all.some((name, k) => all.indexOf(name) !== k) ? "Two profiles have the same name." : now.some(([, list]) => list.length === 0) ? "Add a model to each profile." : null;
+    if (bad !== null) {
+      const at = form.querySelector<HTMLElement>(".profiles")!;
+      at.querySelector(".err")!.textContent = bad;
+      at.scrollIntoView({ block: "center" });
+      return;
+    }
+    const was = JSON.stringify(page.profiles);
+    profiles = JSON.stringify(Object.fromEntries(now)) === was ? undefined : Object.fromEntries(now);
+  }
+  if (Object.keys(set).length === 0 && Object.keys(keys).length === 0 && profiles === undefined) {
     why.textContent = "Nothing changed.";
     return;
   }
   const go = form.querySelector<HTMLButtonElement>(".go")!;
   go.disabled = true;
   why.textContent = "";
-  const out = await View.post("/api/settings", { version: page.version, set, keys });
+  const out = await View.post("/api/settings", { version: page.version, set, keys, ...(profiles === undefined ? {} : { profiles }) });
   go.disabled = false;
   if (!out.ok) {
     const at = out.key === undefined ? null : form.querySelector<HTMLElement>(`.set[data-key="${out.key}"]`);

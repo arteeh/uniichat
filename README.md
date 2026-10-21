@@ -154,7 +154,7 @@ print), `APNS_KEY`. One the environment doesn't set is read from
 For the owner, the Settings page also shows the server's settings it
 can change, and each key by its last 4 characters only; a save is
 checked as a start checks config.json and applies at once on every
-worker (vendors, models, pick, compactor, agents, keys) or on the next
+worker (vendors, models, pick, compactor, agents, profiles, keys) or on the next
 start (`site`, `apple`, `apns`). `owner`, `workers`, `work`, `rules`,
 `after` and what the environment sets are changed on the server only,
 and not shown.
