@@ -863,6 +863,20 @@ var Pick;
     return { ...pick, model: model?.id ?? pick.model };
   }
   Pick2.ask = ask;
+  function named(run) {
+    const model = MODELS[run.vendor].find((m) => m.id === run.model);
+    return { ...run, model: model?.label ?? run.model };
+  }
+  Pick2.named = named;
+  function falls(run, falls) {
+    const own = { vendor: run.vendor, model: run.model, effort: run.effort, speed: run.speed };
+    const list = falls.map((f) => {
+      const on = Pick.on(own, f.vendor, f.model);
+      return Pick.ask({ ...on, effort: f.effort ?? on.effort, speed: f.speed ?? on.speed });
+    });
+    return [own, ...list].filter((p, k, all) => all.findIndex((q) => q.vendor === p.vendor && q.model === p.model) === k);
+  }
+  Pick2.falls = falls;
   function read(x, offer) {
     const model = offer.vendors.includes(x.vendor) && offer.models.includes(x.model) ? Pick.model(x.vendor, x.model) : undefined;
     if (model === undefined || !EFFORTS.includes(x.effort) || !model.speeds.includes(x.speed)) {
