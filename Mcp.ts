@@ -10,11 +10,14 @@
 // Each chat runs its own (one user's never see another's), started by
 // the first listing or call, ended as the chat closes, moves (a call
 // running finishes first) or turns it off. One that fails to start, dies
-// or times out fails its call saying why; the chat gets a note of each
-// new why, and each agent's next listing gives it the notes it hasn't
-// heard (Mcp.heard), for the request it builds. A dead one starts again
-// at the next call; one that failed to start rests LIMITS.again first.
-// While a device server's device isn't open, its tools are left out.
+// or times out fails its call saying why; each agent's next listing
+// gives it the notes it hasn't heard (Mcp.heard), for the request it
+// builds. Only a why the user can act on (a server that won't start) is
+// also a note in the chat; the rest (its device isn't open, it died and
+// starts again at the next call) only the model is told, and tools left
+// out go to the log. A dead one starts again at the next call; one that
+// failed to start rests LIMITS.again first. While a device server's
+// device isn't open, its tools are left out.
 
 import * as os from "node:os";
 import type { Out } from "./Agent.ts";
@@ -39,7 +42,8 @@ type Link = {
 // string: why it has no tools); why its last start failed, and when it
 // may be tried again; its link; the server's name of each tool by the
 // model's; whether it said its tools changed; the note of why it has no
-// tools (null: it works); what each agent last heard of it; the tools
+// tools (null: it works), and whether the chat showed it; what each
+// agent last heard of it; the tools
 // last told left out; the calls running; gone: it ends as its last call
 // does (its chat moved)
 export type Server = {
@@ -50,6 +54,7 @@ export type Server = {
   names : Map<string, string>;
   stale : boolean;
   said  : string | null;
+  shown : boolean;
   heard : Map<string, string | null>;
   left  : string;
   calls : number;
@@ -96,7 +101,7 @@ const HERE = new Map<string, { link: Link; changed: boolean }>();
 export namespace Mcp {
 
   export function servers(note: (text: string) => void, confs: config.McpServer[], run: Run, open: (device: string) => boolean): Servers {
-    const server = (conf: config.McpServer): Server => ({ conf, up: null, fail: null, link: null, names: new Map(), stale: false, said: null, heard: new Map(), left: "", calls: 0, gone: false });
+    const server = (conf: config.McpServer): Server => ({ conf, up: null, fail: null, link: null, names: new Map(), stale: false, said: null, shown: false, heard: new Map(), left: "", calls: 0, gone: false });
     return { all: new Map(confs.map((conf) => [conf.name, server(conf)])), note, run, open };
   }
 
@@ -108,11 +113,12 @@ export namespace Mcp {
   }
 
   // the notes of the servers not `off` that agent `who` hasn't heard: why
-  // one has no tools, or that it works again
-  export function heard(servers: Servers, off: string[], who: string): string[] {
+  // one has no tools, or that it works again; viewed: only those the chat
+  // showed (in the view a call reads: the rest its listing tells)
+  export function heard(servers: Servers, off: string[], who: string, viewed = false): string[] {
     const notes: string[] = [];
     for (const s of servers.all.values()) {
-      if (s.gone || off.includes(s.conf.name) || s.said === (s.heard.get(who) ?? null)) {
+      if (s.gone || off.includes(s.conf.name) || s.said === (s.heard.get(who) ?? null) || (viewed && !s.shown)) {
         continue;
       }
       s.heard.set(who, s.said);
@@ -128,7 +134,7 @@ export namespace Mcp {
       Mcp.close(s);
       s.fail = null;
       const why = "can't run: device " + s.conf.device + " isn't open";
-      Mcp.tell(servers, s, why + "; its tools are left out until it is");
+      Mcp.tell(servers, s, why + "; its tools are left out until it is", false);
       return why;
     }
     if (s.link !== null && s.link.dead() !== null) {
@@ -151,13 +157,15 @@ export namespace Mcp {
     if (typeof got === "string") {
       Mcp.close(s);
       s.fail = { why: got, till: Date.now() + LIMITS.again };
-      Mcp.tell(servers, s, got + "; its tools are left out until it starts");
+      Mcp.tell(servers, s, got + "; its tools are left out until it starts", true);
       return got;
     }
     s.fail = null;
     if (s.said !== null) {
       s.said = null;
-      Mcp.say(servers, s, "MCP server " + s.conf.name + " works again.");
+      if (s.shown) {
+        Mcp.say(servers, s, "MCP server " + s.conf.name + " works again.");
+      }
     }
     return got;
   }
@@ -169,7 +177,7 @@ export namespace Mcp {
     const changed = () => (s.stale = true);
     let up = false;
     let link: Link | null = null;
-    const died = (why: string) => up && s.link === link && Mcp.tell(servers, s, why + "; the next call starts it again");
+    const died = (why: string) => up && s.link === link && Mcp.tell(servers, s, why + "; the next call starts it again", false);
     try {
       link = s.link = s.conf.url ? Mcp.http(s.conf, changed) : s.conf.device ? Mcp.device(s.conf, servers.run, changed, died) : Mcp.stdio(s.conf, changed, died);
       await link.ask("initialize", INIT, timer);
@@ -184,7 +192,7 @@ export namespace Mcp {
 
   // its tools, named for the model; one whose name clashes with another's
   // once made the vendors', or whose input schema they refuse, left out,
-  // the chat told
+  // logged
   export async function listed(servers: Servers, s: Server, signal: AbortSignal): Promise<Spec[]> {
     const specs: Spec[] = [];
     const names = new Map<string, string>();
@@ -207,7 +215,7 @@ export namespace Mcp {
     if (left.join(", ") !== s.left) {
       s.left = left.join(", ");
       if (s.left !== "") {
-        Mcp.say(servers, s, "MCP server " + s.conf.name + " has tools left out: " + s.left + ".");
+        console.error("unii: MCP server " + s.conf.name + " has tools left out: " + s.left);
       }
     }
     s.names = names;
@@ -229,12 +237,16 @@ export namespace Mcp {
     return { ...obj, type: "object", properties: is(obj.properties) ? obj.properties : {} };
   }
 
-  // why a server has no tools, told to the chat if it is new
-  export function tell(servers: Servers, s: Server, why: string): void {
+  // why a server has no tools, if it is new: told to the model (heard),
+  // and to the chat too if `show` (the user can act on it)
+  export function tell(servers: Servers, s: Server, why: string, show: boolean): void {
     const text = "MCP server " + s.conf.name + " " + why + ".";
     if (text !== s.said) {
       s.said = text;
-      Mcp.say(servers, s, text);
+      s.shown = show;
+      if (show) {
+        Mcp.say(servers, s, text);
+      }
     }
   }
 

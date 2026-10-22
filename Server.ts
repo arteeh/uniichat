@@ -604,9 +604,9 @@ export namespace Chat {
     const msgs = (chat.sent = chat.wait.splice(0));
     const says = msgs.filter((m) => m.end > from).map((m) => Memory.say(mem, Math.max(m.id, from), m.end));
     const view = Memory.view(mem, from);
-    // the MCP servers' notes so far are in the view: the call's listing
-    // gives the master only those made since (Mcp.heard)
-    Mcp.heard(chat.tools.mcp, Tools.off(chat.tools), "main");
+    // the MCP servers' notes the chat showed are in the view: the call's
+    // listing gives the master the rest, and those made since (Mcp.heard)
+    Mcp.heard(chat.tools.mcp, Tools.off(chat.tools), "main", true);
     const text = says.map((say) => say.text).join("\n\n");
     const imgs = says.flatMap((say) => say.imgs);
     const server = Tools.at(chat.tools, "main");
