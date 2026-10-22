@@ -389,13 +389,6 @@ function section_html(title: string, body: string): string {
   return `<section><h2>${esc(title)}</h2>${body}</section>`;
 }
 
-// a table (cls: its class) of inline markdown cells
-function table_html(cls: string, head: string[], rows: string[][]): string {
-  const cells = (row: string[], tag: string) => row.map((x) => `<${tag}>${spans_html(Md.span_parse(x))}</${tag}>`).join("");
-  const body  = rows.map((row) => `<tr>${cells(row, "td")}</tr>`).join("");
-  return `<div class="wide ${cls}"><table><tr>${cells(head, "th")}</tr>${body}</table></div>`;
-}
-
 export function block_html(b: Md.Block): string {
   switch (b.$) {
     case "Para": {

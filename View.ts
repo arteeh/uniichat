@@ -195,7 +195,7 @@ export const TURN = "Unii's turn";
 
 // the messages' version, in a view's query; one more for each change an
 // older view would misread
-export const WIRE = 2;
+export const WIRE = 3;
 
 // the Link's: the most a live socket hears nothing (ms); the wait to open
 // another; the server's tick; a client's close as it quits

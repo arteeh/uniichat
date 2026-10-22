@@ -95,7 +95,6 @@ async function boot(): Promise<void> {
   if (APP === null) {
     navigator.serviceWorker?.register("/sw.js").catch(() => {});
   }
-  const q = new URLSearchParams(location.search);
   history.replaceState(null, "", PAGES.includes(location.pathname) ? "/settings" : "/");
   if (await boot_me() === null) {
     solo("Sign in", "This UniiChat server is private. On the computer it runs on, run <code>unii serve link</code> and open the link it prints here.");
