@@ -8,8 +8,8 @@
 
 // this unii's version: each release ships one, a new one for every
 // change to Term.ts or what it imports. The fork's release script reads
-// it here and tags the release v + it
-export const VERSION = "18";
+// it here and tags the release with it, as is ("19")
+export const VERSION = "19";
 
 export const REPO        = "https://github.com/arteeh/uniichat";
 export const INSTALL     = REPO + "/releases/latest/download/install.sh";
