@@ -45,7 +45,7 @@ type Link = {
 // tools (null: it works), and whether the chat showed it; what each
 // agent last heard of it; the tools
 // last told left out; the calls running; gone: it ends as its last call
-// does (its chat moved)
+// does (the chat closed)
 export type Server = {
   conf  : config.McpServer;
   up    : Promise<Spec[] | string> | null;
@@ -250,7 +250,7 @@ export namespace Mcp {
     }
   }
 
-  // a note to the chat; none once it moved: the process it went to has it
+  // a note to the chat; none once it closed
   export function say(servers: Servers, s: Server, text: string): void {
     if (!s.gone) {
       servers.note(text);

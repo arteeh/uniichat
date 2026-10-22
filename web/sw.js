@@ -5,7 +5,7 @@
 // boot_me) instead of the browser's error page. The server's answer
 // always comes first, so a deploy shows at once; nothing else (the API,
 // the socket, the chat's pages and images) is ever kept or answered here.
-// A push (Push.ts, Cloud.web_push) shows the start of a reply, unless a
+// A push (Push.ts, Push.browsers) shows the start of a reply, unless a
 // tab of the chat is in front, in place of the one before; a tap opens
 // the chat.
 

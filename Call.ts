@@ -7,7 +7,8 @@
 // command as itself; a file tool its path, read's lines after it, write's
 // content in a block, edit's files (the diff comes in its result); zoom and
 // date the message (`#6243`, a line `#6243+8`, an agent by name); spawn its
-// tasks, tell and computer their name and text in blocks; schedule its time
+// tasks, tell and computer (in logs from before computer use went) their
+// name and text in blocks; schedule its time
 // (or cron) and zone, its message in a block. Any other call, or an
 // edit whose edits are no list, shows its name and short values as arguments
 // (`web_search "bend"`; short: JSON within SHORT chars, and a string without

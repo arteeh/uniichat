@@ -837,7 +837,8 @@ function term_paint(t: Term): void {
 // request: one a day); a cached ver newer than this one is a note. It
 // never delays nor fails the chat
 async function update_check(t: Term): Promise<void> {
-  if (process.env.UNII_NO_UPDATE_CHECK) {
+  // UNII_NO_TELEMETRY: its name before arteeh.17
+  if (process.env.UNII_NO_UPDATE_CHECK || process.env.UNII_NO_TELEMETRY) {
     return;
   }
   let last = { t: 0, ver: Update.VERSION, notice: "" };
