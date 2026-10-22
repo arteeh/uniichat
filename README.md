@@ -170,14 +170,15 @@ With only an OpenAI key, set `vendors`, `pick` and `compactor` to
 UNII_PICK=openai-api:gpt-6.1-sol:medium:slow
 UNII_COMPACTOR=openai-api:gpt-6-luna:high:slow`.
 
-With a ChatGPT plan instead, run `unii chatgpt` (or `bun ChatGPT.ts`;
-it shows a link and a code to enter in any browser; `logout` signs out) and use
+With a ChatGPT plan instead, run `unii serve chatgpt` (or `bun ChatGPT.ts`;
+it shows a link and a code to enter in any browser; `logout` signs out,
+`status` shows who it's signed in as) and use
 `openai-sub` the same way. The sign-in is the server's: every user's
 calls run on that one plan, so offer it only on a server for yourself.
 A server that bills refuses to start with it.
 
-With a Claude plan instead, run `unii claude` (`logout`, `status`;
-from source: `bun install`, then `bun Term.ts claude`) to sign in
+With a Claude plan instead, run `unii serve claude` (`logout`, `status`;
+from source: `bun install`, then `bun Term.ts serve claude`) to sign in
 through Claude Code, and use `claude-sub` the same way. Every user's calls then run on your
 plan: Anthropic allows no one to offer others their Claude plan, so
 offer it only on a server for yourself. A server that bills refuses it.

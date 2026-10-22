@@ -74,9 +74,9 @@ const ASKVER = ARGS.includes("version");
 const UPDATE = ARGS.includes("update");
 const SERVE  = ARGS.includes("serve");
 const PORT   = SERVE ? ARGS.find((a) => /^\d+$/.test(a)) : undefined;
-const SUB    = ARGS.includes("chatgpt");
-const CLAUDE = ARGS.includes("claude");
-const WORDS  = ["login", "help", "--help", "-h", "version", "update", "serve", "chatgpt", "claude", ...(SUB ? ["logout"] : []), ...(CLAUDE ? ["logout", "status"] : [])];
+const SUB    = SERVE && ARGS.includes("chatgpt"); // the server's sign-ins: under serve
+const CLAUDE = SERVE && ARGS.includes("claude");
+const WORDS  = ["login", "help", "--help", "-h", "version", "update", "serve", ...(SERVE ? ["chatgpt", "claude"] : []), ...(SUB || CLAUDE ? ["logout", "status"] : [])];
 const WEB    = /^https?:\/\//;
 const ODD    = ARGS.find((a) => !WORDS.includes(a) && !WEB.test(a) && a !== PORT);
 const HOME   = process.env.UNII_HOME || os.homedir() + "/.unii";
@@ -95,14 +95,14 @@ const USAGE = `Usage: unii [url]           the chat (url: $UNII_URL, else https:
                             (another port: set UNII_SITE to its address too),
                             on your ANTHROPIC_API_KEY and OPENAI_API_KEY;
                             chat with it: unii http://127.0.0.1:8788
-       unii chatgpt         sign the server unii serve runs here in to a
-                            ChatGPT plan (its openai-sub vendor), by a
-                            code entered in any browser
-       unii chatgpt logout  sign it out
-       unii claude [logout|status]
+       unii serve chatgpt [logout|status]
                             sign the server unii serve runs here in to a
-                            Claude plan (its claude-sub vendor), in
-                            Claude Code's own sign-in; or out
+                            ChatGPT plan (its openai-sub vendor), by a
+                            code entered in any browser; or out; or show
+                            who it's signed in as
+       unii serve claude [logout|status]
+                            the same for a Claude plan (its claude-sub
+                            vendor), in Claude Code's own sign-in
        unii help            this
 UNII_WORK: where the agent works on this computer (default
 ~/.unii/work). UNII_COMPUTER=1: it may use the screen. UNII_HOME: where
@@ -1150,7 +1150,8 @@ fs.mkdirSync(TOKEN.slice(0, -"/token".length), { recursive: true, mode: 0o700 })
 
 if (HELP || ODD !== undefined) {
   if (ODD !== undefined) {
-    login_fail("no argument " + ODD + ".\n\n" + USAGE);
+    const moved = ODD === "chatgpt" || ODD === "claude" ? " (now unii serve " + ODD + ")" : "";
+    login_fail("no argument " + ODD + moved + ".\n\n" + USAGE);
   }
   console.log(USAGE);
 } else if (ASKVER) {
