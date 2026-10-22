@@ -1503,7 +1503,18 @@ export namespace Main {
         },
       },
     });
-    setInterval(() => Main.chat.socks.forEach((sock) => sock.send(TICK)), PING / 2);
+    // a tick to each socket; one whose session is gone (signed out,
+    // `unii serve revoke`) closed, a device's let go
+    setInterval(() => {
+      const kept = Owner.kept();
+      Main.chat.socks.forEach((sock) => {
+        if (kept.has(sock.data.who)) {
+          return sock.send(TICK);
+        }
+        Chat.leave(Main.chat, sock, true);
+        sock.close(QUIT, "signed out");
+      });
+    }, PING / 2);
     for (const sig of ["SIGTERM", "SIGINT", "SIGHUP"]) {
       process.on(sig, () => process.exit(0));
     }
