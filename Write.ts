@@ -5,8 +5,17 @@
 // then moved in, so a crash leaves the old file or the new, never half,
 // and two processes writing it never share a temp file. Imports nothing
 // of the server's: devices and terminals write their files with it too.
+// On Windows a mode is no protection (only its write bit counts): the
+// file's ACL, from the user's profile folder it is in, keeps others out.
 
 import * as fs from "node:fs";
+
+const WIN = process.platform === "win32";
+
+// how often, and how far apart (ms), a move Windows refused is tried
+// again: a virus scanner or the search indexer may hold the file a moment
+const TRIES = 20;
+const APART = 50;
 
 export function write_whole(file: string, text: string | null, mode = 0o600): void {
   if (text === null) {
@@ -17,15 +26,33 @@ export function write_whole(file: string, text: string | null, mode = 0o600): vo
   try {
     const fd = fs.openSync(tmp, "w", mode);
     try {
-      fs.fchmodSync(fd, mode);
+      if (!WIN) {
+        fs.fchmodSync(fd, mode);
+      }
       fs.writeFileSync(fd, text);
       fs.fsyncSync(fd);
     } finally {
       fs.closeSync(fd);
     }
-    fs.renameSync(tmp, file);
+    move_over(tmp, file);
   } catch (err) {
     fs.rmSync(tmp, { force: true });
     throw err;
+  }
+}
+
+// a file moved over another at once (rename); on Windows tried again
+// while it is held (EPERM, EACCES, EBUSY), up to TRIES times
+export function move_over(from: string, to: string): void {
+  for (let k = 1; ; k++) {
+    try {
+      fs.renameSync(from, to);
+      return;
+    } catch (err: any) {
+      if (!WIN || k >= TRIES || !["EPERM", "EACCES", "EBUSY"].includes(err?.code)) {
+        throw err;
+      }
+      Bun.sleepSync(APART);
+    }
   }
 }
