@@ -35,12 +35,25 @@ tree browser.
 Install and set up
 ------------------
 
-On Linux or macOS (Windows: WSL):
+On Linux or macOS (or in WSL):
 
     curl -fsSL https://github.com/arteeh/uniichat/releases/latest/download/install.sh | sh
 
-This installs `unii` to `~/.local/bin`; `unii update` installs the
-newest release. The installer also moves data from older versions.
+This installs `unii` to `~/.local/bin`. The installer also moves data
+from older versions.
+
+Windows: native, or WSL with the Linux installer. Natively, in
+PowerShell:
+
+    irm https://github.com/arteeh/uniichat/releases/latest/download/install.ps1 | iex
+
+This installs `unii.exe` to `%LOCALAPPDATA%\Programs\unii` and adds it to
+your PATH (no admin). Windows runs devices and the terminal; the server
+runs on Linux, macOS or WSL.
+
+`unii update` installs the newest release. A server or device running
+keeps the old one till it restarts; on Windows the installer won't run
+while one does: stop it first (`Stop-ScheduledTask unii-device`).
 
 1. **Start the server** on the computer that keeps your chat (as a
    systemd user service, say): `unii serve` serves http://127.0.0.1:8788;
@@ -69,7 +82,16 @@ newest release. The installer also moves data from older versions.
        WantedBy=default.target
 
    `systemctl --user enable --now unii-device` (and `loginctl
-   enable-linger` to run it while you're logged out).
+   enable-linger` to run it while you're logged out). On Windows, a
+   task that starts it at logon, hidden, and again if it fails:
+
+       $unii = "$env:LOCALAPPDATA\Programs\unii\unii.exe"
+       $act = New-ScheduledTaskAction -Execute conhost.exe -Argument "--headless `"$unii`" device"
+       $set = New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::Zero) -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1) -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
+       Register-ScheduledTask unii-device -Action $act -Trigger (New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME) -Settings $set
+       Start-ScheduledTask unii-device
+
+   (`Stop-ScheduledTask unii-device` stops it, as for an update.)
 
 The server's settings are in `~/.unii/config.json` (most are on the
 Settings page). Each may also be set as `UNII_<KEY>`, which wins. Besides
@@ -98,6 +120,22 @@ Use
 
 From source (Bun): `bun install`, `bun run web` (rebuilds web/app.js),
 `bun Cli.ts <command>`, `bun run build` (one `unii` executable).
+
+Uninstall
+---------
+
+Back up `~/.unii` first if you may want your chat again.
+
+- **Linux, macOS:** stop and remove the services you made
+  (`systemctl --user disable --now unii-device unii-serve`, then their
+  files in `~/.config/systemd/user`), then `rm ~/.local/bin/unii` and
+  `rm -rf ~/.unii ~/.config/unii`.
+- **Windows:** `Stop-ScheduledTask unii-device; Unregister-ScheduledTask
+  unii-device -Confirm:$false` (if you made it), stop any other `unii`
+  you run, then `Remove-Item -Recurse -Force
+  "$env:LOCALAPPDATA\Programs\unii", "$HOME\.unii", "$HOME\.config\unii"`,
+  and take `%LOCALAPPDATA%\Programs\unii` out of your user Path
+  (`rundll32 sysdm.cpl,EditEnvironmentVariables`).
 
 Q&A
 ---
