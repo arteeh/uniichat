@@ -1013,7 +1013,7 @@ export namespace Chat {
       return;
     }
     const link = { send: (msg: object) => Chat.send(sock, msg), live: () => chat.socks.has(sock), work, shell };
-    sock.data.device = Tools.attach(chat.tools, tab, host, sock.data.who, link);
+    sock.data.device = Tools.attach(chat.tools, tab, host, sock.data.who, link, Owner.kept());
     if (sock.data.device !== host) {
       Chat.send(sock, { $: "note", text: host + " was taken: Unii calls this computer " + sock.data.device + "." });
     }
@@ -1504,7 +1504,8 @@ export namespace Main {
       },
     });
     // a tick to each socket; one whose session is gone (signed out,
-    // `unii serve revoke`) closed, a device's let go
+    // `unii serve revoke`) closed, and that session's devices let go,
+    // linked or not, so their names are free
     setInterval(() => {
       const kept = Owner.kept();
       Main.chat.socks.forEach((sock) => {
@@ -1514,6 +1515,7 @@ export namespace Main {
         Chat.leave(Main.chat, sock, true);
         sock.close(QUIT, "signed out");
       });
+      Tools.prune(Main.chat.tools, kept);
     }, PING / 2);
     for (const sig of ["SIGTERM", "SIGINT", "SIGHUP"]) {
       process.on(sig, () => process.exit(0));

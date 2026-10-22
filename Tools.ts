@@ -510,11 +510,16 @@ export namespace Tools {
   // -------
 
   // a device's link joins its sign-in's device on host, and is sent its
-  // jobs; the device's name
-  export function attach(tools: Tools, term: string, host: string, who: string, link: Link): string {
+  // jobs; the device's name. A name is another sign-in's while it is kept
+  // (a link lost keeps it) or has a live link; else it is taken over
+  export function attach(tools: Tools, term: string, host: string, who: string, link: Link, kept: Set<string>): string {
+    const held = (d: Device | undefined) => d !== undefined && d.who !== who && (kept.has(d.who) || [...d.terms.values()].some((t) => t.live()));
     let name = host;
-    for (let k = 2; (tools.devices.get(name)?.who ?? who) !== who; k++) {
+    for (let k = 2; held(tools.devices.get(name)); k++) {
       name = host + "-" + k;
+    }
+    if (tools.devices.get(name)?.who !== who) {
+      Tools.forget(tools, name);
     }
     const d = tools.devices.get(name) ?? { who, terms: new Map(), jobs: new Map(), skills: [] };
     d.terms.set(term, link);
@@ -541,6 +546,29 @@ export namespace Tools {
     for (const job of d.jobs.values()) {
       if (job.term === term) {
         job.end({ text: "The device " + device + " that ran this stopped.", fail: true });
+      }
+    }
+  }
+
+  // a device gone with its sign-in: its links and jobs end, its name is
+  // free
+  export function forget(tools: Tools, device: string): void {
+    const d = tools.devices.get(device);
+    if (d === undefined) {
+      return;
+    }
+    tools.devices.delete(device);
+    d.terms.clear();
+    for (const job of [...d.jobs.values()]) {
+      job.end({ text: "The device " + device + " that ran this was signed out.", fail: true });
+    }
+  }
+
+  // every device whose sign-in isn't kept forgotten
+  export function prune(tools: Tools, kept: Set<string>): void {
+    for (const [name, d] of [...tools.devices]) {
+      if (!kept.has(d.who)) {
+        Tools.forget(tools, name);
       }
     }
   }
