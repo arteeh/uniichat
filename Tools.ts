@@ -42,10 +42,12 @@ export type { Live };
 // Types
 // =====
 
-// a device: its sign-in (a session's hash), its links by tab (none:
-// closed), jobs by id, and its skills as last looked at (Tools.look)
+// a device: its sign-in (a session's hash), the host it said it is
+// (its name may be host-2...), its links by tab (none: closed), jobs by
+// id, and its skills as last looked at (Tools.look)
 type Device = {
   who    : string;
+  host   : string;
   terms  : Map<string, Link>;
   jobs   : Map<string, Running>;
   skills : Skill[];
@@ -509,19 +511,23 @@ export namespace Tools {
   // Devices
   // -------
 
-  // a device's link joins its sign-in's device on host, and is sent its
-  // jobs; the device's name. A name is another sign-in's while it is kept
+  // a device's link joins its sign-in's device on host, under the name it
+  // has (a reconnect is the same device, its jobs kept, even if a name
+  // before it was freed since), and is sent its jobs; the device's name.
+  // A new one takes host, else host-2, ...: a name is held by this
+  // sign-in's other devices, and by another sign-in's while that is kept
   // (a link lost keeps it) or has a live link; else it is taken over
   export function attach(tools: Tools, term: string, host: string, who: string, link: Link, kept: Set<string>): string {
-    const held = (d: Device | undefined) => d !== undefined && d.who !== who && (kept.has(d.who) || [...d.terms.values()].some((t) => t.live()));
-    let name = host;
-    for (let k = 2; held(tools.devices.get(name)); k++) {
+    const own = [...tools.devices].find(([, d]) => d.who === who && d.host === host)?.[0];
+    const held = (d: Device | undefined) => d !== undefined && (d.who === who || kept.has(d.who) || [...d.terms.values()].some((t) => t.live()));
+    let name = own ?? host;
+    for (let k = 2; own === undefined && held(tools.devices.get(name)); k++) {
       name = host + "-" + k;
     }
-    if (tools.devices.get(name)?.who !== who) {
+    if (own === undefined) {
       Tools.forget(tools, name);
     }
-    const d = tools.devices.get(name) ?? { who, terms: new Map(), jobs: new Map(), skills: [] };
+    const d = tools.devices.get(name) ?? { who, host, terms: new Map(), jobs: new Map(), skills: [] };
     d.terms.set(term, link);
     tools.devices.set(name, d);
     Tools.sync(d, term, () => true);
