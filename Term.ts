@@ -80,9 +80,10 @@ const SINCE  = /\bsince +(\d{4}-\d\d-\d\d)\b/;
 const EXPORT = /\.(zip|json)$/i;
 const HOW = "Pick with /import [claude] [chatgpt] [since 2026-06-01] [tools] [sessions] [-#n] [<export>.zip] [go] (-#n: not session n; go: import); /import pause or resume: the import running. Exports, on each website: " + Object.entries(Import.EXPORTS).map(([app, how]) => app + ": " + how).join("; ") + "; it emails you a zip.";
 
-// the keys on an agent's page, which has no input: a tab back, quit and
-// suspend; none that types, sends or moves the pick
-const PAGE_KEYS = ["Tab", "Ctrl+D", "Ctrl+Z"];
+// the keys on an agent's page, which has no input: a tab back, quit,
+// suspend and Esc (UniiChat's turn interrupted; agents go on); none that
+// types, sends or moves the pick
+const PAGE_KEYS = ["Tab", "Ctrl+D", "Ctrl+Z", "Esc"];
 
 // the pick's moves by Shift and an arrow
 const ARROWS: Record<string, Move> = { "Shift+Left": "prev", "Shift+Right": "next", "Shift+Up": "up", "Shift+Down": "down" };
