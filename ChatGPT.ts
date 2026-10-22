@@ -25,6 +25,7 @@ import type { Ask } from "./AskAI.ts";
 import type { Emit, Item, Refusal, Tool, Wire } from "./Agent.ts";
 import { OpenAI, type State } from "./OpenAI.ts";
 import * as config from "./Config.ts";
+import { write_whole } from "./Write.ts";
 
 // Types
 // =====
@@ -115,9 +116,7 @@ export namespace ChatGPT {
   // written whole (a temp file renamed over it), owner only, its dir made
   export function save(auth: Auth): void {
     fs.mkdirSync(path.dirname(config.CHATGPT), { recursive: true, mode: 0o700 });
-    const tmp = config.CHATGPT + "." + process.pid + ".tmp";
-    fs.writeFileSync(tmp, JSON.stringify(auth, null, 2) + "\n", { mode: 0o600 });
-    fs.renameSync(tmp, config.CHATGPT);
+    write_whole(config.CHATGPT, JSON.stringify(auth, null, 2) + "\n");
   }
 
   // a sign-in from a token response (old: the tokens it refreshed)

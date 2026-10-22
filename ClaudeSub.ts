@@ -53,8 +53,9 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import type { Options, Query, SDKMessage, SDKRateLimitInfo, SDKUserMessage, SpawnOptions } from "@anthropic-ai/claude-agent-sdk";
 import { AGAIN, AskAI, type Ask, type End, type Event, type Img, type Say, type Try } from "./AskAI.ts";
-import { Agent, BUSY, LIMIT, LONG, type Emit, type Hold } from "./Agent.ts";
+import { Agent, BUSY, LIMIT, type Emit, type Hold } from "./Agent.ts";
 import { Anthropic } from "./Anthropic.ts";
+import { Machine } from "./Machine.ts";
 import { live_push, type Live } from "./View.ts";
 import * as config from "./Config.ts";
 
@@ -216,16 +217,7 @@ export namespace ClaudeSub {
       return true;
     }
     const pids = fs.existsSync(users) ? fs.readdirSync(users).map(Number) : [];
-    return pids.some((pid) => pid > 0 && ClaudeSub.alive(pid));
-  }
-
-  export function alive(pid: number): boolean {
-    try {
-      process.kill(pid, 0);
-      return true;
-    } catch (err: any) {
-      return err?.code === "EPERM";
-    }
+    return pids.some((pid) => pid > 0 && Machine.alive(pid));
   }
 
   // the SDK, loaded once (a test hands in its own)
@@ -446,21 +438,9 @@ export namespace ClaudeSub {
     if (server === "") {
       return null;
     }
-    const out = await ClaudeSub.race(code.q.setMcpServers(ClaudeSub.mcp(server)), signal);
+    const out = await Agent.race(code.q.setMcpServers(ClaudeSub.mcp(server)), signal);
     const err = out?.errors?.unii;
     return err === undefined ? null : "claude-sub couldn't reach UniiChat's tools: " + err;
-  }
-
-  // a promise's value, or null once `signal` aborts
-  export function race<T>(go: Promise<T>, signal: AbortSignal): Promise<T | null> {
-    go.catch(() => {});
-    let drop = () => {};
-    const stopped = new Promise<null>((done) => {
-      const stop = () => done(null);
-      signal.aborted ? stop() : signal.addEventListener("abort", stop, { once: true });
-      drop = () => signal.removeEventListener("abort", stop);
-    });
-    return Promise.race([go, stopped]).finally(drop);
   }
 
   // Usage limits
@@ -537,7 +517,7 @@ export namespace ClaudeSub {
     // a limit's wait, or the call's end if its fallback goes on instead,
     // or it is a subagent's (Agent.ts)
     const out = (ms: number, until: number | null, why: string): Partial<End> | null => {
-      if (ms < LONG || (ask.agent !== true && (ask.fallback !== true || acted.v))) {
+      if (!Agent.ends(ask, acted.v, ms)) {
         return null;
       }
       const r = Agent.limit_off(Agent.fail(why, []), until, ask).refusal!;

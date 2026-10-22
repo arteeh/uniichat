@@ -11,17 +11,16 @@
 // (Term.ts, Device.ts) posts a token it made (/api/login) and waits
 // (/api/wait) while the owner opens the link it prints in a browser
 // signed in, and types the code it shows there (in no link). The iOS
-// app's links open it (AASA); its phones get each turn's last message
-// (APNs), as do browsers that turned notifications on (Web Push,
-// Push.ts).
+// app's links open it (AASA). Its phones' and browsers' push
+// subscriptions are kept here; Push.ts sends them each turn's last
+// message.
 
 import { Database } from "bun:sqlite";
 import * as crypto from "node:crypto";
 import * as fs from "node:fs";
-import * as http2 from "node:http2";
 import * as config from "./Config.ts";
 import { Disk } from "./Disk.ts";
-import { Push, type Sub } from "./Push.ts";
+import { Push } from "./Push.ts";
 
 // Types
 // =====
@@ -51,16 +50,8 @@ const LINK  = 15 * 60 * 1000;
 const WAIT  = 5 * 60 * 1000;
 const ASKS  = 10;
 
-// the connection to APNs, kept open as Apple asks, and the token its
-// requests carry, signed again past 40 minutes (Apple takes 20 to 60)
-const PUSH = { link: null as http2.ClientHttp2Session | null, jwt: "", at: 0, by: "" };
-const PUSH_AGE = 40 * 60 * 1000;
-
 // the browsers that get pushes at once (the oldest beyond go)
 const WEB_PUSHES = 32;
-
-// how much of a message a push shows
-const GIST = 200;
 
 const SCHEMA = `
 create table if not exists sessions (hash text primary key, what text not null default '');
@@ -142,88 +133,6 @@ export namespace Owner {
   // server's files are (who can, owns them)
   export function cli(): void {
     console.log("Open this link in your browser within 15 minutes to sign in (it works once):\n\n  " + config.SITE + "/auth?t=" + Owner.ticket({ session: null, what: "" }) + "\n");
-  }
-
-  // Push
-  // ----
-
-  // the start of a message, to every phone (a push token goes with its
-  // sign-in); a phone APNs no longer knows is forgotten
-  export function push(text: string): void {
-    if (!config.APNS || !config.KEYS.apns) {
-      return;
-    }
-    const db = Owner.open();
-    const phones = db.query("select token from pushes").all() as { token: string }[];
-    const body = JSON.stringify({ aps: { alert: { body: Owner.gist(text) }, sound: "default" } });
-    for (const { token } of phones) {
-      const link = Owner.apns();
-      const head = { ":method": "POST", ":path": "/3/device/" + token, authorization: "bearer " + Owner.apns_jwt(), "apns-topic": config.APPLE.replace(/^[^.]*\./, ""), "apns-push-type": "alert" };
-      const req = link.request(head);
-      let out = "";
-      req.setEncoding("utf8");
-      req.on("data", (got) => (out += got));
-      req.on("error", (err) => console.error("push: " + err.message));
-      req.on("end", () => {
-        if (/Unregistered|BadDeviceToken/.test(out)) {
-          db.query("delete from pushes where token = ?").run(token);
-        } else if (out !== "") {
-          console.error("push: " + out);
-        }
-      });
-      req.end(body);
-    }
-  }
-
-  // what a push shows of a message: its start, on one line
-  export function gist(text: string): string {
-    return text.replace(/\s+/g, " ").slice(0, GIST);
-  }
-
-  // the start of a message, to every browser that turned notifications on
-  // (sw.js shows it); one its push service no longer knows (404, 410) is
-  // forgotten
-  export function web_push(text: string): void {
-    const db = Owner.open();
-    const subs = db.query("select endpoint, p256dh, auth from web_pushes").all() as Sub[];
-    const body = JSON.stringify({ text: Owner.gist(text) });
-    for (const sub of subs) {
-      Push.send(sub, body).then((status) => {
-        if (status === 404 || status === 410) {
-          db.query("delete from web_pushes where endpoint = ?").run(sub.endpoint);
-        } else if (status !== 0 && (status < 200 || status > 299)) {
-          console.error("web push: " + new URL(sub.endpoint).host + ": HTTP " + status);
-        }
-      });
-    }
-  }
-
-  // the connection to APNs, opened again if it closed
-  export function apns(): http2.ClientHttp2Session {
-    if (PUSH.link === null || PUSH.link.closed || PUSH.link.destroyed) {
-      const link = (PUSH.link = http2.connect("https://api.push.apple.com"));
-      link.on("error", (err) => console.error("push: " + err.message));
-      link.on("close", () => PUSH.link === link && (PUSH.link = null));
-    }
-    return PUSH.link!;
-  }
-
-  // the token pushes go with: the team's, signed by the key config.APNS
-  // names; signed again if old, or if the key, its id or the team changed
-  // since (the settings page sets them: Settings.ts)
-  export function apns_jwt(): string {
-    const by = Owner.hash(config.APNS + "\0" + config.APPLE + "\0" + config.KEYS.apns);
-    if (Date.now() - PUSH.at > PUSH_AGE || PUSH.by !== by) {
-      const b64 = (obj: object) => Buffer.from(JSON.stringify(obj)).toString("base64url");
-      const head = b64({ alg: "ES256", kid: config.APNS }) + "." + b64({ iss: config.APPLE.split(".")[0], iat: Math.floor(Date.now() / 1000) });
-      const der = Buffer.from(config.KEYS.apns.replace(/-----[^-]+-----|\s/g, ""), "base64");
-      const key = crypto.createPrivateKey({ key: der, format: "der", type: "pkcs8" });
-      const sig = crypto.sign("sha256", Buffer.from(head), { key, dsaEncoding: "ieee-p1363" });
-      PUSH.jwt = head + "." + sig.toString("base64url");
-      PUSH.at = Date.now();
-      PUSH.by = by;
-    }
-    return PUSH.jwt;
   }
 
   // Acts

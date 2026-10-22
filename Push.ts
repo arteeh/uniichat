@@ -1,17 +1,21 @@
 // Push
 // ====
-// Web Push (RFC 8030) with no vendor's account: the server's own VAPID
+// Each turn's last message to the owner's phones (the iOS app, by APNs)
+// and browsers (notify). Web Push (RFC 8030) with no vendor's account: the server's own VAPID
 // key pair (RFC 8292), made at its first start and kept beside its config
 // (config.DIR/vapid.json; a new pair loses every browser's subscription),
 // signs each request, and each message is encrypted to its browser's
 // keys (RFC 8291: aes128gcm, RFC 8188, one record), so the push service
 // (Google's, Mozilla's, Apple's, as the browser picked) reads nothing.
 
+import type { Database } from "bun:sqlite";
 import * as crypto from "node:crypto";
 import * as dns from "node:dns";
 import * as fs from "node:fs";
+import * as http2 from "node:http2";
 import * as net from "node:net";
 import * as config from "./Config.ts";
+import { write_whole } from "./Write.ts";
 
 // Types
 // =====
@@ -55,8 +59,16 @@ for (const cidr of ["0.0.0.0/8", "10.0.0.0/8", "100.64.0.0/10", "127.0.0.0/8", "
   INSIDE.addSubnet(ip, Number(bits), net.isIPv6(ip) ? "ipv6" : "ipv4");
 }
 
+// how much of a message a push shows
+const GIST = 200;
+
 // Globals
 // =======
+
+// the connection to APNs, kept open as Apple asks, and the token its
+// requests carry, signed again past 40 minutes (Apple takes 20 to 60)
+const PUSH = { link: null as http2.ClientHttp2Session | null, jwt: "", at: 0, by: "" };
+const PUSH_AGE = 40 * 60 * 1000;
 
 // the key pair read (null: vapid.json is broken, so no web push)
 let KEYS: Keys | null | undefined;
@@ -65,6 +77,90 @@ let KEYS: Keys | null | undefined;
 // ====
 
 export namespace Push {
+
+  // a turn's last message, to every phone and browser of the owner's
+  export function notify(db: Database, text: string): void {
+    Push.phones(db, text);
+    Push.browsers(db, text);
+  }
+
+  // the start of a message, to every phone (a push token goes with its
+  // sign-in); a phone APNs no longer knows is forgotten
+  export function phones(db: Database, text: string): void {
+    if (!config.APNS || !config.KEYS.apns) {
+      return;
+    }
+        const phones = db.query("select token from pushes").all() as { token: string }[];
+    const body = JSON.stringify({ aps: { alert: { body: Push.gist(text) }, sound: "default" } });
+    for (const { token } of phones) {
+      const link = Push.apns();
+      const head = { ":method": "POST", ":path": "/3/device/" + token, authorization: "bearer " + Push.apns_jwt(), "apns-topic": config.APPLE.replace(/^[^.]*\./, ""), "apns-push-type": "alert" };
+      const req = link.request(head);
+      let out = "";
+      req.setEncoding("utf8");
+      req.on("data", (got) => (out += got));
+      req.on("error", (err) => console.error("push: " + err.message));
+      req.on("end", () => {
+        if (/Unregistered|BadDeviceToken/.test(out)) {
+          db.query("delete from pushes where token = ?").run(token);
+        } else if (out !== "") {
+          console.error("push: " + out);
+        }
+      });
+      req.end(body);
+    }
+  }
+
+  // what a push shows of a message: its start, on one line
+  export function gist(text: string): string {
+    return text.replace(/\s+/g, " ").slice(0, GIST);
+  }
+
+  // the start of a message, to every browser that turned notifications on
+  // (sw.js shows it); one its push service no longer knows (404, 410) is
+  // forgotten
+  export function browsers(db: Database, text: string): void {
+        const subs = db.query("select endpoint, p256dh, auth from web_pushes").all() as Sub[];
+    const body = JSON.stringify({ text: Push.gist(text) });
+    for (const sub of subs) {
+      Push.send(sub, body).then((status) => {
+        if (status === 404 || status === 410) {
+          db.query("delete from web_pushes where endpoint = ?").run(sub.endpoint);
+        } else if (status !== 0 && (status < 200 || status > 299)) {
+          console.error("web push: " + new URL(sub.endpoint).host + ": HTTP " + status);
+        }
+      });
+    }
+  }
+
+  // the connection to APNs, opened again if it closed
+  export function apns(): http2.ClientHttp2Session {
+    if (PUSH.link === null || PUSH.link.closed || PUSH.link.destroyed) {
+      const link = (PUSH.link = http2.connect("https://api.push.apple.com"));
+      link.on("error", (err) => console.error("push: " + err.message));
+      link.on("close", () => PUSH.link === link && (PUSH.link = null));
+    }
+    return PUSH.link!;
+  }
+
+  // the token pushes go with: the team's, signed by the key config.APNS
+  // names; signed again if old, or if the key, its id or the team changed
+  // since (the settings page sets them: Settings.ts)
+  export function apns_jwt(): string {
+    const by = crypto.createHash("sha256").update(config.APNS + "\0" + config.APPLE + "\0" + config.KEYS.apns).digest("hex");
+    if (Date.now() - PUSH.at > PUSH_AGE || PUSH.by !== by) {
+      const b64 = (obj: object) => Buffer.from(JSON.stringify(obj)).toString("base64url");
+      const head = b64({ alg: "ES256", kid: config.APNS }) + "." + b64({ iss: config.APPLE.split(".")[0], iat: Math.floor(Date.now() / 1000) });
+      const der = Buffer.from(config.KEYS.apns.replace(/-----[^-]+-----|\s/g, ""), "base64");
+      const key = crypto.createPrivateKey({ key: der, format: "der", type: "pkcs8" });
+      const sig = crypto.sign("sha256", Buffer.from(head), { key, dsaEncoding: "ieee-p1363" });
+      PUSH.jwt = head + "." + sig.toString("base64url");
+      PUSH.at = Date.now();
+      PUSH.by = by;
+    }
+    return PUSH.jwt;
+  }
+
 
   // the server's key pair, read, or made at the first start (Server.ts);
   // null, logged, if vapid.json isn't one: made anew,
@@ -75,8 +171,7 @@ export namespace Push {
     }
     if (!fs.existsSync(FILE)) {
       const { privateKey } = crypto.generateKeyPairSync("ec", { namedCurve: "P-256" });
-      fs.writeFileSync(FILE + ".new", JSON.stringify(privateKey.export({ format: "jwk" })) + "\n", { mode: 0o600 });
-      fs.renameSync(FILE + ".new", FILE);
+      write_whole(FILE, JSON.stringify(privateKey.export({ format: "jwk" })) + "\n");
     }
     try {
       const jwk = JSON.parse(fs.readFileSync(FILE, "utf8"));
@@ -174,7 +269,7 @@ export namespace Push {
   }
 
   // who a push service may write to about this server's pushes: its
-  // site, if https, else its sign-in mail's sender
+  // site, if https, else a mailto at its host
   export function subject(): string {
     return config.SITE.startsWith("https:") ? config.SITE : "mailto:noreply@" + new URL(config.SITE).hostname;
   }

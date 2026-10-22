@@ -18,6 +18,7 @@
 import * as fs from "node:fs";
 import * as config from "./Config.ts";
 import { LABELS } from "./Pick.ts";
+import { write_whole } from "./Write.ts";
 
 // Types
 // =====
@@ -229,11 +230,11 @@ export namespace Settings {
     }
     try {
       if (Object.keys(keys).length > 0) {
-        config.config_write(config.KEYS_PATH, config.keys_text(kept), 0o600);
+        write_whole(config.KEYS_PATH, config.keys_text(kept), 0o600);
       }
       if (Object.keys(set).length > 0 || profiles !== undefined) {
         const mode = snap.file === null ? 0o600 : fs.statSync(config.FILE_PATH).mode & 0o777;
-        config.config_write(config.FILE_PATH, JSON.stringify(next, null, 2) + "\n", mode);
+        write_whole(config.FILE_PATH, JSON.stringify(next, null, 2) + "\n", mode);
       }
       config.config_reload();
     } catch (err: any) {
