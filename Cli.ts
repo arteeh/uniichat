@@ -7,11 +7,14 @@
 // device`, Device.ts) and the terminal chat (`unii [url]`, Term.ts),
 // these two with their files in ~/.config/unii (Client.ts). `unii
 // update` runs the newest release's installer, which replaces this
-// executable.
+// executable. On Windows only the device and the terminal run: the
+// server is Linux's and macOS's (WSL's on a Windows computer).
 //
 // Usage: USAGE (`unii help` prints it).
 
 import * as child from "node:child_process";
+import * as fs from "node:fs";
+import * as path from "node:path";
 import * as Update from "./Update.ts";
 
 const ARGS = process.argv.slice(2);
@@ -26,7 +29,7 @@ const USAGE = `Usage: unii [url]           the chat in this terminal (url: $UNII
                             service to keep it up)
        unii serve [port]    your UniiChat server, at http://127.0.0.1:8788
                             (another port: set its "site" too); data in
-                            ~/.unii ($UNII_DIR)
+                            ~/.unii ($UNII_DIR). Linux, macOS or WSL only
        unii serve link      a link that signs a browser in to the server
                             here (run it where the server runs)
        unii serve chatgpt [logout|status]
@@ -41,7 +44,7 @@ const USAGE = `Usage: unii [url]           the chat in this terminal (url: $UNII
                             sign one of them out (its open sockets close),
                             or all
        unii update          replace this unii with the fork's newest
-                            release (curl | sh, shown first)
+                            release (its installer, shown first)
        unii version         this unii's version
        unii help            this
 The terminal and the device keep their server and sign-in in
@@ -53,19 +56,34 @@ function fail(why: string): never {
   process.exit(1);
 }
 
+const WIN  = process.platform === "win32";
+const BUN  = /^bun(\.exe)?$/i.test(path.basename(process.execPath));
+
 // runs an installer: the one way unii changes. It replaces this
 // executable, wherever and however named; from source (bun) there is
-// none to replace. The command prints first, so one can run it alone.
+// none to replace. The command prints first, so one can run it alone:
+// on Windows a PowerShell one, its exit code the installer's
 function update(): void {
-  if (process.platform === "win32") {
-    fail("on Windows, build unii.exe again from the source (README).");
-  }
-  if (/^bun(\.exe)?$/.test(process.execPath.split("/").pop() ?? "")) {
+  if (BUN) {
     fail("this unii runs from source (bun): update it with git.");
   }
-  const cmd = Update.update_cmd(process.execPath);
+  const cmd = Update.update_cmd(process.execPath, WIN);
   console.error(cmd);
-  process.exitCode = child.spawnSync("sh", ["-c", cmd], { stdio: "inherit" }).status ?? 1;
+  const run = WIN ? [Bun.which("pwsh") ?? "powershell.exe", "-NoProfile", "-Command", "$ErrorActionPreference = 'Stop'; " + cmd + "; exit $LASTEXITCODE"] : ["sh", "-c", cmd];
+  process.exitCode = child.spawnSync(run[0], run.slice(1), { stdio: "inherit" }).status ?? 1;
+}
+
+// on Windows a running unii.exe can't be replaced, only renamed: the
+// installer leaves the one it replaced as unii.exe.old (or .old-<n>),
+// removed here once it no longer runs
+if (WIN && !BUN) {
+  const dir = path.dirname(process.execPath);
+  const old = path.basename(process.execPath) + ".old";
+  try {
+    for (const f of fs.readdirSync(dir).filter((f) => f.startsWith(old))) {
+      fs.rmSync(path.join(dir, f), { force: true });
+    }
+  } catch {}
 }
 
 const [cmd, sub, more] = REST;
@@ -79,6 +97,8 @@ if (cmd === undefined) {
   console.log("unii " + Update.VERSION);
 } else if (cmd === "update" && !odd([cmd]) && URL_ === undefined) {
   update();
+} else if (cmd === "serve" && WIN) {
+  fail("unii serve runs on Linux, macOS or WSL, not on Windows itself: run the server there, and unii device here (README).");
 } else if (cmd === "device" && !odd([cmd])) {
   await (await import("./Device.ts")).run(URL_);
 } else if (cmd === "serve" && sub === "chatgpt" && [undefined, "logout", "status"].includes(more) && !odd([cmd, sub, ...(more ? [more] : [])])) {
