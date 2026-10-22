@@ -425,6 +425,7 @@ export namespace Agent {
       await Machine.nap(ms, wake.signal);
     } finally {
       PARKED.delete(me);
+      Agent.poll_off(vendor);
       signal.removeEventListener("abort", end);
       hold.poke = () => {};
       if (parked) {
@@ -493,10 +494,22 @@ export namespace Agent {
     POLLS.set(vendor, timer);
   }
 
-  // `vendor`'s usage read: its limit cleared, its calls waiting wake
-  // (resume); else, while one waits, it is read again in POLL. Its token
-  // got counts in READING, as a call's (Agent.token)
+  // `vendor`'s usage read due cancelled once no call waits for it
+  export function poll_off(vendor: Vendor): void {
+    if (![...PARKED].some((p) => p.vendor === vendor)) {
+      clearTimeout(POLLS.get(vendor));
+      POLLS.delete(vendor);
+    }
+  }
+
+  // `vendor`'s usage read, if a call still waits for it: its limit
+  // cleared, its calls waiting wake (resume); else, while one waits, it
+  // is read again in POLL. Its token got counts in READING, as a call's
+  // (Agent.token)
   export async function poll(vendor: Vendor): Promise<boolean> {
+    if (![...PARKED].some((p) => p.vendor === vendor)) {
+      return false;
+    }
     const clear = await (USAGE[vendor]?.() ?? Promise.resolve(null)).catch(() => null);
     if (clear === true) {
       Agent.resume(vendor);
