@@ -56,8 +56,19 @@ newest release. The installer also moves data from older versions.
    the server's computer, then pick `claude-sub` or `openai-sub`. Each
    takes `logout` or `status`.
 4. **Add devices.** On each computer Unii may work on, run `unii device
-   https://your-server` (as a service to keep it up). Its work dir is
-   `~/.unii/work`; its settings are in `~/.config/unii/device.json`.
+   https://your-server` once by hand: it prints a link and a code to
+   confirm in your browser. Its work dir is `~/.unii/work`; its settings
+   are in `~/.config/unii/device.json`. Then keep it up as a service,
+   e.g. `~/.config/systemd/user/unii-device.service`:
+
+       [Service]
+       ExecStart=%h/.local/bin/unii device
+       Restart=always
+       [Install]
+       WantedBy=default.target
+
+   `systemctl --user enable --now unii-device` (and `loginctl
+   enable-linger` to run it while you're logged out).
 
 The server's settings are in `~/.unii/config.json` (most are on the
 Settings page). Each may also be set as `UNII_<KEY>`, which wins. Besides
@@ -69,7 +80,7 @@ Settings page). Each may also be set as `UNII_<KEY>`, which wins. Besides
 - `claude_sub`, `claude`, `chatgpt`: where the plans' sign-ins are kept.
 - `apple`, `apns`: the iOS app's (ios/) App ID and push key id.
 
-The prompts: `~/.unii/prompt.md` (every turn; its subagents read it too)
+The prompts: `~/.unii/prompt.md` (every turn; subagents get it too)
 and `~/.unii/compact.md` (every summary, nothing else) replace the
 built-in `prompt.txt` and `compact.txt`. Edit them on the Settings page.
 
@@ -99,6 +110,13 @@ run on that device:
 
 **Can others use my server?** No: a server has one owner. Anthropic and
 OpenAI don't allow sharing a plan, either.
+
+**Upgrading from arteeh.16 or older?** Stop the server first (`systemctl
+--user stop unii-serve`), run the installer, then start it: it moves your
+data to the new layout and won't while a server runs. Your user prompt is
+then fixed in `prompt.md` (empty it on the Settings page to get later
+built-in changes). The terminal is no device any more: set up `unii
+device` (above) on each computer Unii should work on.
 
 License
 -------
