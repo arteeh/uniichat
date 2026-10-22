@@ -832,8 +832,7 @@ export namespace Chat {
     Chat.change(chat);
   }
 
-  // an import paused, at once (Memory.pause), or resumed (short of credit,
-  // it waits for it)
+  // an import paused, at once (Memory.pause), or resumed
   export function go(chat: Chat, on: boolean): Answer {
     if (chat.batch === null) {
       return { error: "No import is running." };
@@ -1101,7 +1100,7 @@ export namespace Chat {
   // an act changes the chat. One that would change it again if done again
   // (a post adds again; a stop ends what runs by then) is recorded: logged
   // (Chat.mark) before any effect off the log, or as the last page of
-  // what it logs; each costs credit or ends what credit started. The rest
+  // what it logs. The rest
   // set state (a pick: view.json; an import's hold: its file) or end a
   // job, so done again they change nothing, and only that state is kept,
   // written over; a stop with nothing to stop is one (so one a client

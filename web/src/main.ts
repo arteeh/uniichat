@@ -108,7 +108,7 @@ async function boot(): Promise<void> {
 }
 
 // whether signed in (null: no, as the server refuses the session);
-// any other answer (a network past its limit, a deploy, no connection)
+// any other answer (a restart, no connection)
 // says nothing of who, so it is asked again, saying so while it lasts (the
 // app opened from sw.js's shell with the server down)
 async function boot_me(): Promise<any> {
