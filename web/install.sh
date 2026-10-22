@@ -1,9 +1,9 @@
 #!/bin/sh
-# Installs unii, the UniiChat terminal, as released: this runs the
-# official installer (https://uniichat.com/install.sh), which says what it
-# installs and where. To run unii from this source instead: bun Term.ts.
-# Once a day unii asks bend-lang.com for the latest version (its version,
-# OS and CPU type, whether this computer ever self-hosted, nothing else);
+# Installs unii, the UniiChat terminal, from arteeh's fork: this runs the
+# installer of the fork's newest GitHub release, which says what it
+# installs and where (here ~/.local/bin/unii; set UNII_BIN to change). To
+# run unii from this source instead: bun Term.ts.
+# Once a day unii asks GitHub which release is the newest;
 # UNII_NO_TELEMETRY=1 turns that off.
 set -eu
-curl -fsSL https://uniichat.com/install.sh | sh
+curl -fsSL https://github.com/arteeh/uniichat/releases/latest/download/install.sh | UNII_BIN="${UNII_BIN:-$HOME/.local/bin/unii}" sh
