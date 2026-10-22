@@ -68,6 +68,7 @@ import manifest from "./web/manifest.webmanifest" with { type: "file" };
 import sw_js from "./web/sw.js" with { type: "file" };
 import icon_192 from "./web/icon-192.png" with { type: "file" };
 import icon_512 from "./web/icon-512.png" with { type: "file" };
+import icon_mask_192 from "./web/icon-maskable-192.png" with { type: "file" };
 import icon_mask from "./web/icon-maskable-512.png" with { type: "file" };
 import icon_apple from "./web/apple-touch-icon.png" with { type: "file" };
 
@@ -281,6 +282,7 @@ const WEB: Record<string, string> = {
   "/favicon.svg"    : mark_svg,
   "/icon-192.png"   : icon_192,
   "/icon-512.png"   : icon_512,
+  "/icon-maskable-192.png": icon_mask_192,
   "/icon-maskable-512.png": icon_mask,
   "/install.sh"     : install_sh,
   "/legal.css"      : legal_css,
