@@ -62,15 +62,20 @@ const BUN  = /^bun(\.exe)?$/i.test(path.basename(process.execPath));
 // runs an installer: the one way unii changes. It replaces this
 // executable, wherever and however named; from source (bun) there is
 // none to replace. The command prints first, so one can run it alone:
-// on Windows a PowerShell one, its exit code the installer's
+// on Windows a PowerShell one, its exit code the installer's (install.ps1
+// ends setting $LASTEXITCODE, as an `exit` would close the window of one
+// who runs it by hand; 1 until it does, so one that never got that far
+// failed). The installer is told this process's pid (UNII_UPDATER): on
+// Windows it refuses while a device or server runs, but not for this
 function update(): void {
   if (BUN) {
     fail("this unii runs from source (bun): update it with git.");
   }
   const cmd = Update.update_cmd(process.execPath, WIN);
   console.error(cmd);
-  const run = WIN ? [Bun.which("pwsh") ?? "powershell.exe", "-NoProfile", "-Command", "$ErrorActionPreference = 'Stop'; " + cmd + "; exit $LASTEXITCODE"] : ["sh", "-c", cmd];
-  process.exitCode = child.spawnSync(run[0], run.slice(1), { stdio: "inherit" }).status ?? 1;
+  const run = WIN ? [Bun.which("pwsh") ?? "powershell.exe", "-NoProfile", "-Command", "$ErrorActionPreference = 'Stop'; $global:LASTEXITCODE = 1; " + cmd + "; exit $LASTEXITCODE"] : ["sh", "-c", cmd];
+  const env = { ...process.env, UNII_UPDATER: String(process.pid) };
+  process.exitCode = child.spawnSync(run[0], run.slice(1), { stdio: "inherit", env }).status ?? 1;
 }
 
 // on Windows a running unii.exe can't be replaced, only renamed: the
