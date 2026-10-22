@@ -8,22 +8,17 @@
 // (or the line it was logged with) in at most NODE bytes, node (l,i)
 // merges (l-1,2i) and (l-1,2i+1). A source that fits is its node; else a
 // compaction writes it: a call like a turn, on the config's COMPACTOR,
-// with the same system prompt (`share`, Server.ts), no tools, and its
+// with the compaction prompt (`share`, Server.ts), no tools, and its
 // own view (`seen`) up to the node's `ctx`; a line too long is asked
 // anew (build). The call asks till it is answered (AskAI patient: an
 // outage only delays a node, never harms it); answered with no line (a
 // refusal: its input's doing), its node is its source clipped. Every
 // node builds so, an imported one too; the import's are a side of their
 // own (`side`: the chat's turns don't wait on them). A side is held as
-// the user's credit says (its payer refusing a call holds it:
-// Billing.ts), an import's also as its user does (`hold`; a pause cuts
-// its calls): its nodes wait, with no call, till it goes on, and a turn
-// needing the chat's is told why (settle), never left waiting. Of each
-// side, JOBS build at once, in the order the messages came. A try cut
-// after a line keeps the best one. A chat
-// moving to another process (a deploy) takes its summaries along, their
-// calls going on where they began (give, take): none is cut or asked
-// again.
+// held as its user does (`hold`; a pause cuts its calls): its nodes
+// wait, with no call, till it goes on. Of each side, JOBS build at once,
+// in the order the messages came. A try cut after a line keeps the best
+// one.
 //
 // A view lists nodes covering the chat to its end, oldest first; each message
 // it reaches appends its node. Past `high` bytes, a batch merges the adjacent
@@ -51,7 +46,7 @@
 // hash; an agent's log in docs/agent/<Name>.jsonl.
 
 import * as fs from "node:fs";
-import { AskAI, type Ask, type Bill, type Block, type Call, type Img, type Kind, type Pay, type Say, type Served } from "./AskAI.ts";
+import { AskAI, type Ask, type Block, type Call, type Img, type Kind, type Say } from "./AskAI.ts";
 import { clip_page, clip_pages } from "./Clip.ts";
 import * as config from "./Config.ts";
 import { Disk } from "./Disk.ts";
@@ -78,13 +73,11 @@ type Part = { l: number; i: number };
 // bytes past which it merges to half
 type View = { parts: Part[]; size: number; batch: boolean; high: number };
 
-// a summary running: its node, what it serves
+// a summary running: its node, its side's kind
 type Sum = Part & { kind: Served };
+type Served = "compactor" | "import";
 
-// a summary running as its chat moved (Memory.give): its node, its call's id
-export type Given = [number, number, string];
-
-// what a compaction shares with the chat's turns: all but the blocks
+// what a compaction's call takes but its blocks (Server.ts share)
 export type Share = Omit<Ask, "blocks">;
 
 // a log: of messages (main) or of nodes (tree)
@@ -111,9 +104,8 @@ type Saved = Kept & { seen?: Kept; main: End; tree: End; pick: object | null; go
 // each log is indexed; busy: nodes building, by slot, with their side;
 // sides: the side by the last message of nodes not built; calls: those
 // building's calls; hold: why each side is held (null: it builds);
-// wait: checks run as the views change; share: what
-// compactions share with the chat's turns; pay: what pays them (none:
-// free); made, acted: told of each node built, of each act indexed
+// wait: checks run as the views change; share: a compaction's call but
+// its blocks; made, acted: told of each node built, of each act indexed
 export type Memory = {
   dir    : string;
   fds    : Map<string, number>;
@@ -137,7 +129,6 @@ export type Memory = {
   done   : boolean;
   wait   : Set<() => void>;
   share  : () => Share;
-  pay?   : Pay;
   made?  : (l: number, i: number) => void;
   acted  : (id: string, ans: object) => void;
 };
@@ -690,11 +681,11 @@ export namespace Memory {
   }
 
   // a node cut (its side held, or the chat ended: Memory.stop) builds as
-  // it goes on; call: one running for it already (Memory.take)
-  export function job(mem: Memory, l: number, i: number, text: string, call: Call | null = null): void {
+  // it goes on
+  export function job(mem: Memory, l: number, i: number, text: string): void {
     const key = Memory.slot(l, i);
     mem.busy.set(key, Memory.side(mem, l, i));
-    Memory.build(mem, l, i, text, call).finally(() => {
+    Memory.build(mem, l, i, text).finally(() => {
       mem.busy.delete(key);
       Memory.pump(mem);
       Memory.fit(mem);
@@ -703,54 +694,27 @@ export namespace Memory {
     });
   }
 
-  // no node starts again (the chat moves: Memory.give)
-  export function halt(mem: Memory): void {
-    mem.done = true;
-  }
-
-  // nor runs: those running are cut
+  // no node starts again, nor runs: those running are cut
   export function stop(mem: Memory): void {
-    Memory.halt(mem);
+    mem.done = true;
     mem.calls.forEach((_, call) => call.stop());
     mem.fds.forEach((fd) => fs.closeSync(fd));
     mem.fds.clear();
   }
 
-  // the summaries running, as the chat moves to another process (Server.ts
-  // Chat.move): each node and its call, which runs on here as `far` moves
-  // it (its id); none is cut, nor asked again there
-  export function give(mem: Memory, far: (call: Call) => string): Given[] {
-    const given = [...mem.calls].map(([call, { l, i }]): Given => [l, i, far(call)]);
-    mem.calls.clear();
-    return given;
-  }
-
-  // the summaries a chat moved here was running (Memory.give) build here
-  // as their calls end there: `far` makes the call of an id, paid here
-  export function take(mem: Memory, given: Given[], far: (id: string, bill?: Bill) => Call): void {
-    for (const [l, i, id] of given) {
-      const text = Memory.source(mem, l, i)!;
-      Memory.job(mem, l, i, text, far(id, Memory.bill(mem, l, i, text)));
-    }
-  }
-
   // node (l,i)'s summary: its view to the node and its task, asked till
-  // a line fits, TRIES lines at most (fewer if the chat moves), the
+  // a line fits, TRIES lines at most (fewer if the chat ends), the
   // shortest kept. Each try sends those blocks, never a try's words or
   // thoughts; one after a line too long adds only its size and where the
   // limit cuts it (`over`): never more than the first and that note. No
   // line (a refusal: its input's doing): its source clipped; a try cut
-  // (a pause, a stop) or refused by its payer throws, unless a line came;
-  // one a deploy cut as it waited for a usage limit builds anew (pump)
-  export async function build(mem: Memory, l: number, i: number, text: string, call: Call | null): Promise<void> {
+  // (a pause, a stop) throws, unless a line came
+  export async function build(mem: Memory, l: number, i: number, text: string): Promise<void> {
     const task = { text: Memory.task(l, i) + text + "\n</input>", mark: false };
     const upto = Math.min(Memory.ctx(l, i), Memory.first(mem, 0, Memory.side(mem, l, i)));
     const blocks = [...Memory.view(mem, upto, mem.seen.parts), task];
     const lines: string[] = [];
-    let end = await Memory.compact(mem, l, i, call ?? Memory.ask(mem, l, i, text, blocks));
-    if (end.cut) {
-      return;
-    }
+    let end = await Memory.compact(mem, l, i, Memory.ask(mem, l, i, text, blocks));
     while (end.ok && end.text.trim() !== "") {
       const line = end.text.trim();
       lines.push(line);
@@ -775,11 +739,6 @@ export namespace Memory {
     return Memory.side(mem, l, i) === 1 ? "import" : "compactor";
   }
 
-  // what pays node (l,i)'s summary (none: free)
-  export function bill(mem: Memory, l: number, i: number, text: string): Bill | undefined {
-    return mem.pay?.(Memory.served(mem, l, i), Memory.ref({ l, i }), Memory.bytes(text));
-  }
-
   // nodes built: logged in one write, kept
   export function store(mem: Memory, parts: Array<Part & { text: string }>): void {
     Memory.log(mem, "tree", parts.map(({ l, i, text }) => ({ l, i, text, size: Memory.bytes(text) })));
@@ -800,8 +759,7 @@ export namespace Memory {
 
   // a call of node (l,i)'s summary, on the compactor
   export function ask(mem: Memory, l: number, i: number, text: string, blocks: Block[]): Call {
-    const bill = Memory.bill(mem, l, i, text);
-    return AskAI.ask({ ...mem.share(), ...Pick.ask(config.COMPACTOR), blocks, bill, patient: true, yields: Memory.served(mem, l, i) === "import" ? mem.dir : undefined }, () => {});
+    return AskAI.ask({ ...mem.share(), ...Pick.ask(config.COMPACTOR), blocks, patient: true, yields: Memory.served(mem, l, i) === "import" ? mem.dir : undefined }, () => {});
   }
 
   // a summary's try: its call's end, the call held in `calls` till then
@@ -972,7 +930,7 @@ ${Memory.cut(line)}| ← LIMIT`;
 
   // once the chat's messages before `end` are built (not an import's):
   // null; else why they won't be: "Stopped." (signal aborted), or why
-  // their side is held (no credit for them: Billing.ts book), so no
+  // their side is held, so no
   // turn or agent waits on summaries no call is building
   export function settle(mem: Memory, end: number, signal: AbortSignal): Promise<string | null> {
     return new Promise((resolve) => {
@@ -1083,12 +1041,12 @@ ${Memory.cut(line)}| ← LIMIT`;
     }
   }
 
-  // /export: the account, the messages, the summaries, the
+  // /export: the messages, the summaries, the
   // agents' logs, then every image, each its base64, read a PIECE at a time
-  export function* dump(mem: Memory, account: object): Generator<string> {
+  export function* dump(mem: Memory): Generator<string> {
     const ls = (sub: string) => (fs.existsSync(mem.dir + sub) ? fs.readdirSync(mem.dir + sub).sort() : []);
     let sep = "\n";
-    yield '{"account": ' + JSON.stringify(account) + ',\n"messages": [';
+    yield '{"messages": [';
     for (let i = 0; i < mem.count; i++) {
       const { kind, text, date, images, more } = Memory.message(mem, i)!;
       yield (i === 0 ? "\n" : ",\n") + JSON.stringify({ id: i, kind, text, date, images, more });

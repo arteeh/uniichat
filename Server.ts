@@ -1,68 +1,46 @@
 #!/usr/bin/env bun
 // Server
 // ======
-// The agent: chats that never end (Memory.ts), one per user signed in
-// (Cloud.ts), at config.DIR/users/<id>, and their views, terminals
-// (Term.ts) and browser tabs (web/), each one WebSocket (View.ts's Link)
-// carrying the chat's events and its acts (one with a body: a post to
-// /api/act), each done once (Chat.apply), within USERS' limit. A
-// terminal's socket names its device, which the agent's tools reach
-// (Tools.ts) until it quits.
+// The agent: one chat that never ends (Memory.ts), the owner's (Owner.ts),
+// at config.DIR/chat, and its views, terminals (Term.ts) and browser tabs
+// (web/), each one WebSocket (View.ts's Link) carrying the chat's events
+// and its acts (one with a body: a post to /api/act), each done once
+// (Chat.apply). A device (Device.ts) joins by a socket of its own, naming
+// itself; the agent's tools reach it (Tools.ts) until it quits.
 //
 // One turn at a time. A message is logged as it arrives; the running call
 // takes it between tool calls if it goes whole beside its view, else the
-// next call does, on the chat's pick (Pick.ts). Its paid calls ask its
-// wallet (Billing.ts), and what the billing refuses stops; a chat at
-// rest settles what it owes; one nobody views is let go.
-//
-// Alone, this process serves the site. Workers (config.WORKERS, behind a
-// proxy: README) each serve the users shard() gives them, under this
-// process (Main.supervise), which only routes. A deploy is a handover:
-// told so (SIGHUP), the supervisor starts each worker anew beside the
-// old one, on the same port; the old one takes no more connections and
-// gives the new one each chat once no post of it runs (Chat.give): its
-// work goes on there, the calls it runs (its turn's, agents', summaries')
-// going on where they started, fed straight to where the chat is (Main.away,
-// Main.far), and its views open again there at once (View.ts MOVE). It
-// ends once those calls do (a process that ran none, at once); one
-// waiting for a usage limit is cut, and goes on there as after a restart
-// (Main.away). A stop or crash cuts all: a start resumes what ran
-// (Chat.wake), told so. A chat's schedules come at their time, viewed or
-// not (Chat.ring).
+// next call does, on the chat's pick (Pick.ts). The chat stays open while
+// the server runs. A stop or crash cuts all: a start resumes what ran
+// (Chat.resume), told so. Its schedules come at their time, viewed or not
+// (Chat.ring).
 //
 // Usage: Server.ts [port]   (127.0.0.1; default 8788)
 
 import * as fs from "node:fs";
 import * as net from "node:net";
 import type { ServerWebSocket } from "bun";
-import { READING } from "./Agent.ts";
-import { AskAI, type Bill, type Grant, type Call, type End, type Event, type Kind, type Parked, type Say, type Sink } from "./AskAI.ts";
-import { Backup } from "./Backup.ts";
-import type { Wallet } from "./Billing.ts";
+import { AskAI, type Call, type Event, type Kind, type Parked } from "./AskAI.ts";
 import { clip_pages } from "./Clip.ts";
-import { Cloud, type Account, type User } from "./Cloud.ts";
 import { Disk } from "./Disk.ts";
-import { Mail } from "./Mail.ts";
 import { Mcp } from "./Mcp.ts";
 import * as Import from "./Import.ts";
-import { JOBS, Memory, type Given, type Msg as Log, type Share } from "./Memory.ts";
+import { JOBS, Memory, type Msg as Log, type Share } from "./Memory.ts";
 import { OpenAI, TRANSCRIBER } from "./OpenAI.ts";
+import { Owner } from "./Owner.ts";
 import { Pick } from "./Pick.ts";
-import { Price } from "./Price.ts";
+import { Push } from "./Push.ts";
 import { Reap } from "./Reap.ts";
 import { Settings } from "./Settings.ts";
 import * as Timer from "./Timer.ts";
-import { PROMPTS, SEARCHES, Tools, type Agent, type Live, type Moved as Kit } from "./Tools.ts";
-import { email_ask, FRAME, IMAGES, live_push, MOVE, PING, QUIT, SUMMARIES, TICK, TURN, WIRE, type Answer, type Part, type Server as Out, type Wait } from "./View.ts";
+import { PROMPTS, SEARCHES, Tools, type Agent, type Live } from "./Tools.ts";
+import { FRAME, IMAGES, live_push, PING, QUIT, SUMMARIES, TICK, TURN, WIRE, type Answer, type Part, type Server as Out, type Wait } from "./View.ts";
 import * as config from "./Config.ts";
 import hello_md from "./hello.md" with { type: "text" };
 import app_js from "./web/app.js" with { type: "file" };
 import index_html from "./web/index.html" with { type: "file" };
 import install_sh from "./web/install.sh" with { type: "file" };
-import legal_css from "./web/legal.css" with { type: "file" };
 import mark_svg from "./web/mark.svg" with { type: "file" };
-import experimental_jpg from "./web/experimental.jpg" with { type: "file" };
-import og_png from "./web/og.png" with { type: "file" };
 import style_css from "./web/style.css" with { type: "file" };
 import manifest from "./web/manifest.webmanifest" with { type: "file" };
 import sw_js from "./web/sw.js" with { type: "file" };
@@ -75,9 +53,9 @@ import icon_apple from "./web/apple-touch-icon.png" with { type: "file" };
 // Types
 // =====
 
-// a socket: its user, sign-in (hashed), its query's fields, its device,
-// the parts it was shown (Chat.teach)
-type Sock = ServerWebSocket<{ user: User; who: string; tab: string; wire: string | null; host: string | null; computer: boolean; work: string; shell: string | null; device: string | null; seen: Set<string> }>;
+// a socket: its sign-in (hashed), its query's fields, a device's name
+// (null: a view), the parts it was shown (Chat.teach)
+type Sock = ServerWebSocket<{ who: string; tab: string; wire: string | null; host: string | null; work: string; shell: string | null; device: string | null; seen: Set<string> }>;
 
 // a body: its file, its size so far
 type Body = { fh: fs.promises.FileHandle; size: number };
@@ -89,41 +67,35 @@ type Msg = { id: number; end: number };
 // then every message from it on
 type Eye = { parts: Part[]; from: number };
 
-// a goal check (Chat.check): its call (here, or by its ref as its chat
-// moves), the goal it asks of
-type Check<C> = { call: C; goal: string };
+// a goal check (Chat.check): its call, the goal it asks of
+type Check = { call: Call; goal: string };
 
-// an import as kept: messages [a, b), those sent (not notes), USD spent;
-// as run: by level what each node costs (micro-USD, Import.import_guess)
-// and how many are not built; their cost; its time (Chat.time) in all
+// an import as kept: messages [a, b), those sent (not notes), what it
+// spent (none: kept for an import a past version began); as run: by level
+// what each node weighs (Import.import_guess) and how many are not built;
+// their weight left; its time (Chat.time) in all
 type Kept  = { a: number; b: number; said: number; spent: number };
 type Batch = Kept & { micros: number[][]; open: number[]; left: number; all: number };
 
-// a chat: acts being done (Chat.apply); posts: requests and acts being
-// taken, its start till what it resumed runs, and the command after a
-// turn; model: what the turn's call runs on, as picked when it began (a
-// /model since picks the next call's); asked: a request out, nothing
-// back; open: tool calls without results; check: the turn's goal check
-// running (Chat.check); sent, wait: messages given and waiting; ending:
-// what to do once at rest as it ends (all: nothing runs) or moves (no
-// post runs); writes, held: the posts logging, one after another, and
-// the logging held meanwhile (null: none); wallet: what pays its calls;
-// limits: the calls waiting for a usage limit, by TURN or agent name
-// fell: the fallback its calls ("") or an agent's (by name, till it
-// reports) run on (Chat.ran), forgotten as a pick is picked, moving
-// with the chat
+// the chat: acts being done (Chat.apply); model: what the turn's call
+// runs on, as picked when it began (a /model since picks the next
+// call's); asked: a request out, nothing back; open: tool calls without
+// results; check: the turn's goal check running (Chat.check); sent,
+// wait: messages given and waiting; writes, held: the posts logging, one
+// after another, and the logging held meanwhile (null: none); limits:
+// the calls waiting for a usage limit, by TURN or agent name; fell: the
+// fallback its calls ("") or an agent's (by name, till it reports) run
+// on (Chat.ran), forgotten as a pick is picked
 type Chat = {
-  acct  : Account;
   mem   : Memory;
   tools : Tools;
   pick  : Pick;
   socks : Set<Sock>;
   acts  : Map<string, Promise<Answer>>;
   busy  : boolean;
-  posts : number;
   call  : Call | null;
   model : string;
-  check : Check<Call> | null;
+  check : Check | null;
   asked : boolean;
   open  : number;
   sent  : Msg[];
@@ -134,65 +106,26 @@ type Chat = {
   eye   : Eye;
   after : Promise<void>;
   batch : Batch | null;
-  ending: { all: boolean; then: () => void } | null;
   writes: Promise<unknown>;
   held  : Array<() => void> | null;
-  wallet: Wallet;
   limits: Record<string, Parked>;
   fell  : Map<string, string>;
 };
-
-// a chat as it moves to another process (Chat.move): its user (an id:
-// a chat moved is never new, so no hello needs their name, and they may
-// have signed out since), their credit as their billing last told it,
-// its turn (its call and goal check's by their refs, Main.away; the
-// fallbacks its calls run on, Chat.fell), the tools' part, its
-// summaries running
-type Moved = { user: string; credit: number | undefined; turn: Turn; tools: Kit; sums: Given[] };
-type Turn = { busy: boolean; call: string | null; model: string; check: Check<string> | null; sent: Msg[]; wait: Msg[]; asked: boolean; open: number; live: Live[]; calls: Record<string, string>; eye: Eye; fell: [string, string][] };
-
-// another process (the one this gives its chats to or takes them from,
-// or one a call is fed from or to), by a line of JSON a message
-// (Main.told): the replies to payments asked of it; the calls fed from it
-// here, by ref (Main.far), and the payments let through for them; end:
-// the line closed once all sent is out, then `then`
-type Peer = {
-  send   : (msg: object) => void;
-  end    : (then: () => void) => void;
-  asks   : Map<string, (grant: Grant | string) => void>;
-  feeds  : Map<string, Sink>;
-  grants : Map<string, Grant>;
-};
-
-// a call fed from here to the process its chat is in (Main.away): run
-// here, or passed on (a relay) till its origin feeds that process itself
-type Away = { call: Call; link: Peer };
-
-// a call fed here by its origin while its relay (the process its chat
-// came from) still passes on what reached it first: what came straight
-// meanwhile, held; whether its origin's line was lost
-type Gate = { relay: Peer; origin: Peer; held: any[]; lost: boolean };
-
-// a rate limit (Main.spend): what each key (a user, a network) may still
-// spend, as of when; it grows `rate` a second, up to `most`
-type Limit = { rate: number; most: number; keys: Map<string, { n: number; at: number }> };
 
 // Constants
 // =========
 
 const LOCK       = config.DIR + "/lock";
-// where worker k's successor reaches it, HAND + k (Main.listen); how
-// often one that gave its chats looks whether its last requests ended
-const HAND       = config.DIR + "/hand";
-const LEAVE      = 500;
-// how a call ends whose process ended first (a crash)
-const ENDED      = "the server process that ran it ended";
+// the running server's pid, for the installer (it moves no data from
+// under a server)
+const PID        = config.DIR + "/server.pid";
+// where the chat is
+const CHAT       = config.DIR + "/chat";
 // a turn's head
 const HEAD       = "Turn: the user's new message:\n\n";
-// a goal's check (Chat.check): its own system prompt (Unii's, which says
-// a call is a turn or a compaction, made the model summarize the chat
-// instead of answering), asked after the chat (the view, its latest
-// messages whole) of its goal; unmet, the user's nudge
+// a goal's check (Chat.check): its own system prompt, asked after the
+// chat (the view, its latest messages whole) of its goal; unmet, the
+// user's nudge
 const GOAL       = "You check a goal. Below is a chat between a user and Unii, an AI agent: its older messages as summary lines (id+n|text), then its latest messages whole, then the goal the user set with /goal. Answer yes if the chat shows the goal fully satisfied now, else no. Write that one word, nothing else.";
 const GOAL_ASK   = "\nThe goal:\n\n";
 const GOAL_NO    = "The goal isn't satisfied yet: keep working.";
@@ -202,20 +135,10 @@ const BATCH      = "/import.json";
 // under SPARE free, the disk takes no more (Chat.post)
 const SPARE      = 2 ** 30;
 
-// how often a worker looks for chats due a snapshot (Chat.backups): an
-// hour, or the time between two if less; where a restore is unpacked
-// (Main.restore), by user; the most it takes; what a form posts
-const HOUR       = 3600 * 1000;
-const BACKUPS    = Math.min(HOUR, config.BACKUP_EVERY * HOUR);
-const RESTORE    = config.DIR + "/restore/";
-const UPLOAD     = 2 ** 30;
-const FORMS      = ["application/x-www-form-urlencoded", "multipart/form-data", "text/plain"];
-
 // a schedule's message as views get it (its head: Chat.state); a ring
-// that failed (a balance not read, a full disk, a write that threw)
-// tried again after RING ms; the longest the alarm waits before it looks
-// at the clock again (one set forward, or a machine woken, rings
-// schedules overdue)
+// that failed (a full disk, a write that threw) tried again after RING
+// ms; the longest the alarm waits before it looks at the clock again
+// (one set forward, or a machine woken, rings schedules overdue)
 const TIMER_TEXT = 200;
 const RING       = 60000;
 const WAKE       = 60000;
@@ -232,45 +155,16 @@ const BUFFER     = 2 ** 31 - 1;
 // a piece of a long answer (Main.stream)
 const PIECE      = 2 ** 16;
 
-// what a user's clients may send (Main.spend): 200 messages (acts, asks,
-// sockets opened) at once, 100 more a second, each counting once more
-// for each UNIT in it (none is over View.FRAME); past it, a socket is
-// closed (FLOOD) unread, a socket or an act posted refused (429), so no
-// user's flood holds the worker every chat on it shares (a client opens
-// again and sends what wasn't answered; a person's clicks, keys and
-// tools never come near: a screenshot counts ~3)
-const USERS: Limit = { rate: 100, most: 200, keys: new Map() };
-const UNIT       = 2 ** 16;
-const FLOOD      = 1008;
-
-// the sockets a user's clients may hold open at once (Main.sockets: a
-// view each, a tab, a terminal, the app); past it a new one is refused
-// (429), so no user fills the worker's memory with sockets, each of which
-// may hold an unfinished message up to View.FRAME
-const SOCKETS    = 32;
-
-// what a network (Cloud.net: an IPv4 address, an IPv6 /48) may ask of the
-// site: 1,000 requests at once, 100 more a second; past it the supervisor
-// answers 429, so no worker hears it. A page opens in ~10, then lives on
-// its socket: a hundred people behind one NAT opening it at once never
-// come near
-const NETS: Limit = { rate: 100, most: 1000, keys: new Map() };
-
-// the model requests a worker may have open at once (Bun's fetch: 256)
-const FETCHES    = 65535;
-
-// the paths of a user signed in, but /api/'s (the rest: the site's files)
+// the paths of the owner's, but /api/'s (the rest: the site's files)
 const OWN        = ["/ws", "/tree", "/export"];
 
-// what a recording is written out by, and its fewest bytes a second
-// (Opus's least, 6 kbps)
+// what a recording is written out by
 const VOICE: Pick = { vendor: "openai-api", model: TRANSCRIBER, effort: "", speed: "slow" };
-const AUDIO      = 750;
 
-// the first message, ending in the installer every terminal starts from,
-// signed out (it signs in by email: Term.ts login_run), so the message
-// holds no credential a screenshot could leak
+// the chat's first message, ending in the installer of the terminal
+// (Term.ts), and its line
 const HELLO      = hello_md.trim().replace("{install}", config.SITE + "/install.sh");
+const HELLO_LINE = "unii: hello: UniiChat, one endless chat kept in a memory tree, recent days in more detail; build anything for years; recalls the past (ad2cat.py); a chatbot with a memory system; the user's terminal install.";
 
 // the site's files, by path (a new one is imported above)
 const WEB: Record<string, string> = {
@@ -278,57 +172,33 @@ const WEB: Record<string, string> = {
   "/account"        : index_html,
   "/app.js"         : app_js,
   "/apple-touch-icon.png": icon_apple,
-  "/experimental.jpg": experimental_jpg,
   "/favicon.svg"    : mark_svg,
   "/icon-192.png"   : icon_192,
   "/icon-512.png"   : icon_512,
   "/icon-maskable-192.png": icon_mask_192,
   "/icon-maskable-512.png": icon_mask,
   "/install.sh"     : install_sh,
-  "/legal.css"      : legal_css,
   "/manifest.webmanifest": manifest,
   "/mark.svg"       : mark_svg,
-  "/og.png"         : og_png,
   "/style.css"      : style_css,
   "/sw.js"          : sw_js,
 };
 
-// the settings page (Settings.ts), drawn by the site's page as /account
+// the settings page, drawn by the site's page
 WEB["/settings"] = WEB["/"];
-
-// a new account's chat opens as its guest's talk went (main.ts guest), so
-// its next line follows from the email: hello.md asking for it (View.ask),
-// the email, and SIGNED. The hello's node is written with it, so no
-// compactor call summarizes the three (with an email of up to 254 bytes,
-// a node of at most 512 bytes) and a new account owes nothing.
-const HELLO_LINE = "unii: hello: UniiChat, one endless chat kept in a memory tree, recent days in more detail; build anything for years; recalls the past (ad2cat.py); a chatbot with a memory system; the user's terminal install; asks their email.";
-const SIGNED     = "You're in! What should we start with?";
 
 // Chat
 // ====
 
+// the server's timer for the chat's first schedule due (Chat.timed)
+let bell: ReturnType<typeof setTimeout> | undefined;
+
 export namespace Chat {
 
-  // the accounts (set at start); the chats loaded, by user
-  export let cloud: Cloud;
-  export const chats = new Map<string, Chat>();
-
-  // a chat's paid calls ask its wallet (Billing.ts), each sent only while
-  // its credit pays it (a balance not told yet is none): its summaries
-  // start once told. One
-  // moving here takes what ran (`moved`); none opens as this process
-  // gives its chats away, nor as a restore replaces it (null). A chat is
-  // kept only once open whole, so one that fails to (throws) is never
-  // left half open
-  export function open(user: User, moved: Moved | null = null, peer: Peer | null = null): Chat | null {
-    const cloud = Chat.cloud;
-    const old = Chat.chats.get(user.id);
-    if (old !== undefined || (Main.given && moved === null) || Main.restores.has(user.id)) {
-      return old ?? null;
-    }
-    const acct = { cloud, user: user.id };
-    const dir = config.DIR + "/users/" + user.id;
-    const mem = Memory.load(dir, () => Chat.share(chat, Tools.prompt("compact")), (id, ans) => Cloud.act_put(acct, id, ans));
+  // the chat, opened at the start (the one before, if any, resumed by
+  // Main.start). One that fails to open throws, and the server ends
+  export function open(): Chat {
+    const mem = Memory.load(CHAT, () => Chat.share(chat, Tools.prompt("compact")), Owner.act_put);
     const tools = Tools.serve(mem, {
       push   : (agent, kind, text) => Chat.push(chat, agent, kind, text),
       note   : (text) => Chat.note(chat, text),
@@ -338,19 +208,12 @@ export namespace Chat {
       timed  : () => Chat.timed(chat),
       pick   : () => chat.pick,
       halt   : () => chat.halt.signal,
-    }, moved?.tools.key);
-    const wallet = cloud.billing.wallet({
-      user  : user.id,
-      mem,
-      batch : () => chat.batch,
-      told  : () => Chat.all(chat, Chat.state(chat)),
-      rest  : () => Chat.free(chat),
     });
     const pick = Pick.load(mem.pick, config.OFFER, config.PICK);
     const chat: Chat = {
-      acct, mem, tools, pick, socks: new Set(), acts: new Map(), busy: false, posts: 1, call: null, model: "", check: null, asked: false, open: 0, sent: [], wait: [],
-      halt: new AbortController(), live: [], calls: {}, eye: { parts: [], from: 0 }, after: Promise.resolve(), batch: null, ending: null,
-      writes: Promise.resolve(), held: null, wallet, limits: {}, fell: new Map(),
+      mem, tools, pick, socks: new Set(), acts: new Map(), busy: false, call: null, model: "", check: null, asked: false, open: 0, sent: [], wait: [],
+      halt: new AbortController(), live: [], calls: {}, eye: { parts: [], from: 0 }, after: Promise.resolve(), batch: null,
+      writes: Promise.resolve(), held: null, limits: {}, fell: new Map(),
     };
     // a saved pick (a profile, by name) not offered gave way: told once
     const shown = (p: Pick) => p.profile ?? Pick.label(p);
@@ -360,30 +223,17 @@ export namespace Chat {
       Memory.save(mem);
       Chat.note(chat, saved + " isn't offered here, so the chat now runs on " + shown(pick) + ".");
     }
-    mem.pay = tools.pay = wallet.pay;
     if (mem.count === 0) {
-      const hello = HELLO + "\n\n" + email_ask(cloud.billing.github !== null);
-      Memory.push(mem, [{ kind: "unii", text: hello, line: HELLO_LINE }, { kind: "user", text: user.name }, { kind: "unii", text: SIGNED }]);
+      Memory.push(mem, [{ kind: "unii", text: HELLO, line: HELLO_LINE }]);
     }
     chat.eye = Chat.eye(mem, Memory.turn(mem));
     mem.made = (l, i) => Chat.made(chat, l, i);
     mem.wait.add(() => Chat.progress(chat));
-    mem.wait.add(() => Chat.free(chat));
-    const work = moved === null ? mem.work : [];
     chat.batch = Chat.resumed(chat);
-    if (moved !== null) {
-      Chat.arrive(chat, moved, peer!);
-    }
-    Chat.chats.set(user.id, chat);
-    Chat.due_set(user.id, mem.timers);
-    cloud.billing.balance(user.id).then(async () => {
-      Memory.pump(mem);
-      Chat.progress(chat);
-      await Chat.resume(chat, work);
-    }).finally(() => {
-      chat.posts -= 1;
-      Chat.change(chat);
-    }).catch((err) => console.error("chat " + acct.user + ": open: " + (err?.message ?? err)));
+    Chat.timed(chat);
+    Memory.pump(mem);
+    Chat.progress(chat);
+    Chat.resume(chat, mem.work).finally(() => Chat.change(chat)).catch((err) => console.error("unii: resuming the chat: " + (err?.message ?? err)));
     return chat;
   }
 
@@ -394,49 +244,6 @@ export namespace Chat {
   // again
   export function share(chat: Chat, system: string): Share {
     return { ...Pick.ask(chat.pick), system, searches: 0, server: "" };
-  }
-
-  // at rest (nothing runs): pays, and lets go of a chat nobody views;
-  // one ending or moving does that once at its rest (Chat.ending), and
-  // one ended or moved never (it pays where it is, or as it closes)
-  export function free(chat: Chat): void {
-    const acct = chat.acct;
-    const ending = chat.ending;
-    if (ending !== null && chat.posts === 0 && (!ending.all || Chat.idle(chat))) {
-      chat.ending = null;
-      ending.then();
-    }
-    if (ending !== null || !Chat.idle(chat) || Chat.chats.get(acct.user) !== chat) {
-      return;
-    }
-    Chat.cloud.billing.settle(acct.user);
-    if (chat.socks.size === 0) {
-      Tools.close(chat.tools);
-      Memory.stop(chat.mem);
-      Chat.chats.delete(acct.user);
-    }
-  }
-
-  // no turn, post, agent, summary or paid request runs (one stopped is
-  // read on to its end, then billed: Billing.ts book)
-  export function idle(chat: Chat): boolean {
-    return !chat.busy && chat.posts === 0 && Tools.working(chat.tools).length === 0 && chat.mem.busy.size === 0 && chat.wallet.booked() === 0;
-  }
-
-  // stops a chat for good; done at rest, its work logged where it was cut
-  export function end(chat: Chat): Promise<void> {
-    Chat.chats.delete(chat.acct.user);
-    chat.socks.forEach((sock) => sock.close());
-    Chat.stop(chat, null);
-    Memory.stop(chat.mem);
-    return new Promise((done) => {
-      const then = () => {
-        Tools.close(chat.tools);
-        done();
-      };
-      chat.ending = { all: true, then };
-      Chat.free(chat);
-    });
   }
 
   // a message (its body: its images, sizes given, then its text), logged
@@ -517,21 +324,13 @@ export namespace Chat {
     } while (at < body.size);
   }
 
-  // a recording's words, logged as the act's answer, then billed (booked
-  // as its bytes at AUDIO a second)
+  // a recording's words, logged as the act's answer
   export async function voice(chat: Chat, id: string, type: string, body: Body): Promise<Answer> {
-    const most = Price.cost(VOICE.model, { ...Price.usage("slow"), seconds: body.size / AUDIO });
-    const pay = await chat.mem.pay?.("voice", id)?.({ input: most, token: 0, exact: null }, 0);
-    if (typeof pay === "string") {
-      return { error: pay };
-    }
     const got = await OpenAI.transcribe(new Blob([await Chat.read(body, 0, body.size)], { type })).catch((err: Error) => err);
     if (got instanceof Error) {
-      pay?.end(null);
       return { error: got.message };
     }
     Chat.mark(chat, id, { ans: { text: got.text } });
-    pay?.end({ run: VOICE, use: { ...Price.usage("slow"), seconds: got.seconds } });
     return { text: got.text };
   }
 
@@ -551,11 +350,10 @@ export namespace Chat {
     }
   }
 
-  // first: the end of the call running (its chat moved here)
-  export async function turn(chat: Chat, first: Promise<boolean> | null = null): Promise<void> {
+  export async function turn(chat: Chat): Promise<void> {
     chat.busy = true;
     try {
-      let go = first === null || (await first);
+      let go = true;
       while (go && chat.wait.length > 0) {
         go = await Chat.call(chat);
       }
@@ -613,9 +411,8 @@ export namespace Chat {
     const server = Tools.at(chat.tools, "main");
     chat.eye = Chat.eye(mem, from);
     chat.socks.forEach((sock) => Chat.show(chat, sock));
-    const bill = mem.pay?.("chat", String(msgs[0].id));
     const blocks = [...view, Tools.devices(chat.tools), Tools.skills(chat.tools), Tools.at_work(chat.tools), { text: HEAD + text, mark: true }];
-    const ask = { ...Chat.share(chat, Tools.prompt("prompt")), searches: SEARCHES, server, blocks, imgs, bill };
+    const ask = { ...Chat.share(chat, Tools.prompt("prompt")), searches: SEARCHES, server, blocks, imgs };
     chat.model = chat.pick.model;
     chat.asked = true;
     chat.open = 0;
@@ -624,8 +421,7 @@ export namespace Chat {
     return Chat.ended(chat, call, halt);
   }
 
-  // the turn's call ends; false: the turn ends. One a deploy cut as it
-  // waited for a usage limit goes on, as after a restart
+  // the turn's call ends; false: the turn ends
   export async function ended(chat: Chat, call: Call, halt: AbortController): Promise<boolean> {
     const end = await call.done;
     chat.call = null;
@@ -633,9 +429,7 @@ export namespace Chat {
     Chat.unanswered(chat, null);
     Chat.live(chat, null, []);
     chat.wait.unshift(...chat.sent.slice(chat.sent.length - end.left.length));
-    if (end.cut && !halt.signal.aborted) {
-      await Chat.writing(chat, () => Chat.resume(chat, [TURN]));
-    } else if (!end.ok && !halt.signal.aborted) {
+    if (!end.ok && !halt.signal.aborted) {
       Chat.failed(chat, end.text);
     }
     if (end.note) {
@@ -650,7 +444,7 @@ export namespace Chat {
 
   // the user's goal (/goal), asked of the chat's model, without tools, on
   // the chat as it is now
-  export function check(chat: Chat, goal: string): Check<Call> {
+  export function check(chat: Chat, goal: string): Check {
     const mem  = chat.mem;
     const at   = Memory.whole(mem, 0);
     const tail = Array.from({ length: mem.count - at }, (_, k) => at + k).map((i) => {
@@ -658,7 +452,7 @@ export namespace Chat {
       return Memory.line({ l: 0, i }, msg.kind + ": " + msg.text) + "\n";
     });
     const blocks = [...Memory.view(mem, at), { text: tail.join("") + GOAL_ASK + goal, mark: true }];
-    return { call: AskAI.ask({ ...Chat.share(chat, GOAL), blocks, bill: mem.pay?.("chat", "goal") }, (ev) => Chat.checking(chat, ev)), goal };
+    return { call: AskAI.ask({ ...Chat.share(chat, GOAL), blocks }, (ev) => Chat.checking(chat, ev)), goal };
   }
 
   // a goal check's events: only its waits for a usage limit show, as the
@@ -669,13 +463,11 @@ export namespace Chat {
     }
   }
 
-  // a goal check's answer, as the turn's call's is, read where the chat
-  // is (its call moves with it: Chat.move): unmet (any answer but yes),
-  // the user's nudge goes to the turn as their message; met, the goal
-  // ends. A check that fails, a stop, a message or a /halt meanwhile end
-  // it with no nudge, so the turn ends; one a deploy cut as it waited for
-  // a usage limit is asked anew; false: it ends
-  export async function checked(chat: Chat, check: Check<Call>, halt: AbortController): Promise<boolean> {
+  // a goal check's answer, as the turn's call's is: unmet (any answer but
+  // yes), the user's nudge goes to the turn as their message; met, the
+  // goal ends. A check that fails, a stop, a message or a /halt
+  // meanwhile end it with no nudge, so the turn ends; false: it ends
+  export async function checked(chat: Chat, check: Check, halt: AbortController): Promise<boolean> {
     const { call, goal } = (chat.check = check);
     halt.signal.addEventListener("abort", () => call.stop(), { once: true });
     const end = await call.done;
@@ -683,9 +475,6 @@ export namespace Chat {
     const on = !halt.signal.aborted && mem.goal === goal && chat.wait.length === 0;
     chat.check = null;
     delete chat.limits[TURN];
-    if (on && end.cut) {
-      return Chat.checked(chat, Chat.check(chat, goal), halt);
-    }
     if (on && !end.ok) {
       Chat.note(chat, "No goal check: " + end.text.replace(/\.$/, "") + ". The goal stays; /halt drops it.");
     } else if (on && /^\W*yes\b/i.test(end.text)) {
@@ -827,34 +616,29 @@ export namespace Chat {
     Chat.all(chat, { $: "live", agent: agent?.name, live });
   }
 
-  // an agent's report, once it ends: a turn of its own, unless stopped or
-  // out of credit; none once its chat ended (the next start resumes it).
-  // It is taken as a post is, so the chat never rests between logging it
-  // and its turn
+  // an agent's report, once it ends: a turn of its own, unless stopped.
+  // It is taken as a post is, between the chat's other logging
   export function report(chat: Chat, agent: Agent, text: string, stopped: boolean): void {
     delete chat.limits[agent.name];
     chat.fell.delete(agent.name);
     Chat.unanswered(chat, agent);
     Chat.live(chat, agent, []);
     Chat.hold(chat, () => {
-      chat.posts += 1;
-      const msg = Chat.chats.get(chat.acct.user) !== chat ? null : Chat.push(chat, null, "work", text);
-      if (msg !== null && !stopped && Chat.cloud.billing.refuse(chat.acct.user, 0) === null) {
+      const msg = Chat.push(chat, null, "work", text);
+      if (!stopped) {
         Chat.take(chat, msg);
       }
-      chat.posts -= 1;
       Chat.change(chat);
-      Chat.free(chat);
     });
   }
 
   // a turn's last message, Unii's reply or why there was none, to the
-  // user's phones (Cloud.push) and browsers (Cloud.web_push)
+  // owner's phones and browsers (Owner.push, Owner.web_push)
   export function phone(chat: Chat): void {
     const last = Memory.message(chat.mem, chat.mem.count - 1);
     if (last !== null && (last.kind === "unii" || last.kind === "note")) {
-      Cloud.push(Chat.cloud, chat.acct.user, last.text);
-      Cloud.web_push(Chat.cloud, chat.acct.user, last.text);
+      Owner.push(last.text);
+      Owner.web_push(last.text);
     }
   }
 
@@ -863,17 +647,13 @@ export namespace Chat {
     if (!config.AFTER) {
       return;
     }
-    chat.posts += 1;
     chat.after = chat.after.then(async () => {
       const proc = Bun.spawn(["/bin/sh", "-c", config.AFTER], { stdout: "ignore", stderr: "pipe" });
       const err = await new Response(proc.stderr).text();
       if ((await proc.exited) !== 0) {
         Chat.all(chat, { $: "note", text: "after: " + err.trim() });
       }
-    }).catch((err) => console.error("after: " + (err?.message ?? err))).finally(() => {
-      chat.posts -= 1;
-      Chat.free(chat);
-    });
+    }).catch((err) => console.error("after: " + (err?.message ?? err)));
   }
 
   // Import
@@ -881,26 +661,21 @@ export namespace Chat {
 
   // an import (its body: messages as JSON lines), those new (fresh) logged
   // as one, summarized on the compactor; refused amid a turn or an
-  // import, or past the credits
+  // import
   export async function ingest(chat: Chat, id: string, body: Body): Promise<Answer> {
     if (chat.busy || chat.batch !== null) {
       return { error: (chat.busy ? "Unii is answering" : "An import is under way") + ": import again once it ends." };
     }
     const done = Chat.done(chat);
-    const sizes: number[] = [];
     let said = 0;
+    let found = 0;
     for await (const msgs of Chat.fresh(body, done)) {
-      sizes.push(...msgs.map(Import.import_size));
+      found += msgs.length;
       said += msgs.filter((m) => m.kind !== "note").length;
     }
     const a = chat.mem.count;
-    const usd = Import.import_usd(a, sizes);
-    if (sizes.length === 0) {
+    if (found === 0) {
       return { error: "Nothing to import: no new messages found." };
-    }
-    const refused = Chat.cloud.billing.refuse(chat.acct.user, usd);
-    if (refused !== null) {
-      return refused;
     }
     chat.mem.hold[1] = null;
     const tag = (m: Log, of: boolean): Log => ({ ...m, imported: true, ...(of ? { more: true } : { more: false, act: id }) });
@@ -1075,75 +850,10 @@ export namespace Chat {
     return {};
   }
 
-  // the chats a restart cut at work or importing, opened, their account
-  // signed in or not (Chat.owner: a schedule's turn runs for one signed
-  // out everywhere); one that fails to load is logged and left (its
-  // user's page gets the error), never keeping the worker, which serves
-  // every other user, from starting
-  export function wake(): void {
-    const dir = config.DIR + "/users/";
-    for (const id of fs.existsSync(dir) ? fs.readdirSync(dir) : []) {
-      const user = Main.shard(id) === Main.index ? Chat.owner(id) : null;
-      if (user !== null && ((Memory.saved(dir + id)?.work ?? []).length > 0 || fs.existsSync(dir + id + BATCH))) {
-        Main.event("waking the chat of user " + id, () => Chat.open(user));
-      }
-    }
-  }
-
-  // Backups
-  // -------
-
-  // the users whose chat's last backup failed, by whether they were told;
-  // whether a pass of Chat.backups runs
-  export const unbacked = new Map<string, boolean>();
-  export let backing = false;
-
-  // each chat this worker serves that is due one, a snapshot (Backup.ts),
-  // one at a time; one whose command failed gets it again on its last
-  // snapshot each pass. A failure is a note in the chat (one closed opens
-  // for it; a user signed out is told once back), once till one works
-  // again. One pass at a time, none as this process gives its chats away
-  export async function backups(): Promise<void> {
-    const dir = config.DIR + "/users/";
-    if (Chat.backing) {
-      return;
-    }
-    Chat.backing = true;
-    try {
-      for (const id of fs.existsSync(dir) ? fs.readdirSync(dir) : []) {
-        await Main.here(id);
-        const out = config.BACKUP + "/" + id;
-        const due = Main.shard(id) === Main.index && !Main.given && Backup.due(dir + id, out, config.BACKUP_EVERY * HOUR);
-        if (!due && (!Chat.unbacked.has(id) || Main.given)) {
-          continue;
-        }
-        const why = due ? await Backup.run(dir + id, out, config.BACKUP_KEEP, config.BACKUP_RUN) : await Backup.hook(config.BACKUP_RUN, out + "/" + Backup.list(out).at(-1));
-        if (why === null) {
-          Chat.unbacked.delete(id);
-          continue;
-        }
-        console.error("backup of user " + id + " failed: " + why);
-        const user = Cloud.user(Chat.cloud, id);
-        const told = Chat.unbacked.get(id) === true;
-        Chat.unbacked.set(id, told || user !== null);
-        if (!told && user !== null) {
-          Main.event("a backup note of user " + id, () => {
-            const chat = Chat.chats.get(id) ?? Chat.open(user);
-            if (chat !== null) {
-              Chat.note(chat, "Backup failed: " + why.replace(/\.$/, "") + ". The server tries again within the hour.");
-            }
-          });
-        }
-      }
-    } finally {
-      Chat.backing = false;
-    }
-  }
-
   // the work a restart cut goes on, told so: each agent, and Unii's turn
   // by a note (none for a chat ended meanwhile)
   export async function resume(chat: Chat, work: string[]): Promise<void> {
-    if (work.length === 0 || Chat.chats.get(chat.acct.user) !== chat) {
+    if (work.length === 0) {
       return;
     }
     const text = Tools.restarted(work);
@@ -1153,142 +863,53 @@ export namespace Chat {
 
   // Timers
   // ------
-  // A chat's schedules (Timer.ts) live in its view.json, so they move
-  // with it and outlive a restart. A worker keeps when each of its users'
-  // next is due (`due`: read from their files once it serves them,
-  // Chat.timers_read, then kept as chats open and schedules change), and
-  // one timer for the first, set at most WAKE ahead. Then it opens the
-  // chat of the account (signed in or not: Chat.owner; nobody need view
-  // it) and logs each schedule due as the timer's report "[Timer id]",
-  // taken as an agent's is; then each moves on to its next time, or ends,
-  // saved. Coming is an act (its id: the schedule's and its time),
+  // The chat's schedules (Timer.ts) live in its view.json, so they
+  // outlive a restart. One timer is set for the first due, at most WAKE
+  // ahead; then each schedule due is logged as the timer's report "[Timer
+  // id]", taken as an agent's is; then each moves on to its next time, or
+  // ends, saved. Coming is an act (its id: the schedule's and its time),
   // recorded with the message, so a crash before the save brings it
-  // again only to find it done: each time comes once. A worker giving
-  // its chats away rings none: the next one does, once it has the chat
-  // (Main.here). A time that passed while no server ran comes as the
-  // next starts, late, saying when it was due; a cron that passed many
-  // times comes once. Under SPARE free disk, or a write failing, they
-  // wait, tried again after RING.
+  // again only to find it done: each time comes once. A time that passed
+  // while no server ran comes as the next starts, late, saying when it
+  // was due; a cron that passed many times comes once. Under SPARE free
+  // disk, or a write failing, they wait, tried again after RING.
 
-  export const due = new Map<string, number>();
-  let bell: ReturnType<typeof setTimeout> | undefined;
-
-  // a user's schedules as they are now: when due
-  export function due_set(user: string, timers: Timer.Timer[]): void {
-    if (timers.length === 0) {
-      Chat.due.delete(user);
-    } else {
-      Chat.due.set(user, Math.min(...timers.map((t) => Date.parse(t.at))));
-    }
-    Chat.alarm();
-  }
-
-  // the timer set for the first due, or WAKE from now if sooner
-  export function alarm(): void {
+  // the chat's schedules changed (or a ring failed: `retry`): the alarm
+  // set again, and the views told
+  export function timed(chat: Chat, retry = false): void {
     clearTimeout(bell);
-    if (Chat.due.size > 0) {
-      const first = Math.min(...Chat.due.values());
-      bell = setTimeout(() => Chat.ring(Date.now()), Math.min(WAKE, Math.max(0, first - Date.now())));
-    }
-  }
-
-  // a chat's schedules changed: the alarm and its views told
-  export function timed(chat: Chat): void {
-    if (Chat.chats.get(chat.acct.user) === chat) {
-      Chat.due_set(chat.acct.user, chat.mem.timers);
+    const first = retry ? Date.now() + RING : Math.min(...chat.mem.timers.map((t) => Date.parse(t.at)));
+    if (first < Infinity) {
+      bell = setTimeout(() => Chat.fire(chat, Date.now()), Math.min(WAKE, Math.max(0, first - Date.now())));
     }
     Chat.change(chat);
-  }
-
-  // the schedules of this worker's users, from their files
-  export function timers_read(): void {
-    const dir = config.DIR + "/users/";
-    for (const id of fs.existsSync(dir) ? fs.readdirSync(dir) : []) {
-      const timers = Main.shard(id) === Main.index && !Chat.chats.has(id) ? (Memory.saved(dir + id)?.timers ?? []) : [];
-      if (timers.length > 0) {
-        Chat.due.set(id, Math.min(...timers.map((t) => Date.parse(t.at))));
-      }
-    }
-    Chat.alarm();
-  }
-
-  // each user whose schedules are due by `now`: their chat opened, if
-  // they have an account, and those rung
-  export function ring(now: number): void {
-    if (Main.given) {
-      return;
-    }
-    for (const [user, at] of Chat.due) {
-      if (at <= now) {
-        Chat.due.delete(user);
-        Chat.rung(user, now).catch((err) => {
-          console.error("unii: the schedules of user " + user + ": " + (err?.message ?? err));
-          Chat.retry(user);
-        });
-      }
-    }
-    Chat.alarm();
-  }
-
-  export async function rung(id: string, now: number): Promise<void> {
-    await Main.here(id);
-    await Chat.cloud.billing.balance(id);
-    Main.event("the schedules of user " + id, () => {
-      const user = Main.given ? null : Chat.owner(id);
-      const chat = user === null ? null : Chat.open(user);
-      if (chat !== null) {
-        Chat.due.delete(id);
-        Chat.fire(chat, now);
-      }
-    }, () => Chat.retry(id));
-  }
-
-  // a user's schedules that failed, tried again after RING
-  export function retry(user: string): void {
-    Chat.due.set(user, Date.now() + RING);
-    Chat.alarm();
-  }
-
-  // the account a chat is of, signed in anywhere or not: as its session
-  // names it, else by its chat's files, which live as long as it does
-  // (Main.close); null: none
-  export function owner(id: string): User | null {
-    return Cloud.user(Chat.cloud, id) ?? (fs.existsSync(config.DIR + "/users/" + id + "/view.json") ? { id, name: id } : null);
   }
 
   // the schedules due by `now` (or by when the chat's logging lets them:
   // Chat.hold) come, each once, as the timer's reports, taken as
   // reports are; then each moves on, saved. Under SPARE free, or a
-  // write throwing, they are tried again (Chat.retry)
+  // write throwing, they are tried again (Chat.timed)
   export function fire(chat: Chat, now: number): void {
-    chat.posts += 1;
     Chat.hold(chat, () => {
       const mem = chat.mem;
-      const user = chat.acct.user;
       const at = Math.max(now, Date.now());
       const dues = mem.timers.filter((t) => Date.parse(t.at) <= at);
       try {
-        if (Chat.chats.get(user) === chat && dues.length > 0 && Chat.full()) {
-          console.error("unii: the schedules of user " + user + " wait: " + FULL);
-          Chat.retry(user);
-        } else if (Chat.chats.get(user) === chat) {
-          if (dues.length > 0) {
-            const fresh = dues.filter((t) => Cloud.act_get(chat.acct, "timer " + t.id + " " + t.at) === null);
-            const msgs = fresh.map((t) => Chat.push(chat, null, "work", Timer.timer_say(t, at), [], false, "timer " + t.id + " " + t.at));
-            mem.timers = mem.timers.flatMap((t) => (dues.includes(t) ? (Timer.timer_after(t, at) ?? []) : [t]));
-            Memory.save(mem);
-            if (Chat.cloud.billing.refuse(user, 0) === null) {
-              msgs.forEach((msg) => Chat.take(chat, msg));
-            }
-          }
-          Chat.due_set(user, mem.timers);
+        if (dues.length > 0 && Chat.full()) {
+          console.error("unii: the schedules wait: " + FULL);
+          return Chat.timed(chat, true);
         }
+        if (dues.length > 0) {
+          const fresh = dues.filter((t) => Owner.act_get("timer " + t.id + " " + t.at) === null);
+          const msgs = fresh.map((t) => Chat.push(chat, null, "work", Timer.timer_say(t, at), [], false, "timer " + t.id + " " + t.at));
+          mem.timers = mem.timers.flatMap((t) => (dues.includes(t) ? (Timer.timer_after(t, at) ?? []) : [t]));
+          Memory.save(mem);
+          msgs.forEach((msg) => Chat.take(chat, msg));
+        }
+        Chat.timed(chat);
       } catch (err: any) {
-        console.error("unii: the schedules of user " + user + " failed: " + (err?.stack ?? err));
-        Chat.retry(user);
-      } finally {
-        chat.posts -= 1;
-        Chat.change(chat);
+        console.error("unii: the schedules failed: " + (err?.stack ?? err));
+        Chat.timed(chat, true);
       }
     });
   }
@@ -1299,54 +920,8 @@ export namespace Chat {
     return disk.bavail * disk.bsize < SPARE;
   }
 
-  // Moving
-  // ------
-
-  // the chat moves to `peer`'s process, whose tools are at `url`, once no
-  // post of it runs; no summary starts meanwhile, and those running go
-  // along (Memory.give): waiting for them hung the chat (an import's run
-  // on), cutting them asked each again there, billed twice
-  export function give(chat: Chat, peer: Peer, url: string): void {
-    Memory.halt(chat.mem);
-    chat.ending = { all: false, then: () => Chat.move(chat, peer, url) };
-    Chat.free(chat);
-  }
-
-  // the chat moves: what it runs goes on there (its calls by Main.away),
-  // and its views open again there
-  export function move(chat: Chat, peer: Peer, url: string): void {
-    const user = chat.acct.user;
-    const far = (call: Call) => Main.away(peer, call);
-    const { busy, model, sent, wait, asked, open, live, calls, eye } = chat;
-    const check = chat.check && { call: far(chat.check.call), goal: chat.check.goal };
-    const turn = { busy, call: chat.call && far(chat.call), model, check, sent, wait, asked, open, live, calls, eye, fell: [...chat.fell] };
-    const tools = Tools.give(chat.tools, url, far);
-    if (chat.batch !== null) {
-      Chat.keep(chat.batch, chat);
-    }
-    const sums = Memory.give(chat.mem, far);
-    Chat.chats.delete(user);
-    Memory.stop(chat.mem);
-    peer.send({ $: "chat", moved: { user, credit: Chat.cloud.billing.credit.get(user), turn, tools, sums } });
-    chat.socks.forEach((sock) => sock.close(MOVE));
-    Main.done();
-  }
-
-  // a chat moved here (Chat.move) goes on: its turn, agents and summaries,
-  // each call running there by Main.far
-  export function arrive(chat: Chat, moved: Moved, peer: Peer): void {
-    const { call, check, fell, ...turn } = moved.turn;
-    const far = (id: string, on: (ev: Event) => void, bill?: Bill) => Main.far(peer, id, chat.tools.key, on, bill);
-    Object.assign(chat, turn);
-    chat.fell = new Map(fell ?? []);
-    Tools.take(chat.tools, moved.tools, far);
-    Memory.take(chat.mem, moved.sums, (id, bill) => far(id, () => {}, bill));
-    if (turn.busy) {
-      const run = call === null ? null : (chat.call = far(call, (ev) => Chat.on(chat, null, ev), chat.mem.pay?.("chat", String(turn.sent[0].id))));
-      const checking = check ? { call: far(check.call, (ev) => Chat.checking(chat, ev), chat.mem.pay?.("chat", "goal")), goal: check.goal } : null;
-      Chat.turn(chat, run ? Chat.ended(chat, run, chat.halt) : checking && Chat.checked(chat, checking, chat.halt));
-    }
-  }
+  // Work
+  // ----
 
   // what runs: Unii's turn, the agents at work
   export function running(chat: Chat): string[] {
@@ -1375,10 +950,11 @@ export namespace Chat {
   // Views
   // -----
   // A socket message carries at most one log entry, summary or job, so
-  // none is too large to hear the next tick in time.
+  // none is too large to hear the next tick in time. A device's socket
+  // gets only its jobs and its acts' answers.
 
   export function all(chat: Chat, msg: Out): void {
-    chat.socks.forEach((sock) => Chat.send(sock, msg));
+    chat.socks.forEach((sock) => sock.data.host === null && Chat.send(sock, msg));
   }
 
   export function send(sock: Sock, msg: object): void {
@@ -1389,11 +965,10 @@ export namespace Chat {
     const agents = Tools.working(chat.tools).map((a) => a.name);
     const batch = chat.batch;
     const why = chat.mem.hold[1];
-    const importing = batch && { done: batch.all - Chat.time(batch), total: batch.all, spent: batch.spent, left: batch.left / 1e6, why, msgs: batch.b - batch.a, open: batch.open };
-    const billing = Chat.cloud.billing;
+    const importing = batch && { done: batch.all - Chat.time(batch), total: batch.all, why, msgs: batch.b - batch.a, open: batch.open };
     const timers = chat.mem.timers.map((t) => ({ ...t, text: t.text.length > TIMER_TEXT ? t.text.slice(0, TIMER_TEXT) + "…" : t.text }));
     const mcp = config.MCP.map(({ name }) => ({ name, on: !chat.mem.off.includes(name) }));
-    return { $: "state", busy: chat.busy, wait: Chat.waits(chat), agents, pick: chat.pick, ...config.OFFER, bills: billing.bills, credits: billing.credits(chat.acct.user), importing, limits: chat.limits, timers, mcp };
+    return { $: "state", busy: chat.busy, wait: Chat.waits(chat), agents, pick: chat.pick, ...config.OFFER, importing, limits: chat.limits, timers, mcp };
   }
 
   export function waits(chat: Chat): Wait {
@@ -1406,12 +981,8 @@ export namespace Chat {
 
   // the settings changed (Settings.ts): the chat runs on its pick if
   // still offered, else on the default (told once, as Chat.open tells
-  // it), and its views see the offer. One leaving (given, ended) is
-  // left: where it goes, it opens on the settings read there
+  // it), and its views see the offer
   export function offer(chat: Chat): void {
-    if (chat.ending !== null || Chat.chats.get(chat.acct.user) !== chat) {
-      return;
-    }
     const pick = Pick.load(chat.mem.pick, config.OFFER, config.PICK);
     const saved = chat.mem.pick === null ? null : Pick.label(chat.mem.pick as Pick);
     chat.pick = pick;
@@ -1423,66 +994,54 @@ export namespace Chat {
     Chat.change(chat);
   }
 
-  // the wallet told the change (Billing.ts changed): what it ends stops
-  // all work running, saying so; what runs is saved, unless the chat ended
+  // what runs is saved, and told to every view
   export function change(chat: Chat): void {
-    const stop = chat.wallet.changed();
     const work = Chat.running(chat);
-    if (Chat.chats.get(chat.acct.user) === chat && String(work) !== String(chat.mem.work)) {
+    if (String(work) !== String(chat.mem.work)) {
       chat.mem.work = work;
       Memory.save(chat.mem);
     }
-    const turn = chat.busy && !chat.halt.signal.aborted;
-    const agents = [...chat.tools.agents.values()].some((a) => a.call !== null && !a.stop);
-    if ((turn || agents) && stop !== null) {
-      Chat.stop(chat, stop);
-    }
     Chat.all(chat, Chat.state(chat));
-    Chat.free(chat);
   }
 
-  // a view joins on the chat as it is now; a terminal's device too (told
+  // a view joins on the chat as it is now; a device is attached (told
   // its name if its host's was taken)
   export function join(chat: Chat, sock: Sock): void {
-    const { tab, host, computer, work, shell } = sock.data;
+    const { tab, host, work, shell } = sock.data;
     chat.socks.add(sock);
-    Chat.send(sock, Chat.state(chat));
-    Chat.show(chat, sock);
-    Chat.send(sock, { $: "live", live: chat.live });
     if (host === null) {
+      Chat.send(sock, Chat.state(chat));
+      Chat.show(chat, sock);
+      Chat.send(sock, { $: "live", live: chat.live });
       return;
     }
-    const link = { send: (msg: object) => Chat.send(sock, msg), live: () => chat.socks.has(sock), computer, work, shell };
+    const link = { send: (msg: object) => Chat.send(sock, msg), live: () => chat.socks.has(sock), work, shell };
     sock.data.device = Tools.attach(chat.tools, tab, host, sock.data.who, link);
     if (sock.data.device !== host) {
       Chat.send(sock, { $: "note", text: host + " was taken: Unii calls this computer " + sock.data.device + "." });
     }
   }
 
-  // a socket closed; a terminal's device goes only if it quit (a link lost
-  // is no quit)
+  // a socket closed; a device goes only if it quit (a link lost is no
+  // quit)
   export function leave(chat: Chat, sock: Sock, quit: boolean): void {
     chat.socks.delete(sock);
     if (quit && sock.data.device !== null) {
       Tools.detach(chat.tools, sock.data.tab, sock.data.device);
     }
-    Chat.free(chat);
   }
 
   // a view's message answered (ack): a read at once, else as Chat.apply
   // does it. A client sends it, so it may be anything (not JSON, a field
   // missing): one that fails is answered its error, as a failed act is,
-  // and never ends the process, which serves other users too
+  // and never ends the process
   export async function answer(chat: Chat, sock: Sock, data: string): Promise<void> {
-    chat.posts += 1;
     let msg: any = null;
     const out = await Promise.try(() => {
       msg = JSON.parse(data);
       return Chat.ask(chat, sock, msg) ?? Chat.apply(chat, msg, sock.data.device ?? "");
     }).catch(Chat.fail);
-    chat.posts -= 1;
     Chat.send(sock, { $: "ack", id: msg?.id, ...out });
-    Chat.free(chat);
   }
 
   // what a message or act that threw answers
@@ -1522,11 +1081,11 @@ export namespace Chat {
 
   // THE apply point: every change is done here once, however often it
   // comes. An act being done, or recorded done (its record's answer, kept
-  // by Cloud.act_put as the log indexes it), gets that answer; else
+  // by Owner.act_put as the log indexes it), gets that answer; else
   // Chat.act does it, answered once on disk
   export function apply(chat: Chat, msg: any, device: string): Promise<Answer> {
     const id = String(msg.id);
-    const was = chat.acts.get(id) ?? (Cloud.act_get(chat.acct, id) as Answer | null);
+    const was = chat.acts.get(id) ?? (Owner.act_get(id) as Answer | null);
     if (was !== null) {
       return Promise.resolve(was);
     }
@@ -1586,17 +1145,6 @@ export namespace Chat {
       case "go": {
         return Chat.go(chat, msg.on === true || msg.on === "true");
       }
-      case "guess": {
-        // a read: an import priced here, not by a unii older than PRICE
-        let sizes = "";
-        for await (const data of msg.req?.body ?? []) {
-          sizes += Buffer.from(data);
-          if (sizes.length > FRAME) {
-            return { error: "Too large.", status: 413 };
-          }
-        }
-        return { usd: Import.import_usd(chat.mem.count, sizes.split(",").map(Number)) };
-      }
       case "pick": {
         const pick = Pick.read(msg.to, config.OFFER);
         if (pick === null) {
@@ -1644,21 +1192,12 @@ export namespace Chat {
     return { error: "No act " + msg.$ + "." };
   }
 
-  // a post (msg.req) refused before a byte of its body is read, so a chat
-  // without credit stores none: under SPARE free, 507; refused by the
-  // billing, asked again after a balance read (a top-up lands there). Else
-  // its body goes to a file unlinked once open, then its act is done
+  // a post (msg.req) refused before a byte of its body is read under
+  // SPARE free (507). Else its body goes to a file unlinked once open,
+  // then its act is done
   export async function post(chat: Chat, id: string, msg: any): Promise<Answer> {
     if (Chat.full()) {
       return { error: FULL, status: 507 };
-    }
-    const billing = Chat.cloud.billing;
-    if (billing.refuse(chat.acct.user, 0) !== null) {
-      await billing.balance(chat.acct.user);
-    }
-    const refused = billing.refuse(chat.acct.user, 0);
-    if (refused !== null) {
-      return refused;
     }
     const file = chat.mem.dir + "/up/" + crypto.randomUUID();
     fs.mkdirSync(chat.mem.dir + "/up", { recursive: true });
@@ -1760,42 +1299,9 @@ export namespace Chat {
 
 export namespace Main {
 
-  // whether the supervisor ends; its workers, which this is; mails the
-  // supervisor sends for it, by id, awaiting answers
-  export let leaving = false;
-  export let count   = 1;
-  export let index   = 0;
-  export const mails = new Map<string, (err: string | null) => void>();
-
-  // a worker: its port and server; the process it took its chats from,
-  // its address, and the users whose chats that one has yet to give
-  // (Main.here), once it said which; the one it gives its chats to, and
-  // whether it does
-  export let port    = 0;
-  export let server  : Bun.Server<Sock["data"]>;
-  export let back    : Peer | null = null;
-  export let before  = "";
-  export const coming = new Map<string, PromiseWithResolvers<void>>();
-  export let listed  = Promise.withResolvers<void>();
-  export let next    : Peer | null = null;
-  export let given   = false;
-  export let onward  = "";
-  // the sockets open here, by user (SOCKETS; Bun opens one inside
-  // server.upgrade, so none is opened past it)
-  export const sockets = new Map<string, number>();
-  // the restores running, by user (Main.restore)
-  export const restores = new Map<string, Promise<void>>();
-
-  // this process's address (Main.listen); every line to another, and those
-  // it opened to calls' origins, by address; the calls it feeds to where
-  // their chats went (Main.away) and those its relays still pass on to it
-  // (Main.far), by ref; each call's ref here, if fed from elsewhere
-  export let addr    = "";
-  export const peers  = new Set<Peer>();
-  export const links  = new Map<string, Peer>();
-  export const aways  = new Map<string, Away>();
-  export const gates  = new Map<string, Gate>();
-  export const refs   = new WeakMap<Call, string>();
+  // the chat; the server
+  export let chat: Chat;
+  export let server: Bun.Server<Sock["data"]>;
 
   // a unix socket one process at a time listens on: one a crash left
   // refuses connections and is taken; one held is waited on
@@ -1827,116 +1333,6 @@ export namespace Main {
     return file === undefined ? new Response("not found", { status: 404 }) : new Response(Bun.file(file));
   }
 
-
-  // deletes the account of the user signed in, if they typed its name,
-  // where their chat is: one the worker before still gives (a deploy) is
-  // waited for, so it ends before its files go, its backups (BACKUP) with
-  // them
-  export async function close(req: Request): Promise<Response> {
-    const cloud = Chat.cloud;
-    const user = Cloud.who(cloud, req);
-    const confirm = String((await req.json().catch(() => ({}))).confirm ?? "").trim().toLowerCase();
-    if (user === null || confirm !== user.name.toLowerCase()) {
-      const name = user === null ? "you are signed out." : "type \"" + user.name + "\".";
-      const error = "Deleting your account erases your chat and Unii's memory for good" + cloud.billing.closes + ". To confirm, " + name;
-      return Response.json({ error }, { status: 400 });
-    }
-    await Main.here(user.id);
-    const owed = await cloud.billing.owing(user.id);
-    if (owed !== null) {
-      return Response.json({ error: owed }, { status: 409 });
-    }
-    Cloud.leave(cloud, user);
-    const chat = Chat.chats.get(user.id);
-    await (chat === undefined ? Promise.resolve() : Chat.end(chat));
-    const why = await Cloud.close(cloud, user, req);
-    if (why !== null) {
-      return Response.json({ error: why }, { status: 409 });
-    }
-    fs.rmSync(config.DIR + "/users/" + user.id, { recursive: true, force: true });
-    if (config.BACKUP !== "") {
-      fs.rmSync(config.BACKUP + "/" + user.id, { recursive: true, force: true });
-    }
-    Chat.unbacked.delete(user.id);
-    return Cloud.out();
-  }
-
-  // the chat of the user signed in, put back as a snapshot they upload
-  // had it (Backup.ts): read whole (at most UPLOAD; a form posts no tar,
-  // so no other site's page restores), unpacked and loaded aside, then
-  // their chat ends and the snapshot takes its place, the chat as it was
-  // first kept as a snapshot of its own if backups are on (none taken:
-  // none restored). One at a time; none as this process gives its chats
-  // away (one running ends first: Main.heard "go"). Once the upload is
-  // read, their requests and views wait till it is done (Main.here), then
-  // open the chat restored
-  export async function restore(req: Request): Promise<Response> {
-    const user = Cloud.who(Chat.cloud, req);
-    const type = (req.headers.get("content-type") ?? "").split(";")[0].trim().toLowerCase();
-    if (user === null) {
-      return new Response("sign in first", { status: 401 });
-    }
-    if (req.method !== "POST") {
-      return new Response("a restore is a POST", { status: 405 });
-    }
-    if (FORMS.includes(type)) {
-      return Response.json({ error: "A restore takes a .tar.gz backup." }, { status: 415 });
-    }
-    if (!Main.spend(USERS, user.id)) {
-      return Response.json({ error: "Too many requests: wait a moment." }, { status: 429 });
-    }
-    const disk = fs.statfsSync(config.DIR);
-    if (disk.bavail * disk.bsize < SPARE) {
-      return Response.json({ error: FULL }, { status: 507 });
-    }
-    const parts: Uint8Array[] = [];
-    const reader = req.body?.getReader();
-    let size = Number(req.headers.get("content-length") ?? 0) > UPLOAD ? Infinity : 0;
-    while (reader !== undefined && size <= UPLOAD) {
-      const piece = await reader.read();
-      if (piece.done) {
-        break;
-      }
-      size += piece.value.length;
-      parts.push(piece.value);
-    }
-    if (size > UPLOAD) {
-      return Response.json({ error: "This backup is too big to restore here." }, { status: 413 });
-    }
-    await Main.here(user.id);
-    if (Main.given || Main.restores.has(user.id)) {
-      return Response.json({ error: Main.given ? "UniiChat is restarting: try again in a moment." : "A restore of your chat is running." }, { status: 409 });
-    }
-    const done = Promise.withResolvers<void>();
-    Main.restores.set(user.id, done.promise);
-    const [dir, t, out] = [config.DIR + "/users/" + user.id, RESTORE + user.id, config.BACKUP + "/" + user.id];
-    try {
-      const why = await Backup.unpack(Buffer.concat(parts), t + "/new");
-      if (why !== null) {
-        return Response.json({ error: why }, { status: 400 });
-      }
-      const chat = Chat.chats.get(user.id);
-      await (chat === undefined ? Promise.resolve() : Chat.end(chat));
-      if (config.BACKUP !== "" && fs.existsSync(dir)) {
-        const kept = await Backup.write(dir, out).catch((err) => err);
-        if (typeof kept !== "string") {
-          return Response.json({ error: "Your chat as it is now could not be backed up first, so nothing was restored: " + (kept?.message ?? kept) }, { status: 500 });
-        }
-        Backup.prune(out, config.BACKUP_KEEP);
-        if (config.BACKUP_RUN !== "") {
-          Backup.hook(config.BACKUP_RUN, kept).then((why) => why !== null && console.error("backup of user " + user.id + " failed: " + why));
-        }
-      }
-      Backup.swap(t, dir);
-      Chat.cloud.billing.settle(user.id);
-      return Response.json({});
-    } finally {
-      fs.rmSync(t, { recursive: true, force: true });
-      Main.restores.delete(user.id);
-      done.resolve();
-    }
-  }
-
   // a long answer, sent as made, a PIECE at a time, the event loop
   // running between
   export async function* stream(lines: Iterable<string>): AsyncGenerator<string> {
@@ -1952,11 +1348,11 @@ export namespace Main {
     yield piece;
   }
 
-  // a page or post of the user's chat (/api/act: an act with a body, its
-  // fields in the query; a POST only, since a GET is what another site
-  // may send with the user's cookie, by sending their browser here, from
-  // a browser that doesn't say where it comes from: Main.http)
-  export async function page(chat: Chat, user: User, p: string, req: Request): Promise<Response> {
+  // a page or post of the chat (/api/act: an act with a body, its fields
+  // in the query; a POST only, since a GET is what another site may send
+  // with the owner's cookie, by sending their browser here, from a
+  // browser that doesn't say where it comes from: Main.http)
+  export async function page(chat: Chat, p: string, req: Request): Promise<Response> {
     const mem = chat.mem;
     switch (p) {
       case "/tree": {
@@ -1969,14 +1365,11 @@ export namespace Main {
       case "/export": {
         const name = "unii-memory-" + new Date().toISOString().slice(0, 10) + ".json";
         const json = { "content-type": "application/json", "content-disposition": 'attachment; filename="' + name + '"' };
-        return new Response(Main.stream(Memory.dump(mem, await Cloud.data(Chat.cloud, user))), { headers: json });
+        return new Response(Main.stream(Memory.dump(mem)), { headers: json });
       }
       case "/api/act": {
         if (req.method !== "POST") {
           return new Response("an act is a POST", { status: 405 });
-        }
-        if (!Main.spend(USERS, user.id)) {
-          return Response.json({ error: "Too many requests: wait a moment." }, { status: 429 });
         }
         const msg = { ...Object.fromEntries(new URL(req.url).searchParams), req };
         const out = await Chat.apply(chat, msg, "");
@@ -1987,6 +1380,9 @@ export namespace Main {
       }
       case "/api/prompts": {
         return await Main.prompts(req);
+      }
+      case "/api/settings": {
+        return await Main.settings(req);
       }
     }
     const file = Memory.image_file(mem, p.slice("/image/".length));
@@ -2021,87 +1417,40 @@ export namespace Main {
     return Response.json(read());
   }
 
-  // a request; one for a chat this process gave away goes there. Another
-  // site's page (its browser says so: Sec-Fetch-Site) only links here: it
-  // posts nothing, reaches no /api/ and opens no socket, so no site acts
-  // for its visitors, signed in or not (sends a message, signs them out,
-  // asks sign-in mail from their networks)
-  // an answer of a process giving its chats away closes its connection,
-  // so no client (Caddy, another worker's Main.pass) keeps one to reuse as
-  // the process ends
-  export async function reply(req: Request, server: Bun.Server<Sock["data"]>): Promise<Response | undefined> {
-    const res = await Main.http(req, server);
-    if (res === undefined || !Main.given) {
-      return res;
-    }
-    const headers = new Headers(res.headers);
-    headers.set("connection", "close");
-    return new Response(res.body, { status: res.status, statusText: res.statusText, headers });
-  }
-
+  // a request. Another site's page (its browser says so: Sec-Fetch-Site)
+  // only links here: it posts nothing, reaches no /api/ and opens no
+  // socket, so no site acts for the owner's browser
   export async function http(req: Request, server: Bun.Server<Sock["data"]>): Promise<Response | undefined> {
     const p = new URL(req.url).pathname;
-    const cloud = Chat.cloud;
     const away = /^(cross|same)-site$/.test(req.headers.get("sec-fetch-site") ?? "");
     if (away && (req.method !== "GET" || p.startsWith("/api/") || p === "/ws")) {
       return new Response("not from another site", { status: 403 });
     }
     try {
-      const user = Cloud.who(cloud, req);
-      if (user !== null && Main.shard(user.id) !== Main.index) {
-        return new Response("this user's worker is another", { status: 421 });
-      }
-      const api = await Cloud.http(cloud, req);
-      if (api !== null) {
-        return api;
-      }
-      if (p === "/api/hello") {
-        return Response.json({ hello: HELLO, bills: cloud.billing.bills, github: cloud.billing.github !== null });
-      }
-      if (p === "/api/delete") {
-        return await Main.close(req);
-      }
-      if (p === "/api/restore") {
-        return await Main.restore(req);
+      const own = await Owner.http(req);
+      if (own !== null) {
+        return own;
       }
       if (!OWN.includes(p) && !p.startsWith("/image/") && !p.startsWith("/api/")) {
         return Main.file(p);
       }
-      if (user === null) {
+      if (!Owner.is(req)) {
         return new Response("sign in first", { status: 401 });
       }
-      if (p === "/api/settings") {
-        return await Main.settings(req, user);
-      }
-      await Main.here(user.id);
       if (p === "/ws") {
-        if ((Main.sockets.get(user.id) ?? 0) >= SOCKETS || !Main.spend(USERS, user.id)) {
-          return new Response("too many requests", { status: 429 });
-        }
         const q    = new URL(req.url).searchParams;
-        const who  = Cloud.hash(Cloud.token(req));
-        const work = q.get("work") ?? "~/.unii/work";
-        const data = { user, who, tab: q.get("tab") ?? "", wire: q.get("wire"), host: q.get("device"), computer: q.get("computer") === "1", work, shell: q.get("shell") === "PowerShell" ? "PowerShell" : null, device: null, seen: new Set<string>() };
+        const who  = Owner.hash(Owner.token(req));
+        const data = { who, tab: q.get("tab") ?? "", wire: q.get("wire"), host: q.get("device"), work: q.get("work") ?? "~/.unii/work", shell: q.get("shell") === "PowerShell" ? "PowerShell" : null, device: null, seen: new Set<string>() };
         return server.upgrade(req, { data }) ? undefined : new Response("upgrade failed", { status: 400 });
       }
-      const chat = Chat.open(user);
-      if (chat === null) {
-        return await Main.pass(req);
-      }
-      chat.posts += 1;
-      const res = await Main.page(chat, user, p, req).finally(() => (chat.posts -= 1));
-      Chat.free(chat);
-      return res;
+      return await Main.page(Main.chat, p, req);
     } catch (err: any) {
       return Response.json({ error: err.message }, { status: 500 });
     }
   }
 
-  // work one user or peer asks (a socket opened or closed, a chat woken,
-  // a message of the process before or after): one that throws (a chat
-  // that fails to load or show) fails alone, logged, then `fail`, never
-  // the worker, which serves other users too, nor the work that came
-  // with it (a view's message fails alone too: Chat.answer)
+  // work a socket asks (opened, closed): one that throws fails alone,
+  // logged, then `fail`, never the server
   export function event(what: string, run: () => void, fail: () => void = () => {}): void {
     try {
       run();
@@ -2111,680 +1460,96 @@ export namespace Main {
     }
   }
 
-  // whether `key` may spend n more of its limit; one refused spends
-  // nothing
-  export function spend(limit: Limit, key: string, n = 1): boolean {
-    const now = performance.now();
-    const q = limit.keys.get(key) ?? { n: limit.most, at: now };
-    q.n = Math.min(limit.most, q.n + ((now - q.at) * limit.rate) / 1000);
-    q.at = now;
-    limit.keys.set(key, q);
-    if (q.n < n) {
-      return false;
-    }
-    q.n -= n;
-    return true;
-  }
-
-  // a key whose quota grew full again is as one never seen: dropped, so
-  // a limit holds only the keys near it, not every one it ever saw
-  export function forget(limit: Limit): void {
-    const full = (limit.most / limit.rate) * 1000;
-    setInterval(() => limit.keys.forEach((q, key) => performance.now() - q.at > full && limit.keys.delete(key)), full);
-  }
-
-  // a user's sockets here, n more (n < 0: fewer); none: dropped
-  export function opened(user: string, n: number): void {
-    const open = (Main.sockets.get(user) ?? 0) + n;
-    if (open === 0) {
-      Main.sockets.delete(user);
-    } else {
-      Main.sockets.set(user, open);
-    }
-  }
-
-  // the worker of a user (signed out: of a token)
-  export function shard(key: string): number {
-    return Bun.hash.crc32(key) % Main.count;
-  }
-
-  // a worker, alone or of a supervisor (whose word, over IPC, wakes a
-  // terminal signed in elsewhere, and answers a mail it sent): it takes
-  // the chats of the one it follows, if any, then serves beside it on
-  // the same port
+  // the server: the chat open (a crash's work resumed), then listening.
+  // Data an older unii left in the multi-user layout (users/) is moved by
+  // the installer; till then this refuses to start, so no new chat
+  // starts beside the old one
   export async function start(port: number): Promise<void> {
-    const send = process.send?.bind(process);
-    const change = (user: string) => {
-      const chat = Chat.chats.get(user);
-      if (chat !== undefined) {
-        Chat.change(chat);
-      }
-    };
-    const signed = (session: string) => (send === undefined ? Cloud.wake(Chat.cloud, session) : send({ $: "signed", session }));
-    const post = (mail: object) => (send === undefined ? Mail.send(config.KEYS.resend, mail) : Main.mail(send, mail));
-    const hand = HAND + Main.index;
-    Main.port = port;
-    Chat.cloud = Cloud.open(change, signed, post);
-    Main.listed.promise.then(Chat.timers_read).catch((err) => console.error("unii: reading the schedules failed: " + (err?.stack ?? err)));
-    process.on("message", Main.heard);
-    Main.back = await Main.dial(hand);
-    if (Main.back === null) {
-      Main.recover();
-      Main.listed.resolve();
-      Chat.wake();
+    Reap.start();
+    await Main.lock();
+    if (fs.existsSync(config.DIR + "/users") && !fs.existsSync(CHAT)) {
+      throw new Error(config.DIR + " holds an older unii's data (users/): run the installer (unii update) to move it, then start again");
     }
-    Tools.coming(Main.arrived());
-    Chat.cloud.billing.start(Main.index, (user) => Main.shard(user) === Main.index, Chat.chats);
-    Main.forget(USERS);
-    process.on("disconnect", () => process.exit(0));
+    fs.writeFileSync(PID, String(process.pid));
+    Owner.open();
+    Push.keys();
+    Main.chat = Chat.open();
     process.on("unhandledRejection", Main.unowned);
-    // the settings as the files are now: a save made since this process
-    // read them (at its start) whose word came before it listened is
-    // read here; one after, it hears (Main.heard)
-    Main.configured(true);
     Main.server = Bun.serve<Sock["data"]>({
       port               : port,
       hostname           : "127.0.0.1",
-      reusePort          : true,
       idleTimeout        : 0,
       maxRequestBodySize : Infinity,
-      fetch              : Main.reply,
+      fetch              : Main.http,
       websocket          : {
         maxPayloadLength         : FRAME,
         backpressureLimit        : BUFFER,
         closeOnBackpressureLimit : true,
         idleTimeout              : PING / 1000,
         open(ws: Sock) {
-          Main.opened(ws.data.user.id, 1);
-          Main.event("a socket of user " + ws.data.user.id, () => {
+          Main.event("a socket", () => {
             if (ws.data.wire !== String(WIRE)) {
               ws.send(JSON.stringify({ $: "error", text: "This page or unii is older than the server: reload or reopen it (`unii update` for the latest)." }));
               return;
             }
-            const chat = Chat.open(ws.data.user);
-            if (chat === null) {
-              ws.close(MOVE);
-            } else {
-              Chat.join(chat, ws);
-            }
+            Chat.join(Main.chat, ws);
           }, () => ws.close(1011));
         },
         message(ws: Sock, data) {
-          const chat = Chat.chats.get(ws.data.user.id);
-          if (chat === undefined || !chat.socks.has(ws)) {
-            return;
-          }
-          if (Main.spend(USERS, chat.acct.user, 1 + data.length / UNIT)) {
-            Chat.answer(chat, ws, String(data));
-          } else {
-            ws.close(FLOOD);
+          if (Main.chat.socks.has(ws)) {
+            Chat.answer(Main.chat, ws, String(data));
           }
         },
         close(ws: Sock, code) {
-          Main.opened(ws.data.user.id, -1);
-          Main.event("a socket of user " + ws.data.user.id, () => {
-            const chat = Chat.chats.get(ws.data.user.id);
-            if (chat !== undefined) {
-              Chat.leave(chat, ws, code === QUIT);
-            }
-          });
+          Main.event("a socket", () => Chat.leave(Main.chat, ws, code === QUIT));
         },
       },
     });
-    setInterval(() => {
-      for (const chat of Chat.chats.values()) {
-        chat.socks.forEach((sock) => sock.send(TICK));
-      }
-    }, PING / 2);
-    if (config.BACKUP !== "") {
-      const backups = () => Chat.backups().catch((err) => console.error("backups: " + (err?.message ?? err)));
-      backups();
-      setInterval(backups, BACKUPS);
-    }
+    setInterval(() => Main.chat.socks.forEach((sock) => sock.send(TICK)), PING / 2);
     for (const sig of ["SIGTERM", "SIGINT", "SIGHUP"]) {
       process.on(sig, () => process.exit(0));
     }
     process.on("exit", () => {
-      fs.rmSync(Main.addr, { force: true });
-      for (const chat of Chat.chats.values()) {
-        Chat.stop(chat, null);
-        Memory.stop(chat.mem);
-      }
+      fs.rmSync(PID, { force: true });
+      Chat.stop(Main.chat, null);
+      Memory.stop(Main.chat.mem);
     });
-    console.log("unii: " + config.SITE + ", users in " + config.DIR + "/users, worker " + Main.index + " of " + Main.count + " on 127.0.0.1:" + port);
-    send?.({ $: "ready" });
-    Main.back?.send({ $: "go", tools: Tools.base() });
-    Main.listen(hand);
+    console.log("unii: " + config.SITE + ", data in " + config.DIR + ", on 127.0.0.1:" + port);
   }
 
-  // the settings page's (Settings.ts), the owner's alone (whom
-  // config.json names; none: no one): a GET reads them, a POST saves;
-  // once saved, every process reads them again (with workers, by the
-  // supervisor's word: Main.supervise)
-  export async function settings(req: Request, user: User): Promise<Response> {
+  // the settings page's (Settings.ts): a GET reads them, a POST saves
+  export async function settings(req: Request): Promise<Response> {
     const fresh = { "cache-control": "no-store" };
-    if (!config.config_owner(user)) {
-      const error = config.OWNER.length === 0 ? "No owner is named: the server's settings page opens for the sign-in emails \"owner\" names in config.json (or UNII_OWNER), set on the server." : "Only the server's owner can see its settings.";
-      return Response.json({ error }, { status: 403, headers: fresh });
-    }
     if (req.method === "GET") {
       return Response.json(Settings.page(), { headers: fresh });
     }
     if (req.method !== "POST") {
       return new Response("settings are read or saved", { status: 405 });
     }
-    if (!Main.spend(USERS, user.id)) {
-      return Response.json({ error: "Too many requests: wait a moment." }, { status: 429 });
-    }
     const out = await Settings.save(req);
     if (out.saved.length > 0) {
-      console.log("unii: settings saved by user " + user.id + ": " + out.saved.join(", "));
+      console.log("unii: settings saved: " + out.saved.join(", "));
     }
     if (out.wrote) {
-      Main.configured(false);
-      process.send?.({ $: "config" });
+      Chat.offer(Main.chat);
     }
     return Response.json(out.body, { status: out.status, headers: fresh });
   }
 
-  // the settings changed (read: config.json and keys.json read again
-  // first, a save elsewhere): each chat here runs on what they offer
-  export function configured(read: boolean): void {
-    if (read) {
-      try {
-        config.config_reload();
-      } catch (err: any) {
-        console.error("unii: the settings saved couldn't be read: " + (err?.message ?? err));
-        return;
-      }
-    }
-    for (const chat of Chat.chats.values()) {
-      Main.event("the settings of user " + chat.acct.user, () => Chat.offer(chat));
-    }
-  }
-
-  // a mail, sent by the supervisor: its answer
-  export function mail(send: (msg: object) => void, mail: object): Promise<string | null> {
-    const id = crypto.randomUUID();
-    send({ $: "mail", id, mail });
-    return new Promise((done) => Main.mails.set(id, done));
-  }
-
   // a failure no owner took: every background promise has one that ends
   // it (a chat's note, a log line), so this is a bug, logged, never the
-  // end of the worker and every chat it holds
+  // end of the server
   export function unowned(err: unknown): void {
     console.error("unii: a failure no one owned: " + ((err as any)?.stack ?? err));
   }
 
-  // a worker hears its supervisor
-  export function heard(msg: any): void {
-    switch (msg.$) {
-      case "signed": {
-        Cloud.wake(Chat.cloud, String(msg.session));
-        return;
-      }
-      case "mailed": {
-        Main.mails.get(msg.id)?.(msg.err);
-        Main.mails.delete(msg.id);
-        return;
-      }
-      case "config": {
-        Main.configured(true);
-        return;
-      }
-    }
-  }
-
-  // Handover
-  // --------
-  // Worker k's successor reaches it at HAND + k (which leads to the
-  // newest's own address: Main.listen), says go (its tools' URL), then
-  // listens for its own (a successor that dies before that leaves this
-  // one serving, reachable again). This one stops serving (its watch
-  // too), says its address, which chats it holds and which still come to
-  // it (a deploy during a deploy: the one before gives a chat only at
-  // rest, after a long post), and gives each on as it can (Chat.give),
-  // those coming once they come. A call goes on in the process that
-  // started it, fed straight to its chat's process (Main.away, Main.far),
-  // so one that passed calls on ends once their origins feed the next.
-  // A process ends once nothing is left to come, run, pass
-  // on or pay (Main.done).
-
-  // the worker before this one, if one listens at `hand`
-  export function dial(hand: string): Promise<Peer | null> {
-    return new Promise((done) => {
-      const sock = net.connect(hand);
-      sock.once("connect", () => done(Main.peer(sock)));
-      sock.once("error", () => done(null));
-    });
-  }
-
-  // this process's address, `hand` and its pid, which any process may
-  // reach (a call's new process: Main.far); once it listens, `hand`
-  // leads to it, so the next worker k reaches this one
-  export function listen(hand: string): void {
-    const temp = hand + ".link";
-    Main.addr = hand + "." + process.pid;
-    fs.rmSync(Main.addr, { force: true });
-    net.createServer((sock) => Main.peer(sock)).listen(Main.addr, () => {
-      fs.rmSync(temp, { force: true });
-      fs.symlinkSync(Main.addr, temp);
-      fs.renameSync(temp, hand);
-    });
-  }
-
-  // a peer over a socket, a line of JSON a message, each heard alone
-  // (Main.event): one that fails (a chat moved here that won't open) is
-  // logged, and the rest of the read (the chats moved after it) goes on
-  export function peer(sock: net.Socket): Peer {
-    const peer: Peer = { send: (msg) => sock.write(JSON.stringify(msg) + "\n"), end: (then) => (sock.destroyed ? then() : sock.end(then)), asks: new Map(), feeds: new Map(), grants: new Map() };
-    let rest = "";
-    Main.peers.add(peer);
-    sock.setEncoding("utf8");
-    sock.on("data", (data: string) => {
-      const lines = (rest + data).split("\n");
-      rest = lines.pop()!;
-      lines.forEach((line) => Main.event("a message of another worker", () => Main.told(peer, JSON.parse(line))));
-    });
-    sock.on("error", () => {});
-    sock.on("close", () => Main.lost(peer));
-    return peer;
-  }
-
-  // the process at `addr` (a call's origin: Main.far), by one line
-  export function link(addr: string): Peer {
-    const known = Main.links.get(addr);
-    if (known !== undefined) {
-      return known;
-    }
-    const peer = Main.peer(net.connect(addr));
-    Main.links.set(addr, peer);
-    return peer;
-  }
-
-  // a peer's message; a chat moved here frees its user's requests first,
-  // so one that won't open is opened by them anew, as after a restart
-  // (Chat.open: it was never kept half open). What a call's origin sends
-  // while its relay still passes on is held (Main.far)
-  export function told(peer: Peer, msg: any): void {
-    const gate = Main.gates.get(msg.call);
-    if (gate?.origin === peer) {
-      gate.held.push(msg);
-      return;
-    }
-    switch (msg.$) {
-      case "go": {
-        if (Main.next !== null) {
-          return peer.end(() => {});
-        }
-        Main.next = peer;
-        Main.server.stop();
-        Main.given = true;
-        Main.onward = msg.tools;
-        Main.listed.promise.then(() => Promise.all(Main.restores.values())).then(() => {
-          peer.send({ $: "users", addr: Main.addr, users: [...Chat.chats.keys(), ...Main.coming.keys()] });
-          [...Chat.chats.values()].forEach((chat) => Chat.give(chat, peer, msg.tools));
-          Main.done();
-        }).catch((err) => console.error("unii: giving the chats failed: " + (err?.stack ?? err)));
-        return;
-      }
-      case "users": {
-        Main.before = msg.addr ?? "";
-        (msg.users as string[]).forEach((user) => Main.coming.set(user, Promise.withResolvers()));
-        Main.listed.resolve();
-        return;
-      }
-      case "chat": {
-        const moved: Moved = msg.moved;
-        Main.coming.get(moved.user)?.resolve();
-        Main.coming.delete(moved.user);
-        if (moved.credit !== undefined) {
-          Chat.cloud.billing.credit.set(moved.user, moved.credit);
-        }
-        const chat = Chat.open({ id: moved.user, name: "" }, moved, peer);
-        if (chat !== null && Main.given) {
-          Chat.give(chat, Main.next!, Main.onward);
-        }
-        Main.done();
-        return;
-      }
-      case "ev": {
-        peer.feeds.get(msg.call)?.on(msg.ev);
-        return;
-      }
-      case "end": {
-        peer.feeds.get(msg.call)?.end(msg.end);
-        peer.feeds.delete(msg.call);
-        gate?.origin.feeds.delete(msg.call);
-        Main.gates.delete(msg.call);
-        return;
-      }
-      case "take": {
-        Tools.went(msg.key, msg.tools);
-        const away = Main.aways.get(msg.call);
-        if (away !== undefined) {
-          away.link.send({ $: "gone", call: msg.call });
-          away.link = peer;
-        }
-        return;
-      }
-      case "gone": {
-        if (gate !== undefined) {
-          return Main.open(msg.call, gate);
-        }
-        peer.feeds.delete(msg.call);
-        Main.aways.get(msg.call)?.link.send(msg);
-        Main.aways.delete(msg.call);
-        Main.done();
-        return;
-      }
-      case "send": {
-        Main.aways.get(msg.call)?.call.send(msg.say);
-        return;
-      }
-      case "stop": {
-        Main.aways.get(msg.call)?.call.stop();
-        return;
-      }
-      case "book": {
-        const bill = peer.feeds.get(msg.call)?.bill ?? (async () => "its call ended");
-        bill({ input: msg.input, token: msg.token, exact: null }, msg.cap).then((grant) => {
-          if (typeof grant !== "string") {
-            peer.grants.set(msg.req, grant);
-          }
-          peer.send(typeof grant === "string" ? { $: "grant", req: msg.req, why: grant } : { $: "grant", req: msg.req, max: grant.max, cut: grant.cut });
-        }).catch((err) => console.error("book " + msg.req + ": " + (err?.message ?? err)));
-        return;
-      }
-      case "grant": {
-        const end = (used: object | null) => peer.send({ $: "paid", req: msg.req, used });
-        peer.asks.get(msg.req)?.(msg.why ?? { max: msg.max, cut: msg.cut, end });
-        peer.asks.delete(msg.req);
-        Main.done();
-        return;
-      }
-      case "paid": {
-        peer.grants.get(msg.req)?.end(msg.used);
-        peer.grants.delete(msg.req);
-        Main.done();
-        return;
-      }
-    }
-  }
-
-  // a call moved with its chat to `peer`'s process: what it sends, pays
-  // and ends goes where the chat is, by its ref: this process's address
-  // and an id, or, fed here from further back, its own, passed on till
-  // its origin feeds the chat's process itself (gone); a request it books
-  // there goes with its input exact (Cost: a count can't go). One that
-  // started here is woken (one parked asks once more) and cut once it
-  // waits for a usage limit, its end told so (End.cut), so it goes on
-  // where the chat is and no process waits on running old code
-  export function away(peer: Peer, call: Call): string {
-    const own = !Main.refs.has(call);
-    const ref = Main.refs.get(call) ?? Main.addr + "#" + crypto.randomUUID();
-    const away: Away = { call, link: peer };
-    let cut = false;
-    const on = (ev: Event) => {
-      if (own && !cut && ev.$ === "Limit" && ev.limit !== null) {
-        cut = true;
-        call.stop();
-      }
-      if (!cut) {
-        away.link.send({ $: "ev", call: ref, ev });
-      }
-    };
-    const bill: Bill = async (cost, cap) => {
-      const { input, token } = cost.exact === null ? cost : await cost.exact();
-      const req = crypto.randomUUID();
-      const link = away.link;
-      link.send({ $: "book", call: ref, req, input, token, cap });
-      return new Promise((done) => link.asks.set(req, done));
-    };
-    const end = (end: End) => {
-      Main.aways.delete(ref);
-      away.link.send({ $: "end", call: ref, end: cut ? { ...end, cut } : end });
-      Main.done();
-    };
-    Main.aways.set(ref, away);
-    call.move({ on, bill, end });
-    if (own) {
-      call.wake();
-    }
-    return ref;
-  }
-
-  // the call `ref` running elsewhere for a chat moved here from `back`: fed by
-  // `back` if it runs there, else by its origin, asked to (take; its MCP
-  // requests for the chat `key` then come straight here: Tools.went), what that
-  // sends held till `back` passed on all that reached it (gone)
-  export function far(back: Peer, ref: string, key: string, on: (ev: Event) => void, bill?: Bill): Call {
-    const at = ref.slice(0, Math.max(0, ref.lastIndexOf("#")));
-    const origin = at === Main.before ? back : Main.link(at);
-    const send = (say: Say) => origin.send({ $: "send", call: ref, say });
-    const [call, feed] = AskAI.tie(on, bill, send, () => origin.send({ $: "stop", call: ref }));
-    back.feeds.set(ref, feed);
-    origin.feeds.set(ref, feed);
-    if (origin !== back) {
-      Main.gates.set(ref, { relay: back, origin, held: [], lost: false });
-      origin.send({ $: "take", call: ref, key, tools: Tools.base() });
-    }
-    Main.refs.set(call, ref);
-    return call;
-  }
-
-  // a call's relay passed on all that reached it: what its origin sent
-  // since goes on, then the end its lost line meant
-  export function open(ref: string, gate: Gate): void {
-    Main.gates.delete(ref);
-    gate.relay.feeds.delete(ref);
-    gate.held.forEach((msg) => Main.told(gate.origin, msg));
-    if (gate.lost) {
-      gate.origin.feeds.get(ref)?.end(AskAI.end(ENDED));
-      gate.origin.feeds.delete(ref);
-    }
-  }
-
-  // once it gave all its chats and nothing it runs, passes on or pays for
-  // them is left, this process ends, its last requests answered
-  // (Main.leave)
-  export function done(): void {
-    const paying = [...Main.peers].some((peer) => peer.asks.size > 0 || peer.grants.size > 0);
-    if (Main.given && Chat.chats.size === 0 && Main.coming.size === 0 && Main.aways.size === 0 && !paying) {
-      Main.leave();
-    }
-  }
-
-  // ends once no request is under way, to it or from it (a model's answer
-  // read on to be billed: Agent.READING), and all told to other processes
-  // is out (an exit drops what a socket still holds: a call's end, its
-  // payment; on macOS all past 8 KB); Bun's server.stop() promise would
-  // say so of the first, but never resolves once a WebSocket was open
-  // (Bun 1.3.14), so the counts are read again each LEAVE ms
-  export function leave(): void {
-    if (Main.server.pendingRequests === 0 && READING.n === 0) {
-      Promise.all([...Main.peers].map((peer) => new Promise<void>((ok) => peer.end(ok)))).then(() => process.exit(0));
-      return;
-    }
-    setTimeout(Main.leave, LEAVE);
-  }
-
-  // a line lost: if calls were fed over it from here, or it was the next
-  // one's with chats still given it, that process crashed, and this one
-  // ends too (the next start resumes all). Else the calls fed over it end
-  // (a call's origin crashed; one its relay still passes on ends as that
-  // says), and what it asked or let through for payment; the one before
-  // frees what waits on it, and this one ends as it was to (Main.leave)
-  export function lost(peer: Peer): void {
-    Main.peers.delete(peer);
-    Main.links.forEach((link, at) => link === peer && Main.links.delete(at));
-    const fed = [...Main.aways.values()].some((away) => away.link === peer);
-    if (fed || (peer === Main.next && (Chat.chats.size > 0 || Main.coming.size > 0))) {
-      process.exit(1);
-    }
-    if (peer === Main.back) {
-      Main.listed.resolve();
-      Main.coming.forEach((c) => c.resolve());
-      Main.coming.clear();
-    }
-    for (const [ref, feed] of peer.feeds) {
-      const gate = Main.gates.get(ref);
-      if (gate?.origin === peer) {
-        gate.lost = true;
-        continue;
-      }
-      gate?.origin.feeds.delete(ref);
-      Main.gates.delete(ref);
-      feed.end(AskAI.end(ENDED));
-    }
-    peer.asks.forEach((ask) => ask(ENDED));
-    peer.grants.forEach((grant) => grant.end(null));
-    Main.done();
-  }
-
-  // a request for a chat this process gave away, sent where it went
-  // (the only one on this port since)
-  export function pass(req: Request): Promise<Response> {
-    const url = new URL(req.url);
-    return fetch("http://127.0.0.1:" + Main.port + url.pathname + url.search, { method: req.method, headers: req.headers, body: req.body, redirect: "manual" });
-  }
-
-  // once the chat of `user` the worker before gives is here, and no
-  // restore of it runs (Main.restore)
-  export async function here(user: string): Promise<void> {
-    await Main.listed.promise;
-    await Main.coming.get(user)?.promise;
-    while (Main.restores.has(user)) {
-      await Main.restores.get(user);
-    }
-  }
-
-  // what restores of this worker's users a crash cut left (Backup.recover),
-  // at a start with no worker before (none runs)
-  export function recover(): void {
-    for (const id of fs.existsSync(RESTORE) ? fs.readdirSync(RESTORE) : []) {
-      if (Main.shard(id) === Main.index) {
-        Backup.recover(RESTORE + id, config.DIR + "/users/" + id);
-      }
-    }
-  }
-
-  // once all it gives are
-  export async function arrived(): Promise<void> {
-    await Main.listed.promise;
-    await Promise.all([...Main.coming.values()].map((c) => c.promise));
-  }
-
-  // the workers' supervisor (run: what starts one, on port+1+k,
-  // UNII_WORKER=k): holds the lock, starts again a worker that dies,
-  // answers each request with its worker's address (`x-unii-worker`:
-  // README; past its network's limit, NETS, 429), relays a worker's word
-  // to all (a sign-in, settings saved: read again here too, for the mail
-  // key), sends their mail. A deploy (SIGHUP) starts each worker anew,
-  // which takes the chats of the one before (Main.start); one that fails
-  // to start leaves that one serving. Its own code changes only on a
-  // restart
-  export function supervise(port: number, run: string[]): void {
-    const cloud = Cloud.open(() => {}, () => {}, async () => null);
-    const workers: Bun.Subprocess[] = [];
-    const all = new Set<Bun.Subprocess>();
-    const hear = (k: number, proc: Bun.Subprocess, msg: any) => {
-      switch (msg.$) {
-        case "ready": {
-          workers[k] = proc;
-          return;
-        }
-        case "signed": {
-          all.forEach((w) => w.send(msg));
-          return;
-        }
-        case "mail": {
-          Mail.send(config.KEYS.resend, msg.mail).then((err) => proc.send({ $: "mailed", id: msg.id, err })).catch(() => {});
-          return;
-        }
-        case "config": {
-          try {
-            config.config_reload();
-          } catch (err: any) {
-            console.error("unii: the settings saved couldn't be read: " + (err?.message ?? err));
-          }
-          all.forEach((w) => w !== proc && w.send(msg));
-          return;
-        }
-      }
-    };
-    const start = (k: number) => {
-      const env = { ...config.config_env(), UNII_WORKER: String(k), BUN_CONFIG_MAX_HTTP_REQUESTS: String(FETCHES) };
-      const ipc = (msg: any, proc: Bun.Subprocess) => hear(k, proc, msg);
-      const proc = Bun.spawn([...run, String(port + 1 + k)], { env, ipc, stdio: ["ignore", "inherit", "inherit"] });
-      all.add(proc);
-      proc.exited.then((code) => {
-        all.delete(proc);
-        Main.died(k, code, workers[k], proc, () => start(k));
-      });
-    };
-    Array.from({ length: config.WORKERS }, (_, k) => start(k));
-    Main.forget(NETS);
-    Bun.serve({
-      port     : port,
-      hostname : "127.0.0.1",
-      fetch    : (req) => {
-        if (!Main.spend(NETS, Cloud.net(Cloud.ip(req) ?? ""))) {
-          return new Response("too many requests", { status: 429 });
-        }
-        const user = Cloud.who(cloud, req);
-        const k = Main.shard(user?.id ?? Cloud.token(req));
-        return new Response(null, { headers: { "x-unii-worker": "127.0.0.1:" + (port + 1 + k) } });
-      },
-    });
-    const stop = () => {
-      Main.leaving = true;
-      all.forEach((w) => w.kill());
-      Promise.all([...all].map((w) => w.exited)).then(() => process.exit(0));
-    };
-    for (const sig of ["SIGTERM", "SIGINT"]) {
-      process.on(sig, stop);
-    }
-    process.on("SIGHUP", () => workers.forEach((_, k) => start(k)));
-    console.log("unii: " + config.SITE + ", " + config.WORKERS + " workers on 127.0.0.1:" + (port + 1) + "-" + (port + config.WORKERS) + ", routes on " + port);
-  }
-
-  // a worker ended (`now`: worker k's, the last that started): as the
-  // server ends, nothing; one after a deploy (another is now) too; worker
-  // k's again; one that never started (none is), the server ends
-  export function died(k: number, code: number | null, now: Bun.Subprocess | undefined, proc: Bun.Subprocess, again: () => void): void {
-    if (code !== 0) {
-      console.error("unii: worker " + k + " ended (" + code + ")");
-    }
-    if (Main.leaving || (now !== undefined && now !== proc)) {
-      return;
-    }
-    if (now === undefined) {
-      process.exit(1);
-    }
-    again();
-  }
-
 }
 
-// run: the command that starts this server again, to start a worker
-// (null: the server is one process: no workers, or `unii serve`)
-export async function serve(port: number, run: string[] | null): Promise<void> {
-  const worker = process.env.UNII_WORKER;
-  Main.count = run === null ? 1 : config.WORKERS;
-  Main.index = Number(worker ?? 0);
-  if (worker === undefined) {
-    Reap.start();
-    await Main.lock();
-  }
-  if (worker === undefined && run !== null) {
-    Main.supervise(port, run);
-  } else {
-    await Main.start(port);
-  }
+// `unii serve [port]`, `bun Server.ts [port]`
+export async function serve(port: number): Promise<void> {
+  await Main.start(port);
 }
 
 if (import.meta.main) {
-  await serve(Number(process.argv[2] ?? 8788), config.WORKERS > 0 ? [process.execPath, import.meta.path] : null);
+  await serve(Number(process.argv[2] ?? 8788));
 }

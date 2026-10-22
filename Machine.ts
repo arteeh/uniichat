@@ -1,9 +1,9 @@
 // Machine
 // =======
 // The tools that touch a device: shell, read, write, edit, view_video
-// (TOOLS) and computer (Computer.ts), run by a terminal (Term.ts) as Jobs, each in
-// its agent's dir under the device's work dir. A stop kills the job's
-// shell and its process group. As this unii quits, end() kills every
+// (TOOLS), run by a device (Device.ts) as Jobs, each in its agent's dir
+// under the device's work dir. A stop kills the job's shell and its
+// process group. As the device quits, end() kills every
 // shell's group (SHELLS), and any process marked UNII_RUN that left it.
 // A file changed (write over one, edit) answers as a unified diff (Diff),
 // which both views draw as one (Md.ts). read shows an image file as an
@@ -16,7 +16,6 @@ import * as os from "node:os";
 import * as path from "node:path";
 import type { Out } from "./Agent.ts";
 import { CAP, clip, clip_end } from "./Clip.ts";
-import { Computer } from "./Computer.ts";
 import { Mcp } from "./Mcp.ts";
 import { FIT, HEAD, IMAGE, image_kind, PIXELS } from "./View.ts";
 
@@ -92,52 +91,12 @@ const CELL = 16;
 const EDIT = { type: "object", properties: { path: STR, old: STR, new: STR, all: { type: "boolean" } }, required: ["path", "old", "new"] };
 
 export const TOOLS: Spec[] = [
-  spec("shell", "Run a command with the device's shell ($SHELL -c), stdout and stderr together, and return its output, then its exit code and time, as (exit 0 in 0.4 s); output past " + CAP + " characters keeps its head and tail. Each call is a new shell. The call waits until the command and everything holding its output end, so give background jobs their own output file. Background jobs live only while unii is open on the device: closing it kills every process the calls started.", { command: STR }, ["command"]),
+  spec("shell", "Run a command with the device's shell ($SHELL -c), stdout and stderr together, and return its output, then its exit code and time, as (exit 0 in 0.4 s); output past " + CAP + " characters keeps its head and tail. Each call is a new shell. The call waits until the command and everything holding its output end, so give background jobs their own output file. Background jobs live only while the device runs: stopping it kills every process the calls started.", { command: STR }, ["command"]),
   spec("read", "Read a text file. offset: the first line to show (from 1); limit: how many lines; at: the character of the first line to start from. It ends saying the lines shown, as [lines 4-7 of 15]; output past " + CAP + " characters comes in pages, saying where to go on. An image file (png, jpeg, gif, webp) comes as the picture, scaled to fit " + FIT + " px, or max_side px if given (a GIF shows its first frame; view_video plays it).", { path: STR, offset: INT, limit: INT, at: INT, max_side: INT }, ["path"]),
   spec("write", "Write a whole file, making its directories. Answers a unified diff of what changed (a new file: all its lines added).", { path: STR, content: STR }, ["path", "content"]),
   spec("view_video", "See part of a video (any file ffmpeg opens: mp4, mkv, webm, mov, avi, gif...) as ONE image: a grid of its frames, row by row, each stamped with its frame number (top) and time (bottom), fitting " + FIT + " px, or max_side px. It also answers a line on the whole video (duration, fps, frames, size). start and end: the range, ends included, in frames from 0 (or seconds, with unit \"second\"); by default the whole video. step: take every step-th frame; by default the one that gives at most 16. Each frame gets smaller as more share the sheet: past about 25 they get hard to read, and " + SHEET + " is the most. For a long stretch, raise step, narrow the range, or call again on the next range. Needs ffmpeg and ffprobe on the device.", { path: STR, start: { type: "number" }, end: { type: "number" }, unit: { type: "string", enum: ["frame", "second"] }, step: INT, max_side: INT }, ["path"]),
   spec("edit", "Replace text in files: the edits in order, each on its file as the edits before it left it. old must match exactly, whitespace included, and only once, unless all is true, which replaces every match. If any edit fails, no file is changed. Answers a unified diff of each file.", { edits: { type: "array", items: EDIT, minItems: 1 } }, ["edits"]),
 ];
-
-// the tool of a computer task, bound to its device: Anthropic's computer
-// use tool, its actions and fields as theirs (so the model does as it
-// was trained); one tool for every vendor, as every tool is
-const PX = { type: "array", items: { type: "integer" }, minItems: 2, maxItems: 2 };
-
-// the longest wait or hold_key, in seconds (Computer.ts clamps to it)
-export const WAIT = 100;
-export const COMPUTER: Spec = spec("computer", `Use a mouse and keyboard to interact with the user's Mac, and take screenshots. Every action answers with a screenshot taken after it.
-* This is an interface to a desktop GUI. Some applications may take time to start or process actions, so you may need to wait and take successive screenshots to see the results of your actions. E.g. if you click on Safari and a window doesn't open, try waiting and taking another screenshot.
-* Coordinates are pixels of the screenshot (1280x800 at most), x from its left edge, y from its top edge.
-* Whenever you intend to move the cursor to click on an element like an icon, you should consult a screenshot to determine the coordinates of the element before moving the cursor.
-* If you tried clicking on a program or link but it failed to load, even after waiting, try adjusting your cursor position so that the tip of the cursor visually falls on the element that you want to click.
-* Make sure to click any buttons, links, icons, etc with the cursor tip in the center of the element. Don't click boxes on their edges unless asked.`, {
-  action: { type: "string", enum: ["key", "hold_key", "type", "cursor_position", "mouse_move", "left_mouse_down", "left_mouse_up", "left_click", "left_click_drag", "right_click", "middle_click", "double_click", "triple_click", "scroll", "wait", "screenshot", "zoom"], description: `The action to perform. The available actions are:
-* \`key\`: Press a key or key-combination on the keyboard. This supports xdotool's \`key\` syntax. Examples: "a", "Return", "cmd+l", "ctrl+s", "Up".
-* \`hold_key\`: Hold down a key or multiple keys for a specified duration (in seconds). Supports the same syntax as \`key\`.
-* \`type\`: Type a string of text on the keyboard.
-* \`cursor_position\`: Get the current (x, y) pixel coordinate of the cursor on the screen.
-* \`mouse_move\`: Move the cursor to a specified (x, y) pixel coordinate on the screen.
-* \`left_mouse_down\`: Press the left mouse button.
-* \`left_mouse_up\`: Release the left mouse button.
-* \`left_click\`: Click the left mouse button at the specified (x, y) pixel coordinate on the screen. You can also include a key combination to hold down while clicking using the \`text\` parameter.
-* \`left_click_drag\`: Click and drag the cursor from \`start_coordinate\` to a specified (x, y) pixel coordinate on the screen.
-* \`right_click\`: Click the right mouse button at the specified (x, y) pixel coordinate on the screen.
-* \`middle_click\`: Click the middle mouse button at the specified (x, y) pixel coordinate on the screen.
-* \`double_click\`: Double-click the left mouse button at the specified (x, y) pixel coordinate on the screen.
-* \`triple_click\`: Triple-click the left mouse button at the specified (x, y) pixel coordinate on the screen.
-* \`scroll\`: Scroll the screen in a specified direction by a specified amount of clicks of the scroll wheel, at the specified (x, y) pixel coordinate. DO NOT use PageUp/PageDown to scroll.
-* \`wait\`: Wait for a specified duration (in seconds).
-* \`screenshot\`: Take a screenshot of the screen.
-* \`zoom\`: View a region of the screen at full resolution.` },
-  coordinate       : { ...PX, description: "(x, y): The x (pixels from the left edge) and y (pixels from the top edge) coordinates to move the mouse to. Required by `action=mouse_move` and `action=left_click_drag`; optional for clicks and `scroll` (default: where the cursor is)." },
-  start_coordinate : { ...PX, description: "(x, y): The x (pixels from the left edge) and y (pixels from the top edge) coordinates to start the drag from. Required only by `action=left_click_drag`." },
-  text             : { type: "string", description: "Required only by `action=type`, `action=key`, and `action=hold_key`. Can also be used by click or scroll actions to hold down keys while clicking or scrolling." },
-  scroll_direction : { type: "string", enum: ["up", "down", "left", "right"], description: "The direction to scroll the screen. Required only by `action=scroll`." },
-  scroll_amount    : { type: "integer", minimum: 0, description: "The number of 'clicks' to scroll. Required only by `action=scroll`." },
-  duration         : { type: "number", minimum: 0, maximum: WAIT, description: "The duration to hold the key down for, or to wait, in seconds. Required only by `action=hold_key` and `action=wait`." },
-  region           : { type: "array", items: { type: "integer" }, minItems: 4, maxItems: 4, description: "(x0, y0, x1, y1): The top-left and bottom-right corners of the region to view. Required only by `action=zoom`." },
-}, ["action"]);
 
 // Spec
 // ====
@@ -185,9 +144,6 @@ export namespace Machine {
         }
         case "edit": {
           return Machine.edit(cwd, input.edits);
-        }
-        case "computer": {
-          return await Computer.act(input, signal);
         }
         case "mcp": {
           return await Mcp.here(input, signal);
@@ -607,7 +563,7 @@ export namespace Machine {
 // ===========
 
 // a SKILL.md's YAML frontmatter, from its first 64 KB; a regular file only,
-// so a FIFO or device can't hang the terminal
+// so a FIFO or device can't hang the device
 function skill_head(file: string): any {
   if (!fs.statSync(file).isFile()) {
     return null;

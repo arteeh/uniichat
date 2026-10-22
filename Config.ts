@@ -1,13 +1,13 @@
 // Config
 // ======
 // The server's settings. Its DIR ($UNII_DIR, default ~/.unii) holds
-// config.json, keys.json, the lock and users/<id>. Each key of
-// config.json (README, SETTINGS) may be set as UNII_<KEY> instead, which
-// wins; a path may start with "~/". The keys are read from the
-// environment and removed from it, so no program an agent runs inherits
-// them, and put back for the workers; a key the environment lacks is
-// read from keys.json (0600), where the settings page puts them
-// (Settings.ts). config_reload reads both
+// config.json, keys.json, the prompts, the lock, unii.db (Owner.ts) and
+// the chat (chat/). Each key of config.json (README, SETTINGS) may be
+// set as UNII_<KEY> instead, which wins; a path may start with "~/". The
+// keys are read from the environment and removed from it, so no program
+// an agent runs inherits them; a key the environment lacks is read from
+// keys.json (0600), where the settings page puts them (Settings.ts).
+// config_reload reads both
 // files again: what SETTINGS applies "now" changes at once, the rest
 // on the next start.
 
@@ -40,7 +40,6 @@ type Made = {
   compactor : Pick;
   agents    : Pick | null;
   after     : string;
-  owner     : string[];
 };
 
 // Types
@@ -77,11 +76,9 @@ export const SETTINGS: Setting[] = [
   { key: "pick",      def: "claude-api:sonnet-5.5:medium:slow", apply: "now",     web: true  },
   { key: "compactor", def: "claude-api:haiku-5.5:high:slow",    apply: "now",     web: true  },
   { key: "agents",    def: "",                                  apply: "now",     web: true  },
-  { key: "owner",     def: "",                                  apply: "now",     web: false },
   { key: "site",      def: "http://127.0.0.1:8788",             apply: "restart", web: true  },
   { key: "apple",     def: "",                                  apply: "restart", web: true  },
   { key: "apns",      def: "",                                  apply: "restart", web: true  },
-  { key: "workers",   def: "0",                                 apply: "restart", web: false },
   { key: "work",      def: DIR + "/work",                       apply: "restart", web: false },
   { key: "after",     def: "",                                  apply: "now",     web: false },
 ];
@@ -90,7 +87,6 @@ export const SETTINGS: Setting[] = [
 export const VARS: Record<string, string> = {
   anthropic       : "ANTHROPIC_API_KEY",
   openai          : "OPENAI_API_KEY",
-  resend          : "RESEND_API_KEY",
   apns            : "APNS_KEY",
 };
 
@@ -113,25 +109,12 @@ export let   PICK       = MADE.pick;
 // the chat's pick
 export let   COMPACTOR  = MADE.compactor;
 export let   AGENTS     = MADE.agents;
-export const WORKERS    = Number(config_value(FILE, "workers"));
 
-// who may change the settings (config_owner): sign-in names (an email);
-// config.json's or UNII_OWNER's only (the settings page can't change it)
-export let   OWNER      = MADE.owner;
-
-// the iOS app (ios/, Cloud.ts): its App ID, the team's then the bundle's
+// the iOS app (ios/, Owner.ts): its App ID, the team's then the bundle's
 // ("TEAM.com.example.uniichat"), whose app sign-in links open; and
 // the id of the key its pushes are signed with (APNS_KEY holds the key)
 export const APPLE      = config_value(FILE, "apple");
 export const APNS       = config_value(FILE, "apns");
-
-// each chat's snapshots (Backup.ts): the dir they go to ("": none), the
-// hours between two, how many are kept, the shell command each is given
-// to (its path, $1)
-export const BACKUP       = config_path(config_get("backup", ""));
-export const BACKUP_EVERY = config_number("backup_every", "24");
-export const BACKUP_KEEP  = config_number("backup_keep", "7");
-export const BACKUP_RUN   = config_get("backup_run", "");
 
 // openai-sub's ChatGPT sign-in (ChatGPT.ts)
 export const CHATGPT    = config_path(config_get("chatgpt", DIR + "/chatgpt.json"));
@@ -147,11 +130,10 @@ export const CLAUDE     = config_path(config_get("claude", ""));
 const ENV_KEYS: Record<string, string> = Object.fromEntries(Object.entries(VARS).map(([name, v]) => [name, config_key(v)]));
 export const KEYS: Record<string, string> = config_keys(keys_read());
 
-// the MCP servers each chat runs (Mcp.ts): Claude's `mcpServers`, as an
+// the MCP servers the chat runs (Mcp.ts): Claude's `mcpServers`, as an
 // object, its JSON, or a file holding it (read once the keys are out of
 // the environment, so ${VAR} never gives one). UNII_MCP leaves the
-// environment too (a server's headers are in it): only workers get it
-// back (config_env)
+// environment too (a server's headers are in it)
 const MCP_VAR           = process.env.UNII_MCP;
 delete process.env.UNII_MCP;
 export const MCP        = config_mcp(MCP_VAR ?? (FILE.mcp as unknown) ?? {});
@@ -188,14 +170,6 @@ function config_path(path: string): string {
 // config.json's, else `def`
 export function config_get(key: string, def: string): string {
   return config_env_value(key) ?? config_str(FILE[key]) ?? def;
-}
-
-function config_number(key: string, def: string): number {
-  const n = Number(config_get(key, def));
-  if (!(n > 0)) {
-    throw new Error("config: " + key + " is no number above 0: " + config_get(key, def));
-  }
-  return n;
 }
 
 // config.json, read (none: empty); an Error if it is no JSON object
@@ -253,7 +227,6 @@ export function config_make(file: Record<string, unknown>): Made {
     compactor : config_run("compactor", config_value(file, "compactor"), offer),
     agents    : agents ? config_run("agents", agents, offer) : null,
     after     : config_value(file, "after"),
-    owner     : config_value(file, "owner").split(",").map((o) => o.trim().toLowerCase()).filter((o) => o !== ""),
   };
 }
 
@@ -396,14 +369,6 @@ function config_keys(kept: Record<string, string>): Record<string, string> {
   return Object.fromEntries(Object.keys(VARS).map((name) => [name, ENV_KEYS[name] || kept[name] || ""]));
 }
 
-// the environment a worker of this server starts with: this one, with
-// the environment's keys back (a worker reads keys.json itself, so a key
-// set there is no environment's), and UNII_MCP
-export function config_env(): Record<string, string | undefined> {
-  const keys = Object.entries(VARS).filter(([name]) => ENV_KEYS[name]).map(([name, v]) => [v, ENV_KEYS[name]]);
-  return { ...process.env, ...Object.fromEntries(keys), ...(MCP_VAR === undefined ? {} : { UNII_MCP: MCP_VAR }) };
-}
-
 // config.json and keys.json read again: what applies at once takes their
 // values (OFFER and KEYS changed in place, so who holds them sees it);
 // one wrong (a hand edit) throws and changes nothing
@@ -418,16 +383,7 @@ export function config_reload(): void {
   COMPACTOR = made.compactor;
   AGENTS = made.agents;
   AFTER = made.after;
-  OWNER = made.owner;
   Object.assign(KEYS, keys);
-}
-
-// whether a user (a sign-in name) may change the settings: one `owner`
-// names (config.json, UNII_OWNER: the server's files, never the settings
-// page). None named: no one. Who signed up first, or holds id 1, proves
-// nothing: where sign-in is open to any email, that may be anyone
-export function config_owner(user: { name: string }, owner: string[] = OWNER): boolean {
-  return owner.includes(user.name.toLowerCase());
 }
 
 // config.json and keys.json as read at once: their texts (null: none)

@@ -6,7 +6,7 @@
 // is stopped, or a job a command left running. Each that ends stays a
 // zombie till its parent waits on it, so every TICK the server (serve,
 // Server.ts) waits on its zombies that aren't Bun's. Bun waits on each
-// process it spawns (Bun.spawn, node:child_process: workers, commands,
+// process it spawns (Bun.spawn, node:child_process: commands,
 // Claude Codes) through a pidfd it holds, and one waited on from under
 // it throws (ECHILD): a zombie this process holds a pidfd for is Bun's,
 // and one that wasn't a zombie at the tick before too is left for now.

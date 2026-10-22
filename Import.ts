@@ -11,10 +11,9 @@
 // compactor (Config.ts COMPACTOR). A session imported before (import_key)
 // brings only its new messages.
 //
-// The estimate is the run's plan (import_guess): each node whose source
-// is over NODE takes a call, priced as measured on the compactor (PRICE).
-// It is shown, never a cap: only the credit stops an import (Billing.ts
-// book).
+// A run's progress is weighed by its plan (import_guess): each node whose
+// source is over NODE takes a call, weighed by its cost as measured on
+// the compactor (PRICE), which goes as its time.
 
 import type { Kind } from "./AskAI.ts";
 import { clip_pages, stream_lines } from "./Clip.ts";
@@ -47,9 +46,8 @@ export type Done = Record<string, string>;
 export type Want = { off: string[]; since: string; tools: boolean };
 
 // an import: the sessions as wanted but for off, those picked, their
-// messages, the first new message's day ("": none), their sizes, its
-// cost in USD
-export type Plan = { sessions: Session[]; picked: Session[]; msgs: number; first: string; sizes: number[]; guess: number };
+// messages, the first new message's day ("": none), their sizes
+export type Plan = { sessions: Session[]; picked: Session[]; msgs: number; first: string; sizes: number[] };
 
 // a node as the estimate sees it: its source's bytes, and the summaries
 // under it (0: its source is messages as they are)
@@ -162,14 +160,14 @@ function import_pick(sessions: Session[], want: Want, done: Done): Session[] {
   return old.map((s) => ({ ...s, heads: kept(s, done[import_id(s)]) })).filter((s) => s.heads.length > 0);
 }
 
-// the sessions found, as an import into a chat of `count` messages
-export function import_plan(sessions: Session[], want: Want, done: Done, count: number): Plan {
+// the sessions found, as an import
+export function import_plan(sessions: Session[], want: Want, done: Done): Plan {
   const all    = import_pick(sessions, { ...want, since: "" }, done);
   const shown  = import_pick(all, want, {});
   const picked = shown.filter((s) => !want.off.includes(import_id(s)));
   const first  = all.map((s) => s.heads[0].date).sort()[0] ?? "";
   const sizes  = picked.flatMap((s) => [import_size(import_note(s)), ...s.heads.map((m) => m.size)]);
-  return { sessions: shown, picked, msgs: sizes.length - picked.length, first: first.slice(0, 10), sizes, guess: import_usd(count, sizes) };
+  return { sessions: shown, picked, msgs: sizes.length - picked.length, first: first.slice(0, 10), sizes };
 }
 
 // whether a message of a session imported up to `last` (none: never) is
@@ -263,11 +261,6 @@ export function import_guess(a: number, sizes: number[]): number[][] {
   return usd;
 }
 
-// import_guess's total (USD)
-export function import_usd(a: number, sizes: number[]): number {
-  return import_guess(a, sizes).flat().reduce((x, y) => x + y, 0) / 1e6;
-}
-
 // a message's bytes as summarized
 export function import_size(m: { kind: Kind; text: string }): number {
   return new TextEncoder().encode(m.kind + ": " + m.text).length;
@@ -276,18 +269,6 @@ export function import_size(m: { kind: Kind; text: string }): number {
 // "1 message", "2,048 new messages" (what: "new ")
 export function import_count(n: number, what: string): string {
   return n.toLocaleString("en-US") + " " + what + (n === 1 ? "message" : "messages");
-}
-
-// the credit to add so the balance holds the estimate and half again
-// (room for the chat), up to the next $5 (0: none)
-export function topup(guess: number, credits: number): number {
-  const need = guess * 1.5 - credits;
-  return need > 0 ? Math.ceil(need / 5) * 5 : 0;
-}
-
-// "$3.10"
-export function guess_usd(usd: number): string {
-  return "$" + Math.max(0.01, usd).toFixed(2);
 }
 
 // Node

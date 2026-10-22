@@ -404,10 +404,9 @@ function span_run(s: Md.Span, ink: Ink): Run {
 // Bars
 // ====
 
-// the rule over the input, the pick and the balance at its right end
+// the rule over the input, the pick at its right end
 export function rule_line(v: View.View, w: number): Line {
-  const parts = [...View.view_pick(v).map((knob) => knob.text), View.view_credits(v) ?? []].flat();
-  return rule_text(parts.join(" · "), w);
+  return rule_text(View.view_pick(v).map((knob) => knob.text).join(" · "), w);
 }
 
 // a rule, a text at its right end ("": none)

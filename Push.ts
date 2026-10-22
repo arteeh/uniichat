@@ -66,8 +66,8 @@ let KEYS: Keys | null | undefined;
 
 export namespace Push {
 
-  // the server's key pair, read, or made at the first start (Cloud.open,
-  // before any worker); null, logged, if vapid.json isn't one: made anew,
+  // the server's key pair, read, or made at the first start (Server.ts);
+  // null, logged, if vapid.json isn't one: made anew,
   // it would silence every browser
   export function keys(): Keys | null {
     if (KEYS !== undefined) {

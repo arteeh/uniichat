@@ -11,14 +11,10 @@
 // setup failing) or, if the vendor said when its refusal lifts (`until`:
 // a usage limit a fallback went past: Agent.limit_off), then (a week at
 // most), till
-// one is answered or we end it (a stop; its payer's refusal: its node
-// then waits for the user's credit, with no call: Memory.ts `hold`): an
-// outage only delays it, and no summary is made of a failure that isn't
+// one is answered or we end it (a stop): an outage only delays it, and no summary is made of a failure that isn't
 // its input's (Memory.ts). A call that yields (an import's summary,
 // naming its import) sends nothing while one that doesn't waits on its
-// busy model, nor while another of its import's does (Agent.ts). A
-// call's events, payments and end go to its sink, which moves with its
-// chat to another process (Server.ts): the call runs on where it started.
+// busy model, nor while another of its import's does (Agent.ts).
 //
 // Fallback: a call on a profile (Pick.ts) runs on its pick, then on each
 // of the profile's models (Pick.falls); one on a model alone has none.
@@ -33,12 +29,11 @@
 // answer begins it tells its sink what it runs on (Run).
 //
 // Cache: a marked block ends a prefix the vendor caches. Single flight
-// (AskAI.wait), as a request is sent, once its payer let it through: one
-// whose prefix no call cached within TTL leads; one whose prefix a leader
-// is writing waits until the leader's response begins (only then can it
-// read the entry). So a leader is always a request being sent, never one
-// waiting for its user's credit or yielding (Agent.ts), which every
-// user's calls of its prefix would wait on.
+// (AskAI.wait), as a request is sent: one whose prefix no call cached
+// within TTL leads; one whose prefix a leader is writing waits until the
+// leader's response begins (only then can it read the entry). So a
+// leader is always a request being sent, never one yielding (Agent.ts),
+// which every call of its prefix would wait on.
 
 import { Agent } from "./Agent.ts";
 import { ClaudeSub } from "./ClaudeSub.ts";
@@ -46,7 +41,6 @@ import { stream_lines } from "./Clip.ts";
 import { Machine } from "./Machine.ts";
 import { Pick } from "./Pick.ts";
 import * as config from "./Config.ts";
-import type { Usage } from "./Price.ts";
 
 // Types
 // =====
@@ -67,39 +61,6 @@ export type Say = { text: string; imgs: Img[] };
 // a text block of a call's message; `mark`: a cache entry ends after it
 export type Block = { text: string; mark: boolean };
 
-// what a paid call serves: the chat's turn, a summary (the chat's, an
-// import's), a recording, an agent, a computer-use agent
-export type Served = "chat" | "compactor" | "import" | "voice" | "agent" | "computer";
-
-// a paid request let through: the most tokens it may write, why it
-// failed should it write them all (null: the model's cap, no failure),
-// and what ends it, billing what it used (null: nothing) and letting go
-// of its booking
-export type Grant = { max: number; cut: string | null; end: (used: Used | null) => void };
-
-// what a request ran on and used
-export type Used = { run: Pick; use: Usage };
-
-// a paid request's costs (micro-USD): its input's, each byte of its text a
-// token (Agent.worst), and an output token's, priced at that input's size;
-// exact: both at its tokens as the API counts them (null: they are)
-export type Cost = { input: number; token: number; exact: (() => Promise<Cost>) | null };
-
-// a paid call's payer, the gate every paid request passes right before
-// it is sent. Given its costs and the model's most tokens out (cap), it
-// books the input (exact, once the credit can't pay cap tokens past its
-// bytes) and as many tokens out, up to cap, as the credit less what
-// running requests booked pays for, waiting while they hold what a few
-// need; why not: the credit alone can't pay a few tokens out. So any
-// credit runs any model, a debt is at most what one estimate missed, and
-// a reply that wrote all it was let ends, saying why
-export type Bill = (cost: Cost, cap: number) => Promise<Grant | string>;
-
-// the bill of a call serving `what`: a zoom target (a message "id", a
-// summary "id+n", an agent's name), or "" (a recording); bytes: a
-// compaction's input
-export type Pay = (kind: Served, what: string, bytes?: number) => Bill;
-
 // searches: the most web searches it runs (0: no web tools); probe: its
 // first request goes once (its pick is DOWN); fallback: a pick follows
 // its own, which a long usage-limit wait goes on with instead (Agent.step)
@@ -109,7 +70,6 @@ export type Ask = Pick & {
   imgs?     : Img[];
   searches  : number;
   server    : string;
-  bill?     : Bill;
   patient?  : boolean;
   yields?   : string;
   probe?    : boolean;
@@ -137,13 +97,10 @@ export type Event =
 
 // stop: who ended a call that failed (Agent.ts): the model (`fail`: it
 // answered, so the failure is its input's doing, a refusal or a stop
-// reason; asked again, it fails alike), we (`lost`: a stop, its payer's
-// refusal or cut), the vendor (`down`; off: out for every call, not
-// this request alone), or none (our setup threw); acted: it ran a tool
-// or took a message sent mid-run, which another try would do again;
-// cut: a deploy cut it as it waited for a usage limit (Server.ts
-// Main.away), so where its chat went it goes on, as after a restart;
-// until: when the vendor's refusal lifts, if it said (ms since 1970)
+// reason; asked again, it fails alike), we (`lost`: a stop), the vendor
+// (`down`; off: out for every call, not this request alone), or none
+// (our setup threw); acted: it ran a tool or took a message sent mid-run,
+// which another try would do again; until: when the vendor's refusal lifts, if it said (ms since 1970)
 export type End = {
   ok     : boolean;
   text   : string;
@@ -152,7 +109,6 @@ export type End = {
   stop?  : "fail" | "lost" | "down";
   off?   : boolean;
   acted? : boolean;
-  cut?   : boolean;
   until? : number;
 };
 
@@ -164,12 +120,8 @@ export type Try = {
   done : Promise<End>;
 };
 
-// where a call's events, payments and end go
-export type Sink = { on: (ev: Event) => void; bill?: Bill; end: (end: End) => void };
-
-// a call: its done is its first sink's end; `move` sends what comes
-// after to another (its chat moved to another process: Server.ts)
-export type Call = Try & { move: (to: Sink) => void };
+// a call: its tries, one after another (AskAI.ask)
+export type Call = Try;
 
 // Constants
 // =========
@@ -214,7 +166,8 @@ export namespace AskAI {
       halt.abort();
       call.stop();
     };
-    const [out, feed] = AskAI.tie(on, ask.bill, send, stop, () => call.wake());
+    const { promise, resolve } = Promise.withResolvers<End>();
+    const out: Call = { send, stop, wake: () => call.wake(), done: promise };
     const picks = Pick.falls(ask, ask.profile === undefined ? [] : config.OFFER.profiles?.[ask.profile] ?? []);
     // why each pick failed or was skipped, this call
     const whys: (string | null)[] = picks.map(() => null);
@@ -235,13 +188,13 @@ export namespace AskAI {
       const hear = (ev: Event) => {
         if (!heard && (ev.$ === "Delta" || (ev.$ === "Entry" && ev.kind !== "mind"))) {
           heard = true;
-          feed.on({ $: "Run", run: Pick.named(run), from: from && Pick.named(from), why });
+          on({ $: "Run", run: Pick.named(run), from: from && Pick.named(from), why });
         }
-        feed.on(ev);
+        on(ev);
       };
       const probe = picks.length > 1 && DOWN.has(AskAI.down_key(run));
       const fallback = k < picks.length - 1;
-      return AskAI.start({ ...ask, ...run, bill: feed.bill, probe, fallback }, hear);
+      return AskAI.start({ ...ask, ...run, probe, fallback }, hear);
     };
     let call = go();
     const run = async (): Promise<End> => {
@@ -270,18 +223,8 @@ export namespace AskAI {
         end = await call.done;
       }
     };
-    run().then(feed.end, (err) => feed.end(AskAI.end(String(err?.message ?? err))));
+    run().then(resolve, (err) => resolve(AskAI.end(String(err?.message ?? err))));
     return out;
-  }
-
-  // a call fed by `feed` (its tries, or another process: Server.ts),
-  // which passes all to the call's sink: first `on`, `bill` and done
-  export function tie(on: Sink["on"], bill: Bill | undefined, send: Try["send"], stop: Try["stop"], wake: Try["wake"] = () => {}): [Call, Sink] {
-    const { promise, resolve } = Promise.withResolvers<End>();
-    let to: Sink = { on, bill, end: resolve };
-    const pay: Bill = (cost, cap) => to.bill!(cost, cap);
-    const feed: Sink = { on: (ev) => to.on(ev), bill: bill && pay, end: (end) => to.end(end) };
-    return [{ send, stop, wake, done: promise, move: (sink) => (to = sink) }, feed];
   }
 
   // one try; a vendor that throws gives a failed one
