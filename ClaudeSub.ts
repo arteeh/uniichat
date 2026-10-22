@@ -13,6 +13,11 @@
 // tool loop; we log what it streams. A message sent mid-run goes in once
 // its turn ends. Not signed in, the call ends as one its vendor can't
 // be asked for here (no stop, as with no API key), saying how to sign in.
+// An error Claude Code ends a turn with (past its own retries) is the
+// vendor's, as at the other vendors (Agent.ts): logged, the user told
+// only that the AI service is busy; one that is the account's or every
+// call's (the service down, billing, no such model) is `off`, so a
+// fallback goes on.
 //
 // A Claude Code per call: each call starts its own (~235 MB while it
 // runs), which exits as the call ends; a stop kills it (its tool jobs
@@ -21,30 +26,35 @@
 // Summaries and imports wait on no call: SUMS of them run at most at once
 // (Memory.ts starts up to JOBS), a chat's summaries ahead of imports'.
 //
-// A usage limit never ends a call, as with the other vendors (Agent.ts).
-// Claude Code tells it (a rate_limit_event "rejected", saying when it
-// resets; then a reply with error rate_limit); the call waits for that
-// reset (if not told, a doubling wait up to PACE), its thought saying so
-// once; a wait of LONG or more parks it (a Limit event tells till when),
-// and a message sent, a wake or a stop ends the wait. One that ran no
-// tool of ours (nor took a message) and has a fallback (AskAI.ts) goes on
-// with it instead, as when its vendor is out; else it asks again in a
-// new Claude Code. One that did keeps its
+// A usage limit never ends a call, as with the other vendors, on their
+// code (Agent.ts: its waits, what it says, the limits remembered,
+// resume). Claude Code tells it (a rate_limit_event "rejected", saying
+// when it resets; then a reply with error rate_limit); the call waits
+// for that reset (if not told, a doubling wait up to LIMIT), its thought
+// saying so once; a wait of LONG or more parks it (a Limit event tells
+// till when), and a message sent, a wake, a resume or a stop ends the
+// wait. One that ran no tool of ours (nor took a message) and has a
+// fallback (AskAI.ts) goes on with it instead, as when its vendor is
+// out; else it asks again in a new Claude Code. One that did keeps its
 // Claude Code, idle, and at the reset is told to go on (ON): its
-// conversation as it was, tool results in, so no tool runs again. Usage billed past the plan (isUsingOverage: extra usage) is a
-// limit too: the turn is interrupted at once (an answer already whole is
-// kept: it is paid). A limit told is remembered till its reset (LIMITS,
-// per plan or per model family), and a call under it waits before
-// starting a Claude Code, so none asks into it, nor bills extra usage.
+// conversation as it was, tool results in, so no tool runs again. Usage
+// billed past the plan (isUsingOverage: extra usage) is a limit too: the
+// turn is interrupted at once (an answer already whole is kept: it is
+// paid). A limit told is remembered till its reset (Agent.note, per plan
+// or per model family), and a call under it waits before starting a
+// Claude Code, so none asks into it, nor bills extra usage. The plan's
+// usage isn't polled while a call waits, as openai-sub's is: only Claude
+// Code reads it, with the sign-in we never touch (its SDK's usage call
+// is experimental), so a limit lifted early wakes a call by resume or a
+// message.
 
 import * as child from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import type { Options, Query, SDKMessage, SDKRateLimitInfo, SDKUserMessage, SpawnOptions } from "@anthropic-ai/claude-agent-sdk";
-import { AskAI, type Ask, type End, type Event, type Img, type Say, type Try } from "./AskAI.ts";
-import { Agent, LONG, TRIES, type Emit } from "./Agent.ts";
+import { AGAIN, AskAI, type Ask, type End, type Event, type Img, type Say, type Try } from "./AskAI.ts";
+import { Agent, BUSY, LIMIT, LONG, type Emit, type Hold } from "./Agent.ts";
 import { Anthropic } from "./Anthropic.ts";
-import { Machine } from "./Machine.ts";
 import { live_push, type Live } from "./View.ts";
 import * as config from "./Config.ts";
 
@@ -55,11 +65,6 @@ const DIR = config.CLAUDE_SUB;
 
 // the most summaries' and imports' Claude Codes running at once
 export const SUMS = 4;
-
-// the longest wait between asks at a usage limit whose reset isn't told
-// (a patient call's: AGAIN, as AskAI's)
-const PACE  = 1800e3;
-const AGAIN = 60e3;
 
 // a carried binary's copy younger than this is never removed (another
 // process may have just written it, not yet marked it as its own)
@@ -85,7 +90,12 @@ const ENV = {
   CLAUDE_AGENT_SDK_CLIENT_APP              : "uniichat",
 };
 
-const SIGN_IN = "claude-sub is not signed in: run `unii claude` on the server";
+const SIGN_IN = "claude-sub is not signed in, or its sign-in expired: run `unii claude` on the server";
+
+// the errors Claude Code ends a turn with that are every call's, not
+// this one's: the service down past its retries, the account's (as
+// Agent.ts OFF), no such model
+const OFF = ["server_error", "overloaded", "billing_error", "account_on_hold", "oauth_org_not_allowed", "verification_required", "model_not_found"];
 
 const NO_BIN = "claude-sub needs Claude Code: `bun install` in uniichat's folder, or set `claude` to a Claude Code executable";
 
@@ -123,11 +133,6 @@ const LOADED = { bin: null as Promise<string> | null, sdk: null as Promise<Sdk> 
 
 // the summaries' slots: how many run, those waiting
 const SLOTS = { busy: 0, waits: [] as Wait[], n: 0 };
-
-// the usage limits told: the plan's (""), or a model family's ("opus",
-// "sonnet": a weekly limit of its own); till when, and whether asking
-// under it would bill extra usage
-const LIMITS = new Map<string, { until: number; bills: boolean }>();
 
 // ClaudeSub
 // =========
@@ -260,7 +265,7 @@ export namespace ClaudeSub {
     const end = AskAI.end("");
     const sent: Say[] = [];
     const abort = new AbortController();
-    const wake = { poke: () => {} };
+    const wake: Hold = { poke: () => {}, said: false };
     const send = (say: Say) => {
       sent.push(say);
       wake.poke();
@@ -450,72 +455,29 @@ export namespace ClaudeSub {
     return typeof at === "number" && at > 0 ? (at < 1e12 ? at * 1e3 : at) : null;
   }
 
-  // a limit told, kept till its reset, or lifted: the plan's, or a model
-  // family's. One whose reset isn't told is kept PACE if asking under it
-  // bills (extra usage on), else not (the call's doubling waits pace it)
+  // a limit told, kept till its reset, or lifted (Agent.note): the
+  // plan's ("claude-sub"), or a model family's ("claude-sub opus", a
+  // weekly limit of its own). One whose reset isn't told is kept LIMIT if
+  // asking under it bills (extra usage on), else not (the call's doubling
+  // waits pace it)
   export function note(info: SDKRateLimitInfo): void {
-    const scope = /opus|sonnet/.exec(info.rateLimitType ?? "")?.[0] ?? "";
+    const scope = /opus|sonnet/.exec(info.rateLimitType ?? "")?.[0];
     const bills = info.isUsingOverage === true || info.overageStatus === "allowed" || info.overageStatus === "allowed_warning";
-    const until = ClaudeSub.reset(info) ?? (bills ? Date.now() + PACE : null);
-    if ((info.status === "rejected" || info.isUsingOverage === true) && until !== null) {
-      LIMITS.set(scope, { until, bills });
-    } else {
-      LIMITS.delete(scope);
-    }
+    const until = ClaudeSub.reset(info) ?? (bills ? Date.now() + LIMIT : null);
+    const on = info.status === "rejected" || info.isUsingOverage === true;
+    Agent.note("claude-sub" + (scope ? " " + scope : ""), on ? until : null, bills);
   }
 
   // the latest reset of the limits a call on `model` is under (null:
   // none); billing: only those asking under would bill
   export function limited(model: string, billing: boolean): number | null {
-    const now = Date.now();
     const family = /opus|sonnet/.exec(model)?.[0];
-    const told = ["", ...(family ? [family] : [])].map((k) => LIMITS.get(k)).filter((l) => l !== undefined && l.until > now && (l.bills || !billing));
-    return told.length > 0 ? Math.max(...told.map((l) => l!.until)) : null;
+    return Agent.under(["claude-sub", ...(family ? ["claude-sub " + family] : [])], billing);
   }
 
   // the limits told forgotten (for tests)
   export function forget(): void {
-    LIMITS.clear();
-  }
-
-  // how long a call waits at its `n`th usage limit in a row: till the
-  // reset told (from TRIES on, at least the doubling), else a doubling up
-  // to PACE (a patient call's: AGAIN), as Agent.limit_wait does
-  export function wait(until: number | null, n: number, patient: boolean): number {
-    const back = Math.min(2 ** n * 1e3, patient ? AGAIN : PACE);
-    const left = until === null ? 0 : until - Date.now();
-    return Math.min(2 ** 31 - 1, left <= 0 ? back : n < TRIES ? left : Math.max(left, back));
-  }
-
-  // a call waits `ms` for a usage limit, its thought logged if `say`,
-  // parked (Limit: till when, `known` if the vendor told it) if LONG or
-  // more; a message sent or a wake (true) or a stop ends the wait
-  export async function park(on: (ev: Event) => void, ms: number, known: boolean, say: boolean, signal: AbortSignal, wake: { poke: () => void }): Promise<boolean> {
-    const end = new AbortController();
-    let woke = false;
-    const stop = () => end.abort();
-    wake.poke = () => ((woke = true), stop());
-    signal.addEventListener("abort", stop, { once: true });
-    if (signal.aborted) {
-      stop();
-    }
-    const parked = ms >= LONG;
-    if (parked) {
-      on({ $: "Limit", limit: { until: Date.now() + ms, known } });
-    }
-    if (say) {
-      on({ $: "Entry", kind: "mind", text: "The AI service reached a usage limit: asking again in " + Agent.span(ms) + "." });
-    }
-    try {
-      await Machine.nap(ms, end.signal);
-    } finally {
-      signal.removeEventListener("abort", stop);
-      wake.poke = () => {};
-      if (parked) {
-        on({ $: "Limit", limit: null });
-      }
-    }
-    return woke;
+    Agent.forget("claude-sub");
   }
 
   // A call
@@ -530,7 +492,7 @@ export namespace ClaudeSub {
   // and the wait is long, it ends (`off`) for the fallback to go on. One whose Claude Code dies before
   // anything came out is tried once more. A binary's copy gone since
   // (removed by hand) is written out again
-  export async function run(ask: Ask, on: (ev: Event) => void, sent: Say[], signal: AbortSignal, wake: { poke: () => void }): Promise<Partial<End>> {
+  export async function run(ask: Ask, on: (ev: Event) => void, sent: Say[], signal: AbortSignal, wake: Hold): Promise<Partial<End>> {
     let bin = await ClaudeSub.bin();
     if (!fs.existsSync(bin)) {
       LOADED.bin = null;
@@ -550,22 +512,26 @@ export namespace ClaudeSub {
     };
     const acted = { v: false };
     let code: Code | null = null;
-    let parked = false;
     let woke = false;
     const sleep = async (ms: number, known: boolean) => {
-      woke = await ClaudeSub.park(on, ms, known, !parked, signal, wake);
-      parked = true;
+      woke = await Agent.park(wake, on, signal, "claude-sub", ms, known);
     };
     // a limit's wait, or the call's end if its fallback goes on instead
-    const out = (ms: number, until: number | null, why: string): Partial<End> | null =>
-      ms >= LONG && ask.fallback === true && !acted.v ? { text: why, stop: "down", off: true, acted: false, until: until ?? undefined } : null;
+    const out = (ms: number, until: number | null, why: string): Partial<End> | null => {
+      if (ms < LONG || ask.fallback !== true || acted.v) {
+        return null;
+      }
+      const r = Agent.limit_off(Agent.fail(why, []), until).refusal!;
+      console.error(ask.model + ": " + r.why.slice(0, 300));
+      return { text: r.say, stop: "down", off: true, acted: false, until: r.until };
+    };
     try {
       for (let tries = 0, n = 0; !signal.aborted; ) {
         const until = ClaudeSub.limited(ask.model, woke);
         woke = false;
         if (until !== null) {
           const ms = until - Date.now();
-          const end = out(ms, until, "claude-sub: a usage limit till " + new Date(until).toISOString());
+          const end = out(ms, until, "usage limit");
           if (end !== null) {
             return end;
           }
@@ -611,12 +577,12 @@ export namespace ClaudeSub {
           void ClaudeSub.close(code);
           code = null;
         }
-        const ms = ClaudeSub.wait(got.limit.until, n, ask.patient === true);
+        const { ms, known } = Agent.limit_wait(got.limit.until, n, ask.patient === true ? AGAIN : LIMIT);
         const end = out(ms, got.limit.until, got.limit.text);
         if (end !== null) {
           return end;
         }
-        await sleep(ms, got.limit.until !== null && got.limit.until > Date.now() && n < TRIES);
+        await sleep(ms, known);
       }
       return {};
     } finally {
@@ -638,6 +604,7 @@ export namespace ClaudeSub {
     let info: SDKRateLimitInfo | null = null;
     let hit = false;
     let over = false;
+    let err: string | undefined;
     for (;;) {
       const r = await Promise.race([ClaudeSub.read(code), stopped]);
       if (r === "stop") {
@@ -668,6 +635,7 @@ export namespace ClaudeSub {
         return { text: SIGN_IN };
       }
       hit ||= msg.type === "assistant" && msg.error === "rate_limit";
+      err = msg.type === "assistant" ? msg.error ?? err : err;
       if (msg.type === "user" && Array.isArray(msg.message.content)) {
         ClaudeSub.backs(msg.message.content).forEach((e) => log({ $: "Entry", ...e }));
       }
@@ -681,7 +649,8 @@ export namespace ClaudeSub {
         return { limit: { until: info && ClaudeSub.reset(info), text: why } };
       }
       if (!ok) {
-        return { text: why || msg.subtype, stop: "down" };
+        console.error("claude-sub: " + (err ? err + ": " : "") + (why || msg.subtype).slice(0, 300));
+        return { text: BUSY, stop: "down", off: err !== undefined && OFF.includes(err) };
       }
       const says = sent.splice(0);
       if (says.length === 0) {

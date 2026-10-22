@@ -3,8 +3,10 @@
 // `bun test ChatGPT.test.ts`. The openai-sub vendor's seams, against a
 // fake auth.openai.com and ChatGPT backend (one local server) that takes
 // only the fields Codex sends and requires `instructions`: the body,
-// refreshes (refresh tokens rotate), the sign-in file, usage limits, the
-// sign-ins, logout, which vendor a pick bills, and a billing server.
+// refreshes (refresh tokens rotate), the sign-in file, usage limits (as
+// every vendor's: waits, the fallback, limits remembered, the plan's
+// usage read while one waits, resume), the sign-ins, logout, which
+// vendor a pick bills, and a billing server.
 
 import { beforeEach, expect, spyOn, test } from "bun:test";
 import * as fs from "node:fs";
@@ -35,7 +37,8 @@ const REFRESH = ["client_id", "grant_type", "refresh_token"];
 
 // what the fake saw and does: a refresh waits `slow` ms, then runs
 // `before`; `down` polls answer 5xx first; `limited`: a usage limit, reset
-// at `resets`
+// at `resets`, which wham/usage tells (`usages`: its reads); a system
+// prompt "TOOL" calls our tool `date` first (`tools`: its runs)
 const fake = {
   valid     : new Set<string>(),
   spent     : new Set<string>(),
@@ -44,6 +47,8 @@ const fake = {
   requests  : [] as Array<{ headers: Record<string, string>; body: any }>,
   limited   : false,
   resets    : 1793082856,
+  usages    : [] as Array<Record<string, string>>,
+  tools     : 0,
   polls     : 0,
   exchanges : [] as Array<Record<string, string>>,
   revoked   : [] as any[],
@@ -107,6 +112,19 @@ const server = Bun.serve({
       }
       return Response.json({ authorization_code: "code-ok", code_verifier: "verifier-dev" });
     }
+    if (url.pathname === "/wham/usage") {
+      fake.usages.push(Object.fromEntries(req.headers));
+      const window = { used_percent: fake.limited ? 100 : 40, limit_window_seconds: 18000, reset_after_seconds: 600, reset_at: fake.resets };
+      return Response.json({ plan_type: "plus", rate_limit: { allowed: !fake.limited, limit_reached: fake.limited, primary_window: window, secondary_window: null } });
+    }
+    if (url.pathname === "/mcp") {
+      const msg = await req.json();
+      if (msg.method === "tools/list") {
+        return Response.json({ jsonrpc: "2.0", id: msg.id, result: { tools: [{ name: "date", description: "The date.", inputSchema: { type: "object", properties: {} } }] } });
+      }
+      fake.tools += 1;
+      return Response.json({ jsonrpc: "2.0", id: msg.id, result: { content: [{ type: "text", text: "Tue" }] } });
+    }
     if (url.pathname === "/codex/responses") {
       const headers = Object.fromEntries(req.headers);
       const body = await req.json();
@@ -123,6 +141,11 @@ const server = Bun.serve({
       }
       if (!fake.valid.has((headers.authorization ?? "").replace(/^Bearer /, ""))) {
         return Response.json({ error: { message: "Your authentication token has expired." } }, { status: 401 });
+      }
+      if (body.instructions === "TOOL" && !body.input.some((i: any) => i.type === "function_call_output")) {
+        const call = { type: "function_call", call_id: "c1", name: "date", arguments: "{}" };
+        const response = { status: "completed", output: [], usage: { input_tokens: 10, output_tokens: 2 } };
+        return sse([{ type: "response.output_item.added", output_index: 0, item: { type: "function_call" } }, { type: "response.output_item.done", output_index: 0, item: call }, { type: "response.completed", response }]);
       }
       if (fake.limited) {
         const error = { type: "usage_limit_reached", message: "The usage limit has been reached", plan_type: "plus", resets_at: fake.resets };
@@ -153,6 +176,7 @@ process.env.UNII_VENDORS = "claude-api,openai-sub";
 const config = await import("./Config.ts");
 const { ChatGPT } = await import("./ChatGPT.ts");
 const { AskAI } = await import("./AskAI.ts");
+const { Agent } = await import("./Agent.ts");
 const { Pick } = await import("./Pick.ts");
 const { Machine } = await import("./Machine.ts");
 const { Billing } = await import("./Billing.ts");
@@ -180,11 +204,59 @@ function turn(speed = "slow", text = "Say pong.") {
   return call(speed, text).done;
 }
 
+// a try on openai-sub alone (AskAI.start: `fallback` as a profile sets
+// it), its events kept: its Limits, its thoughts on waiting
+function tried(more: object = {}) {
+  const evs: any[] = [];
+  const ask = { vendor: "openai-sub" as const, model: "gpt-6-luna", effort: "low", speed: "slow", system: "Be brief.", blocks: [{ text: "Say pong.", mark: true }], searches: 0, server: "", ...more };
+  const t = AskAI.start(ask, (ev) => evs.push(ev));
+  const limits = () => evs.filter((e) => e.$ === "Limit").map((e) => e.limit);
+  const minds = () => evs.filter((e) => e.$ === "Entry" && e.kind === "mind" && e.text.startsWith("The AI service")).map((e) => e.text);
+  return { t, limits, minds };
+}
+
+// waits pass at once, the clock moved on past each, `then` run as a
+// parked one (a minute or more) ends; `held`: a parked one never ends
+// but by a wake or a stop
+function clock(held = false, then = () => {}) {
+  const real = Date.now.bind(Date);
+  let skew = 0;
+  const naps: number[] = [];
+  const now = spyOn(Date, "now").mockImplementation(() => real() + skew);
+  const nap = spyOn(Machine, "nap").mockImplementation((ms: number, signal: AbortSignal) => {
+    naps.push(ms);
+    if (held && ms >= 60e3) {
+      return new Promise<void>((ok) => (signal.aborted ? ok() : signal.addEventListener("abort", () => ok(), { once: true })));
+    }
+    skew += ms + 1;
+    if (ms >= 60e3) {
+      then();
+    }
+    return Promise.resolve();
+  });
+  return { naps, restore: () => (now.mockRestore(), nap.mockRestore()) };
+}
+
+async function until(ok: () => boolean): Promise<void> {
+  for (let i = 0; i < 200 && !ok(); i++) {
+    await Bun.sleep(10);
+  }
+}
+
+// a valid sign-in, its token
+function signed(): string {
+  const token = access(1);
+  fake.valid.add(token);
+  sign_in(token);
+  return token;
+}
+
 beforeEach(() => {
   fs.rmSync(FILE, { force: true });
-  Object.assign(fake, { issued: 0, refreshes: [], requests: [], limited: false, resets: 1793082856, polls: 0, exchanges: [], revoked: [], slow: 0, down: 0, before: null });
+  Object.assign(fake, { issued: 0, refreshes: [], requests: [], limited: false, resets: 1793082856, usages: [], tools: 0, polls: 0, exchanges: [], revoked: [], slow: 0, down: 0, before: null });
   fake.valid.clear();
   fake.spent.clear();
+  Agent.forget();
 });
 
 // Tests
@@ -294,16 +366,109 @@ test("a first sign-in makes the file's missing dir, owner only", async () => {
   expect(fs.statSync(FILE).mode & 0o777).toBe(0o600);
 });
 
-test("a usage limit is down at once, till it resets", async () => {
-  const token = access(1);
-  fake.valid.add(token);
-  sign_in(token);
+test("a usage limit after a tool ran (a turn's, a subagent's): it waits for the reset told, parked, then goes on; the tool doesn't run again", async () => {
+  signed();
   fake.limited = true;
-  const end = await turn();
-  expect(end.ok).toBe(false);
-  expect(end.stop).toBe("down");
-  expect(end.until).toBe(fake.resets * 1000);
-  expect(fake.requests).toHaveLength(1);
+  fake.resets = now() + 600;
+  const c = clock(false, () => (fake.limited = false));
+  try {
+    const { t, limits, minds } = tried({ system: "TOOL", server: "http://127.0.0.1:" + server.port + "/mcp", fallback: true });
+    expect(await t.done).toMatchObject({ ok: true, text: "pong" });
+    expect(fake.tools).toBe(1);
+    expect(fake.requests).toHaveLength(3);
+    expect(c.naps.filter((ms) => ms >= 60e3)).toEqual([expect.any(Number)]);
+    expect(c.naps[0]).toBeGreaterThan(590e3);
+    expect(limits()).toEqual([{ until: expect.any(Number), known: true }, null]);
+    expect(minds()).toEqual(["The AI service reached a usage limit: asking again in 10 min."]);
+  } finally {
+    c.restore();
+  }
+});
+
+test("a usage limit, no tool run, with a fallback: it ends at once (off) for the fallback; a call after waits under the limit remembered, asking nothing", async () => {
+  signed();
+  fake.limited = true;
+  fake.resets = now() + 7200;
+  const end = await tried({ fallback: true }).t.done;
+  expect(end).toMatchObject({ ok: false, stop: "down", off: true, until: fake.resets * 1000 });
+  expect(end.acted).not.toBe(true);
+  expect(end.text).toContain("usage limit");
+  const c = clock(true);
+  try {
+    const { t, limits } = tried();
+    await until(() => limits().length > 0);
+    expect(limits()).toEqual([{ until: fake.resets * 1000, known: true }]);
+    expect(fake.requests).toHaveLength(1);
+    t.stop();
+    expect(await t.done).toMatchObject({ ok: false, text: "stopped" });
+  } finally {
+    c.restore();
+  }
+});
+
+test("a message sent ends the wait; still limited, it waits again saying nothing more; a stop ends it at once", async () => {
+  signed();
+  fake.limited = true;
+  fake.resets = now() + 7200;
+  const c = clock(true);
+  try {
+    const { t, limits, minds } = tried();
+    await until(() => limits().length === 1);
+    t.send({ text: "still there?", imgs: [] });
+    await until(() => limits().length === 3);
+    expect(fake.requests).toHaveLength(2);
+    expect(limits()).toEqual([expect.anything(), null, expect.anything()]);
+    expect(minds()).toHaveLength(1);
+    t.stop();
+    expect(await t.done).toMatchObject({ ok: false, text: "stopped" });
+    expect(limits().at(-1)).toBeNull();
+  } finally {
+    c.restore();
+  }
+});
+
+test("while a call waits, the plan's usage is read: a limit lifted early (a banked reset) wakes it, and it goes on", async () => {
+  const token = signed();
+  fake.limited = true;
+  fake.resets = now() + 7200;
+  const c = clock(true);
+  try {
+    const { t, limits } = tried();
+    await until(() => limits().length === 1);
+    expect(await Agent.poll("openai-sub")).toBe(false);
+    expect(fake.requests).toHaveLength(1);
+    expect(fake.usages[0].authorization).toBe("Bearer " + token);
+    expect(fake.usages[0]["chatgpt-account-id"]).toBe("acct-1");
+    fake.limited = false;
+    expect(await Agent.poll("openai-sub")).toBe(true);
+    expect(await t.done).toMatchObject({ ok: true, text: "pong" });
+    expect(fake.requests).toHaveLength(2);
+    expect(fake.refreshes).toHaveLength(0);
+  } finally {
+    c.restore();
+  }
+});
+
+test("resume wakes every call waiting (a turn's, a summary's); still limited, each waits again; lifted, each goes on", async () => {
+  signed();
+  fake.limited = true;
+  fake.resets = now() + 7200;
+  const c = clock(true);
+  try {
+    const a = tried();
+    const b = tried({ patient: true });
+    await until(() => a.limits().length === 1 && b.limits().length === 1);
+    expect(Agent.resume()).toBe(2);
+    await until(() => a.limits().length === 3 && b.limits().length === 3);
+    expect(fake.requests).toHaveLength(4);
+    expect([a.minds().length, b.minds().length]).toEqual([1, 1]);
+    fake.limited = false;
+    expect(Agent.resume()).toBe(2);
+    expect(await a.t.done).toMatchObject({ ok: true, text: "pong" });
+    expect(await b.t.done).toMatchObject({ ok: true, text: "pong" });
+  } finally {
+    c.restore();
+  }
 });
 
 test("a patient call (a summary's) at a usage limit waits for the reset, not asking again", async () => {

@@ -12,8 +12,11 @@
 // Codex does; one saves only if FILE still holds the tokens it refreshed
 // (a logout or sign-in since wins).
 // The body is Codex's: openai-api's parts (OpenAI.ts), the system prompt
-// as `instructions`, no max_output_tokens. A usage limit (429) is told to
-// the user as such, with its reset time (Agent.ts, AskAI.ts).
+// as `instructions`, no max_output_tokens. A usage limit (a 429
+// usage_limit_reached) waits for the reset it tells, as at every vendor
+// (Agent.ts); while a call waits, the plan's usage is read as Codex reads
+// it for its /status (GET wham/usage, no model asked: ChatGPT.clear), so
+// a limit lifted early (a banked reset spent) wakes it.
 // config `chatgpt_issuer` and `chatgpt_url` point it elsewhere (tests).
 
 import * as fs from "node:fs";
@@ -40,7 +43,9 @@ type Sub = State & { items: any[]; speed: string };
 // Codex CLI's OAuth client
 const CLIENT    = "app_EMoamEEZ73f0CkXaXp7hrann";
 const ISSUER    = config.config_get("chatgpt_issuer", "https://auth.openai.com").replace(/\/$/, "");
-const RESPONSES = config.config_get("chatgpt_url", "https://chatgpt.com/backend-api/codex").replace(/\/$/, "") + "/responses";
+const CODEX     = config.config_get("chatgpt_url", "https://chatgpt.com/backend-api/codex").replace(/\/$/, "");
+const RESPONSES = CODEX + "/responses";
+const USAGE     = CODEX.replace(/\/codex$/, "") + "/wham/usage";
 
 // how close to its expiry a token is refreshed; how old a token with no
 // expiry may get; the longest a request to the issuer takes; how long a
@@ -58,14 +63,14 @@ const CLAIMS = "https://api.openai.com/auth";
 // refresh errors that only signing in again fixes
 const GONE = ["refresh_token_expired", "refresh_token_reused", "refresh_token_invalidated", "invalid_grant"];
 
-// 429s whose limit lasts, and what the user reads of each
+// 429s no reset lifts, and what the user reads of each (a usage limit,
+// usage_limit_reached, waits for its reset: ChatGPT.reset)
 const LIMITS: Record<string, string> = {
-  usage_limit_reached : "reached its usage limit",
   usage_not_included  : "doesn't include this use",
   insufficient_quota  : "is out of quota",
 };
 
-const SIGN_IN = "sign in again: `unii chatgpt` (or `bun ChatGPT.ts`) on the server";
+const SIGN_IN = "run `unii chatgpt` on the server";
 
 // the refresh under way in this process, which every call waits on
 let REFRESHING: Promise<Auth> | null = null;
@@ -138,7 +143,7 @@ export namespace ChatGPT {
   export async function token(refused?: string): Promise<string> {
     const auth = ChatGPT.load();
     if (auth === null) {
-      throw new Error("not signed in to ChatGPT: " + SIGN_IN);
+      throw new Error("openai-sub is not signed in: " + SIGN_IN);
     }
     if (auth.tokens.access_token !== refused && !ChatGPT.due(auth)) {
       return auth.tokens.access_token;
@@ -159,7 +164,7 @@ export namespace ChatGPT {
     const newer = () => {
       const now = ChatGPT.load();
       if (now === null) {
-        throw new Error("signed out of ChatGPT: " + SIGN_IN);
+        throw new Error("openai-sub was signed out: " + SIGN_IN);
       }
       return now.tokens.refresh_token !== old.tokens.refresh_token ? now : null;
     };
@@ -191,7 +196,7 @@ export namespace ChatGPT {
           break;
         }
       }
-      throw new Error("the ChatGPT sign-in has expired or was revoked (" + (code || "HTTP " + res.status) + "): " + SIGN_IN);
+      throw new Error("openai-sub's sign-in has expired or was revoked (" + (code || "HTTP " + res.status) + "): " + SIGN_IN);
     }
     if (typeof body.access_token !== "string") {
       throw ChatGPT.busy("no access token");
@@ -342,19 +347,38 @@ export namespace ChatGPT {
     return end;
   }
 
-  // a 429 at a lasting limit (null: not one): the backend's words logged,
-  // ours said (which limit, the plan, when it resets)
+  // a 429 no reset lifts (null: not one): the backend's words logged,
+  // ours said (which, the plan)
   export function refusal(res: Response, text: string): Refusal | null {
     const err = ChatGPT.json(text).error ?? {};
     const kind = [err.type, err.code].find((k) => typeof k === "string" && Object.hasOwn(LIMITS, k));
     if (res.status !== 429 || kind === undefined) {
       return null;
     }
-    const until = typeof err.resets_at === "number" && err.resets_at > 0 && err.resets_at < 1e11 ? err.resets_at * 1000 : undefined;
     const plan = typeof err.plan_type === "string" && /^[a-z0-9_]{1,20}$/.test(err.plan_type) ? " (" + err.plan_type + ")" : "";
-    const when = until === undefined ? "" : "; it resets " + new Date(until).toISOString().slice(0, 16).replace("T", " ") + " UTC";
-    const why = "ChatGPT " + kind + plan + when + ": " + String(err.message ?? "").slice(0, 300);
-    return { why, say: "the ChatGPT plan" + plan + " this server runs on " + LIMITS[kind] + when, until };
+    const why = "ChatGPT " + kind + plan + ": " + String(err.message ?? "").slice(0, 300);
+    return { why, say: "the ChatGPT plan" + plan + " this server runs on " + LIMITS[kind] };
+  }
+
+  // when a usage limit (a 429 usage_limit_reached) resets, as its body
+  // tells (null: not told, or not one)
+  export function reset(res: Response, text: string): number | null {
+    const err = ChatGPT.json(text).error ?? {};
+    if (res.status !== 429 || ![err.type, err.code].includes("usage_limit_reached")) {
+      return null;
+    }
+    const at = typeof err.resets_at === "number" ? err.resets_at * 1000 : typeof err.resets_in_seconds === "number" ? Date.now() + err.resets_in_seconds * 1000 : 0;
+    return at > Date.now() && at - Date.now() < 2 ** 31 ? at : null;
+  }
+
+  // whether the plan's usage limit cleared, as Codex reads it for its
+  // /status (codex-rs backend-client: GET wham/usage, its rate_limit's
+  // `allowed`); null: can't tell
+  export async function clear(): Promise<boolean | null> {
+    const { authorization, "chatgpt-account-id": account, originator } = ChatGPT.headers(await ChatGPT.token());
+    const res = await fetch(USAGE, { headers: { authorization, "chatgpt-account-id": account, originator }, signal: AbortSignal.timeout(REQUEST) });
+    const limit = res.ok ? ChatGPT.json(await res.text()).rate_limit : null;
+    return typeof limit?.allowed === "boolean" ? limit.allowed && limit.limit_reached !== true : null;
   }
 
   export const wire: Wire<Sub> = {
@@ -371,6 +395,7 @@ export namespace ChatGPT {
     step    : (st, ask) => ({ ...OpenAI.step(st, ask), note: "" }),
     usage   : (st) => st.use,
     refusal : (res, text) => ChatGPT.refusal(res, text),
+    reset   : (res, text) => ChatGPT.reset(res, text),
   };
 
 }
