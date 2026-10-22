@@ -67,7 +67,16 @@ export type McpServer = {
 // Constants
 // =========
 
+// the official 1.0.138 build kept its data in ~/.opt: a server started
+// on the default DIR (no $UNII_DIR) moves it here first (config_move)
+export const OLD_DIR = os.homedir() + "/.opt";
+
 export const DIR = config_path(process.env.UNII_DIR ?? "~/.unii");
+
+if (process.env.UNII_DIR === undefined && process.env.UNII_WORKER === undefined && process.argv.slice(2).includes("serve")) {
+  const said = config_move(OLD_DIR, DIR);
+  if (said) console.log("unii: " + said);
+}
 
 export const FILE_PATH = DIR + "/config.json";
 export const KEYS_PATH = DIR + "/keys.json";
@@ -181,6 +190,59 @@ function config_str(x: unknown): string | undefined {
 // a key's: the environment's, keys.json's (`kept`), or none ("default")
 export function config_key_from(name: string, kept: Record<string, string>): From {
   return ENV_KEYS[name] ? "env" : kept[name] ? "file" : "default";
+}
+
+// moves an official build's data (`from`, ~/.opt) into `to`, the
+// default DIR, when `from` has users and `to` has none (a fresh DIR, or
+// one holding only the terminal's sign-ins) and no server still runs on
+// `from` (a live pid in its hand<k>.<pid> sockets). Each entry is
+// renamed into `to`; a folder both have (work) is merged; a file both
+// have keeps `to`'s copy as <name>.before-move. users/ goes last, so a
+// move cut short goes on at the next start. `from` is removed after.
+// Returns what it did, or "".
+export function config_move(from: string, to: string): string {
+  const users = (d: string) => { try { return fs.readdirSync(d + "/users").length > 0; } catch { return false; } };
+  if (from === to || !users(from)) return "";
+  if (users(to)) return from + " has an official build's data too; not moved, as " + to + " has users already";
+  const stale = (n: string) => n === "lock" || /^hand\d+/.test(n);
+  const names = fs.readdirSync(from).sort((a, b) => Number(a === "users") - Number(b === "users"));
+  for (const n of names) {
+    const pid = Number(/^hand\d+\.(\d+)$/.exec(n)?.[1]);
+    if (pid && pid !== process.pid) {
+      try { process.kill(pid, 0); return "not moving " + from + " to " + to + ": a unii server (pid " + pid + ") still runs on it"; } catch {}
+    }
+  }
+  fs.mkdirSync(to, { recursive: true });
+  try { fs.rmdirSync(to + "/users"); } catch {}   // an empty users/: users/ moves whole
+  const move = (x: string, y: string) => {
+    const [dx, dy] = [config_dir(x), config_dir(y)];
+    if (dx && dy) {
+      for (const m of fs.readdirSync(x)) move(x + "/" + m, y + "/" + m);
+      fs.rmdirSync(x);
+      return;
+    }
+    if (fs.existsSync(y) || config_link(y)) fs.renameSync(y, y + ".before-move");
+    try { fs.renameSync(x, y); }
+    catch (err: any) {
+      if (err?.code !== "EXDEV") throw err;
+      fs.cpSync(x, y, { recursive: true, verbatimSymlinks: true });
+      fs.rmSync(x, { recursive: true, force: true });
+    }
+  };
+  for (const n of names) if (!stale(n)) move(from + "/" + n, to + "/" + n);
+  for (const n of fs.readdirSync(from)) if (stale(n)) fs.rmSync(from + "/" + n, { force: true });
+  try { fs.rmdirSync(from); } catch { return "moved the data in " + from + " to " + to + " (" + from + " is not empty)"; }
+  return "moved the data in " + from + " to " + to;
+}
+
+// whether a path is a folder, not a link to one
+function config_dir(p: string): boolean {
+  try { return fs.lstatSync(p).isDirectory(); } catch { return false; }
+}
+
+// whether a path is a symbolic link (existsSync is false for a broken one)
+function config_link(p: string): boolean {
+  try { return fs.lstatSync(p).isSymbolicLink(); } catch { return false; }
 }
 
 function config_path(path: string): string {
