@@ -7,8 +7,7 @@
 // device`, Device.ts) and the terminal chat (`unii [url]`, Term.ts),
 // these two with their files in ~/.config/unii (Client.ts). `unii
 // update` runs the newest release's installer, which replaces this
-// executable. On Windows only the device and the terminal run: the
-// server is Linux's and macOS's (WSL's on a Windows computer).
+// executable. All three run on Linux, macOS and Windows alike.
 //
 // Usage: USAGE (`unii help` prints it).
 
@@ -29,7 +28,7 @@ const USAGE = `Usage: unii [url]           the chat in this terminal (url: $UNII
                             service to keep it up)
        unii serve [port]    your UniiChat server, at http://127.0.0.1:8788
                             (another port: set its "site" too); data in
-                            ~/.unii ($UNII_DIR). Linux, macOS or WSL only
+                            ~/.unii ($UNII_DIR)
        unii serve link      a link that signs a browser in to the server
                             here (run it where the server runs)
        unii serve chatgpt [logout|status]
@@ -110,8 +109,6 @@ if (cmd === undefined) {
   console.log("unii " + Update.VERSION);
 } else if (cmd === "update" && !odd([cmd]) && URL_ === undefined) {
   update();
-} else if (cmd === "serve" && WIN) {
-  fail("unii serve runs on Linux, macOS or WSL, not on Windows itself: run the server there, and unii device here (README).");
 } else if (cmd === "device" && !odd([cmd])) {
   await (await import("./Device.ts")).run(URL_);
 } else if (cmd === "serve" && sub === "chatgpt" && [undefined, "logout", "status"].includes(more) && !odd([cmd, sub, ...(more ? [more] : [])])) {

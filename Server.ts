@@ -32,7 +32,7 @@ import { Pick } from "./Pick.ts";
 import { Push } from "./Push.ts";
 import { Reap } from "./Reap.ts";
 import { Settings } from "./Settings.ts";
-import { INSTALL } from "./Update.ts";
+import { INSTALL, INSTALL_PS1 } from "./Update.ts";
 import { move_over, write_whole } from "./Write.ts";
 import * as Timer from "./Timer.ts";
 import { PROMPTS, SEARCHES, Tools, type Agent, type Live } from "./Tools.ts";
@@ -118,6 +118,13 @@ type Chat = {
 // =========
 
 const LOCK       = config.DIR + "/lock";
+// on Windows (no unix sockets to lock by): LOCK.pid, the server's pid,
+// its time touched every LOCK_BEAT; one older than LOCK_DEAD, or whose
+// process is gone, a crash's
+const LOCK_PID   = LOCK + ".pid";
+const LOCK_BEAT  = 5000;
+const LOCK_DEAD  = 30000;
+const WIN        = process.platform === "win32";
 // the running server's pid, for the installer (it moves no data from
 // under a server)
 const PID        = config.DIR + "/server.pid";
@@ -640,13 +647,15 @@ export namespace Chat {
     }
   }
 
-  // config.AFTER, a shell command, after each turn
+  // config.AFTER, a shell command (sh's; on Windows PowerShell's, as a
+  // device's shell is), after each turn
   export function after(chat: Chat): void {
     if (!config.AFTER) {
       return;
     }
     chat.after = chat.after.then(async () => {
-      const proc = Bun.spawn(["/bin/sh", "-c", config.AFTER], { stdout: "ignore", stderr: "pipe" });
+      const shell = WIN ? [Bun.which("pwsh") ?? "powershell.exe", "-NoProfile", "-NonInteractive", "-Command"] : ["/bin/sh", "-c"];
+      const proc = Bun.spawn([...shell, config.AFTER], { stdout: "ignore", stderr: "pipe", windowsHide: true });
       const err = await new Response(proc.stderr).text();
       if ((await proc.exited) !== 0) {
         Chat.all(chat, { $: "note", text: "after: " + err.trim() });
@@ -1312,9 +1321,31 @@ export namespace Main {
   export let server: Bun.Server<Sock["data"]>;
 
   // a unix socket one process at a time listens on: one a crash left
-  // refuses connections and is taken; one held is waited on
+  // refuses connections and is taken; one held is waited on. On Windows
+  // LOCK_PID, made only where there is none
   export async function lock(): Promise<void> {
     fs.mkdirSync(config.DIR, { recursive: true });
+    while (WIN) {
+      try {
+        fs.writeFileSync(LOCK_PID, String(process.pid), { flag: "wx" });
+        setInterval(() => {
+          try {
+            fs.utimesSync(LOCK_PID, new Date(), new Date());
+          } catch {}
+        }, LOCK_BEAT).unref();
+        process.on("exit", () => fs.rmSync(LOCK_PID, { force: true }));
+        return;
+      } catch (err: any) {
+        if (err.code !== "EEXIST") {
+          throw err;
+        }
+      }
+      if (!Main.locked()) {
+        fs.rmSync(LOCK_PID, { force: true });
+        continue;
+      }
+      await Bun.sleep(1000);
+    }
     while (true) {
       try {
         Bun.listen({ unix: LOCK, socket: { data() {} } });
@@ -1332,6 +1363,24 @@ export namespace Main {
       if (!live) {
         fs.rmSync(LOCK, { force: true });
       }
+    }
+  }
+
+  // whether LOCK_PID is a live server's: it beat lately (a pid Windows
+  // gave another process since is no server) and its process runs; one
+  // being made (empty yet) is
+  export function locked(): boolean {
+    try {
+      const text = fs.readFileSync(LOCK_PID, "utf8");
+      if (Date.now() - fs.statSync(LOCK_PID).mtimeMs > LOCK_DEAD || text === String(process.pid)) {
+        return false;
+      }
+      if (text !== "") {
+        process.kill(Number(text), 0);
+      }
+      return true;
+    } catch (err: any) {
+      return err?.code === "EPERM";
     }
   }
 
@@ -1473,7 +1522,8 @@ export namespace Main {
     Reap.start();
     await Main.lock();
     if ((fs.existsSync(config.DIR + "/users") && !fs.existsSync(CHAT)) || fs.existsSync(config.DIR + "/.migrating")) {
-      throw new Error(config.DIR + " holds an older unii's data, not yet (or not all) moved to this version's layout: run the installer (curl -fsSL " + INSTALL + " | sh) with no unii server running, then start again");
+      const installer = WIN ? "irm " + INSTALL_PS1 + " | iex" : "curl -fsSL " + INSTALL + " | sh";
+      throw new Error(config.DIR + " holds an older unii's data, not yet (or not all) moved to this version's layout: run the installer (" + installer + ") with no unii server running, then start again");
     }
     fs.writeFileSync(PID, String(process.pid));
     Owner.open();
