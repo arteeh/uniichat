@@ -10,7 +10,6 @@
 
 import * as fs from "node:fs";
 import * as os from "node:os";
-import * as path from "node:path";
 import * as View from "./View.ts";
 
 // Constants
@@ -99,9 +98,4 @@ export function fail(why: string): never {
 // a host's name, as its key in a file
 export function host(url: string): string {
   return new URL(url).host;
-}
-
-// where a device works (~/: the home), as a path
-export function home(dir: string): string {
-  return dir.startsWith("~/") ? path.join(os.homedir(), dir.slice(2)) : dir;
 }

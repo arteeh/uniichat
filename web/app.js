@@ -895,7 +895,7 @@ var OPENING = 1;
 var SUMMARIES = "summaries";
 var MAIN = "UniiChat";
 var TURN = "Unii's turn";
-var WIRE = 2;
+var WIRE = 3;
 var PING = 1e4;
 var RETRY = 1000;
 var TICK = "+";
@@ -1782,7 +1782,6 @@ async function boot() {
   if (APP === null) {
     navigator.serviceWorker?.register("/sw.js").catch(() => {});
   }
-  const q = new URLSearchParams(location.search);
   history.replaceState(null, "", PAGES.includes(location.pathname) ? "/settings" : "/");
   if (await boot_me() === null) {
     solo("Sign in", "This UniiChat server is private. On the computer it runs on, run <code>unii serve link</code> and open the link it prints here.");

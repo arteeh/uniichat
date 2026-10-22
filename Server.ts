@@ -26,7 +26,7 @@ import { Disk } from "./Disk.ts";
 import { Mcp } from "./Mcp.ts";
 import * as Import from "./Import.ts";
 import { JOBS, Memory, type Msg as Log, type Share } from "./Memory.ts";
-import { OpenAI, TRANSCRIBER } from "./OpenAI.ts";
+import { OpenAI } from "./OpenAI.ts";
 import { Owner } from "./Owner.ts";
 import { Pick } from "./Pick.ts";
 import { Push } from "./Push.ts";
@@ -157,9 +157,6 @@ const PIECE      = 2 ** 16;
 
 // the paths of the owner's, but /api/'s (the rest: the site's files)
 const OWN        = ["/ws", "/tree", "/export"];
-
-// what a recording is written out by
-const VOICE: Pick = { vendor: "openai-api", model: TRANSCRIBER, effort: "", speed: "slow" };
 
 // the chat's first message, ending in the installer of the terminal
 // (Term.ts), and its line
