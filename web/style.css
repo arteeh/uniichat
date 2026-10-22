@@ -402,7 +402,6 @@ header > .imping { display: flex; flex-direction: column; justify-content: cente
 #account th { font-size: 12.5px; font-weight: 500; color: var(--mid); }
 #account :is(th, td):not(:first-child) { text-align: right; }
 #account :is(th, td):last-child { padding-right: 0; }
-#account :is(.days, .buys) :is(th, td):nth-child(2) { text-align: left; }
 #account td:nth-child(2) { white-space: normal; }
 #account tr:last-child td { border-bottom: 0; }
 .item { display: flex; gap: 16px; align-items: center; justify-content: space-between; padding: 12px 0; }
@@ -411,7 +410,7 @@ header > .imping { display: flex; flex-direction: column; justify-content: cente
 #account .chip { min-width: 96px; }
 .item small { display: block; font-size: 13.5px; font-weight: 400; color: var(--mid); overflow-wrap: anywhere; }
 #account .notify:disabled { opacity: .4; cursor: default; }
-/* a prompt's editor (SOUL.md, an owner's base prompt): its note, its
+/* a prompt's editor (prompt.md, compact.md): its note, its
    text (16px on touch, as above), then what saving said beside Save
    (red: refused) */
 .prompt .note { margin: 0 0 10px; font-size: 14px; color: var(--mid); }
