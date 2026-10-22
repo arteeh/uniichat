@@ -1237,8 +1237,12 @@ export namespace Chat {
   // once built: Chat.made), so no view ever gets the raw history; a block
   // opened gets its halves (zoom); they start where the tree's root
   // holding the import's first message starts, so the oldest blocks are
-  // the largest, as in the tree, not grown from an unaligned start
+  // the largest, as in the tree, not grown from an unaligned start. A
+  // device's socket is no view: it gets none of it
   export function show(chat: Chat, sock: Sock): void {
+    if (sock.data.host !== null) {
+      return;
+    }
     const [from, count] = [chat.eye.from, chat.mem.count];
     const [a, hi] = chat.batch === null ? [0, 0] : [chat.batch.a, chat.batch.b];
     const root = Memory.roots(count).find((part) => Memory.span(part)[1] >= a);
