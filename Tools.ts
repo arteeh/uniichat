@@ -40,8 +40,9 @@ import { clip_page } from "./Clip.ts";
 import * as config from "./Config.ts";
 import { COMPUTER, INT, STR, TOOLS, spec, type Job, type Skill, type Spec } from "./Machine.ts";
 import { Mcp, type Server, type Servers } from "./Mcp.ts";
-import { Memory, SOUL } from "./Memory.ts";
+import { Memory } from "./Memory.ts";
 import PROMPT from "./prompt.txt" with { type: "text" };
+import COMPACT_PROMPT from "./compact.txt" with { type: "text" };
 import { EFFORTS, Pick } from "./Pick.ts";
 import * as Timer from "./Timer.ts";
 import type { Live } from "./View.ts";
@@ -140,15 +141,15 @@ const JOB = "x-unii-job";
 const RUNNING = new Map<string, Set<AbortController>>();
 const SESSION = "mcp-session-id";
 
-// the master's prompt (a turn's and a compaction's): prompt.txt
-export const MASTER = PROMPT.trim();
-
-// a user's SOUL.md until they write their own, before MASTER
-export const SOUL_DEFAULT = "You are Unii, an AI agent that works for one user in a single chat that never ends.";
-
-// the owner's base prompt (config.OWNER), in place of MASTER for every
-// user, set on the Settings page (Server.ts)
-export const BASE = config.DIR + "/base.md";
+// the two prompts: the user prompt, every turn's (prompt.txt), and the
+// compaction prompt, every summary's and nothing else (compact.txt, after
+// upstream #37 by @tinqr: with one prompt for both, a turn sometimes came
+// back a summary). Each is replaced by its file in the server's dir,
+// written by hand or on the Settings page (Server.ts)
+export const PROMPTS = {
+  prompt  : { def: PROMPT.trim(), file: config.DIR + "/prompt.md" },
+  compact : { def: COMPACT_PROMPT.trim(), file: config.DIR + "/compact.md" },
+};
 
 const SUB_HEAD = `You are a subagent of Unii, an AI agent that works for one user in a
 single chat that never ends. Unii gave you a task. Do it yourself, with
@@ -229,8 +230,10 @@ const SKILLS = "Skills on the devices open now, by device: when a task matches o
 // longer keeps those it listed last
 const LOOK = 3000;
 
-// a subagent's prompt: its part, then the view's and the devices' docs
+// a subagent's prompt: its part, then the view's and the devices' docs;
+// then, after AGENT_PROMPT, Unii's own (the user's instructions are in it)
 const SUB = SUB_HEAD + "\n\n" + VIEW_DOC + "\n\n" + DEVICES;
+const AGENT_PROMPT = "Unii's own prompt follows, for the user's instructions in it. Where it speaks to Unii, it speaks of the agent you work for, not of you.";
 
 // the tools of everyone (OWN), the master's (BOSS), those that run on a
 // device (`kit`: Machine.ts's), and the master's computer tasks (HAND),
@@ -301,21 +304,9 @@ export namespace Tools {
     return tools.url + who;
   }
 
-  // a prompt: its head, the rules, then the user's own SOUL.md (dir:
-  // theirs; none for the master's, which starts with it: Chat.share)
-  export function system(head: string, dir?: string): string {
-    const [rules, soul] = [Tools.rules(), dir === undefined ? "" : Memory.file_text(dir + SOUL)];
-    return head + "\n\n" + (soul === "" ? rules : [rules.trimEnd(), soul].filter((t) => t !== "").join("\n\n"));
-  }
-
-  // the master's head: the owner's base prompt, else MASTER
-  export function master(): string {
-    return Memory.file_text(BASE) || MASTER;
-  }
-
-  // the user's SOUL.md (dir: theirs), else SOUL_DEFAULT
-  export function soul(dir: string): string {
-    return Memory.file_text(dir + SOUL) || SOUL_DEFAULT;
+  // a prompt as used: its file, else its default
+  export function prompt(which: keyof typeof PROMPTS): string {
+    return Memory.file_text(PROMPTS[which].file) || PROMPTS[which].def;
   }
 
   export function devices(tools: Tools): Block {
@@ -365,10 +356,6 @@ export namespace Tools {
   export function at_work(tools: Tools): Block {
     const names = Tools.working(tools).map((a) => a.name);
     return { text: "Agents at work now: " + (names.length === 0 ? "none." : names.join(", ") + ".") + "\n\n", mark: false };
-  }
-
-  export function rules(): string {
-    return config.RULES ? fs.readFileSync(config.RULES, "utf8") : "";
   }
 
   // MCP
@@ -823,13 +810,13 @@ export namespace Tools {
     const role = agent.role;
     switch (role.$) {
       case "sub": {
-        const system = Tools.system(SUB, tools.mem.dir);
+        const system = SUB + "\n\n" + AGENT_PROMPT + "\n\n" + Tools.prompt("prompt");
         const blocks = [...agent.view, Tools.devices(tools), Tools.skills(tools), log];
         const effort = role.effort ?? run.effort;
         return { ...run, effort, system, blocks, searches: SEARCHES, server, bill };
       }
       case "hands": {
-        const system = Tools.system(HANDS.replace("{device}", role.device), tools.mem.dir);
+        const system = HANDS.replace("{device}", role.device) + "\n\n" + AGENT_PROMPT + "\n\n" + Tools.prompt("prompt");
         return { ...run, system, blocks: [...agent.view, log], searches: 0, server, bill };
       }
     }

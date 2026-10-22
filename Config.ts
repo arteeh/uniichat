@@ -39,7 +39,6 @@ type Made = {
   pick      : Pick;
   compactor : Pick;
   agents    : Pick | null;
-  rules     : string;
   after     : string;
   owner     : string[];
 };
@@ -84,7 +83,6 @@ export const SETTINGS: Setting[] = [
   { key: "apns",      def: "",                                  apply: "restart", web: true  },
   { key: "workers",   def: "0",                                 apply: "restart", web: false },
   { key: "work",      def: DIR + "/work",                       apply: "restart", web: false },
-  { key: "rules",     def: "",                                  apply: "now",     web: false },
   { key: "after",     def: "",                                  apply: "now",     web: false },
 ];
 
@@ -108,7 +106,6 @@ export const SITE    = config_value(FILE, "site").replace(/\/$/, "");
 export const OFFER: Offer = MADE.offer;
 
 export const WORK       = config_path(config_value(FILE, "work"));
-export let   RULES      = MADE.rules;
 export let   AFTER      = MADE.after;
 export let   PICK       = MADE.pick;
 
@@ -255,7 +252,6 @@ export function config_make(file: Record<string, unknown>): Made {
     pick      : config_run("pick", config_value(file, "pick"), offer),
     compactor : config_run("compactor", config_value(file, "compactor"), offer),
     agents    : agents ? config_run("agents", agents, offer) : null,
-    rules     : config_path(config_value(file, "rules")),
     after     : config_value(file, "after"),
     owner     : config_value(file, "owner").split(",").map((o) => o.trim().toLowerCase()).filter((o) => o !== ""),
   };
@@ -421,7 +417,6 @@ export function config_reload(): void {
   PICK = made.pick;
   COMPACTOR = made.compactor;
   AGENTS = made.agents;
-  RULES = made.rules;
   AFTER = made.after;
   OWNER = made.owner;
   Object.assign(KEYS, keys);

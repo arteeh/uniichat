@@ -45,14 +45,14 @@ import { Disk } from "./Disk.ts";
 import { Mail } from "./Mail.ts";
 import { Mcp } from "./Mcp.ts";
 import * as Import from "./Import.ts";
-import { JOBS, Memory, SOUL, type Given, type Msg as Log, type Share } from "./Memory.ts";
+import { JOBS, Memory, type Given, type Msg as Log, type Share } from "./Memory.ts";
 import { OpenAI, TRANSCRIBER } from "./OpenAI.ts";
 import { Pick } from "./Pick.ts";
 import { Price } from "./Price.ts";
 import { Reap } from "./Reap.ts";
 import { Settings } from "./Settings.ts";
 import * as Timer from "./Timer.ts";
-import { BASE, MASTER, SEARCHES, SOUL_DEFAULT, Tools, type Agent, type Live, type Moved as Kit } from "./Tools.ts";
+import { PROMPTS, SEARCHES, Tools, type Agent, type Live, type Moved as Kit } from "./Tools.ts";
 import { email_ask, FRAME, IMAGES, live_push, MOVE, PING, QUIT, SUMMARIES, TICK, TURN, WIRE, type Answer, type Part, type Server as Out, type Wait } from "./View.ts";
 import * as config from "./Config.ts";
 import hello_md from "./hello.md" with { type: "text" };
@@ -187,7 +187,7 @@ const HAND       = config.DIR + "/hand";
 const LEAVE      = 500;
 // how a call ends whose process ended first (a crash)
 const ENDED      = "the server process that ran it ended";
-// a turn's head, as a summary's is "Compaction:": one prompt serves both
+// a turn's head
 const HEAD       = "Turn: the user's new message:\n\n";
 // a goal's check (Chat.check): its own system prompt (Unii's, which says
 // a call is a turn or a compaction, made the model summarize the chat
@@ -328,7 +328,7 @@ export namespace Chat {
     }
     const acct = { cloud, user: user.id };
     const dir = config.DIR + "/users/" + user.id;
-    const mem = Memory.load(dir, () => Chat.share(chat), (id, ans) => Cloud.act_put(acct, id, ans));
+    const mem = Memory.load(dir, () => Chat.share(chat, Tools.prompt("compact")), (id, ans) => Cloud.act_put(acct, id, ans));
     const tools = Tools.serve(mem, {
       push   : (agent, kind, text) => Chat.push(chat, agent, kind, text),
       note   : (text) => Chat.note(chat, text),
@@ -387,11 +387,12 @@ export namespace Chat {
     return chat;
   }
 
-  // what every call of the chat starts with, a summary's too: its system
-  // prompt. A summary gets no tools: one it called, ours or the API's
-  // own (web search brings code execution), sent its whole input again
-  export function share(chat: Chat): Share {
-    const system = Tools.system(Tools.soul(chat.mem.dir) + "\n\n" + Tools.master());
+  // what a call of the chat starts with: its system prompt, the user
+  // prompt (a turn's) or the compaction prompt (a summary's, which gets
+  // nothing else). A summary gets no tools: one it called, ours or the
+  // API's own (web search brings code execution), sent its whole input
+  // again
+  export function share(chat: Chat, system: string): Share {
     return { ...Pick.ask(chat.pick), system, searches: 0, server: "" };
   }
 
@@ -614,7 +615,7 @@ export namespace Chat {
     chat.socks.forEach((sock) => Chat.show(chat, sock));
     const bill = mem.pay?.("chat", String(msgs[0].id));
     const blocks = [...view, Tools.devices(chat.tools), Tools.skills(chat.tools), Tools.at_work(chat.tools), { text: HEAD + text, mark: true }];
-    const ask = { ...Chat.share(chat), searches: SEARCHES, server, blocks, imgs, bill };
+    const ask = { ...Chat.share(chat, Tools.prompt("prompt")), searches: SEARCHES, server, blocks, imgs, bill };
     chat.model = chat.pick.model;
     chat.asked = true;
     chat.open = 0;
@@ -657,7 +658,7 @@ export namespace Chat {
       return Memory.line({ l: 0, i }, msg.kind + ": " + msg.text) + "\n";
     });
     const blocks = [...Memory.view(mem, at), { text: tail.join("") + GOAL_ASK + goal, mark: true }];
-    return { call: AskAI.ask({ ...Chat.share(chat), system: GOAL, blocks, bill: mem.pay?.("chat", "goal") }, (ev) => Chat.checking(chat, ev)), goal };
+    return { call: AskAI.ask({ ...Chat.share(chat, GOAL), blocks, bill: mem.pay?.("chat", "goal") }, (ev) => Chat.checking(chat, ev)), goal };
   }
 
   // a goal check's events: only its waits for a usage limit show, as the
@@ -1984,8 +1985,8 @@ export namespace Main {
       case "/api/imported": {
         return Response.json(Chat.done(chat));
       }
-      case "/api/soul": {
-        return await Main.soul(chat, user, req);
+      case "/api/prompts": {
+        return await Main.prompts(req);
       }
     }
     const file = Memory.image_file(mem, p.slice("/image/".length));
@@ -1993,34 +1994,26 @@ export namespace Main {
     return file === null ? new Response("not found", { status: 404 }) : new Response(Bun.file(file), { headers: keep });
   }
 
-  // the user's SOUL.md, and for an owner (config.OWNER) the base prompt
-  // (MASTER, unless replaced): a GET reads them, a POST sets the one its
-  // JSON names ({ soul }, at most 16 KB, or { base }, 64 KB), trimmed;
-  // empty deletes the file, going back to SOUL_DEFAULT (or MASTER)
-  export async function soul(chat: Chat, user: User, req: Request): Promise<Response> {
-    const owner = config.OWNER.includes(user.name.toLowerCase());
-    const read = () => ({ soul: Tools.soul(chat.mem.dir), ...(owner ? { base: Tools.master() } : {}) });
+  // the two prompts (Tools.PROMPTS): a GET reads them, as used and as
+  // built in; a POST sets the one its JSON names ({ prompt } or
+  // { compact }), trimmed, at most 64 KB. Empty or the default deletes
+  // its file, so a new default reaches it
+  export async function prompts(req: Request): Promise<Response> {
+    const read = () => Object.fromEntries(Object.entries(PROMPTS).map(([k, p]) => [k, { text: Tools.prompt(k as keyof typeof PROMPTS), def: p.def }]));
     if (req.method !== "POST") {
       return Response.json(read());
     }
-    if (!Main.spend(USERS, user.id)) {
-      return Response.json({ error: "Too many requests: wait a moment." }, { status: 429 });
-    }
     const msg = await req.json().catch(() => null);
-    const soul = typeof msg?.soul === "string";
-    if (!soul && typeof msg?.base !== "string") {
-      return Response.json({ error: "Send { soul } or { base }, a text." }, { status: 400 });
+    const which = (["prompt", "compact"] as const).find((k) => typeof msg?.[k] === "string");
+    if (which === undefined) {
+      return Response.json({ error: "Send { prompt } or { compact }, a text." }, { status: 400 });
     }
-    if (!soul && !owner) {
-      return Response.json({ error: "Only the server's owner may replace the base prompt." }, { status: 403 });
+    const text: string = msg[which].trim();
+    if (Buffer.byteLength(text) > 64 * 1024) {
+      return Response.json({ error: "A prompt holds at most 64 KB." }, { status: 413 });
     }
-    const text: string = (soul ? msg.soul : msg.base).trim();
-    const most = (soul ? 16 : 64) * 1024;
-    if (Buffer.byteLength(text) > most) {
-      return Response.json({ error: (soul ? "SOUL.md" : "The base prompt") + " holds at most " + most / 1024 + " KB." }, { status: 413 });
-    }
-    const file = soul ? chat.mem.dir + SOUL : BASE;
-    if (text === "" || text === (soul ? SOUL_DEFAULT : MASTER)) {
+    const { file, def } = PROMPTS[which];
+    if (text === "" || text === def) {
       fs.rmSync(file, { force: true });
     } else {
       fs.writeFileSync(file, text + "\n");

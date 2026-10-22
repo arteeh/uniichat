@@ -1133,15 +1133,15 @@ function route(): void {
 
 async function account(): Promise<void> {
   const el = $("#account");
-  const [res, got, set] = await Promise.all([fetch("/api/account").catch(() => null), fetch("/api/soul").catch(() => null), P.owner ? fetch("/api/settings").catch(() => null) : null]);
+  const [res, got, set] = await Promise.all([fetch("/api/account").catch(() => null), fetch("/api/prompts").catch(() => null), P.owner ? fetch("/api/settings").catch(() => null) : null]);
   const a: View.Account | null = res !== null && res.ok ? await res.json() : null;
-  const soul: View.Soul | null = got !== null && got.ok ? await got.json().catch(() => null) : null;
+  const prompts: View.Prompts | null = got !== null && got.ok ? await got.json().catch(() => null) : null;
   if (a === null) {
     el.innerHTML = `<p class="sub">Could not read your account. Try again in a moment.</p>`;
     return;
   }
   const push = await notify_state().catch(() => null);
-  el.innerHTML = Html.account_html(a, APP !== null, soul, P.owner, push);
+  el.innerHTML = Html.account_html(a, APP !== null, prompts, P.owner, push);
   el.querySelectorAll<HTMLFormElement>("form.prompt").forEach((form) => (form.onsubmit = (ev) => {
     ev.preventDefault();
     account_prompt(form);
@@ -1223,17 +1223,21 @@ async function signout(): Promise<void> {
   location.href = "/";
 }
 
-// a prompt saved (SOUL.md, or an owner's base prompt); text typed while
-// it saved is not, and says so
+// a prompt saved (the user prompt or the compaction prompt), shown as
+// it is now (empty: the default); text typed while it saved is not, and
+// says so
 async function account_prompt(form: HTMLFormElement): Promise<void> {
   const area = form.querySelector("textarea")!;
   const why  = form.querySelector(".why")!;
   const save = form.querySelector("button")!;
   const sent = area.value;
   save.disabled = true;
-  const out = await View.post("/api/soul", { [area.name]: sent });
+  const out = await View.post("/api/prompts", { [area.name]: sent });
   save.disabled = false;
-  why.textContent = out.error ?? (area.value === sent ? "Saved." : "Not saved yet: Save again.");
+  if (out.error === undefined && area.value === sent) {
+    area.value = out[area.name]?.text ?? sent;
+  }
+  why.textContent = out.error ?? (area.value === out[area.name]?.text ? "Saved." : "Not saved yet: Save again.");
   form.classList.toggle("bad", out.error !== undefined);
 }
 
