@@ -54,6 +54,7 @@ import { Pick } from "./Pick.ts";
 import * as names from "./Names.ts";
 import type { Timer } from "./Timer.ts";
 import { FIT, IMAGE, image_kind, PIXELS } from "./View.ts";
+import { move_over } from "./Write.ts";
 
 // Types
 // =====
@@ -236,7 +237,7 @@ export namespace Memory {
     const file = mem.dir + "/view.json";
     const [chat, seen] = [mem.view, mem.seen].map((view): Kept => ({ parts: view.parts.map((part) => [part.l, part.i]), batch: view.batch }));
     fs.writeFileSync(file + ".new", JSON.stringify({ ...chat, seen, pick: mem.pick, goal: mem.goal, off: mem.off, work: mem.work, timers: mem.timers, ...mem.ends }));
-    fs.renameSync(file + ".new", file);
+    move_over(file + ".new", file);
     Disk.wrote(file);
   }
 

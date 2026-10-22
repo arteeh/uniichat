@@ -33,7 +33,7 @@ import { Push } from "./Push.ts";
 import { Reap } from "./Reap.ts";
 import { Settings } from "./Settings.ts";
 import { INSTALL } from "./Update.ts";
-import { write_whole } from "./Write.ts";
+import { move_over, write_whole } from "./Write.ts";
 import * as Timer from "./Timer.ts";
 import { PROMPTS, SEARCHES, Tools, type Agent, type Live } from "./Tools.ts";
 import { FRAME, IMAGES, live_push, PING, QUIT, SUMMARIES, TICK, TURN, WIRE, type Answer, type Part, type Server as Out, type Wait } from "./View.ts";
@@ -723,7 +723,7 @@ export namespace Chat {
     const file = chat.mem.dir + BATCH;
     const { a, b, said, spent } = batch;
     fs.writeFileSync(file + ".new", JSON.stringify({ a, b, said, spent, why: chat.mem.hold[1] }));
-    fs.renameSync(file + ".new", file);
+    move_over(file + ".new", file);
   }
 
   // the import a chat ran when let go (BATCH); null: none
