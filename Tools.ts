@@ -627,6 +627,11 @@ export namespace Tools {
     if (agent === null) {
       return "No agent " + name + " to tell.";
     }
+    if (agent.call !== null && agent.stop) {
+      // being stopped: told once it has ended, so the message isn't lost
+      // in the call that ends
+      await agent.call.done.catch(() => {});
+    }
     if (agent.call !== null) {
       tools.hooks.push(agent, "user", message);
       agent.call.send({ text: message, imgs: [] });
@@ -718,23 +723,45 @@ export namespace Tools {
 
   // the stop tool: the agent named stopped at once (Tools.stop), its
   // report saying why and what it was last doing; waited for (up to
-  // HALT), so the answer says it ended
+  // HALT), then every process its shells started killed on each open
+  // device (Machine.halt), so the answer says it ended and nothing of it
+  // runs on, or what does. One not at work only has that sweep
   export async function halt(tools: Tools, name: string, why: string): Promise<Out> {
     const agent = Tools.agent(tools, name);
     if (agent === null) {
       return { text: "No agent " + name + ".", fail: true };
     }
     const call = agent.call;
-    if (call === null) {
-      return { text: name + " isn't working: nothing to stop.", fail: false };
+    let ended = true;
+    if (call !== null) {
+      const live = agent.live.at(-1);
+      const last = Object.values(agent.calls).at(-1) ?? (live && live.kind + ": " + live.text);
+      const doing = last === undefined ? "" : " It was last at " + last.replace(/\s+/g, " ").slice(0, 300);
+      agent.why = "Stopped by Unii" + (why.trim() === "" ? "." : ": " + why.trim().replace(/\.?$/, ".")) + doing;
+      Tools.stop(tools, name);
+      ended = await Promise.race([call.done.then(() => true, () => true), Bun.sleep(HALT).then(() => false)]);
     }
-    const log = (Memory.agent(tools.mem, name) ?? []).filter((e) => e.kind !== "note").at(-1);
-    const last = Object.values(agent.calls).at(-1) ?? (log && log.kind + ": " + log.text);
-    const doing = last === undefined ? "" : " It was last at " + last.replace(/\s+/g, " ").slice(0, 300);
-    agent.why = "Stopped by Unii" + (why.trim() === "" ? "." : ": " + why.trim().replace(/\.?$/, ".")) + doing;
-    Tools.stop(tools, name);
-    const ended = await Promise.race([call.done.then(() => true), Bun.sleep(HALT).then(() => false)]);
-    return { text: ended ? "Stopped " + name + "." : "Stopping " + name + ": it hasn't ended yet.", fail: false };
+    const left = await Tools.sweep(tools, name);
+    const runs = left.length === 0 ? "" : " Still running: " + left.join("; ") + ".";
+    const text = call === null ? name + " isn't working: nothing to stop." + (left.length === 0 ? "" : runs) : ended ? "Stopped " + name + "." + runs : "Stopping " + name + ": it hasn't ended yet." + runs;
+    return { text, fail: !ended || left.length > 0 };
+  }
+
+  // every process `name`'s shells started killed on each open device;
+  // what is left, by device (one that didn't answer in HALT, too)
+  export async function sweep(tools: Tools, name: string): Promise<string[]> {
+    const live = Tools.opened(tools).filter(([, d]) => [...d.terms.values()].some((t) => t.live()));
+    const outs = await Promise.all(live.map(async ([device]) => {
+      const run = Tools.start_job(tools, device, { name: "halt", input: { agent: name }, cwd: "main" }, crypto.randomUUID());
+      if (typeof run === "string") {
+        return null;
+      }
+      const timer = setTimeout(() => run.end({ text: "no answer", fail: true }), HALT);
+      const out = await run.out;
+      clearTimeout(timer);
+      return out.fail ? device + ": " + out.text : null;
+    }));
+    return outs.filter((o) => o !== null);
   }
 
   // every agent at work (name null), or the one named
