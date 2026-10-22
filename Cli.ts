@@ -75,15 +75,23 @@ function update(): void {
 
 // on Windows a running unii.exe can't be replaced, only renamed: the
 // installer leaves the one it replaced as unii.exe.old (or .old-<n>),
-// removed here once it no longer runs
+// removed here once it no longer runs (one still running stays till a
+// later start). Only those names: any other file beside it is the user's
 if (WIN && !BUN) {
   const dir = path.dirname(process.execPath);
-  const old = path.basename(process.execPath) + ".old";
+  const leaf = path.basename(process.execPath).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const old = new RegExp("^" + leaf + "\\.old(-[0-9]+)?$", "i");
+  let files: string[] = [];
   try {
-    for (const f of fs.readdirSync(dir).filter((f) => f.startsWith(old))) {
-      fs.rmSync(path.join(dir, f), { force: true });
-    }
+    files = fs.readdirSync(dir).filter((f) => old.test(f));
   } catch {}
+  for (const f of files) {
+    try {
+      if (fs.lstatSync(path.join(dir, f)).isFile()) {
+        fs.rmSync(path.join(dir, f));
+      }
+    } catch {}
+  }
 }
 
 const [cmd, sub, more] = REST;
