@@ -2,7 +2,7 @@
 // =======
 // The openai-sub vendor: a ChatGPT plan instead of an API key, signed in
 // and called as Codex CLI does (openai/codex: codex-rs login, codex-api).
-// `unii chatgpt` (or `bun ChatGPT.ts`) signs in as Codex's OAuth client,
+// `unii serve chatgpt` (or `bun ChatGPT.ts`) signs in as Codex's OAuth client,
 // by a device code typed at auth.openai.com/codex/device (no redirect
 // back to this computer: the server is often another). The tokens go to FILE
 // (config `chatgpt`), in Codex's auth.json shape, mode 600. Each request
@@ -70,7 +70,7 @@ const LIMITS: Record<string, string> = {
   insufficient_quota  : "is out of quota",
 };
 
-const SIGN_IN = "run `unii chatgpt` on the server";
+const SIGN_IN = "run `unii serve chatgpt` on the server";
 
 // the refresh under way in this process, which every call waits on
 let REFRESHING: Promise<Auth> | null = null;
@@ -279,10 +279,16 @@ export namespace ChatGPT {
     return (id.email ?? "an account") + (plan ? " (" + plan + " plan)" : "");
   }
 
-  // `unii chatgpt [logout]`
+  // `unii serve chatgpt [logout|status]`; status exits 1 if not signed in
   export async function cli(args: string[]): Promise<void> {
     if (args.includes("logout")) {
       console.log(await ChatGPT.logout());
+      return;
+    }
+    if (args.includes("status")) {
+      const auth = ChatGPT.load();
+      console.log(auth === null ? "Not signed in to ChatGPT." : "Signed in to ChatGPT as " + ChatGPT.who(auth) + "; tokens in " + config.CHATGPT + ".");
+      process.exitCode = auth === null ? 1 : 0;
       return;
     }
     const auth = await ChatGPT.device((url, code) => console.log("To sign this server in to ChatGPT, open\n\n  " + url + "\n\nand enter the code\n\n  " + code + "\n\n(it expires in 15 minutes; enter it only if you started this sign-in)"));

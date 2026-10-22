@@ -3,7 +3,7 @@
 // The claude-sub vendor: a Claude plan instead of an API key, on the
 // Claude Agent SDK. Its Claude Code (the SDK's own binary, unmodified,
 // carried inside a compiled unii; config `claude` names another) runs
-// with CLAUDE_CONFIG_DIR at DIR (config `claude_sub`): `unii claude` runs
+// with CLAUDE_CONFIG_DIR at DIR (config `claude_sub`): `unii serve claude` runs
 // its `claude auth login` there, so the sign-in is Anthropic's own and
 // the token stays Claude Code's, kept and refreshed by it, never read by
 // us. A call is one turn: our system prompt, our blocks as its message,
@@ -90,7 +90,7 @@ const ENV = {
   CLAUDE_AGENT_SDK_CLIENT_APP              : "uniichat",
 };
 
-const SIGN_IN = "claude-sub is not signed in, or its sign-in expired: run `unii claude` on the server";
+const SIGN_IN = "claude-sub is not signed in, or its sign-in expired: run `unii serve claude` on the server";
 
 // the errors Claude Code ends a turn with that are every call's, not
 // this one's: the service down past its retries, the account's (as
@@ -252,9 +252,27 @@ export namespace ClaudeSub {
   }
 
 
-  // `unii claude [logout|status]`
+  // `unii serve claude [logout|status]`, as `unii serve chatgpt`: status
+  // reads Claude Code's JSON into one line, and exits 1 if not signed in
   export async function cli(args: string[]): Promise<void> {
-    const cmd = args.includes("logout") ? ["logout"] : args.includes("status") ? ["status"] : ["login", "--claudeai"];
+    if (args.includes("status")) {
+      const run = Bun.spawn([await ClaudeSub.bin(), "auth", "status"], { env: ClaudeSub.env(), stdio: ["ignore", "pipe", "inherit"] });
+      const out = await new Response(run.stdout).text();
+      await run.exited;
+      let st: any = null;
+      try {
+        st = JSON.parse(out);
+      } catch {
+        console.log(out.trim());
+        process.exitCode = run.exitCode ?? 1;
+        return;
+      }
+      const plan = st?.subscriptionType ? " (" + st.subscriptionType + " plan)" : "";
+      console.log(st?.loggedIn ? "Signed in to Claude as " + (st.email ?? "an account") + plan + "; sign-in in " + DIR + "." : "Not signed in to Claude.");
+      process.exitCode = st?.loggedIn ? 0 : 1;
+      return;
+    }
+    const cmd = args.includes("logout") ? ["logout"] : ["login", "--claudeai"];
     const run = Bun.spawn([await ClaudeSub.bin(), "auth", ...cmd], { env: ClaudeSub.env(), stdio: ["inherit", "inherit", "inherit"] });
     process.exitCode = await run.exited;
   }
