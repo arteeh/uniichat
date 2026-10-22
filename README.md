@@ -189,8 +189,9 @@ plugs in its billing (uniichat.com sells credits; this repo has none).
 The `unii` terminal
 -------------------
 
-`web/install.sh` (served at /install.sh) runs the official installer,
-which installs the released `unii` executable. `unii` alone opens
+`web/install.sh` (served at /install.sh) runs the installer of this
+fork's newest GitHub release (arteeh/uniichat), which installs `unii`;
+`unii update` replaces the running `unii` with that release. `unii` alone opens
 uniichat.com; `unii <url>` opens any server. Run with
 `UNII_COMPUTER=1` on a Mac, the agent may use its screen (it compiles
 Computer.swift with swiftc; macOS asks for Screen Recording and
@@ -202,12 +203,10 @@ On Windows without WSL, build `unii.exe` (`bun build --compile
 --target=bun-windows-x64 Term.ts --outfile unii.exe`) and run `unii.exe
 <url>` in PowerShell; its shell tool runs PowerShell (pwsh, else powershell.exe).
 
-Telemetry: once a day the `unii` terminal asks bend-lang.com's /check
-for the latest version (Term.ts update_check), sending its version, OS
-and CPU type, no account and no id; it also says whether this computer
-has ever self-hosted (set for good the first time it runs `unii serve`
-or opens a server other than uniichat.com). It is the one call a
-self-hosted UniiChat makes to us. `UNII_NO_TELEMETRY=1` turns it off.
+Telemetry: once a day the `unii` terminal asks GitHub which release of
+arteeh/uniichat is the newest (Term.ts update_check, a GET of
+/releases/latest, not followed) and notes a newer one.
+`UNII_NO_TELEMETRY=1` turns it off.
 
 License
 -------

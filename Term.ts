@@ -9,8 +9,8 @@
 // done or halted; all they left running dies as this unii quits. From a
 // pipe, each line is a message.
 //
-// One executable per platform (the releases uniichat.com/install.sh
-// installs); once a day it asks bend-lang.com's /check (update_check) and
+// One executable per platform (this fork's GitHub releases, Update.ts);
+// once a day it asks GitHub for the newest release (update_check) and
 // notes a newer one. `unii serve` runs the server it carries. The server:
 // the url given, else $UNII_URL, else uniichat.com; each server's session
 // is a file of its own (TOKEN).
@@ -27,6 +27,7 @@ import { Mcp } from "./Mcp.ts";
 import * as Paint from "./Paint.ts";
 import { type Move, Pick } from "./Pick.ts";
 import * as Screen from "./Screen.ts";
+import * as Update from "./Update.ts";
 import * as View from "./View.ts";
 
 // Types
@@ -63,9 +64,8 @@ type Cmd = [use: string, keys: string, text: string, run: (t: Term, arg: string)
 // Constants
 // =========
 
-// this unii's version: each release ships one, a new one for every
-// change to Term.ts or what it imports
-const VERSION = "1.0.138";
+// this unii's version (Update.VERSION, the fork's full one)
+const VERSION = Update.VERSION;
 
 const ARGS   = process.argv.slice(2);
 const LOGIN  = ARGS.includes("login");
@@ -87,7 +87,9 @@ const TOKEN  = HOME + "/" + (WIN ? HOST.replaceAll(":", "_") : HOST) + "/token";
 
 const USAGE = `Usage: unii [url]           the chat (url: $UNII_URL, else https://uniichat.com)
        unii login [url]     sign in
-       unii update [url]    install the latest unii (curl | sh, shown first)
+       unii update          replace this unii with the fork's newest
+                            release (curl | sh, shown first)
+       unii update <url>    run that server's installer instead
        unii version         this unii's version
        unii serve [port]    your own UniiChat server, at http://127.0.0.1:8788
                             (another port: set UNII_SITE to its address too),
@@ -105,15 +107,14 @@ const USAGE = `Usage: unii [url]           the chat (url: $UNII_URL, else https:
 UNII_WORK: where the agent works on this computer (default
 ~/.unii/work). UNII_COMPUTER=1: it may use the screen. UNII_HOME: where
 it keeps its sign-in (default ~/.unii).
-Once a day, unii asks bend-lang.com for the latest version, sending only
-its version, OS and CPU type, and whether this computer ever ran its own
-server. UNII_NO_TELEMETRY=1 turns that off.
+Once a day, unii asks GitHub which release of arteeh/uniichat is the
+newest (one plain GET to github.com). UNII_NO_TELEMETRY=1 turns that off.
 In the chat, /help lists every command and key.`;
 
-// the daily version check: what it asks, its cache, and the self-host
-// flag: a file made once this computer serves or opens a server not OURS
-const CHECK   = "https://bend-lang.com/check?p=unii&v=" + VERSION + "&os=" + process.platform + "&arch=" + process.arch;
-const CHECKED = HOME + "/check.json";
+// the daily version check's cache (not the official unii's check.json),
+// and the self-host flag: a file made once this computer serves or opens
+// a server not OURS
+const CHECKED = HOME + "/check-arteeh.json";
 const SELF    = HOME + "/self";
 const DAY     = 86400000;
 
@@ -1077,10 +1078,10 @@ function self_mark(): void {
   fs.writeFileSync(SELF, "");
 }
 
-// update_check is the whole telemetry: once a day, a GET of CHECK (plus
-// &self=1 once SELF exists; no account, no id), its answer {ver, notice}
-// cached in CHECKED (stamped before the request: one a day); a cached
-// ver newer than this one is a note. It never delays nor fails the chat
+// update_check: once a day, a GET of Update.LATEST, not followed: the
+// version its redirect names is cached in CHECKED (stamped before the
+// request: one a day); a cached ver newer than this one is a note. It
+// never delays nor fails the chat
 async function update_check(t: Term): Promise<void> {
   if (process.env.UNII_NO_TELEMETRY) {
     return;
@@ -1093,34 +1094,33 @@ async function update_check(t: Term): Promise<void> {
     if (Date.now() - last.t > DAY) {
       last.t = Date.now();
       fs.writeFileSync(CHECKED, JSON.stringify(last) + "\n");
-      const got = await (await fetch(CHECK + (fs.existsSync(SELF) ? "&self=1" : ""), { signal: AbortSignal.timeout(3000) })).json() as { ver?: unknown; notice?: unknown };
-      last.ver = typeof got.ver === "string" ? got.ver : VERSION;
-      last.notice = typeof got.notice === "string" ? got.notice : "";
+      const res = await fetch(Update.LATEST, { redirect: "manual", signal: AbortSignal.timeout(3000) });
+      last.ver = Update.update_tag(res.headers.get("location")) ?? VERSION;
+      last.notice = "";
       fs.writeFileSync(CHECKED, JSON.stringify(last) + "\n");
     }
   } catch {}
-  if (update_newer(last.ver)) {
+  if (Update.update_newer(last.ver, VERSION)) {
     const notice = last.notice.replace(/[\x00-\x1f\x7f]/g, "").slice(0, 200);
     term_note(t, "unii " + last.ver + " is available: run unii update" + (notice === "" ? "" : ". " + notice));
   }
 }
 
-// whether ver (major.minor.patch) is newer than this unii
-function update_newer(ver: string): boolean {
-  const a = ver.split(".").map(Number);
-  const b = VERSION.split(".").map(Number);
-  return a.length === 3 && a.every(Number.isInteger) && (a[0] - b[0] || a[1] - b[1] || a[2] - b[2]) > 0;
-}
-
-// runs the installer again: the one way unii changes. The command prints
-// first, so one can run it alone.
-function update_run(url: string): void {
+// runs an installer: the one way unii changes. It replaces this
+// executable, wherever and however named; from source (bun) there is
+// none to replace. The command prints first, so one can run it alone.
+function update_run(url: string | undefined): void {
   if (WIN) {
     console.error("On Windows, build unii.exe again from the source (README).");
     process.exitCode = 1;
     return;
   }
-  const cmd = "curl -fsSL " + url + "/install.sh | sh";
+  if (/^bun(\.exe)?$/.test(process.execPath.split("/").pop() ?? "")) {
+    console.error("This unii runs from source (bun): update it with git.");
+    process.exitCode = 1;
+    return;
+  }
+  const cmd = Update.update_cmd(url, process.execPath);
   console.error(cmd);
   process.exitCode = child.spawnSync("sh", ["-c", cmd], { stdio: "inherit" }).status ?? 1;
 }
@@ -1156,7 +1156,7 @@ if (HELP || ODD !== undefined) {
 } else if (ASKVER) {
   console.log("unii " + VERSION);
 } else if (UPDATE) {
-  update_run(SERVER);
+  update_run(ARGS.find((a) => WEB.test(a)));
 } else if (SUB) {
   await (await import("./ChatGPT.ts")).ChatGPT.cli(ARGS).catch((err) => login_fail(err.message));
 } else if (CLAUDE) {
