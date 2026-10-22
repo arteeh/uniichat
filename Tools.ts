@@ -66,6 +66,7 @@ export type Agent = {
   live    : Live[];
   calls   : Record<string, string>; // its tool calls awaiting their results, by id (Chat.on)
   stop    : boolean; // its call was stopped: the report stays unanswered
+  why     : string | null; // its report, if stopped by the stop tool
   view    : Block[];
   replies : string[];
 };
@@ -101,6 +102,9 @@ export type Tools = {
 
 // the most web searches a request of a turn or a subagent runs
 export const SEARCHES = 10;
+
+// how long the stop tool waits for its agent to end (ms)
+const HALT = 5000;
 
 // the chats' tools, by their secret; the server, once one is
 const CHATS = new Map<string, Tools>();
@@ -205,7 +209,8 @@ const BOSS: Spec[] = [
   }, ["message", "zone"]),
   spec("schedules", "List the chat's schedules: id, when each comes next, its message.", {}, []),
   spec("unschedule", "Cancel a schedule, by its id.", { id: STR }, ["id"]),
-  spec("resume", "Wake every call on this server waiting for an AI service's usage limit (subagents, summaries, other chats' turns), when the user says a limit was reset early. Each asks again once; one still limited waits again.", {}, []),
+  spec("stop", "Stop a subagent at once, by name, whatever it is doing (mid-call, waiting on a usage limit, running a tool on a device: that job is cancelled). Others keep running. Its report says it was stopped; its chat and work dir stay, so a later tell resumes it.", { name: STR, why: { type: "string", description: "Why, for its report." } }, ["name"]),
+  spec("resume", "Wake every call on this server waiting for an AI service's usage limit (your turn, summaries), when the user says a limit was reset early. Each asks again once; one still limited waits again. A subagent at a usage limit ends and reports it instead: tell it to go on.", {}, []),
 ];
 const DEVICE = { device: { type: "string", description: "The name of the device to run on, one listed under Devices." } };
 function kit(who: string): Spec[] {
@@ -452,6 +457,9 @@ export namespace Tools {
         const id = String(args.id);
         return Tools.unschedule(tools, id) ? { text: "Cancelled " + id + ".", fail: false } : { text: "No schedule " + id + ".", fail: true };
       }
+      case "stop": {
+        return await Tools.halt(tools, String(args.name), args.why === undefined ? "" : String(args.why));
+      }
       case "resume": {
         const n = Agent.resume();
         return { text: n === 0 ? "No call was waiting for a usage limit." : "Woke " + n + " call" + (n === 1 ? "" : "s") + " waiting for a usage limit; any still limited waits again.", fail: false };
@@ -628,13 +636,13 @@ export namespace Tools {
       return view;
     }
     tools.hooks.push(agent, "user", message);
-    Tools.run(tools, Object.assign(agent, { view, replies: [], stop: false }));
+    Tools.run(tools, Object.assign(agent, { view, replies: [], stop: false, why: null }));
     return "Sent. " + name + "'s reply will reach you as a message.";
   }
 
   export function start(tools: Tools, role: Agent["role"], task: string, view: Block[]): string {
     const name = Memory.agent_new(tools.mem);
-    const agent = { name, role, call: null, live: [], calls: {}, stop: false, view, replies: [] };
+    const agent = { name, role, call: null, live: [], calls: {}, stop: false, why: null, view, replies: [] };
     tools.agents.set(name, agent);
     tools.hooks.push(agent, "note", SUB_NOTE + (role.model === null ? "" : SUB_ON + role.model) + (role.effort === null ? "" : SUB_AT + role.effort));
     tools.hooks.push(agent, "user", task);
@@ -648,7 +656,7 @@ export namespace Tools {
     const note = log !== null && log.length > 0 && log[0].kind === "note" ? log[0].text : "";
     const sub = SUB_ROLE.exec(note);
     if (sub !== null) {
-      tools.agents.set(name, { name, role: { effort: sub[2] ?? null, model: sub[1] ?? null }, call: null, live: [], calls: {}, stop: false, view: [], replies: [] });
+      tools.agents.set(name, { name, role: { effort: sub[2] ?? null, model: sub[1] ?? null }, call: null, live: [], calls: {}, stop: false, why: null, view: [], replies: [] });
     }
     return tools.agents.get(name) ?? null;
   }
@@ -663,7 +671,7 @@ export namespace Tools {
         tools.hooks.change();
         const end = await agent.call.done;
         agent.call = null;
-        agent.replies.push(end.ok ? end.text : "failed: " + end.text);
+        agent.replies.push(end.ok ? end.text : agent.why ?? "failed: " + end.text);
         more = end.ok && end.left.length > 0;
       }
     } catch (err: any) {
@@ -681,7 +689,7 @@ export namespace Tools {
     const system = SUB + "\n\n" + AGENT_PROMPT + "\n\n" + Tools.prompt("prompt");
     const blocks = [...agent.view, Tools.devices(tools), Tools.skills(tools), log];
     const effort = agent.role.effort ?? run.effort;
-    return { ...run, effort, system, blocks, searches: SEARCHES, server };
+    return { ...run, effort, system, blocks, searches: SEARCHES, server, agent: true };
   }
 
   // what an agent runs on: config.AGENTS or else the chat's pick, with
@@ -704,6 +712,27 @@ export namespace Tools {
 
   export function working(tools: Tools): Agent[] {
     return [...tools.agents.values()].filter((a) => a.call !== null);
+  }
+
+  // the stop tool: the agent named stopped at once (Tools.stop), its
+  // report saying why and what it was last doing; waited for (up to
+  // HALT), so the answer says it ended
+  export async function halt(tools: Tools, name: string, why: string): Promise<Out> {
+    const agent = Tools.agent(tools, name);
+    if (agent === null) {
+      return { text: "No agent " + name + ".", fail: true };
+    }
+    const call = agent.call;
+    if (call === null) {
+      return { text: name + " isn't working: nothing to stop.", fail: false };
+    }
+    const log = (Memory.agent(tools.mem, name) ?? []).filter((e) => e.kind !== "note").at(-1);
+    const last = Object.values(agent.calls).at(-1) ?? (log && log.kind + ": " + log.text);
+    const doing = last === undefined ? "" : " It was last at " + last.replace(/\s+/g, " ").slice(0, 300);
+    agent.why = "Stopped by Unii" + (why.trim() === "" ? "." : ": " + why.trim().replace(/\.?$/, ".")) + doing;
+    Tools.stop(tools, name);
+    const ended = await Promise.race([call.done.then(() => true), Bun.sleep(HALT).then(() => false)]);
+    return { text: ended ? "Stopped " + name + "." : "Stopping " + name + ": it hasn't ended yet.", fail: false };
   }
 
   // every agent at work (name null), or the one named

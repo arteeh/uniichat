@@ -24,7 +24,10 @@
 // clears never asks fast. A wait of LONG or more parks it (Agent.park):
 // a Limit event tells till when, and a message sent, a wake or a stop
 // ends the wait. A call with a fallback (AskAI.ts) that ran no tool yet
-// goes on with it instead, as when its vendor is out (`off`). claude-sub
+// goes on with it instead, as when its vendor is out (`off`); a
+// subagent's call (Ask `agent`) ends so too, ran tools or not, its end
+// naming the vendor, the model and the reset, so its report tells the
+// chat (a parked subagent waited unseen). claude-sub
 // waits alike, in Claude Code's loop (ClaudeSub.ts), on the same code:
 // what it says, its waits, LIMITS, the polls, resume. A plan's limit
 // whose reset is told (the Wire's `reset`; claude-sub's) is remembered
@@ -293,7 +296,7 @@ export namespace Agent {
     const own = run.ask.yields === undefined ? model : model + " " + run.ask.yields;
     const tries = run.ask.probe === true && items.length === 1 ? 1 : TRIES;
     const scope = run.ask.vendor + " " + model;
-    const out = run.ask.fallback === true && run.end.acted !== true;
+    const out = run.ask.agent === true || (run.ask.fallback === true && run.end.acted !== true);
     let asking = false;
     let woke = false;
     let refused: string | undefined;
@@ -303,7 +306,7 @@ export namespace Agent {
         woke = false;
         if (under !== null) {
           if (out && under - Date.now() >= LONG) {
-            return Agent.limit_off(Agent.fail("usage limit", []), under);
+            return Agent.limit_off(Agent.fail("usage limit", []), under, run.ask);
           }
           woke = await Agent.park(run, run.on, signal, run.ask.vendor, under - Date.now(), true);
           continue;
@@ -349,7 +352,7 @@ export namespace Agent {
           Agent.note(scope, step.until ?? null);
           const { ms, known } = Agent.limit_wait(told, n, run.ask.patient ? AGAIN : LIMIT, now);
           if (out && ms >= LONG) {
-            return Agent.limit_off(step, told);
+            return Agent.limit_off(step, told, run.ask);
           }
           woke = await Agent.park(run, run.on, signal, run.ask.vendor, ms, known);
           continue;
@@ -432,10 +435,10 @@ export namespace Agent {
   }
 
   // a call at a long usage limit, ended for its fallback to go on (off),
-  // saying when it resets, if told
-  export function limit_off(step: Step, until: number | null): Step {
-    const when = until === null ? "" : "; it resets " + new Date(until).toISOString().slice(0, 16).replace("T", " ") + " UTC";
-    const refusal = { why: step.why + when, say: "the AI service reached a usage limit" + when, until: until ?? undefined };
+  // or its subagent to report it: on what, and when it resets, if told
+  export function limit_off(step: Step, until: number | null, ask: { vendor: Vendor; model: string }): Step {
+    const when = until === null ? "reset time unknown" : "resets " + new Date(until).toISOString().slice(0, 16).replace("T", " ") + " UTC";
+    const refusal = { why: step.why + "; " + when, say: "usage limit on " + ask.vendor + " (" + ask.model + "), " + when, until: until ?? undefined };
     return { ...step, stop: "down", off: true, refusal };
   }
 

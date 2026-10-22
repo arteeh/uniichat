@@ -534,14 +534,15 @@ export namespace ClaudeSub {
     const sleep = async (ms: number, known: boolean) => {
       woke = await Agent.park(wake, on, signal, "claude-sub", ms, known);
     };
-    // a limit's wait, or the call's end if its fallback goes on instead
+    // a limit's wait, or the call's end if its fallback goes on instead,
+    // or it is a subagent's (Agent.ts)
     const out = (ms: number, until: number | null, why: string): Partial<End> | null => {
-      if (ms < LONG || ask.fallback !== true || acted.v) {
+      if (ms < LONG || (ask.agent !== true && (ask.fallback !== true || acted.v))) {
         return null;
       }
-      const r = Agent.limit_off(Agent.fail(why, []), until).refusal!;
+      const r = Agent.limit_off(Agent.fail(why, []), until, ask).refusal!;
       console.error(ask.model + ": " + r.why.slice(0, 300));
-      return { text: r.say, stop: "down", off: true, acted: false, until: r.until };
+      return { text: r.say, stop: "down", off: true, acted: acted.v, until: r.until };
     };
     try {
       for (let tries = 0, n = 0; !signal.aborted; ) {
