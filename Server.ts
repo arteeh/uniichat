@@ -959,13 +959,18 @@ export namespace Chat {
   }
 
   export function state(chat: Chat): Out {
-    const agents = Tools.working(chat.tools).map((a) => a.name);
+    const working = Tools.working(chat.tools);
+    const agents = working.map((a) => a.name);
+    const runs = Object.fromEntries(working.flatMap((a) => {
+      const pick = Tools.shown(chat.tools, a);
+      return pick === null ? [] : [[a.name, pick]];
+    }));
     const batch = chat.batch;
     const why = chat.mem.hold[1];
     const importing = batch && { done: batch.all - Chat.time(batch), total: batch.all, why, msgs: batch.b - batch.a, open: batch.open };
     const timers = chat.mem.timers.map((t) => ({ ...t, text: t.text.length > TIMER_TEXT ? t.text.slice(0, TIMER_TEXT) + "…" : t.text }));
     const mcp = config.MCP.map(({ name }) => ({ name, on: !chat.mem.off.includes(name) }));
-    return { $: "state", busy: chat.busy, wait: Chat.waits(chat), agents, pick: chat.pick, ...config.OFFER, importing, limits: chat.limits, timers, mcp };
+    return { $: "state", busy: chat.busy, wait: Chat.waits(chat), agents, runs, pick: chat.pick, ...config.OFFER, importing, limits: chat.limits, timers, mcp };
   }
 
   export function waits(chat: Chat): Wait {
@@ -1067,7 +1072,9 @@ export namespace Chat {
       case "agent": {
         const name = String(msg.name);
         const log = Memory.agent(chat.mem, name);
-        Chat.send(sock, { $: "agent", name, found: log !== null });
+        const agent = log === null ? null : chat.tools.agents.get(name) ?? Tools.logged(chat.tools, name);
+        const pick = agent === null ? null : Tools.shown(chat.tools, agent);
+        Chat.send(sock, { $: "agent", name, found: log !== null, pick });
         log?.forEach(({ kind, text, date }) => Chat.send(sock, { $: "entry", agent: name, kind, text, date }));
         Chat.send(sock, { $: "live", agent: name, live: chat.tools.agents.get(name)?.live ?? [] });
         return {};

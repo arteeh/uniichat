@@ -833,16 +833,15 @@ function bars(): void {
     $("#timers").hidePopover();
   }
   send.classList.toggle("stop", stop);
-  send.disabled = !on;
-  BOX.disabled = !on;
-  $<HTMLButtonElement>(".attach").disabled = !on;
-  $<HTMLButtonElement>(".mic").disabled = !on || v.out.some((p) => p.msg.$ === "voice");
+  // an agent's page has no box: messages go to UniiChat
+  $(".composer").hidden = !on;
+  $("#pics").hidden = !on;
+  $<HTMLButtonElement>(".mic").disabled = v.out.some((p) => p.msg.$ === "voice");
   $(".mic").classList.toggle("rec", P.rec !== null);
-  $(".composer").classList.toggle("off", !on);
   $(".composer").classList.toggle("rec", P.rec !== null);
   // a knob focused (its menu just closed) stays so as its value changes
   const knob = (document.activeElement as HTMLElement | null)?.dataset?.knob;
-  markup($("#pick"), Html.pick_html(View.view_fold(v), v.fold === null, View.view_pick(v)));
+  markup($("#pick"), Html.pick_html(View.view_fold(v), v.fold === null, View.view_shown(v)));
   if (knob !== undefined) {
     $("#pick [data-knob=" + knob + "]").focus();
   }
