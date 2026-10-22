@@ -88,8 +88,14 @@ const INIT    = { protocolVersion: VERSION, capabilities: {}, clientInfo: { name
 const TAIL = 1000;
 
 // the variables of unii's a program gets (as the MCP SDK's client
-// passes), beside its own `env`: no key, no other server's secret
-const PASS = ["HOME", "LOGNAME", "PATH", "SHELL", "TERM", "USER", "LANG", "LC_ALL", "LC_CTYPE", "TZ", "TMPDIR"];
+// passes, Windows' too: without SYSTEMROOT, say, most programs there
+// fail), beside its own `env`: no key, no other server's secret
+// (Machine.WIN not imported: Machine imports this, so on a device it
+// isn't set yet as this loads)
+const WIN = process.platform === "win32";
+const PASS = WIN
+  ? ["APPDATA", "HOMEDRIVE", "HOMEPATH", "LOCALAPPDATA", "PATH", "PROCESSOR_ARCHITECTURE", "SYSTEMDRIVE", "SYSTEMROOT", "TEMP", "USERNAME", "USERPROFILE", "PROGRAMFILES"]
+  : ["HOME", "LOGNAME", "PATH", "SHELL", "TERM", "USER", "LANG", "LC_ALL", "LC_CTYPE", "TZ", "TMPDIR"];
 
 // on a device, the programs it runs for chats (Mcp.here), by their
 // link's key; whether each said its tools changed since its last answer
@@ -390,12 +396,13 @@ export namespace Mcp {
   // Links
   // -----
 
-  // a program in its own process group, a JSON-RPC message a line; its
-  // stderr's tail says why it ended. It gets PASS and its own env; a
-  // line past LIMITS.msg ends it
+  // a program in its own process group (on Windows, which has none, its
+  // tree, no window of its own), a JSON-RPC message a line; its stderr's
+  // tail says why it ended. It gets PASS and its own env; a line past
+  // LIMITS.msg ends it
   export function stdio(conf: config.McpServer, changed: () => void, died: (why: string) => void): Link {
     const env = Object.fromEntries(PASS.flatMap((k) => (process.env[k] === undefined ? [] : [[k, process.env[k]!]])));
-    const proc = Bun.spawn([conf.command, ...conf.args], { cwd: conf.cwd || undefined, env: { ...env, ...conf.env }, stdin: "pipe", stdout: "pipe", stderr: "pipe", detached: true });
+    const proc = Bun.spawn([conf.command, ...conf.args], { cwd: conf.cwd || undefined, env: { ...env, ...conf.env }, stdin: "pipe", stdout: "pipe", stderr: "pipe", detached: !WIN, windowsHide: true });
     const waits = new Map<number, { ok: (got: any) => void; no: (err: Error) => void }>();
     let next = 0;
     let dead: string | null = null;
