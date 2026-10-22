@@ -32,7 +32,7 @@ targets:
         CFBundleDisplayName: UniiChat
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
-        UniiSite: https://uniichat.com
+        UniiSite: https://unii.example.com # your server's site (config site)
         UILaunchScreen: {}
         UIUserInterfaceStyle: Light
         ITSAppUsesNonExemptEncryption: false
@@ -51,7 +51,7 @@ targets:
       path: App/App.entitlements
       properties:
         aps-environment: development
-        com.apple.developer.associated-domains: [applinks:uniichat.com]
+        com.apple.developer.associated-domains: [applinks:unii.example.com] # your server's host
         com.apple.security.application-groups: [group.com.higherorderco.uniichat]
   Share:
     type: app-extension
@@ -66,7 +66,7 @@ targets:
         CFBundleDisplayName: UniiChat
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
-        UniiSite: https://uniichat.com
+        UniiSite: https://unii.example.com # your server's site (config site)
         NSExtension:
           NSExtensionPointIdentifier: com.apple.share-services
           NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).Share

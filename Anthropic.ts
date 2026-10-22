@@ -13,19 +13,19 @@
 
 import type { Ask, Img } from "./AskAI.ts";
 import { Agent, type Emit, type Entry, type Item, type Step, type Tool, type Use, type Wire } from "./Agent.ts";
-import { Price, type Usage } from "./Price.ts";
 
 // Types
 // =====
 
 // a stream read so far: the content blocks, the JSON of each tool input
-// that came in pieces, how it stopped and why, its usage, an error
+// that came in pieces, how it stopped and why, the speed it ran at, an
+// error
 type State = {
   blocks : any[];
   json   : string[];
   stop   : string;
   why    : any;
-  use    : Usage;
+  speed  : string;
   error  : any;
 };
 
@@ -35,7 +35,6 @@ type State = {
 const MARK  = { type: "ephemeral" };
 const WEB   = { type: "web_search_20260318", name: "web_search" };
 const FAST  = "fast-mode-2026-02-01";
-const COUNT = "https://api.anthropic.com/v1/messages/count_tokens";
 
 // Anthropic
 // =========
@@ -84,15 +83,6 @@ export namespace Anthropic {
     };
   }
 
-  // a body's input tokens, as the API counts them (free): the body less
-  // what only a message sent takes; null: not told within 10 s
-  export async function count(key: string, ask: Ask, body: any): Promise<number | null> {
-    const { max_tokens, stream, ...rest } = body;
-    const init = { method: "POST", headers: Anthropic.headers(key, ask), body: JSON.stringify(rest), signal: AbortSignal.timeout(10e3) };
-    const out = await fetch(COUNT, init).then((res) => res.json()).catch(() => null);
-    return typeof out?.input_tokens === "number" ? out.input_tokens : null;
-  }
-
   export function message(item: Item): { role: string; content: any[] } {
     switch (item.$) {
       case "User": {
@@ -128,7 +118,7 @@ export namespace Anthropic {
   export function read(st: State, ev: any, on: Emit): boolean {
     switch (ev.type) {
       case "message_start": {
-        Anthropic.usage(st.use, ev.message.usage ?? {});
+        Anthropic.usage(st, ev.message.usage ?? {});
         return false;
       }
       case "content_block_start": {
@@ -144,7 +134,7 @@ export namespace Anthropic {
       case "message_delta": {
         st.stop = ev.delta.stop_reason ?? st.stop;
         st.why  = ev.delta.stop_details ?? st.why;
-        Anthropic.usage(st.use, ev.usage ?? {});
+        Anthropic.usage(st, ev.usage ?? {});
         return false;
       }
       case "error": {
@@ -155,13 +145,9 @@ export namespace Anthropic {
     return ev.type === "message_stop";
   }
 
-  export function usage(use: Usage, u: any): void {
-    use.input    = u.input_tokens ?? use.input;
-    use.write    = u.cache_creation_input_tokens ?? use.write;
-    use.read     = u.cache_read_input_tokens ?? use.read;
-    use.output   = u.output_tokens ?? use.output;
-    use.searches = u.server_tool_use?.web_search_requests ?? use.searches;
-    use.speed    = u.speed === undefined ? use.speed : u.speed === "fast" ? "fast" : "slow";
+  // the speed it ran at, as its usage tells
+  export function usage(st: State, u: any): void {
+    st.speed = u.speed === undefined ? st.speed : u.speed === "fast" ? "fast" : "slow";
   }
 
   // a piece of a content block, added to it
@@ -225,8 +211,8 @@ export namespace Anthropic {
       }
     });
     const out = st.blocks.filter((b) => b.type !== "text" || b.text);
-    const slow = ask.speed === "fast" && st.use.speed !== "fast";
-    const note = slow ? "ran at " + st.use.speed + " speed" : "";
+    const slow = ask.speed === "fast" && st.speed !== "fast";
+    const note = slow ? "ran at " + st.speed + " speed" : "";
     const step: Step = { out, uses, entries: Anthropic.entries(out), stop: "done", why: "", note };
     if (st.error) {
       return { ...step, stop: st.error.type === "rate_limit_error" ? "limit" : "busy", why: st.error.type + ": " + st.error.message };
@@ -304,12 +290,10 @@ export namespace Anthropic {
     url     : "https://api.anthropic.com/v1/messages",
     headers : Anthropic.headers,
     body    : Anthropic.body,
-    count   : Anthropic.count,
-    start   : () => ({ blocks: [], json: [], stop: "", why: null, use: Price.usage("slow"), error: null }),
+    start   : () => ({ blocks: [], json: [], stop: "", why: null, speed: "slow", error: null }),
     read    : Anthropic.read,
     begun   : (ev) => ev.type === "message_start",
     step    : Anthropic.step,
-    usage   : (st) => st.use,
   };
 
 }

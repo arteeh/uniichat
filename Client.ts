@@ -1,0 +1,107 @@
+// Client
+// ======
+// What the terminal (Term.ts) and a device (Device.ts) share, each with
+// a file of its own in DIR (${XDG_CONFIG_HOME:-~/.config}/unii:
+// tui.json, device.json, 0600; nothing in the server's ~/.unii): the
+// server it reaches (the url given, else $UNII_URL, else its file's,
+// else a server on this computer) and its sign-in there (Owner.ts): a
+// token made here, good once the owner types the code it shows in a
+// browser signed in to that server.
+
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
+import * as View from "./View.ts";
+
+// Constants
+// =========
+
+export const DIR   = (process.env.XDG_CONFIG_HOME || os.homedir() + "/.config") + "/unii";
+export const LOCAL = "http://127.0.0.1:8788";
+
+// Client
+// ======
+
+// a client's file (name: tui, device) as read; none: {}
+export function read(name: string): Record<string, any> {
+  try {
+    const json = JSON.parse(fs.readFileSync(DIR + "/" + name + ".json", "utf8"));
+    return json !== null && typeof json === "object" && !Array.isArray(json) ? json : {};
+  } catch {
+    return {};
+  }
+}
+
+// a client's file written whole (it may hold a token: 0600 from its first
+// byte), then moved in place
+export function write(name: string, conf: object): void {
+  const file = DIR + "/" + name + ".json";
+  fs.mkdirSync(DIR, { recursive: true, mode: 0o700 });
+  fs.writeFileSync(file + ".new", JSON.stringify(conf, null, 2) + "\n", { mode: 0o600 });
+  fs.renameSync(file + ".new", file);
+}
+
+// the server: given, else $UNII_URL, else the file's, else this
+// computer's
+export function server(given: string | undefined, conf: Record<string, any>): string {
+  return (given ?? process.env.UNII_URL ?? conf.url ?? LOCAL).replace(/\/$/, "");
+}
+
+export function auth(token: string | undefined): Record<string, string> {
+  return token ? { authorization: "Bearer " + token } : {};
+}
+
+// whether a token is signed in: the server doesn't refuse it (one it
+// can't reach may be: the client waits for it)
+export async function signed(url: string, token: string | undefined): Promise<boolean> {
+  if (!token) {
+    return false;
+  }
+  const res = await fetch(url + "/api/me", { headers: auth(token) }).catch(() => null);
+  return res === null || res.status !== 401;
+}
+
+// signs in, as `what` ("the terminal on host"): a token made here, which
+// the server keeps once the owner, in a browser signed in, opens the link
+// printed and types the code shown; its wait asked again till the link
+// expires
+export async function login(url: string, what: string): Promise<string> {
+  const key = Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString("base64url");
+  const out = await View.post(url + "/api/login", { key, what });
+  if (typeof out.url !== "string") {
+    fail(out.error ?? "no sign-in from " + url);
+  }
+  console.log("To sign " + what + " in to " + url + ", open this link in a browser signed in there");
+  console.log("(on the server, `unii serve link` signs a browser in):\n\n  " + out.url + "\n");
+  console.log("and type this code: " + out.code + "\n");
+  const wait = { headers: auth(key), timeout: false } as RequestInit;
+  while (true) {
+    const done = await fetch(url + "/api/wait", wait).catch(() => null);
+    const ans  = await done?.json().catch(() => ({})) ?? {};
+    if (done?.status === 410) {
+      fail("the sign-in link expired: run unii again");
+    }
+    if (done?.ok && ans.ok) {
+      console.log("Signed in.");
+      return key;
+    }
+    if (done?.status !== 408) {
+      await Bun.sleep(View.RETRY);
+    }
+  }
+}
+
+export function fail(why: string): never {
+  console.error("unii: " + why);
+  process.exit(1);
+}
+
+// a host's name, as its key in a file
+export function host(url: string): string {
+  return new URL(url).host;
+}
+
+// where a device works (~/: the home), as a path
+export function home(dir: string): string {
+  return dir.startsWith("~/") ? path.join(os.homedir(), dir.slice(2)) : dir;
+}

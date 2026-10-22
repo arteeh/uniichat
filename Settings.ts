@@ -1,8 +1,7 @@
 // Settings
 // ========
-// The settings page's side (web/src/main.ts, /settings), its owner's
-// alone (Config.ts config_owner: whom config.json names, never this
-// page): every setting, its value, where it comes from (the environment, config.json, its default) and whether a
+// The settings page's side (web/src/main.ts, /settings), the owner's
+// (Owner.ts): every setting, its value, where it comes from (the environment, config.json, its default) and whether a
 // change applies at once or on a restart; and the keys, each only as
 // set or not, where from, and its last 4 characters: no answer and no
 // log line holds a key. A save is a POST of JSON (which another site's
@@ -11,8 +10,7 @@
 // it changes (null: back to the default, a key dropped). All of it is
 // checked as a start checks config.json (each pick offered...) and more
 // (the site a URL...), then keys.json and config.json (the keys it
-// doesn't name kept) written and read again (config_reload; with
-// workers, by every one: Server.ts). A save made on files changed since
+// doesn't name kept) written and read again (config_reload). A save made on files changed since
 // the page read them (another tab, a hand edit: `version`) is refused,
 // so none undoes another unseen. The profiles (config `profiles`, a
 // JSON object: Pick.ts) are saved whole, checked as a start checks them.

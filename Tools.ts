@@ -4,41 +4,32 @@
 // local port, at a URL with the chat's secret and the caller ("main", an
 // agent; a compaction has none).
 // shell, read, write, edit and view_video run on the device their
-// `device` field names: a computer with unii open, one per sign-in
-// (host, host-2...), listed in each call's message. A name stays its sign-in's
-// while the chat is loaded, so a call meant for one computer never
-// reaches another. A device's terminals are its views' tabs: one whose
-// link is lost stays, its jobs waiting, until it quits. It is told its
+// `device` field names: a computer running `unii device` (Device.ts), one
+// per sign-in (host, host-2...), listed in each call's message. A name
+// stays its sign-in's while the server runs, so a call meant for one
+// computer never reaches another. A device's links are its sockets: one
+// whose link is lost stays, its jobs waiting, until it quits. It is told its
 // jobs' ids as they change, and each job new to it; a job's output is an
 // act (Server.ts). A device's skills (Machine.skills), read as a job when
 // it joins and as each turn starts, are listed in each call's message
 // while it is open; the skill tool loads one, as a job too.
-// An agent (subagent or computer task) has a name and a log; each call
+// A subagent has a name and a log; each call
 // gets its context and its whole log, so a told agent goes on even after
 // a restart; its replies reach the chat as one "[Name]" message.
 // The master's schedules (schedule, schedules, unschedule) are kept with
 // its chat, each coming as a "[Timer id]" message (Timer.ts). Its resume
 // wakes every call waiting for a usage limit (Agent.resume), for a user
 // who knows one lifted early.
-// A chat moves to another process whole (Tools.give, Tools.take): its
-// key, devices and jobs, and its agents at work, whose calls run on where
-// they started; MCP requests reaching this one then go on there, those
-// waiting too, straight to where the chat is now, past the processes
-// between, which end (Tools.went) (a job's request waits on its job
-// there, by its id; a spawn or tell still waiting on summaries is done
-// there anew).
 // The user's MCP servers (Mcp.ts) add their tools to the master's and its
-// subagents', but those of servers the chat turned off (Memory `off`);
-// a call to one finishes where it started, never done again where the
-// chat moved.
+// subagents', but those of servers the chat turned off (Memory `off`).
 
 import * as fs from "node:fs";
-import { AskAI, type Ask, type Bill, type Block, type Call, type Event, type Kind, type Pay } from "./AskAI.ts";
+import { AskAI, type Ask, type Block, type Call, type Event, type Kind } from "./AskAI.ts";
 import { Agent, type Out } from "./Agent.ts";
 import { report_text } from "./Call.ts";
 import { clip_page } from "./Clip.ts";
 import * as config from "./Config.ts";
-import { COMPUTER, INT, STR, TOOLS, spec, type Job, type Skill, type Spec } from "./Machine.ts";
+import { INT, STR, TOOLS, spec, type Job, type Skill, type Spec } from "./Machine.ts";
 import { Mcp, type Server, type Servers } from "./Mcp.ts";
 import { Memory } from "./Memory.ts";
 import PROMPT from "./prompt.txt" with { type: "text" };
@@ -52,7 +43,7 @@ export type { Live };
 // Types
 // =====
 
-// a device: its sign-in (a session's hash), terminals by tab (none:
+// a device: its sign-in (a session's hash), its links by tab (none:
 // closed), jobs by id, and its skills as last looked at (Tools.look)
 type Device = {
   who    : string;
@@ -61,31 +52,23 @@ type Device = {
   skills : Skill[];
 };
 
-// a job: the terminal it runs on, what it runs, its output, what ends it
+// a job: the link it runs on, what it runs, its output, what ends it
 type Running = { term: string; job: Job; out: Promise<Out>; end: (out: Out) => void };
 
-// a terminal: how to reach it, whether its socket is open now, whether it
-// does computer use, its work dir, its shell if not a POSIX one
-export type Link = { send: (msg: object) => void; live: () => boolean; computer: boolean; work: string; shell: string | null };
+// a device's link: how to reach it, whether its socket is open now, its
+// work dir, its shell if not a POSIX one
+export type Link = { send: (msg: object) => void; live: () => boolean; work: string; shell: string | null };
 
 // at work, the view its calls get and its replies so far
 export type Agent = {
   name    : string;
-  role    : { $: "sub"; effort: string | null; model: string | null } | { $: "hands"; device: string };
+  role    : { effort: string | null; model: string | null };
   call    : Call | null;
   live    : Live[];
   calls   : Record<string, string>; // its tool calls awaiting their results, by id (Chat.on)
   stop    : boolean; // its call was stopped: the report stays unanswered
   view    : Block[];
   replies : string[];
-};
-
-// a chat's tools as they move to another process (Tools.give): the
-// calls of its agents at work by the id `far` takes (Server.ts)
-export type Moved = {
-  key     : string;
-  devices : Array<[string, string, Array<[string, string, Job]>]>;
-  agents  : Array<Omit<Agent, "role" | "call"> & { call: string }>;
 };
 
 // what the server does for agents (report: work stopped stays unanswered;
@@ -103,8 +86,7 @@ type Hooks = {
   halt   : () => AbortSignal;
 };
 
-// the tools: what pays the calls (none: the vendors' keys); where its
-// chat moved (a process's tools URL), once it did; the chat's MCP servers
+// the tools: the chat's MCP servers
 export type Tools = {
   mem     : Memory;
   devices : Map<string, Device>;
@@ -113,8 +95,6 @@ export type Tools = {
   key     : string;
   url     : string;
   hooks   : Hooks;
-  pay?    : Pay;
-  away    : PromiseWithResolvers<string>;
 };
 
 // Constants
@@ -125,16 +105,9 @@ export const MAIN = config.WORK + "/main";
 // the most web searches a request of a turn or a subagent runs
 export const SEARCHES = 10;
 
-// the chats' tools, by their secret; where those moved went (Tools.give);
-// what a chat on its way here waits on (Tools.coming); the server, once
-// one is
+// the chats' tools, by their secret; the server, once one is
 const CHATS = new Map<string, Tools>();
-const GONE  = new Map<string, string>();
-let COMING: Promise<void> = Promise.resolve();
 let HTTP: ReturnType<typeof Bun.serve> | null = null;
-
-// the header of a request that waits on a job, its id (Tools.give)
-const JOB = "x-unii-job";
 
 // the requests running, by chat, caller, MCP session and JSON-RPC id:
 // what a `notifications/cancelled` for one stops
@@ -165,19 +138,6 @@ not what the user's last message says, since Unii may have given you
 just part of the work. Your final reply is your report to Unii. Unii may
 send you more messages, even while you work: answer the last.`;
 
-const HANDS = `You are the hands of Unii, an AI agent that works for one user: you use
-the user's computer, {device}, through your computer tool (screenshots,
-the mouse and the keyboard). Your first message is your
-chat with Unii so far, its lines as "i|kind: text": what you are
-(note), your task (user), and later all you did and were told. Do the task, following the user's
-instructions at the end of this prompt, and do nothing it does not ask
-for: pay, buy, send or delete only what it names, and if a page asks
-for a password, a card or a confirmation it does not cover, stop and
-report that. Unii may send you more messages while you work: follow them. No
-one sees your work but Unii, and only your final reply: your report,
-saying what you did, what you found that the task asks for, and what
-failed.`;
-
 const VIEW_DOC = `The view: the whole chat between Unii and the user, oldest first, inside
 <chat> tags, as one-line summaries. Each line is
 
@@ -185,9 +145,8 @@ const VIEW_DOC = `The view: the whole chat between Unii and the user, oldest fir
 
 A summary tags each item with its kind: user (the user's words), unii
 (Unii's replies), tool (Unii's tool calls), echo (their results), note
-(memories from before this chat), or work (the report of an agent, a
-subagent or a computer task, starting "[Name]", or a scheduled message
-from the timer, starting "[Timer id]"). A short message is its own line, word for word. Recent lines
+(memories from before this chat), or work (the report of a subagent,
+starting "[Name]", or a scheduled message from the timer, starting "[Timer id]"). A short message is its own line, word for word. Recent lines
 cover one message each; the older the messages, the more a line covers.
 A message not summarized yet shows as "(not summarized yet: zoom it)".
 No message appears in full, not even the last ones. A text too long for
@@ -202,13 +161,11 @@ ask. date(id) gives the date and time of message id. zoom("Name") gives
 an agent's whole chat.`;
 
 // an agent's log starts with a note of what it is: SUB_NOTE, and its
-// model and effort if not the configured ones; or HANDS_NOTE and its
-// device
+// model and effort if not the configured ones
 const SUB_NOTE   = "subagent";
 const SUB_ON     = " on ";
 const SUB_AT     = " at effort ";
 const SUB_ROLE   = new RegExp("^" + SUB_NOTE + "(?:" + SUB_ON + "(\\S+))?(?:" + SUB_AT + "(\\S+))?$");
-const HANDS_NOTE = "computer task on ";
 
 // the models a subagent may be given (Tools.call)
 const MODELS = Pick.models(config.OFFER.vendors, config.OFFER.models).map(([, m]) => m.label);
@@ -216,12 +173,11 @@ const MODELS = Pick.models(config.OFFER.vendors, config.OFFER.models).map(([, m]
 // the devices: how they work, in the system prompt (DEVICES); those open
 // now, at the start of each call's message (Tools.devices), so one
 // joining or leaving changes a call's tail, never its cached prefix
-const DEVICES = `Devices: the user's computers that have unii open now, by name, listed
+const DEVICES = `Devices: the user's computers that run unii's device now, by name, listed
 at the start of each message. Your shell, read, write, edit and view_video
-tools run on the one their \`device\` field names, and computer tasks on
-one marked "computer use". A computer is listed only while the user runs unii on
-it, and leaves the list when they close it: a task that needs one not
-listed can't be done now, so tell the user it isn't available.`;
+tools run on the one their \`device\` field names. A computer is listed only
+while its device runs, and leaves the list when it stops: a task that needs
+one not listed can't be done now, so tell the user it isn't available.`;
 const DEVICES_NONE = "(None is open now.)";
 
 const SKILLS = "Skills on the devices open now, by device: when a task matches one's description, load it with the skill tool first, then follow it.";
@@ -236,15 +192,14 @@ const SUB = SUB_HEAD + "\n\n" + VIEW_DOC + "\n\n" + DEVICES;
 const AGENT_PROMPT = "Unii's own prompt follows, for the user's instructions in it. Where it speaks to Unii, it speaks of the agent you work for, not of you.";
 
 // the tools of everyone (OWN), the master's (BOSS), those that run on a
-// device (`kit`: Machine.ts's), and the master's computer tasks (HAND),
-// whose agents get only COMPUTER, on their device
+// device (`kit`: Machine.ts's)
 const OWN: Spec[] = [
   spec("zoom", "Open the line id+n of the view into the two lines of n/2 under it; n = 1 gives the message whole. With an agent's name as id, give that agent's whole chat. A long text comes in pages from character at, saying where to go on.", { id: { type: ["integer", "string"] }, n: INT, at: INT }, ["id"]),
   spec("date", "The date and time of message id.", { id: INT }, ["id"]),
 ];
 const BOSS: Spec[] = [
   spec("spawn", "Start one subagent per task, in parallel, and return their names at once. Each one's report reaches you as a message \"[Name] report\" when it finishes. A subagent sees the view and the user's instructions, but knows what you want only from its task.", { tasks: { type: "array", items: STR }, effort: { type: "string", enum: EFFORTS, description: "How hard they think; by default, as hard as you." }, model: { type: "string", enum: MODELS, description: "Their model; by default, the one they'd run on. Set it ONLY when the user asks for that model or vendor in this chat, since another vendor may come with additional costs." } }, ["tasks"]),
-  spec("tell", "Send a message to an agent (a subagent or a computer task), by name. One at work reads it between its tool calls, and its report answers it; an idle one goes on from its chat, and its reply reaches you as a message \"[Name] reply\".", { name: STR, message: STR }, ["name", "message"]),
+  spec("tell", "Send a message to a subagent, by name. One at work reads it between its tool calls, and its report answers it; an idle one goes on from its chat, and its reply reaches you as a message \"[Name] reply\".", { name: STR, message: STR }, ["name", "message"]),
   spec("schedule", "Schedule a message to yourself: at its time it reaches you as a message \"[Timer id]\" from the timer, not the user, starting a turn as a report does, whether or not the user is online. Give `at` to send it once, or `cron` to send it again and again, and the time zone both are read in (the user's). Write the message as the task to do then, whole: by then this turn is far back in the view.", {
     message : STR,
     at      : { type: "string", description: "Once: YYYY-MM-DD HH:MM, in zone." },
@@ -264,19 +219,17 @@ function kit(who: string): Spec[] {
   });
 }
 const SKILL: Spec = spec("skill", "Load a skill listed under Skills: its SKILL.md, with the folder its other files are in on that device (read or run them there with your other tools).", { ...DEVICE, name: STR }, ["device", "name"]);
-const HAND: Spec = spec("computer", "Start a task on the screen of a device marked \"computer use\", done with its mouse and keyboard by an agent that sees screenshots, and return its name at once. Its report reaches you as a message \"[Name] report\". It knows only the task, so say all it needs. One at a time on each device.", { ...DEVICE, task: STR }, ["device", "task"]);
-
 // Tools
 // =====
 
 export namespace Tools {
 
-  // key: a chat's moving here keeps its own
-  export function serve(mem: Memory, hooks: Hooks, key: string = crypto.randomUUID()): Tools {
+  export function serve(mem: Memory, hooks: Hooks): Tools {
+    const key = crypto.randomUUID();
     const url = Tools.base() + key + "/";
     const run = (device: string, job: Job, signal: AbortSignal) => Tools.job(tools, device, job, signal, crypto.randomUUID());
-    const mcp = Mcp.servers((text) => hooks.note(text), config.MCP, run, (device) => typeof Tools.open(tools, device, false) !== "string");
-    const tools: Tools = { mem, devices: new Map(), agents: new Map(), mcp, key, url, hooks, away: Promise.withResolvers() };
+    const mcp = Mcp.servers((text) => hooks.note(text), config.MCP, run, (device) => typeof Tools.open(tools, device) !== "string");
+    const tools: Tools = { mem, devices: new Map(), agents: new Map(), mcp, key, url, hooks };
     CHATS.set(key, tools);
     fs.mkdirSync(MAIN, { recursive: true });
     return tools;
@@ -286,12 +239,6 @@ export namespace Tools {
   export function base(): string {
     HTTP ??= Bun.serve({ port: 0, hostname: "127.0.0.1", idleTimeout: 0, fetch: Tools.fetch });
     return "http://127.0.0.1:" + HTTP.port + "/";
-  }
-
-  // the chats on their way here: a request for one not here waits on
-  // `till` (Server.ts)
-  export function coming(till: Promise<void>): void {
-    COMING = till;
   }
 
   export function close(tools: Tools): void {
@@ -312,7 +259,7 @@ export namespace Tools {
   export function devices(tools: Tools): Block {
     const work  = (d: Device) => [...d.terms.values()][0]?.work;
     const shell = (d: Device) => [...d.terms.values()][0]?.shell;
-    const line  = ([name, d]: [string, Device]) => "- " + name + (Tools.hands(d) ? " (computer use)" : "") + ", work dir " + work(d) + (shell(d) ? ", shell " + shell(d) + " (closing unii does not kill a process a call left running after its shell ended)" : "");
+    const line  = ([name, d]: [string, Device]) => "- " + name + ", work dir " + work(d) + (shell(d) ? ", shell " + shell(d) + " (stopping the device does not kill a process a call left running after its shell ended)" : "");
     const lines = Tools.opened(tools).map(line);
     return { text: "Devices open now:\n" + (lines.length === 0 ? DEVICES_NONE : lines.join("\n")) + "\n\n", mark: false };
   }
@@ -362,15 +309,13 @@ export namespace Tools {
   // ---
 
   // a notification gets no answer; a request dropped, or cancelled (a
-  // `notifications/cancelled` naming it), stops its job; one of a chat
-  // moved, or waiting as it moves, goes on where it went, and so does a
-  // cancel of it
+  // `notifications/cancelled` naming it), stops its job
   export async function fetch(req: Request): Promise<Response> {
     const [, key, who, ...rest] = new URL(req.url).pathname.split("/");
-    const tools = CHATS.get(key) ?? (GONE.has(key) ? undefined : await COMING.then(() => CHATS.get(key)));
+    const tools = CHATS.get(key);
     const caller = who === "main" || tools?.agents.has(who);
     const msg = await req.json().catch(() => ({}));
-    const id = req.headers.get(JOB) ?? crypto.randomUUID();
+    const id = crypto.randomUUID();
     const session = req.headers.get(SESSION) ?? "";
     const scope = [key, who, session].join("/") + "/";
     if (msg.id === undefined && msg.method === "notifications/cancelled" && msg.params?.requestId !== undefined) {
@@ -383,9 +328,6 @@ export namespace Tools {
       RUNNING.set(name, (RUNNING.get(name) ?? new Set()).add(cancel));
     }
     try {
-      if (GONE.has(key)) {
-        return await Tools.pass(GONE.get(key)!, key, who, msg, id, session, signal);
-      }
       if (tools === undefined || rest.length > 0 || !caller) {
         return new Response(null, { status: 404 });
       }
@@ -396,15 +338,10 @@ export namespace Tools {
         return new Response(null, { status: 202 });
       }
       const no = { error: { code: -32601, message: "no method " + msg.method } };
-      const mcp = msg.method === "tools/call" && Tools.mcp(tools, who, String(msg.params?.name)) !== null;
-      const here = Tools.answer(tools, who, msg.method, msg.params ?? {}, signal, id).then(
+      const out = await Tools.answer(tools, who, msg.method, msg.params ?? {}, signal, id).then(
         (result) => (result === null ? no : { result }),
         (err) => ({ error: { code: -32603, message: String(err?.message ?? err) } }),
       );
-      const out = await (mcp ? here : Promise.race([here, tools.away.promise]));
-      if (typeof out === "string") {
-        return await Tools.pass(out, key, who, msg, id, session, signal);
-      }
       return Response.json({ jsonrpc: "2.0", id: msg.id, ...out });
     } finally {
       const set = RUNNING.get(name);
@@ -412,22 +349,6 @@ export namespace Tools {
         RUNNING.delete(name);
       }
     }
-  }
-
-  // a request sent on to the tools at `url`, as the job `id` if one, in
-  // its MCP session (a cancel there finds it); dropped once it's dropped
-  // or cancelled here (499: nobody waits for an answer)
-  export function pass(url: string, key: string, who: string, msg: object, id: string, session: string, signal: AbortSignal): Promise<Response> {
-    const headers: Record<string, string> = { "content-type": "application/json", [JOB]: id };
-    if (session !== "") {
-      headers[SESSION] = session;
-    }
-    return globalThis.fetch(url + key + "/" + who, { method: "POST", headers, body: JSON.stringify(msg), signal }).catch((err) => {
-      if (signal.aborted) {
-        return new Response(null, { status: 499 });
-      }
-      throw err;
-    });
   }
 
   // null: no such method
@@ -466,16 +387,12 @@ export namespace Tools {
   }
 
   export function list(tools: Tools, who: string): Spec[] {
-    if (who === "main") {
-      return [...OWN, ...BOSS, ...kit(who), SKILL, HAND];
-    }
-    return tools.agents.get(who)?.role.$ === "hands" ? [COMPUTER] : [...OWN, ...kit(who), SKILL];
+    return who === "main" ? [...OWN, ...BOSS, ...kit(who), SKILL] : [...OWN, ...kit(who), SKILL];
   }
 
   // whether `who` gets the MCP servers' tools: the master and subagents
-  // do, computer tasks don't
   export function plugged(tools: Tools, who: string): boolean {
-    return who === "main" || tools.agents.get(who)?.role.$ === "sub";
+    return who === "main" || tools.agents.has(who);
   }
 
   // the MCP servers the chat turned off
@@ -484,8 +401,7 @@ export namespace Tools {
   }
 
   // the MCP server of `who`'s tool `name`, if it is on (named for it: it
-  // need not have listed its tools in this process, as in one the chat
-  // moved to, or since it crashed; Mcp.call starts it)
+  // need not have listed its tools since it crashed; Mcp.call starts it)
   export function mcp(tools: Tools, who: string, name: string): Server | null {
     return Tools.plugged(tools, who) ? Mcp.find(tools.mcp, Tools.off(tools), name) : null;
   }
@@ -544,13 +460,6 @@ export namespace Tools {
         const n = Agent.resume();
         return { text: n === 0 ? "No call was waiting for a usage limit." : "Woke " + n + " call" + (n === 1 ? "" : "s") + " waiting for a usage limit; any still limited waits again.", fail: false };
       }
-      case "computer": {
-        const role = tools.agents.get(who)?.role;
-        if (role?.$ === "hands") {
-          return Tools.job(tools, role.device, { name, input: args, cwd: who }, signal, id);
-        }
-        return Tools.computer(tools, String(args.device), String(args.task));
-      }
       case "skill": {
         return Tools.job(tools, String(args.device), { name, input: { name: String(args.name) }, cwd: "main" }, signal, id);
       }
@@ -595,8 +504,8 @@ export namespace Tools {
   // Devices
   // -------
 
-  // a terminal joins its sign-in's device on host, and is sent its jobs;
-  // the device's name
+  // a device's link joins its sign-in's device on host, and is sent its
+  // jobs; the device's name
   export function attach(tools: Tools, term: string, host: string, who: string, link: Link): string {
     let name = host;
     for (let k = 2; (tools.devices.get(name)?.who ?? who) !== who; k++) {
@@ -610,8 +519,8 @@ export namespace Tools {
     return name;
   }
 
-  // a terminal told its jobs' ids (it halts the rest), then each that
-  // `fresh` picks, a message each
+  // a link told its jobs' ids (it halts the rest), then each that `fresh`
+  // picks, a message each
   export function sync(d: Device, term: string, fresh: (id: string) => boolean): void {
     const send = d.terms.get(term)?.send ?? (() => {});
     const mine = [...d.jobs].filter(([, j]) => j.term === term);
@@ -626,7 +535,7 @@ export namespace Tools {
     }
     for (const job of d.jobs.values()) {
       if (job.term === term) {
-        job.end({ text: "The terminal that ran this on " + device + " closed.", fail: true });
+        job.end({ text: "The device " + device + " that ran this stopped.", fail: true });
       }
     }
   }
@@ -636,16 +545,13 @@ export namespace Tools {
   }
 
   // else why not
-  export function open(tools: Tools, device: string, computer: boolean): Device | string {
+  export function open(tools: Tools, device: string): Device | string {
     const d = tools.devices.get(device);
     const open = Tools.opened(tools).map(([name]) => name).join(", ") || "none";
     if (d === undefined || d.terms.size === 0) {
       // only the user opens one, so a retry in a loop only keeps the chat
       // busy: stop and say so instead
-      return "No device " + device + " is open (unii isn't running there). Open: " + open + ". Only the user opens it, so don't retry or wait: end your turn, saying what is left.";
-    }
-    if (computer && !Tools.hands(d)) {
-      return device + " does no computer use (its unii runs without UNII_COMPUTER=1).";
+      return "No device " + device + " is open (its unii device isn't running). Open: " + open + ". Only the user starts it, so don't retry or wait: end your turn, saying what is left.";
     }
     return d;
   }
@@ -661,22 +567,21 @@ export namespace Tools {
     return run.out;
   }
 
-  // a job started on a device's terminal (the last live one), told to
-  // it; else why not
+  // a job started on a device's link (the last live one), told to it;
+  // else why not
   export function start_job(tools: Tools, device: string, job: Job, id: string): Running | string {
-    const computer = job.name === "computer";
-    const d = Tools.open(tools, device, computer);
+    const d = Tools.open(tools, device);
     if (typeof d === "string") {
       return d;
     }
-    const terms = [...d.terms].filter(([, t]) => t.computer || !computer);
+    const terms = [...d.terms];
     const [term] = terms.filter(([, t]) => t.live()).at(-1) ?? terms.at(-1)!;
     const run = Tools.track(d, id, term, job);
     Tools.sync(d, term, (x) => x === id);
     return run;
   }
 
-  // a job kept until it ends, its terminal told then
+  // a job kept until it ends, its link told then
   export function track(d: Device, id: string, term: string, job: Job): Running {
     const { promise, resolve } = Promise.withResolvers<Out>();
     const end = (out: Out) => {
@@ -688,10 +593,6 @@ export namespace Tools {
     const run = { term, job, out: promise, end };
     d.jobs.set(id, run);
     return run;
-  }
-
-  export function hands(d: Device): boolean {
-    return [...d.terms.values()].some((t) => t.computer);
   }
 
   export function done(tools: Tools, device: string, id: string, out: Out): void {
@@ -706,18 +607,8 @@ export namespace Tools {
     if (typeof view === "string") {
       return view;
     }
-    const names = tasks.map((task) => Tools.start(tools, { $: "sub", effort, model }, task, view));
+    const names = tasks.map((task) => Tools.start(tools, { effort, model }, task, view));
     return "Started " + names.join(", ") + ". Each one's report will reach you as a message when it finishes.";
-  }
-
-  export function computer(tools: Tools, device: string, task: string): Out {
-    const d = Tools.open(tools, device, true);
-    const why = typeof d === "string" ? d : Tools.screen(tools, device);
-    if (why !== null) {
-      return { text: why, fail: true };
-    }
-    const name = Tools.start(tools, { $: "hands", device }, task, []);
-    return { text: "Started " + name + " on " + device + ". Its report will reach you as a message.", fail: false };
   }
 
   // what the work a restart cut is told as it goes on (Server.ts
@@ -736,8 +627,7 @@ export namespace Tools {
       agent.call.send({ text: message, imgs: [] });
       return "Sent. " + name + " reads it between its tool calls, and its report answers it.";
     }
-    const busy = agent.role.$ === "hands" ? Tools.screen(tools, agent.role.device) : null;
-    const view = busy ?? (agent.role.$ === "sub" ? await Tools.view(tools) : []);
+    const view = await Tools.view(tools);
     if (typeof view === "string") {
       return view;
     }
@@ -751,7 +641,7 @@ export namespace Tools {
     const agent = { name, role, call: null, live: [], calls: {}, stop: false, view, replies: [] };
     fs.mkdirSync(config.WORK + "/" + name, { recursive: true });
     tools.agents.set(name, agent);
-    tools.hooks.push(agent, "note", role.$ === "sub" ? SUB_NOTE + (role.model === null ? "" : SUB_ON + role.model) + (role.effort === null ? "" : SUB_AT + role.effort) : HANDS_NOTE + role.device);
+    tools.hooks.push(agent, "note", SUB_NOTE + (role.model === null ? "" : SUB_ON + role.model) + (role.effort === null ? "" : SUB_AT + role.effort));
     tools.hooks.push(agent, "user", task);
     Tools.run(tools, agent);
     return name;
@@ -762,29 +652,22 @@ export namespace Tools {
     const log = tools.agents.has(name) ? null : Memory.agent(tools.mem, name);
     const note = log !== null && log.length > 0 && log[0].kind === "note" ? log[0].text : "";
     const sub = SUB_ROLE.exec(note);
-    if (sub !== null || note.startsWith(HANDS_NOTE)) {
-      const role: Agent["role"] = sub !== null ? { $: "sub", effort: sub[2] ?? null, model: sub[1] ?? null } : { $: "hands", device: note.slice(HANDS_NOTE.length) };
-      tools.agents.set(name, { name, role, call: null, live: [], calls: {}, stop: false, view: [], replies: [] });
+    if (sub !== null) {
+      tools.agents.set(name, { name, role: { effort: sub[2] ?? null, model: sub[1] ?? null }, call: null, live: [], calls: {}, stop: false, view: [], replies: [] });
     }
     return tools.agents.get(name) ?? null;
   }
 
   // calls while a message waits in its log (told too late for the call
-  // before), the first `call` if it runs (its chat moved here; one a
-  // deploy cut as it waited for a usage limit asks anew, told so, as
-  // after a restart); then its report. Detached: a throw ends it as a
-  // failed reply, still reported
-  export async function run(tools: Tools, agent: Agent, call: Call | null = null): Promise<void> {
+  // before); then its report. Detached: a throw ends it as a failed
+  // reply, still reported
+  export async function run(tools: Tools, agent: Agent): Promise<void> {
     try {
-      for (let more = true; more; call = null) {
-        agent.call = call ?? AskAI.ask(Tools.ask(tools, agent), (ev) => tools.hooks.on(agent, ev));
+      for (let more = true; more; ) {
+        agent.call = AskAI.ask(Tools.ask(tools, agent), (ev) => tools.hooks.on(agent, ev));
         tools.hooks.change();
         const end = await agent.call.done;
         agent.call = null;
-        if (end.cut && !agent.stop) {
-          tools.hooks.push(agent, "user", Tools.restarted([agent.name]));
-          continue;
-        }
         agent.replies.push(end.ok ? end.text : "failed: " + end.text);
         more = end.ok && end.left.length > 0;
       }
@@ -795,38 +678,22 @@ export namespace Tools {
     tools.hooks.report(agent, report_text(agent.name, agent.replies.join("\n\n")), agent.stop);
   }
 
-  // what pays an agent's calls
-  export function bill(tools: Tools, agent: Agent): Bill | undefined {
-    return tools.pay?.(agent.role.$ === "sub" ? "agent" : "computer", agent.name);
-  }
-
-  // a call of an agent, on Tools.pick (a computer task's sees no view,
-  // and only its computer tool)
+  // a call of an agent, on Tools.pick
   export function ask(tools: Tools, agent: Agent): Ask {
     const log = { text: Memory.agent_show(tools.mem, agent.name), mark: true };
     const server = Tools.at(tools, agent.name);
     const run = Pick.ask(Tools.pick(tools, agent));
-    const bill = Tools.bill(tools, agent);
-    const role = agent.role;
-    switch (role.$) {
-      case "sub": {
-        const system = SUB + "\n\n" + AGENT_PROMPT + "\n\n" + Tools.prompt("prompt");
-        const blocks = [...agent.view, Tools.devices(tools), Tools.skills(tools), log];
-        const effort = role.effort ?? run.effort;
-        return { ...run, effort, system, blocks, searches: SEARCHES, server, bill };
-      }
-      case "hands": {
-        const system = HANDS.replace("{device}", role.device) + "\n\n" + AGENT_PROMPT + "\n\n" + Tools.prompt("prompt");
-        return { ...run, system, blocks: [...agent.view, log], searches: 0, server, bill };
-      }
-    }
+    const system = SUB + "\n\n" + AGENT_PROMPT + "\n\n" + Tools.prompt("prompt");
+    const blocks = [...agent.view, Tools.devices(tools), Tools.skills(tools), log];
+    const effort = agent.role.effort ?? run.effort;
+    return { ...run, effort, system, blocks, searches: SEARCHES, server };
   }
 
   // what an agent runs on: config.AGENTS or else the chat's pick, with
   // the model it was spawned with, if any; a throw if no longer offered
   export function pick(tools: Tools, agent: Agent): Pick {
     const base = config.AGENTS ?? tools.hooks.pick();
-    const model = agent.role.$ === "sub" ? agent.role.model : null;
+    const model = agent.role.model;
     const given = model === null ? base : Pick.to_model(base, model, config.OFFER.vendors, config.OFFER);
     if (given === null) {
       throw new Error(agent.name + "'s model " + model + " is no longer offered; spawn another subagent.");
@@ -838,51 +705,6 @@ export namespace Tools {
   export async function view(tools: Tools): Promise<Block[] | string> {
     const why = await Memory.settle(tools.mem, tools.mem.count, tools.hooks.halt());
     return why ?? Memory.view(tools.mem);
-  }
-
-  // Moving
-  // ------
-
-  // the chat's tools moved to the process whose tools are at `url`: its
-  // agents at work by `far`, which moves each call; requests go there
-  export function give(tools: Tools, url: string, far: (call: Call) => string): Moved {
-    const jobs = (d: Device) => [...d.jobs].map(([id, j]): [string, string, Job] => [id, j.term, j.job]);
-    const devices = [...tools.devices].map(([name, d]): Moved["devices"][number] => [name, d.who, jobs(d)]);
-    const agents = Tools.working(tools).map(({ role, call, ...a }) => ({ ...a, call: far(call!) }));
-    Mcp.end(tools.mcp);
-    CHATS.delete(tools.key);
-    GONE.set(tools.key, url);
-    tools.away.resolve(url);
-    return { key: tools.key, devices, agents };
-  }
-
-  // the chat `key`, given away from here, is now at the tools at `url`
-  // (its new process took a call that runs here: Main.far): this
-  // process's calls reach it straight, never through one that ended
-  export function went(key: string, url: string): void {
-    if (GONE.has(key)) {
-      GONE.set(key, url);
-    }
-  }
-
-  // a chat's tools come here (Tools.give): `far` makes the call of id
-  export function take(tools: Tools, moved: Moved, far: (id: string, on: (ev: Event) => void, bill?: Bill) => Call): void {
-    for (const [name, who, jobs] of moved.devices) {
-      const d: Device = { who, terms: new Map(), jobs: new Map(), skills: [] };
-      jobs.forEach(([id, term, job]) => Tools.track(d, id, term, job));
-      tools.devices.set(name, d);
-    }
-    for (const { call, ...was } of moved.agents) {
-      const agent = Object.assign(Tools.agent(tools, was.name)!, was);
-      Tools.run(tools, agent, far(call, (ev) => tools.hooks.on(agent, ev), Tools.bill(tools, agent)));
-    }
-  }
-
-  // why a computer task can't start on a device now
-  export function screen(tools: Tools, device: string): string | null {
-    const on = (a: Agent) => a.role.$ === "hands" && a.role.device === device && a.call !== null;
-    const busy = [...tools.agents.values()].find(on);
-    return busy === undefined ? null : "Computer task " + busy.name + " is still working on " + device + "; one works there at a time.";
   }
 
   export function working(tools: Tools): Agent[] {

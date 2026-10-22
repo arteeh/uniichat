@@ -73,9 +73,7 @@ body { text-wrap: balance; }
 
 /* a guest's chat: only the log and the message box; a note alone (the
    terminal signed in) */
-body.guest :is(.net, .credits, .all, .menu, .attach, .mic, #pick, #tabs) { display: none !important; }
-/* what only a server that bills shows (main.ts: body.bills) */
-body:not(.bills) .bill { display: none !important; }
+body.guest :is(.net, .all, .menu, .attach, .mic, #pick, #tabs) { display: none !important; }
 body.solo main { width: min(420px, 100% - 48px); margin: 18vh auto; text-align: center; }
 body.solo h1 { margin: 0; font: 400 46px/1.05 var(--serif); letter-spacing: -.015em; }
 .sub { margin: 18px 0 0; color: var(--mid); font-size: 14.5px; }
@@ -90,7 +88,6 @@ header > .brand:hover { background: none; }
 /* the logo: its shape (mark.svg, the infinity cut out) filled with the
    ink, so it follows the theme */
 .mark { display: block; width: 26px; height: 26px; background: var(--ink); -webkit-mask: url(/mark.svg) center / contain no-repeat; }
-header .credits { font: 500 12.5px var(--mono); }
 header .net { font-size: 13px; color: var(--mid); }
 
 /* Footer: the rule with the pick (a click on a part opens its menu), the
@@ -162,7 +159,7 @@ body.account footer > :not(#toast) { display: none; }
 #tabs button:hover, #tabs .here { color: var(--ink); }
 #tabs .here { font-weight: 600; }
 
-/* Popovers (the browser's): the menu, the wallet, Import History */
+/* Popovers (the browser's): the menu, Import History */
 [popover] { inset: 60px 20px auto auto; margin: 0; width: 280px; padding: 10px 14px; border: 1px solid var(--hair); border-radius: 14px; color: var(--ink); background: var(--lift); box-shadow: var(--shadow); }
 [popover] p { margin: 8px 0 6px; font-size: 14px; }
 [popover] > :is(button, a) { display: block; width: 100%; padding: 8px 4px; text-align: left; font-size: 14.5px; border-radius: 10px; text-decoration: none; }
@@ -184,17 +181,12 @@ body.account footer > :not(#toast) { display: none; }
 #menu .mcp button:hover { background: var(--hover); }
 #menu .mcp span { color: var(--mid); font-size: 13px; }
 #menu .mcp .off { color: var(--mid); }
-.ai { margin: 6px 0 0; text-align: center; font: 12px var(--sans); color: var(--mid); }
-body:not(.guest) .ai { display: none; }
-/* the wallet (out of credit), Import History (also a new account's
-   first step) and the risk warning: centered over the page. A running
+/* Import History (also a new chat's first step): centered over the
+   page. A running
    import's progress shows in Import History and, small, in the header */
-:is(#wallet, #import, #risk) { inset: 0; margin: auto; width: min(440px, 100vw - 40px); height: fit-content; max-height: 85vh; overflow: auto; padding: 14px 20px; }
-:is(#wallet, #import, #risk)::backdrop { background: var(--veil); }
-:is(#wallet, #import, #risk) .title { font-weight: 600; font-size: 16px; }
-#wallet { width: min(400px, 100vw - 40px); padding: 20px 22px; }
-#wallet .title { margin-top: 0; }
-#wallet .title { margin-bottom: 16px; }
+#import { inset: 0; margin: auto; width: min(440px, 100vw - 40px); height: fit-content; max-height: 85vh; overflow: auto; padding: 14px 20px; }
+#import::backdrop { background: var(--veil); }
+#import .title { font-weight: 600; font-size: 16px; }
 #import { width: min(480px, 100vw - 40px); padding: 20px 22px; }
 #import .title { margin-top: 0; font-size: 17px; }
 #import .sub { margin-top: 4px; }
@@ -228,20 +220,15 @@ body:not(.guest) .ai { display: none; }
 #import .since input::-moz-range-track { background: transparent; }
 /* each line one row, on a phone too: there the box takes nearly the
    screen's width, its sides and text shrinking with it */
-#risk { width: min(400px, 100vw - 24px); padding: 20px min(22px, 4vw); }
-#risk .title { margin-top: 0; font-size: 16px; }
-#risk a { color: inherit; text-decoration: underline; }
-#risk ul { margin: 12px 0 0; padding-left: 18px; }
-#risk li { margin: 6px 0; font-weight: 500; font-size: min(16px, 4.1vw); }
-:is(#import, #risk) .acts { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; margin: 16px 0 0; }
-:is(#import, #risk) .acts button { padding: 7px 16px; border-radius: 8px; background: var(--block); font-size: 14px; font-weight: 500; }
-:is(#import, #risk) .acts button:hover { background: var(--hover); }
-:is(#import, #risk) .acts :is(.go, .pickdir, .ok) { background: var(--ink); color: var(--paper); }
-:is(#import, #risk) .acts :is(.go, .pickdir, .ok):hover { background: var(--ink); opacity: .85; }
+#import .acts { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; margin: 16px 0 0; }
+#import .acts button { padding: 7px 16px; border-radius: 8px; background: var(--block); font-size: 14px; font-weight: 500; }
+#import .acts button:hover { background: var(--hover); }
+#import .acts :is(.go, .pickdir) { background: var(--ink); color: var(--paper); }
+#import .acts :is(.go, .pickdir):hover { background: var(--ink); opacity: .85; }
 #import .acts .pickdir.alt { background: var(--block); color: var(--ink); }
 #import .two { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 #import .two button { min-height: 64px; padding: 10px 16px; font-size: 15px; white-space: normal; }
-:is(#import .acts, .usd) button { white-space: nowrap; }
+#import .acts button { white-space: nowrap; }
 #import button:disabled { opacity: 0.4; cursor: default; }
 /* a progress bar: the box's on the paper, track the block's gray; the
    header's on a gray button, named with its percent, track darker
@@ -364,8 +351,8 @@ header > .imping { display: flex; flex-direction: column; justify-content: cente
 @media (pointer: coarse) {
   :is(header > :is(button, a), #pick > button, #tabs button) { position: relative; }
   :is(header > :is(button, a), #pick > button, #tabs button, .mine, .down, .copy, .open.one > .fold)::after { content: ""; position: absolute; left: 50%; top: 50%; width: max(100%, 44px); height: max(100%, 44px); transform: translate(-50%, -50%); }
-  :is(.ai, .fine, .foot) a { padding: 14px 0; }
-  :is(.chip, .usd button) { height: 44px; }
+  .foot a { padding: 14px 0; }
+  .chip { height: 44px; }
   :is([popover] > button, #menu .mcp button) { min-height: 44px; }
   [popover] > a { padding: 11px 4px; }
 }
@@ -405,10 +392,6 @@ header > .imping { display: flex; flex-direction: column; justify-content: cente
 #account section > p { margin: 0 0 10px; }
 #account section > p:last-child { margin-bottom: 0; }
 #account .big { margin: 0 0 16px; font: 500 36px/1 var(--sans); letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
-.usd { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 8px; max-width: 420px; }
-.usd button { height: 40px; padding: 0 8px; border-radius: 10px; background: var(--block); font-weight: 600; }
-.usd button:hover { background: var(--hover); }
-.fine { margin: 12px 0 0; font-size: 12.5px; color: var(--mid); }
 .chip { flex: none; display: inline-grid; place-items: center; height: 36px; padding: 0 14px; border-radius: 9px; background: var(--block); font: 500 14px var(--sans); color: var(--ink); text-decoration: none; }
 .chip:hover { background: var(--hover); }
 .chip svg { width: 15px; height: 15px; }
@@ -427,15 +410,7 @@ header > .imping { display: flex; flex-direction: column; justify-content: cente
 #account .item p { margin: 0; font-weight: 500; overflow-wrap: anywhere; }
 #account .chip { min-width: 96px; }
 .item small { display: block; font-size: 13.5px; font-weight: 400; color: var(--mid); overflow-wrap: anywhere; }
-.kill, .back-up { margin-top: 10px; padding: 16px; border-radius: 12px; background: var(--block); }
-.kill input { width: 100%; height: 44px; margin: 8px 0 16px; padding: 0 12px; border: 1px solid var(--frame); border-radius: 9px; background: var(--paper); color: var(--ink); font: 16px var(--sans); }
-.kill div, .back-up div { display: flex; gap: 8px; justify-content: flex-end; }
-.kill .chip, .back-up .chip { background: var(--paper); }
-.kill .chip.red, .back-up .chip.red { background: var(--red); color: var(--paper); }
-.kill p, .back-up p { margin: 0 0 8px; font-size: 14.5px; }
-.kill .why, .back-up .why { color: var(--red); }
-.kill .why:empty, .back-up .why:empty { display: none; }
-.kill .chip:disabled, .back-up .chip:disabled, #account .notify:disabled { opacity: .4; cursor: default; }
+#account .notify:disabled { opacity: .4; cursor: default; }
 /* a prompt's editor (SOUL.md, an owner's base prompt): its note, its
    text (16px on touch, as above), then what saving said beside Save
    (red: refused) */

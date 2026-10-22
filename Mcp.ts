@@ -4,7 +4,7 @@
 // its subagents get beside unii's own (Tools.ts), each named
 // "<server>__<tool>", on every vendor. A server is a program run here
 // (stdio: a JSON-RPC message a line each way), a program run on a device
-// (`device`: each message a job of its terminal, Mcp.device, Mcp.here),
+// (`device`: each message a job of it, Mcp.device, Mcp.here),
 // or a URL (streamable HTTP: a POST each, answered as JSON or an event
 // stream).
 // Each chat runs its own (one user's never see another's), started by
@@ -500,7 +500,7 @@ export namespace Mcp {
     return { ask, tell, close, dead: () => dead };
   }
 
-  // a program run on a device: each message a job "mcp" of its terminal
+  // a program run on a device: each message a job "mcp" of it
   // (Mcp.here runs it there), keyed to this link; a device not open
   // fails the message; one whose program died (or whose unii restarted)
   // says why, and the link is dead
@@ -585,7 +585,7 @@ export namespace Mcp {
     }
   }
 
-  // on a device, its socket to the server lost (Term.ts): the programs it
+  // on a device, its socket to the server lost (Device.ts): the programs it
   // ran for chats end, as no close may come; a chat's next message finds
   // its program gone, and starts it again
   export function lost(): void {

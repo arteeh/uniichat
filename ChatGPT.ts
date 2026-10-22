@@ -34,8 +34,8 @@ export type Tokens = { id_token: string; access_token: string; refresh_token: st
 // FILE, as Codex writes its auth.json
 export type Auth = { auth_mode: "chatgpt"; OPENAI_API_KEY: null; tokens: Tokens; last_refresh: string };
 
-// a stream read so far, the items it gave, and the speed it was asked at
-type Sub = State & { items: any[]; speed: string };
+// a stream read so far, and the items it gave
+type Sub = State & { items: any[] };
 
 // Constants
 // =========
@@ -347,9 +347,7 @@ export namespace ChatGPT {
     const end = OpenAI.read(st, ev, on);
     if (end && st.res !== null && !(st.res.output?.length > 0)) {
       st.res = { ...st.res, output: st.items.filter(Boolean) };
-      OpenAI.usage(st.use, st.res);
     }
-    st.use.speed = st.speed;
     return end;
   }
 
@@ -394,12 +392,10 @@ export namespace ChatGPT {
     auth    : (refused) => ChatGPT.token(refused),
     headers : (token) => ChatGPT.headers(token),
     body    : (ask, items, tools, max) => ChatGPT.body(ask, items, tools, max),
-    count   : async () => null,
-    start   : (ask) => ({ ...OpenAI.wire.start(ask), items: [], speed: ask.speed }),
+    start   : (ask) => ({ ...OpenAI.wire.start(ask), items: [] }),
     read    : (st, ev, on) => ChatGPT.read(st, ev, on),
     begun   : (ev) => ev.type === "response.output_item.added",
     step    : (st, ask) => ({ ...OpenAI.step(st, ask), note: "" }),
-    usage   : (st) => st.use,
     refusal : (res, text) => ChatGPT.refusal(res, text),
     reset   : (res, text) => ChatGPT.reset(res, text),
   };

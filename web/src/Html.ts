@@ -3,8 +3,7 @@
 // What View.ts draws and Md.ts's tokens, as HTML, every text escaped, one
 // element per row, knob or tab; and the settings page's parts. A click's
 // effect is in the markup: `data-act`, the View.Act it makes;
-// `data-copy`, what Copy copies; `data-usd`, the credit it buys
-// (main.ts), so `credit_html` works wherever it is put.
+// `data-copy`, what Copy copies (main.ts).
 
 import type { Vendor } from "../../AskAI.ts";
 import * as Call from "../../Call.ts";
@@ -161,54 +160,23 @@ export function timers_html(timers: Timer.Timer[]): string[] {
   });
 }
 
-// Account
-// =======
+// Settings page
+// =============
 
-// buying credit: a button per amount, then the fine print (in the iOS
-// app, the App Store's)
-export function credit_html(app: boolean): string {
-  const buttons = [10, 25, 50, 100].map((usd) => `<button data-usd="${usd}">$${usd}</button>`).join("");
-  return `<div class="credit"><div class="usd">${buttons}</div>${fine_html(app)}</div>`;
-}
-
-// what buying credit costs and means, in one line (the terms say the rest)
-export function fine_html(app: boolean): string {
-  const fee = app ? "Paid at the App Store's price." : "+10% platform fee (min $0.80).";
-  return `<p class="fine">${fee} Buying accepts the <a href="/terms.html" target="_blank">terms</a>.</p>`;
-}
-
-// the settings page (/settings, or /account): where the server bills,
-// the balance and credit to add, the use by day and the purchases; the
-// user's SOUL.md (soul: null, unread: a retry); then the account's own
-// acts (notify: this browser's notifications, null: none to offer);
-// restoring a backup and deleting ask first, in place (main.ts); then,
-// for the server's owner, together at the bottom: the base prompt and
-// the server's settings (main.ts fills .owned)
-export function account_html(a: View.Account, app: boolean, prompts: View.Prompts | null, owner: boolean, notify: Notify | null = null): string {
-  const tops    = a.topups ?? [];
-  const days    = View.account_days(a);
-  const balance = a.credits === null ? "" : section_html("Balance", `<p class="big">${View.usd_show(a.credits)}</p>` + credit_html(app));
-  const usage   = section_html("Usage", days.length === 0 ? `<p class="sub">Nothing yet.</p>` : table_html("days", ["Day", "Use", "Cost"], days.map((d) => [d.date, d.what, View.cost_show(d.usd)])));
-  const buys    = tops.length === 0 ? "" : section_html("Purchases", table_html("buys", View.TOPUP, tops.map(View.topup_cells)));
-  const money   = a.bills ? balance + usage + buys : "";
+// the settings page (/settings, or /account): the prompts (null, unread:
+// a retry); this browser's own acts (notify: its notifications, null:
+// none to offer); then the server's settings (main.ts fills .owned)
+export function account_html(prompts: View.Prompts | null, notify: Notify | null = null): string {
   const item    = (what: string, note: string, act: string) => `<div class="item"><p>${what}${note === "" ? "" : `<small>${note}</small>`}</p>${act}</div>`;
-  const closes  = a.bills ? `<p>This also closes your BendAI account (same sign-in). Credit you bought and didn't use goes back to your card.</p>` : "";
-  const kill    = `<form class="kill" hidden>${closes}<p>Type <b>${esc(a.name)}</b> to confirm.</p><input name="name" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="${esc(a.name)}"><p class="why"></p><div><button type="button" class="chip keep">Cancel</button><button class="chip red" disabled>Delete for good</button></div></form>`;
-  const back    = `<form class="back-up" hidden><p>Replace your chat and Unii's memory with <b class="file"></b>? What they hold now is replaced.</p><p class="why"></p><div><button type="button" class="chip keep">Cancel</button><button class="chip red">Restore</button></div></form>`;
   const acts    = [
-    item(esc(a.name), "", `<button class="chip out">Sign out</button>`),
+    item("This browser", "Signed in to this server.", `<button class="chip out">Sign out</button>`),
     ...(notify === null ? [] : [notify_html(notify)]),
-    item("Export memory", "Chat and account, in one file.", `<a class="chip" href="/export">Download</a>`),
-    item("Restore a backup", "Chat and memory, from a .tar.gz backup.", `<button class="chip up">Upload</button><input class="pick" type="file" accept=".gz,.tgz,application/gzip" hidden>`),
-    item("Delete account", "Erases chat and memory for good.", `<button class="chip red del">Delete</button>`),
+    item("Export memory", "The chat and its summaries, in one file.", `<a class="chip" href="/export">Download</a>`),
   ];
-  const account = section_html("Sign-in and data", acts.join("") + back + kill);
   const unread  = item("Could not read the prompts.", "", `<button class="chip retry">Try again</button>`);
   const mine    = section_html("Prompts", prompts === null ? unread : prompt_html("prompt", prompts.prompt.text, "The user prompt: Unii's system prompt in every turn; its subagents read it too. Add who you are and how you want work done at its end. prompt.md in the server's folder; empty: the built-in one.")
     + prompt_html("compact", prompts.compact.text, "The compaction prompt: all a summary of the memory gets, nothing else. compact.md in the server's folder; empty: the built-in one."));
-  const links   = a.bills ? `<p class="foot"><a href="/pricing" target="_blank">Prices</a> · <a href="/terms.html" target="_blank">Terms</a> · <a href="/privacy.html" target="_blank">Privacy</a> · <a href="mailto:contact@higherorderco.com">Help</a></p>` : "";
-  const owned   = owner ? `<div class="owned"></div>` : "";
-  return `<a class="back" href="/" data-go="/">← Chat</a><h1>Settings</h1>` + money + mine + account + owned + links;
+  return `<a class="back" href="/" data-go="/">← Chat</a><h1>Settings</h1>` + mine + section_html("This browser", acts.join("")) + `<div class="owned"></div>`;
 }
 
 // a prompt's editor: its note, its text (name: what /api/prompts sets), Save
@@ -247,7 +215,7 @@ const SETTING: Record<string, [string, string]> = {
   pick      : ["Default model", "What a chat runs on until it picks another."],
   compactor : ["Compactor model", "What writes the memory's summaries."],
   agents    : ["Subagent model", "What subagents run on."],
-  site      : ["Site", "The server's address, for sign-in links."],
+  site      : ["Site", "The server's address, for sign-in links and the installer."],
   apple     : ["iOS App ID", "The app's team and bundle ID, whose sign-in links it opens."],
   apns      : ["APNs key ID", "The ID of the key the app's pushes are signed with."],
 };
@@ -255,7 +223,6 @@ const SETTING: Record<string, [string, string]> = {
 const KEY: Record<string, [string, string]> = {
   anthropic : ["Anthropic key", "For claude-api's models."],
   openai    : ["OpenAI key", "For openai-api's models and dictation."],
-  resend    : ["Resend key", "Emails sign-in links (none: the server prints them)."],
   apns      : ["APNs key", "The .p8 key the iOS app's pushes are signed with."],
 };
 
@@ -280,7 +247,7 @@ export function settings_html(page: Page): string {
   const keys = shown.length === 0 ? "" : section_html("Keys", `<p class="sub">Kept in keys.json in the server's folder, readable by the server's user only, and never shown again, only their last characters.</p>` + shown.map(key_html).join(""));
   const error = page.error === null ? "" : `<p class="why bad">${esc(page.error)}</p>`;
   const save = `<div class="save"><p class="why"></p><button class="chip go"${page.error === null ? "" : " disabled"}>Save</button></div>`;
-  const head = `<p class="sub">You own this server: what follows is its settings, in config.json in its folder, seen by you only.</p>`;
+  const head = `<p class="sub">The server's settings, in config.json in its folder.</p>`;
   const profiles = page.profiles === null ? "" : section_html("Profiles", `<p class="sub">Ranked models: a chat on a profile runs on the first and falls back to the next when one is out.</p><div class="set profiles" data-key="profiles"><div class="field"></div><p class="err"></p></div>`);
   return head + error + `<form class="settings" autocomplete="off">` + group(GROUPS[0]) + profiles + keys + group(GROUPS[1]) + save + `</form>`;
 }

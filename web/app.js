@@ -36,9 +36,6 @@ async function* stream_lines(stream) {
 }
 
 // Import.ts
-var NODE = 512;
-var LINE = 480;
-var PRICE = { base: 187, byte: 735, depth: 628 };
 var PART = 2 ** 20;
 var OLD = "Nothing new: these chats are in Unii's memory already.";
 var NOT_EXPORT = "Not a Claude or ChatGPT export.";
@@ -89,13 +86,13 @@ function import_pick(sessions, want, done) {
   const kept = (s, last) => s.heads.filter((m) => keep(m, last));
   return old.map((s) => ({ ...s, heads: kept(s, done[import_id(s)]) })).filter((s) => s.heads.length > 0);
 }
-function import_plan(sessions, want, done, count) {
+function import_plan(sessions, want, done) {
   const all = import_pick(sessions, { ...want, since: "" }, done);
   const shown = import_pick(all, want, {});
   const picked = shown.filter((s) => !want.off.includes(import_id(s)));
   const first = all.map((s) => s.heads[0].date).sort()[0] ?? "";
   const sizes = picked.flatMap((s) => [import_size(import_note(s)), ...s.heads.map((m) => m.size)]);
-  return { sessions: shown, picked, msgs: sizes.length - picked.length, first: first.slice(0, 10), sizes, guess: import_usd(count, sizes) };
+  return { sessions: shown, picked, msgs: sizes.length - picked.length, first: first.slice(0, 10), sizes };
 }
 function import_new(m, last) {
   return last === undefined || (m.date ?? "") > last;
@@ -143,45 +140,11 @@ async function* import_body(picked) {
   }
   yield part;
 }
-function import_guess(a, sizes) {
-  const usd = [];
-  let nodes = sizes.map((bytes) => ({ bytes, depth: 0 }));
-  for (let l = 0, i = a;nodes.length > 0; l++, i = Math.floor(i / 2)) {
-    usd.push(nodes.map(node_usd));
-    const line = (k) => k < 0 ? { bytes: LINE, depth: l } : node_line(nodes[k]);
-    const from = Math.floor(i / 2);
-    nodes = Array.from({ length: Math.floor((i + nodes.length) / 2) - from }, (_, j) => node_merge(line(2 * (from + j) - i), line(2 * (from + j) + 1 - i)));
-  }
-  return usd;
-}
-function import_usd(a, sizes) {
-  return import_guess(a, sizes).flat().reduce((x, y) => x + y, 0) / 1e6;
-}
 function import_size(m) {
   return new TextEncoder().encode(m.kind + ": " + m.text).length;
 }
 function import_count(n, what) {
   return n.toLocaleString("en-US") + " " + what + (n === 1 ? "message" : "messages");
-}
-function topup(guess, credits) {
-  const need = guess * 1.5 - credits;
-  return need > 0 ? Math.ceil(need / 5) * 5 : 0;
-}
-function guess_usd(usd) {
-  return "$" + Math.max(0.01, usd).toFixed(2);
-}
-function node_usd(node) {
-  if (node.bytes <= NODE) {
-    return 0;
-  }
-  const { base, byte, depth } = PRICE;
-  return Math.round(base + byte * Math.log2(node.bytes / NODE) + depth * (node.depth + 1));
-}
-function node_line(node) {
-  return node.bytes > NODE ? { bytes: LINE, depth: node.depth + 1 } : { bytes: node.bytes, depth: 0 };
-}
-function node_merge(a, b) {
-  return { bytes: a.bytes + 1 + b.bytes, depth: Math.max(a.depth, b.depth) };
 }
 async function import_export(file) {
   const zip = await file.slice(0, 2).text() === "PK";
@@ -479,8 +442,8 @@ function input_parse(text) {
       field = i;
     }
   }
-  const open2 = quote ? (esc ? text.slice(0, -1) : text) + '"' : text;
-  const full = open2.replace(/[\s,]*$/, "") + shut.reverse().join("");
+  const open = quote ? (esc ? text.slice(0, -1) : text) + '"' : text;
+  const full = open.replace(/[\s,]*$/, "") + shut.reverse().join("");
   return object_parse(full) ?? object_parse(text.slice(0, field) + "}");
 }
 function object_parse(text) {
@@ -723,7 +686,7 @@ function block_parse(lines, i, d) {
 function list_parse(lines, i, d) {
   const kind = list_kind(lines[i]);
   const items = [];
-  let [end, w, blank, open2, para, fenced, loose] = [i, 0, 0, true, false, false, false];
+  let [end, w, blank, open, para, fenced, loose] = [i, 0, 0, true, false, false, false];
   for (let j = i;j < lines.length; j++) {
     const l = untab(lines[j]);
     const at = indent(l);
@@ -736,17 +699,17 @@ function list_parse(lines, i, d) {
       const rest = l.slice(mark.length);
       const pad = indent(rest);
       w = mark.length + (rest.trim() === "" || pad > 4 ? 1 : pad);
-      open2 = rest.trim() !== "" || (lines[j + 1] ?? "").trim() !== "";
+      open = rest.trim() !== "" || (lines[j + 1] ?? "").trim() !== "";
       loose = loose || blank > 0 && items.length > 0;
       items.push([l.slice(w)]);
       [para, fenced] = item_line(l.slice(w), false);
-    } else if (open2 && at >= w) {
+    } else if (open && at >= w) {
       for (;blank > 0; blank--) {
         items[items.length - 1].push("");
       }
       items[items.length - 1].push(l.slice(w));
       [para, fenced] = item_line(l.slice(w), fenced);
-    } else if (open2 && para && blank === 0 && !LIST.test(l) && !block_starts(lines, j)) {
+    } else if (open && para && blank === 0 && !LIST.test(l) && !block_starts(lines, j)) {
       items[items.length - 1].push(l.trimStart());
     } else {
       break;
@@ -927,10 +890,8 @@ var Pick;
 })(Pick ||= {});
 
 // View.ts
-var BROKE = "out of credit";
 var PACE = 0.0001;
-var email_ask = (github) => "First, what's your email" + (github ? " or @github" : "") + "? I'll send you a quick sign-up link.";
-var OPENING = 3;
+var OPENING = 1;
 var SUMMARIES = "summaries";
 var MAIN = "UniiChat";
 var TURN = "Unii's turn";
@@ -938,7 +899,6 @@ var WIRE = 2;
 var PING = 1e4;
 var RETRY = 1000;
 var TICK = "+";
-var MOVE = 4001;
 var FRAME = 2 ** 22;
 var HINT = "Message UniiChat";
 var AI = "Unii is an AI, not a person, and can make mistakes.";
@@ -950,16 +910,6 @@ var IMAGE = 2 ** 20;
 var PIXELS = 2 ** 28;
 var TOOL2 = "tool: ";
 var FOLD = "The whole chat, folded into the fewest blocks.";
-var TOPUP = ["#", "Date", "Credit", "Paid", "Left", ""];
-var SERVED = {
-  chat: ["reply", "replies"],
-  compactor: ["summary", "summaries"],
-  import: ["import summary", "import summaries"],
-  voice: ["voice note", "voice notes"],
-  agent: ["agent step", "agent steps"],
-  computer: ["computer step", "computer steps"],
-  earlier: ["earlier use", "earlier uses"]
-};
 function Cap(text) {
   return { $: "Cap", text };
 }
@@ -971,8 +921,6 @@ function view_new() {
     pick: null,
     vendors: [],
     models: LABELS,
-    bills: false,
-    credits: null,
     importing: null,
     limits: {},
     timers: [],
@@ -1174,7 +1122,7 @@ function view_tail(v, live = view_stream(v)) {
     return [];
   }
   const rows = live.flatMap((l) => entry_rows(null, l.kind, l.text));
-  const load = v.page === null && v.importing !== null ? [Cap(progress_show(v, v.importing))] : [];
+  const load = v.page === null && v.importing !== null ? [Cap(progress_show(v.importing))] : [];
   const said = v.page === null && !v.up ? v.out.flatMap((p) => entry_rows(null, "user", p.said)) : [];
   const kept = said.length > 0 ? [...said, Cap(UNSENT)] : [];
   const limit = v.limits[v.page === null ? TURN : v.page.name];
@@ -1194,16 +1142,11 @@ function limit_show(limit, now = Date.now()) {
 function view_stream(v) {
   return v.page === null ? v.live : v.page.live;
 }
-function progress_show(v, p) {
+function progress_show(p) {
   const n = (k) => k.toLocaleString("en-US");
   const merges = p.open.reduce((x, y) => x + y, 0);
   const phase = p.open[0] > 0 ? "Summarizing messages: " + n(p.msgs - p.open[0]) + " of " + n(p.msgs) : "Merging the top of the tree: " + merges + (merges === 1 ? " merge" : " merges") + " left · about " + Math.ceil((p.total - p.done) * PACE) + " min";
-  const why = p.why === null ? "" : p.why === BROKE ? " · waiting for credit: add $" + progress_need(p, v.credits) + " and it goes on by itself" : " · paused";
-  const usd = v.bills ? " · $" + p.spent.toFixed(2) + " spent, estimated $" + p.left.toFixed(2) + " left" : "";
-  return phase + usd + why;
-}
-function progress_need(p, credits) {
-  return Math.max(5, topup(p.left, credits ?? 0));
+  return phase + (p.why === null ? "" : " · paused");
 }
 function view_tabs(v) {
   const at = v.page === null ? null : v.page.name;
@@ -1245,12 +1188,6 @@ function view_choices(pick, move, v) {
     return { text: move === "model" ? to.profile ?? to.model : text, to: by, move, here, vendor };
   });
 }
-function view_count(v) {
-  return v.parts.reduce((end, [id, n]) => Math.max(end, id + n), 0);
-}
-function view_credits(v) {
-  return v.credits === null ? null : usd_show(v.credits);
-}
 function view_learn(v, pack) {
   for (const [key, node] of Object.entries(pack.nodes ?? {})) {
     v.nodes.set(key, node);
@@ -1285,15 +1222,15 @@ function link_open(v, link) {
   const ws = link.open("?tab=" + v.tab + "&wire=" + WIRE);
   let heard = Date.now();
   const tick = setInterval(() => Date.now() - heard > PING && drop(), PING / 2);
-  async function drop(moved = false) {
+  async function drop() {
     const up = v.up;
     ws.onmessage = null;
     ws.onclose = null;
     clearInterval(tick);
     ws.close();
     [v.ws, v.up] = [null, false];
-    if (moved || await link.lost(up)) {
-      setTimeout(() => link_open(v, link), moved ? 0 : RETRY);
+    if (await link.lost(up)) {
+      setTimeout(() => link_open(v, link), RETRY);
     }
   }
   function flush() {
@@ -1335,7 +1272,7 @@ function link_open(v, link) {
       flush();
     }
   };
-  ws.onclose = (ev) => drop(ev.code === MOVE);
+  ws.onclose = () => drop();
 }
 function link_send(v, msg, done = (a) => link_note(v, a), said = "") {
   v.out.push({ msg: { id: crypto.randomUUID(), ...msg }, ws: null, done, said });
@@ -1369,8 +1306,8 @@ function part_rows(v, id, n, t, talk) {
     const after = minds.flatMap((x) => entry_rows(null, "mind", x));
     return [...whole_rows(id, entry), ...after];
   }
-  const open2 = talk && n === 1 && ["user", "unii"].includes(entry?.kind ?? "");
-  if (!(v.open.get(key) ?? open2)) {
+  const open = talk && n === 1 && ["user", "unii"].includes(entry?.kind ?? "");
+  if (!(v.open.get(key) ?? open)) {
     return sum_rows(id, n, v.nodes.get(key));
   }
   const text = n === 1 ? "fold" : GLYPH.open + " " + n + "x · fold";
@@ -1413,38 +1350,6 @@ function live_set(live, now) {
 function sum_call(n, text) {
   const call = n === 1 && text.startsWith(TOOL2) ? call_parse(text.slice(TOOL2.length)) : null;
   return call === null || call.name === "" ? null : call;
-}
-function topup_cells(t) {
-  const usd = (cents) => usd_show(cents / 100);
-  const paid = t.source === "apple" ? "App Store" : usd(t.paid_cents);
-  const left = usd(t.left_cents) + (t.status === "paid" ? "" : " · " + t.status);
-  const bill = t.receipt_url ? "[Receipt](" + t.receipt_url + ")" : "";
-  return ["#" + t.id, day_show(new Date(t.at)), usd(t.credits_cents), paid, left, bill];
-}
-function account_days(a) {
-  const days = new Map;
-  for (const s of a.calls ?? []) {
-    const date = day_show(new Date(s.at));
-    const day = days.get(date) ?? { counts: new Map, micros: 0 };
-    const name = SERVED[s.kind] ?? SERVED.earlier;
-    day.counts.set(name, (day.counts.get(name) ?? 0) + 1);
-    day.micros += s.micros;
-    days.set(date, day);
-  }
-  return [...days].map(([date, day]) => {
-    const what = [...day.counts].map(([name, n]) => n + " " + name[n === 1 ? 0 : 1]);
-    return { date, what: what.join(", "), usd: day.micros / 1e6 };
-  });
-}
-function day_show(d) {
-  const year = d.getFullYear() === new Date().getFullYear() ? undefined : "numeric";
-  return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year });
-}
-function cost_show(usd) {
-  return usd > 0 && usd < 0.005 ? "<$0.01" : usd_show(usd);
-}
-function usd_show(usd) {
-  return (usd < 0 ? "-$" : "$") + Math.abs(usd).toFixed(2);
 }
 function entry_rows(id, kind, text, images = []) {
   const call = kind === "tool" ? call_parse(text) : null;
@@ -1521,9 +1426,9 @@ function row_html(row) {
 function row_make(row) {
   switch (row.$) {
     case "Sum": {
-      const open2 = act_html({ $: "Open", id: row.id, n: row.n });
+      const open = act_html({ $: "Open", id: row.id, n: row.n });
       const text = row.call === null ? esc(row.text) : head_html(row.call, call_line(row.call), "");
-      return `<div class="block"${open2} data-a="${row.id}"><span class="lv">${row.n}x</span><div>${text}</div></div>`;
+      return `<div class="block"${open} data-a="${row.id}"><span class="lv">${row.n}x</span><div>${text}</div></div>`;
     }
     case "Box": {
       const shut = act_html({ $: "Shut", id: row.id, n: row.n });
@@ -1595,42 +1500,19 @@ function timers_html(timers) {
     return `<li data-id="${esc(t.id)}"><span class="when">${esc(timer_when(t))}</span><span class="text">${esc(t.text)}</span>${cancel}</li>`;
   });
 }
-function credit_html(app) {
-  const buttons = [10, 25, 50, 100].map((usd) => `<button data-usd="${usd}">$${usd}</button>`).join("");
-  return `<div class="credit"><div class="usd">${buttons}</div>${fine_html(app)}</div>`;
-}
-function fine_html(app) {
-  const fee = app ? "Paid at the App Store's price." : "+10% platform fee (min $0.80).";
-  return `<p class="fine">${fee} Buying accepts the <a href="/terms.html" target="_blank">terms</a>.</p>`;
-}
-function account_html(a, app, soul, owner, notify = null) {
-  const tops = a.topups ?? [];
-  const days = account_days(a);
-  const balance = a.credits === null ? "" : section_html("Balance", `<p class="big">${usd_show(a.credits)}</p>` + credit_html(app));
-  const usage = section_html("Usage", days.length === 0 ? `<p class="sub">Nothing yet.</p>` : table_html("days", ["Day", "Use", "Cost"], days.map((d) => [d.date, d.what, cost_show(d.usd)])));
-  const buys = tops.length === 0 ? "" : section_html("Purchases", table_html("buys", TOPUP, tops.map(topup_cells)));
-  const money = a.bills ? balance + usage + buys : "";
+function account_html(prompts, notify = null) {
   const item = (what, note, act) => `<div class="item"><p>${what}${note === "" ? "" : `<small>${note}</small>`}</p>${act}</div>`;
-  const closes = a.bills ? `<p>This also closes your BendAI account (same sign-in). Credit you bought and didn't use goes back to your card.</p>` : "";
-  const kill = `<form class="kill" hidden>${closes}<p>Type <b>${esc(a.name)}</b> to confirm.</p><input name="name" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="${esc(a.name)}"><p class="why"></p><div><button type="button" class="chip keep">Cancel</button><button class="chip red" disabled>Delete for good</button></div></form>`;
-  const back = `<form class="back-up" hidden><p>Replace your chat and Unii's memory with <b class="file"></b>? What they hold now is replaced.</p><p class="why"></p><div><button type="button" class="chip keep">Cancel</button><button class="chip red">Restore</button></div></form>`;
   const acts = [
-    item(esc(a.name), "", `<button class="chip out">Sign out</button>`),
+    item("This browser", "Signed in to this server.", `<button class="chip out">Sign out</button>`),
     ...notify === null ? [] : [notify_html(notify)],
-    item("Export memory", "Chat and account, in one file.", `<a class="chip" href="/export">Download</a>`),
-    item("Restore a backup", "Chat and memory, from a .tar.gz backup.", `<button class="chip up">Upload</button><input class="pick" type="file" accept=".gz,.tgz,application/gzip" hidden>`),
-    item("Delete account", "Erases chat and memory for good.", `<button class="chip red del">Delete</button>`)
+    item("Export memory", "The chat and its summaries, in one file.", `<a class="chip" href="/export">Download</a>`)
   ];
-  const account = section_html("Sign-in and data", acts.join("") + back + kill);
-  const unread = item("Could not read your instructions.", "", `<button class="chip retry">Try again</button>`);
-  const mine = section_html("Your instructions", soul === null ? unread : prompt_html("soul", soul.soul, "Who you are, what Unii goes by, its tone: your SOUL.md, in every prompt Unii and its agents get.", "I'm Sam, a designer in Lisbon. Call yourself Kit. Be brief and warm."));
-  const base = soul?.base === undefined ? "" : section_html("Base prompt", prompt_html("base", soul.base, "Unii's prompt for every user of this server, in place of the built-in one (you own the server). Empty: the built-in one.", ""));
-  const links = a.bills ? `<p class="foot"><a href="/pricing" target="_blank">Prices</a> · <a href="/terms.html" target="_blank">Terms</a> · <a href="/privacy.html" target="_blank">Privacy</a> · <a href="mailto:contact@higherorderco.com">Help</a></p>` : "";
-  const owned = owner ? `<div class="owned"></div>` : "";
-  return `<a class="back" href="/" data-go="/">← Chat</a><h1>Settings</h1>` + money + mine + account + base + owned + links;
+  const unread = item("Could not read the prompts.", "", `<button class="chip retry">Try again</button>`);
+  const mine = section_html("Prompts", prompts === null ? unread : prompt_html("prompt", prompts.prompt.text, "The user prompt: Unii's system prompt in every turn; its subagents read it too. Add who you are and how you want work done at its end. prompt.md in the server's folder; empty: the built-in one.") + prompt_html("compact", prompts.compact.text, "The compaction prompt: all a summary of the memory gets, nothing else. compact.md in the server's folder; empty: the built-in one."));
+  return `<a class="back" href="/" data-go="/">← Chat</a><h1>Settings</h1>` + mine + section_html("This browser", acts.join("")) + `<div class="owned"></div>`;
 }
-function prompt_html(name, text, note, hint) {
-  const area = `<textarea name="${name}" rows="8" spellcheck="false" placeholder="${esc(hint)}">${esc(text)}</textarea>`;
+function prompt_html(name, text, note) {
+  const area = `<textarea name="${name}" rows="12" spellcheck="false">${esc(text)}</textarea>`;
   return `<form class="prompt"><p class="note">${esc(note)}</p>${area}<div><p class="why"></p><button class="chip">Save</button></div></form>`;
 }
 function notify_html(notify) {
@@ -1649,14 +1531,13 @@ var SETTING = {
   pick: ["Default model", "What a chat runs on until it picks another."],
   compactor: ["Compactor model", "What writes the memory's summaries."],
   agents: ["Subagent model", "What subagents run on."],
-  site: ["Site", "The server's address, for sign-in links."],
+  site: ["Site", "The server's address, for sign-in links and the installer."],
   apple: ["iOS App ID", "The app's team and bundle ID, whose sign-in links it opens."],
   apns: ["APNs key ID", "The ID of the key the app's pushes are signed with."]
 };
 var KEY = {
   anthropic: ["Anthropic key", "For claude-api's models."],
   openai: ["OpenAI key", "For openai-api's models and dictation."],
-  resend: ["Resend key", "Emails sign-in links (none: the server prints them)."],
   apns: ["APNs key", "The .p8 key the iOS app's pushes are signed with."]
 };
 var VENDOR_KEY = { "claude-api": "anthropic", "openai-api": "openai" };
@@ -1675,7 +1556,7 @@ function settings_html(page) {
   const keys = shown.length === 0 ? "" : section_html("Keys", `<p class="sub">Kept in keys.json in the server's folder, readable by the server's user only, and never shown again, only their last characters.</p>` + shown.map(key_html).join(""));
   const error = page.error === null ? "" : `<p class="why bad">${esc(page.error)}</p>`;
   const save = `<div class="save"><p class="why"></p><button class="chip go"${page.error === null ? "" : " disabled"}>Save</button></div>`;
-  const head = `<p class="sub">You own this server: what follows is its settings, in config.json in its folder, seen by you only.</p>`;
+  const head = `<p class="sub">The server's settings, in config.json in its folder.</p>`;
   const profiles = page.profiles === null ? "" : section_html("Profiles", `<p class="sub">Ranked models: a chat on a profile runs on the first and falls back to the next when one is out.</p><div class="set profiles" data-key="profiles"><div class="field"></div><p class="err"></p></div>`);
   return head + error + `<form class="settings" autocomplete="off">` + group(GROUPS[0]) + profiles + keys + group(GROUPS[1]) + save + `</form>`;
 }
@@ -1778,11 +1659,6 @@ function pick_mend(parts, models, profiles = []) {
 function section_html(title, body) {
   return `<section><h2>${esc(title)}</h2>${body}</section>`;
 }
-function table_html(cls, head, rows) {
-  const cells = (row, tag) => row.map((x) => `<${tag}>${spans_html(span_parse(x))}</${tag}>`).join("");
-  const body = rows.map((row) => `<tr>${cells(row, "td")}</tr>`).join("");
-  return `<div class="wide ${cls}"><table><tr>${cells(head, "th")}</tr>${body}</table></div>`;
-}
 function block_html(b) {
   switch (b.$) {
     case "Para": {
@@ -1872,12 +1748,7 @@ function span_html(s) {
 // web/src/main.ts
 var APP = window.webkit?.messageHandlers?.unii ?? null;
 var DESK = matchMedia("(hover: hover)");
-var EXPIRED = "That sign-in link expired. What's your email? I'll send you a new one.";
-var GUEST_AI = `By signing in, you accept the <a href="/terms.html" target="_blank">terms</a> and <a href="/privacy.html" target="_blank">privacy policy</a>, and that Anthropic's and OpenAI's models answer you.`;
-var SENT = (email) => `Thanks! I sent a link to ${email}. Open it, and we'll go on from here.`;
 var NONE = "No Claude or ChatGPT chats in that folder. Choose ~/.claude or ~/.codex.";
-var PAYING = "Waiting for your payment in the new tab…";
-var PAID = new BroadcastChannel("unii.paid");
 var SCENES = `
   <div class="scene"><p>Your entire life.</p><p>One single chat.</p></div>
   <div class="scene"><i class="mark"></i><h1>UniiChat</h1></div>`;
@@ -1885,9 +1756,6 @@ var v = view_new();
 var BOX = $("textarea");
 var BACK = $("#import [name=back]");
 var P = {
-  id: "",
-  guest: false,
-  owner: false,
   imgs: [],
   rec: null,
   shown: "",
@@ -1907,7 +1775,7 @@ function $(sel) {
   return document.querySelector(sel);
 }
 function kept(fact) {
-  return "unii." + fact + "." + P.id;
+  return "unii." + fact;
 }
 async function boot() {
   document.head.insertAdjacentHTML("beforeend", `<style>${theme_css()}</style>`);
@@ -1916,38 +1784,14 @@ async function boot() {
   }
   const q = new URLSearchParams(location.search);
   history.replaceState(null, "", PAGES.includes(location.pathname) ? "/settings" : "/");
-  if (q.has("terminal")) {
-    solo("Your terminal is signed in.", "You can close this tab and go back to it.");
+  if (await boot_me() === null) {
+    solo("Sign in", "This UniiChat server is private. On the computer it runs on, run <code>unii serve link</code> and open the link it prints here.");
     return;
   }
-  if (q.has("deleted")) {
-    solo("Your account was deleted.", `Your chat and Unii's memory are erased. <a href="/">Back to UniiChat</a>`);
-    return;
-  }
-  if (q.get("paid") === "tab") {
-    PAID.postMessage(true);
-    close();
-    solo("Payment received.", "Close this tab: your import starts in the UniiChat tab you came from.");
-    return;
-  }
-  const me = await boot_me();
-  P.guest = me === null;
   chat();
-  if (me === null) {
-    history.replaceState(null, "", "/");
-    guest(q.has("expired"));
-    return;
-  }
-  P.id = me.id;
-  P.owner = me.owner === true;
   signed();
   route();
-  v.bills = me.bills;
-  v.credits = me.credits;
   connect();
-  if (q.has("paid")) {
-    toast("Payment received. Your credit shows up in a moment.");
-  }
 }
 async function boot_me() {
   for (let k = 0;; k++) {
@@ -1969,44 +1813,10 @@ function solo(title, sub) {
   document.body.className = "solo";
   document.body.innerHTML = `<main><h1>${title}</h1><p class="sub">${sub}</p></main>`;
 }
-async function guest(expired) {
-  document.onvisibilitychange = async () => {
-    const res = await fetch("/api/me").catch(() => null);
-    if (res?.ok) {
-      location.reload();
-    }
-  };
-  const { hello, bills, github } = await fetch("/api/hello").then((res) => res.json());
-  const ask = github && APP === null;
-  document.body.classList.toggle("bills", bills);
-  $(".ai").innerHTML = bills ? GUEST_AI : "";
-  BOX.placeholder = "Enter your email" + (ask ? " or @github" : "");
-  P.end = false;
-  guest_say(hello + `
-
-` + (expired ? EXPIRED : email_ask(ask)));
-}
-async function guest_send(text) {
-  P.end = true;
-  v.live.push({ kind: "user", text });
-  draw(true);
-  const res = await post("/api/login", { who: text });
-  if (res.url) {
-    location.href = res.url;
-    return;
-  }
-  guest_say(res.error ?? SENT(res.who));
-}
-function guest_say(text) {
-  v.live.push({ kind: "unii", text });
-  draw(true);
-}
 function chat() {
   const file = $("input[type=file]");
   BOX.oninput = () => {
-    if (!P.guest) {
-      sessionStorage.setItem(kept("draft"), BOX.value);
-    }
+    sessionStorage.setItem(kept("draft"), BOX.value);
     if (BOX.offsetParent !== null) {
       const foot = $("footer");
       foot.style.minHeight = foot.offsetHeight + "px";
@@ -2017,7 +1827,7 @@ function chat() {
     draw(true);
   };
   BOX.onkeydown = (ev) => {
-    if (ev.key === "Enter" && !ev.shiftKey && !ev.isComposing && ev.keyCode !== 229 && (DESK.matches || P.guest)) {
+    if (ev.key === "Enter" && !ev.shiftKey && !ev.isComposing && ev.keyCode !== 229 && DESK.matches) {
       ev.preventDefault();
       submit();
     }
@@ -2036,7 +1846,6 @@ function chat() {
     attach([...file.files ?? []]);
     file.value = "";
   };
-  $("#wallet").insertAdjacentHTML("beforeend", credit_html(APP !== null));
   onpopstate = route;
   importer();
   document.ondragover = (ev) => ev.preventDefault();
@@ -2074,21 +1883,11 @@ function chat() {
 function signed() {
   document.body.className = "";
   BOX.placeholder = HINT;
-  BOX.removeAttribute("inputmode");
-  BOX.removeAttribute("enterkeyhint");
-  BOX.removeAttribute("autocomplete");
   BOX.value = sessionStorage.getItem(kept("draft")) ?? "";
   BOX.dispatchEvent(new Event("input"));
 }
 function submit() {
   const text = BOX.value.trim();
-  if (P.guest) {
-    BOX.value = "";
-    if (text !== "") {
-      guest_send(text);
-    }
-    return;
-  }
   act({ $: "Send", text, images: P.imgs });
   pics([]);
   BOX.value = "";
@@ -2103,15 +1902,10 @@ function back(sent, out) {
     BOX.dispatchEvent(new Event("input"));
     pics(sent.images ?? []);
   }
-  if (out.status !== 402) {
-    toast(out.error);
-    return;
-  }
-  $("#wallet .title").textContent = out.error;
-  $("#wallet").showPopover();
+  toast(out.error);
 }
 function attach(files) {
-  if (!P.guest && files.length > 0) {
+  if (files.length > 0) {
     pics([...P.imgs, ...files]);
   }
 }
@@ -2137,7 +1931,7 @@ function act(a) {
   draw(a.$ === "Send");
 }
 function click(ev) {
-  const el = ev.target.closest("[data-act], [data-copy], [data-go], [data-usd], [data-knob], .choices > button");
+  const el = ev.target.closest("[data-act], [data-copy], [data-go], [data-knob], .choices > button");
   const sel = getSelection();
   if (el === null || sel !== null && !sel.isCollapsed && el.contains(sel.focusNode)) {
     return;
@@ -2147,7 +1941,7 @@ function click(ev) {
     return;
   }
   el.closest(".choices")?.hidePopover();
-  const { act: a, copy: text, go: path, usd } = el.dataset;
+  const { act: a, copy: text, go: path } = el.dataset;
   const menu = el.closest("#menu") !== null;
   if (menu) {
     $("#menu").hidePopover();
@@ -2158,9 +1952,6 @@ function click(ev) {
   }
   if (a !== undefined) {
     act(JSON.parse(a));
-  }
-  if (usd !== undefined) {
-    warned(el, () => topup2(Number(usd)));
   }
   if (text !== undefined) {
     navigator.clipboard.writeText(text).then(() => copied(el), () => toast("Could not copy."));
@@ -2330,7 +2121,7 @@ function importer() {
   $("#import .flow").onclick = import_flow;
   $("#import").ontoggle = (ev) => {
     if (ev.newState === "closed") {
-      P.step = P.step === "pay" || P.step === "start" || P.step === "done" ? "" : P.step;
+      P.step = P.step === "start" || P.step === "done" ? "" : P.step;
     }
     import_draw("");
   };
@@ -2373,45 +2164,11 @@ function importer() {
   };
   form.onsubmit = (ev) => {
     ev.preventDefault();
-    warned(form, import_go);
+    import_send();
   };
-}
-function import_go() {
-  const add = import_add(import_plan2());
-  if (add === 0) {
-    return import_send();
-  }
-  import_buy(add);
 }
 function import_flow() {
-  const run = v.importing;
-  if (run?.why === BROKE) {
-    return warned($("#import .flow"), () => import_buy(progress_need(run, v.credits)));
-  }
-  link_send(v, { $: "go", on: Boolean(run?.why) }, (out) => out.error && toast(out.error));
-}
-async function import_buy(usd) {
-  P.step = "pay";
-  import_draw(PAYING);
-  if (await topup2(usd)) {
-    return import_pay();
-  }
-  P.step = "";
-  import_draw("");
-}
-function warned(from, then) {
-  if (localStorage.getItem(kept("risked")) !== null) {
-    return then();
-  }
-  const box = $("#risk");
-  (from.closest("[popover]") ?? document.body).append(box);
-  box.querySelector(".no").onclick = () => box.hidePopover();
-  box.querySelector(".ok").onclick = () => {
-    localStorage.setItem(kept("risked"), "1");
-    box.hidePopover();
-    then();
-  };
-  box.showPopover();
+  link_send(v, { $: "go", on: Boolean(v.importing?.why) }, (out) => out.error && toast(out.error));
 }
 async function import_open(first) {
   $("#menu").hidePopover();
@@ -2435,19 +2192,6 @@ async function import_welcome() {
     import_open(true);
   }
 }
-async function import_pay() {
-  while (P.step === "pay") {
-    await new Promise((ok) => {
-      setTimeout(ok, 3000);
-      PAID.onmessage = ok;
-    });
-    const me = await fetch("/api/me").then((res) => res.json()).catch(() => null);
-    v.credits = me?.credits ?? v.credits;
-    if (P.step === "pay" && v.importing === null && v.credits !== null && v.credits >= import_plan2().guess) {
-      import_send();
-    }
-  }
-}
 function import_send() {
   const picked = import_plan2().picked;
   P.step = "send";
@@ -2463,28 +2207,23 @@ function import_sent(out) {
   import_draw(out.error === undefined ? "" : "Not imported: " + out.error);
   $("#import").showPopover();
 }
-function import_add(plan) {
-  return plan.msgs > 0 && v.credits !== null ? topup(plan.guess, v.credits) : 0;
-}
 function import_plan2() {
   const form = new FormData($("#import form"));
   const want = { off: [...P.off], since: import_since(), tools: form.has("tools") };
   const found = [...P.found.values()].flatMap((read) => read.sessions);
-  return import_plan(found, want, P.done, view_count(v));
+  return import_plan(found, want, P.done);
 }
 function import_since() {
   return BACK.valueAsNumber > Number(BACK.min) ? new Date(BACK.valueAsNumber * 86400000).toISOString().slice(0, 10) : "";
 }
 function import_bar() {
   const run = v.importing;
-  const broke = run?.why === BROKE;
-  const paying = broke && P.step === "pay";
-  P.step = run !== null && !paying ? "seen" : P.step === "seen" ? "done" : P.step;
+  P.step = run !== null ? "seen" : P.step === "seen" ? "done" : P.step;
   const done = P.step === "done";
-  const going = paying || ["send", "run", "seen", "done"].includes(P.step);
+  const going = ["send", "run", "seen", "done"].includes(P.step);
   const part = run === null ? Number(done) : run.done / Math.max(1, run.total);
   const why = Boolean(run?.why);
-  const said = run !== null ? progress_show(v, run) : done ? DONE : P.step === "send" ? "Sending…" : "Starting…";
+  const said = run !== null ? progress_show(run) : done ? DONE : P.step === "send" ? "Sending…" : "Starting…";
   $("#import .start").hidden = P.step !== "start";
   $("#import form").hidden = going || P.step === "start";
   $("#import .prog").hidden = !going;
@@ -2493,13 +2232,11 @@ function import_bar() {
   $(".imping progress").value = part;
   $(".imping").hidden = run === null;
   $(".imping").classList.toggle("why", why);
-  $(".imping span").textContent = !why ? "Building memory" : run.why === BROKE ? "Needs credit" : "Import paused";
+  $(".imping span").textContent = why ? "Import paused" : "Building memory";
   $(".imping").title = $("#import .pct").textContent = said;
   $("#import .prog .sub").hidden = why || done;
-  $("#import .flow").textContent = broke ? "Add $" + progress_need(run, v.credits) : why ? "Resume" : "Pause";
+  $("#import .flow").textContent = why ? "Resume" : "Pause";
   $("#import .flow").hidden = run === null;
-  $("#import .flow").disabled = paying;
-  markup($("#import .prog .topup"), broke ? [fine_html(APP !== null)] : []);
   return going;
 }
 function import_draw(status) {
@@ -2510,11 +2247,9 @@ function import_draw(status) {
   const sessions = reads.flatMap((read) => read.sessions);
   const plan = import_plan2();
   const msgs = plan.msgs;
-  const add = import_add(plan);
   const left = reads.reduce((n, read) => n + read.moved, 0);
   const moved = left === 0 ? "" : " (" + left + (left === 1 ? " file" : " files") + " changed while read: choose the folder again to add them)";
-  const has = add > 0 ? " · you have " + usd_show(v.credits) : "";
-  const found = sessions.length === 0 ? "" : plan.first === "" ? OLD : import_count(msgs, "new ") + (msgs > 0 ? " · about " + guess_usd(plan.guess) + has : "");
+  const found = sessions.length === 0 ? "" : plan.first === "" ? OLD : import_count(msgs, "new ");
   const day = (at) => new Date(at).getUTCDate() + " " + new Date(at).toLocaleDateString("en-US", { month: "short", year: "numeric", timeZone: "UTC" });
   BACK.min = String(Math.floor(Date.parse(plan.first || new Date().toISOString()) / 86400000));
   BACK.max = String(Math.floor(Date.now() / 86400000));
@@ -2534,11 +2269,9 @@ function import_draw(status) {
     src.querySelector(".pick summary").textContent = (on < shown.length ? on + " of " : shown.length > 1 ? "All " : "") + shown.length + (shown.length === 1 ? " session" : " sessions") + " picked · choose";
   }
   $("#import .guess").textContent = status;
-  markup($("#import form .topup"), add > 0 ? [fine_html(APP !== null)] : []);
   const [go, dir] = [$("#import .go"), $(".pickdir")];
   go.hidden = msgs === 0;
-  go.textContent = add > 0 ? "Add $" + add + " and import" : "Import";
-  go.disabled = P.step === "pay" || status.startsWith("Reading");
+  go.disabled = status.startsWith("Reading");
   dir.textContent = msgs > 0 ? "Add a folder" : "Choose folder";
   dir.classList.toggle("alt", msgs > 0);
   dir.disabled = go.disabled;
@@ -2638,21 +2371,17 @@ function bars() {
   for (const note of v.notes.splice(0)) {
     toast(note);
   }
-  const credits = view_credits(v);
   const on = view_typing(v);
   const stop = on && v.busy && BOX.value.trim() === "" && P.imgs.length === 0;
   const tabs = view_tabs(v);
   const send = $(".send");
   $(".net").hidden = v.up;
-  $(".credits").hidden = credits === null;
-  $(".credits").textContent = credits;
   $(".timers").hidden = v.timers.length === 0;
   $(".timers span").textContent = String(v.timers.length);
   markup($("#timers ul"), timers_html(v.timers));
   if (v.timers.length === 0 && $("#timers").matches(":popover-open")) {
     $("#timers").hidePopover();
   }
-  document.body.classList.toggle("bills", v.bills);
   send.classList.toggle("stop", stop);
   send.disabled = !on;
   BOX.disabled = !on;
@@ -2721,85 +2450,27 @@ function route() {
 }
 async function account() {
   const el = $("#account");
-  const [res, got, set] = await Promise.all([fetch("/api/account").catch(() => null), fetch("/api/soul").catch(() => null), P.owner ? fetch("/api/settings").catch(() => null) : null]);
-  const a = res !== null && res.ok ? await res.json() : null;
-  const soul = got !== null && got.ok ? await got.json().catch(() => null) : null;
-  if (a === null) {
-    el.innerHTML = `<p class="sub">Could not read your account. Try again in a moment.</p>`;
-    return;
-  }
+  const [got, set] = await Promise.all([fetch("/api/prompts").catch(() => null), fetch("/api/settings").catch(() => null)]);
+  const prompts = got !== null && got.ok ? await got.json().catch(() => null) : null;
   const push = await notify_state().catch(() => null);
-  el.innerHTML = account_html(a, APP !== null, soul, P.owner, push);
+  el.innerHTML = account_html(prompts, push);
   el.querySelectorAll("form.prompt").forEach((form) => form.onsubmit = (ev) => {
     ev.preventDefault();
     account_prompt(form);
   });
   el.querySelectorAll(".retry").forEach((retry) => retry.onclick = () => account());
-  const kill = $("#account .kill");
-  const del = $("#account .del");
-  const name = kill.querySelector("input");
-  const sure = (open2) => {
-    kill.hidden = !open2;
-    del.hidden = open2;
-  };
-  del.onclick = () => {
-    sure(true);
-    name.focus();
-  };
-  $("#account .kill .keep").onclick = () => sure(false);
-  account_restore();
-  name.oninput = () => kill.querySelector(".red").disabled = name.value.trim().toLowerCase() !== a.name.toLowerCase();
   $("#account .out").onclick = signout;
   const bell = document.querySelector("#account .notify");
   bell?.addEventListener("click", () => {
     bell.disabled = true;
     notify(push !== "on");
   });
-  kill.onsubmit = (ev) => {
-    ev.preventDefault();
-    account_delete(kill);
-  };
-  if (set !== null) {
-    const page = set.ok ? await set.json().catch(() => null) : null;
-    if (page === null) {
-      $("#account .owned").innerHTML = `<p class="sub">Could not read the server's settings. Try again in a moment.</p>`;
-      return;
-    }
-    settings_draw(page);
+  const page = set?.ok ? await set.json().catch(() => null) : null;
+  if (page === null) {
+    $("#account .owned").innerHTML = `<p class="sub">Could not read the server's settings. Try again in a moment.</p>`;
+    return;
   }
-}
-function account_restore() {
-  const form = $("#account .back-up");
-  const pick = $("#account .pick");
-  const up = $("#account .up");
-  const sure = (open2) => {
-    form.hidden = !open2;
-    up.hidden = open2;
-    form.querySelector(".why").textContent = "";
-  };
-  up.onclick = () => pick.click();
-  pick.onchange = () => {
-    form.querySelector(".file").textContent = pick.files?.[0]?.name ?? "";
-    sure(pick.files?.length === 1);
-  };
-  form.querySelector(".keep").onclick = () => {
-    pick.value = "";
-    sure(false);
-  };
-  form.onsubmit = async (ev) => {
-    ev.preventDefault();
-    const go = form.querySelector(".red");
-    [go.disabled, go.textContent] = [true, "Restoring…"];
-    form.querySelector(".why").textContent = "";
-    const res = await fetch("/api/restore", { method: "POST", headers: { "content-type": "application/gzip" }, body: pick.files[0] }).catch(() => null);
-    const out = res === null ? { error: "Can't reach the server." } : await res.json().catch(() => res.ok ? {} : { error: "HTTP " + res.status });
-    [go.disabled, go.textContent] = [false, "Restore"];
-    if (res?.ok === true) {
-      location.href = "/";
-      return;
-    }
-    form.querySelector(".why").textContent = out.error;
-  };
+  settings_draw(page);
 }
 async function signout() {
   await notify_sub().then((sub) => sub?.unsubscribe()).catch(() => {});
@@ -2812,19 +2483,13 @@ async function account_prompt(form) {
   const save = form.querySelector("button");
   const sent = area.value;
   save.disabled = true;
-  const out = await post("/api/soul", { [area.name]: sent });
+  const out = await post("/api/prompts", { [area.name]: sent });
   save.disabled = false;
-  why.textContent = out.error ?? (area.value === sent ? "Saved." : "Not saved yet: Save again.");
-  form.classList.toggle("bad", out.error !== undefined);
-}
-async function account_delete(kill) {
-  const name = kill.querySelector("input").value;
-  const out = await post("/api/delete", { confirm: name });
-  if (out.error === undefined) {
-    location.href = "/?deleted";
-    return;
+  if (out.error === undefined && area.value === sent) {
+    area.value = out[area.name]?.text ?? sent;
   }
-  kill.querySelector(".why").textContent = out.error;
+  why.textContent = out.error ?? (area.value === out[area.name]?.text ? "Saved." : "Not saved yet: Save again.");
+  form.classList.toggle("bad", out.error !== undefined);
 }
 async function notify_state() {
   P.push = null;
@@ -3121,22 +2786,6 @@ async function settings_save(form, page, unset, listed, profs) {
   const later = out.saved.filter((key) => page.settings.find((r) => r.key === key)?.apply === "restart");
   settings_draw(out);
   toast(later.length === 0 ? "Saved." : "Saved. " + later.join(", ") + " " + (later.length === 1 ? "applies" : "apply") + " once the server restarts.");
-}
-async function topup2(usd) {
-  if (APP !== null) {
-    $("#wallet").hidePopover();
-    APP.postMessage({ buy: usd });
-    return true;
-  }
-  const tab = $("#import").matches(":popover-open") ? open("", "_blank") : null;
-  const out = await post("/api/topup", { usd, tab: tab !== null, back: location.pathname });
-  if (out.url) {
-    (tab ?? window).location.href = out.url;
-    return true;
-  }
-  tab?.close();
-  toast(out.error ?? "Could not start the payment.");
-  return false;
 }
 function toast(text, stay = false) {
   const el = $("#toast");

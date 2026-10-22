@@ -1,29 +1,20 @@
-#!/usr/bin/env bun
 // Term
 // ====
-// `unii`: a terminal view of the agent (Server.ts) and, while open, a
-// device its tools reach (DEVICE). It feeds a View the server's messages
-// and the person's acts, and prints what it says (Paint.ts, Screen.ts)
-// into the terminal's own scrollback. Every act of the site is a command
-// here (COMMANDS, /help). The agent's jobs run here (Machine.ts) until
-// done or halted; all they left running dies as this unii quits. From a
-// pipe, each line is a message.
-//
-// One executable per platform (this fork's GitHub releases, Update.ts);
-// once a day it asks GitHub for the newest release (update_check) and
-// notes a newer one. `unii serve` runs the server it carries. The server:
-// the url given, else $UNII_URL, else uniichat.com; each server's session
-// is a file of its own (TOKEN).
-//
-// Usage: USAGE (`unii help` prints it).
+// `unii [url]`: a terminal view of the agent (Server.ts). It feeds a View
+// the server's messages and the person's acts, and prints what it says
+// (Paint.ts, Screen.ts) into the terminal's own scrollback. Every act of
+// the site is a command here (COMMANDS, /help). From a pipe, each line is
+// a message. Its file is tui.json (Client.ts): the server it opens by
+// default (the last one signed in to) and its sign-in to each, by host.
+// Once a day it asks GitHub for the newest release (update_check) and
+// notes a newer one.
 
 import * as child from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import type { Kind } from "./AskAI.ts";
+import * as Client from "./Client.ts";
 import * as Import from "./Import.ts";
-import { Machine, WIN, type Job } from "./Machine.ts";
-import { Mcp } from "./Mcp.ts";
 import * as Paint from "./Paint.ts";
 import { type Move, Pick } from "./Pick.ts";
 import * as Screen from "./Screen.ts";
@@ -33,7 +24,7 @@ import * as View from "./View.ts";
 // Types
 // =====
 
-// the terminal: jobs running here; ended: input's; pending: commands at
+// the terminal: its sign-in; ended: input's; pending: commands at
 // work; last: UniiChat's message printed last (-1: none); wait: parts up
 // to it not printed (term_settle); out: lines to print; wipe: first;
 // due: a paint; settle: the page's print at a new size; imgs: for the
@@ -43,7 +34,7 @@ type Term = {
   v       : View.View;
   scr     : Screen.Screen;
   url     : string;
-  jobs    : Map<string, AbortController>;
+  token   : string;
   ended   : boolean;
   pending : number;
   last    : number;
@@ -64,71 +55,12 @@ type Cmd = [use: string, keys: string, text: string, run: (t: Term, arg: string)
 // Constants
 // =========
 
-// this unii's version (Update.VERSION, the fork's full one)
-const VERSION = Update.VERSION;
-
-const ARGS   = process.argv.slice(2);
-const LOGIN  = ARGS.includes("login");
-const HELP   = ARGS.some((a) => ["help", "--help", "-h"].includes(a));
-const ASKVER = ARGS.includes("version");
-const UPDATE = ARGS.includes("update");
-const SERVE  = ARGS.includes("serve");
-const PORT   = SERVE ? ARGS.find((a) => /^\d+$/.test(a)) : undefined;
-const SUB    = SERVE && ARGS.includes("chatgpt"); // the server's sign-ins: under serve
-const CLAUDE = SERVE && ARGS.includes("claude");
-const WORDS  = ["login", "help", "--help", "-h", "version", "update", "serve", ...(SERVE ? ["chatgpt", "claude"] : []), ...(SUB || CLAUDE ? ["logout", "status"] : [])];
-const WEB    = /^https?:\/\//;
-const ODD    = ARGS.find((a) => !WORDS.includes(a) && !WEB.test(a) && a !== PORT);
-const HOME   = process.env.UNII_HOME || os.homedir() + "/.unii";
-const OURS   = "https://uniichat.com";
-const SERVER = (ARGS.find((a) => WEB.test(a)) ?? process.env.UNII_URL ?? OURS).replace(/\/$/, "");
-const HOST   = new URL(SERVER).host;
-const TOKEN  = HOME + "/" + (WIN ? HOST.replaceAll(":", "_") : HOST) + "/token"; // no ":" in a Windows name
-
-const USAGE = `Usage: unii [url]           the chat (url: $UNII_URL, else https://uniichat.com)
-       unii login [url]     sign in
-       unii update          replace this unii with the fork's newest
-                            release (curl | sh, shown first)
-       unii update <url>    run that server's installer instead
-       unii version         this unii's version
-       unii serve [port]    your own UniiChat server, at http://127.0.0.1:8788
-                            (another port: set UNII_SITE to its address too),
-                            on your ANTHROPIC_API_KEY and OPENAI_API_KEY;
-                            chat with it: unii http://127.0.0.1:8788
-       unii serve chatgpt [logout|status]
-                            sign the server unii serve runs here in to a
-                            ChatGPT plan (its openai-sub vendor), by a
-                            code entered in any browser; or out; or show
-                            who it's signed in as
-       unii serve claude [logout|status]
-                            the same for a Claude plan (its claude-sub
-                            vendor), in Claude Code's own sign-in
-       unii help            this
-UNII_WORK: where the agent works on this computer (default
-~/.unii/work). UNII_COMPUTER=1: it may use the screen. UNII_HOME: where
-it keeps its sign-in (default ~/.unii).
-Once a day, unii asks GitHub which release of arteeh/uniichat is the
-newest (one plain GET to github.com). UNII_NO_TELEMETRY=1 turns that off.
-In the chat, /help lists every command and key.`;
-
-// the daily version check's cache (not the official unii's check.json),
-// and the self-host flag: a file made once this computer serves or opens
-// a server not OURS
-const CHECKED = HOME + "/check-arteeh.json";
-const SELF    = HOME + "/self";
+// the daily version check's cache (Client.DIR)
+const CHECKED = Client.DIR + "/check.json";
 const DAY     = 86400000;
 
-// this device's name, as the agent sees it: on macOS its local host name
-// (Bonjour's, unique on its network), else the host's
-const LOCAL  = process.platform === "darwin" ? child.spawnSync("scutil", ["--get", "LocalHostName"]).stdout?.toString().trim() : "";
-const DEVICE = LOCAL || os.hostname();
-
-// where the agent's tools work on this device: in WORK/main (the agent)
-// and WORK/<name> (each subagent)
-const WORK = process.env.UNII_WORK || "~/.unii/work";
-
-// whether the agent may use this device's screen, mouse and keyboard
-const COMPUTER = process.env.UNII_COMPUTER === "1";
+// paths on Windows take \\, not /
+const WIN = process.platform === "win32";
 
 // the margin left of each line
 const MARGIN = 2;
@@ -155,20 +87,14 @@ const SINCE  = /\bsince +(\d{4}-\d\d-\d\d)\b/;
 const EXPORT = /\.(zip|json)$/i;
 const HOW = "Pick with /import [claude] [chatgpt] [since 2026-06-01] [tools] [sessions] [-#n] [<export>.zip] [go] (-#n: not session n; go: import); /import pause or resume: the import running. Exports, on each website: " + Object.entries(Import.EXPORTS).map(([app, how]) => app + ": " + how).join("; ") + "; it emails you a zip.";
 
-// how a terminal adds credit, said when a request is refused for want
-// of it
-const TOPUP = "Add credit with /topup <dollars> ($5 to $500).";
-
 // the input's hint on an agent's page
 const OFF = "Commands only: /help";
 
 // the pick's moves by Shift and an arrow
 const ARROWS: Record<string, Move> = { "Shift+Left": "prev", "Shift+Right": "next", "Shift+Up": "up", "Shift+Down": "down" };
 
-// all a person can do here, by group (the editing keys are Screen's);
-// credit added only where the server bills
+// all a person can do here, by group (the editing keys are Screen's)
 function term_groups(v: View.View): [group: string, cmds: Cmd[]][] {
-  const topup: Cmd[] = v.bills ? [["/topup <usd>", "", "add Bend Credits, paid in the browser", term_topup]] : [];
   return [
     ["Chat", [
       ["",                  "Enter",                   "send; on an empty input, interrupt UniiChat",    term_enter],
@@ -180,8 +106,8 @@ function term_groups(v: View.View): [group: string, cmds: Cmd[]][] {
       ["/open #id",         "",                        "open block #id, as it shows, and keep it open",  (t, a) => term_block(t, a, true)],
       ["/close #id",        "",                        "close block #id and keep it closed",             (t, a) => term_block(t, a, false)],
       ["/fold",             "Ctrl+F",                  "the chat in the fewest blocks; again: unfold (Ctrl+F eaten? type /fold)", term_fold],
-      ["/import [...]",     "",                        "import your Claude and ChatGPT chats (alone: options, costs)", term_import],
-      ["/export",           "",                        "save memory and account as ./unii-memory.json",  term_export],
+      ["/import [...]",     "",                        "import your Claude and ChatGPT chats (alone: options)", term_import],
+      ["/export",           "",                        "save the memory as ./unii-memory.json",          term_export],
       ["/tree",             "",                        "the whole memory, in the browser (its link prints too)", (t) => term_browse(t, "The memory tree", t.url + "/tree")],
       ["",                  "Ctrl+Z",                  "suspend; fg brings it back",                     (t) => Screen.screen_suspend(t.scr)],
       ["/quit",             "",                        "leave: the chat goes on without this terminal",  term_quit],
@@ -201,11 +127,8 @@ function term_groups(v: View.View): [group: string, cmds: Cmd[]][] {
       ["/tab [name]",       "",                        "the tabs; with a name, that one",               term_tab],
       ["/stop [name]",      "",                        "stop all work, agents too; or that agent",       term_stop],
     ]],
-    ["Account", [
-      ...topup,
-      ["/account",          "",                        "balance, top-ups, charges, calls",               term_account],
-      ["/delete <name>",    "",                        "delete your account and chat (its name confirms)", term_delete],
-      ["/logout",           "",                        "sign out and quit",                              term_logout],
+    ["Sign-in", [
+      ["/logout",           "",                        "sign this terminal out and quit",               term_logout],
     ]],
   ];
 }
@@ -217,12 +140,12 @@ function term_commands(v: View.View): Cmd[] {
 // Term
 // ====
 
-function term_new(url: string): Term {
+function term_new(url: string, token: string): Term {
   const t: Term = {
     v       : View.view_new(),
     scr     : Screen.screen_new((key) => term_press(t, key)),
     url,
-    jobs    : new Map(),
+    token,
     ended   : false,
     pending : 0,
     last    : -1,
@@ -243,31 +166,27 @@ function term_new(url: string): Term {
     term_idle(t);
   });
   process.stdout.on("resize", () => term_resize(t));
-  process.on("exit", Machine.end);
   for (const sig of ["SIGHUP", "SIGTERM", "SIGINT"]) {
     process.on(sig, () => term_bye(t));
   }
   return t;
 }
 
-// connects, by View's link, naming this device
+// connects, by View's link
 function term_connect(t: Term): void {
-  const dev = "&device=" + encodeURIComponent(DEVICE) + "&computer=" + (COMPUTER ? 1 : 0) + "&work=" + encodeURIComponent(WORK) + (WIN ? "&shell=PowerShell" : "");
   View.link_open(t.v, {
-    open : (query) => new WebSocket(t.url.replace(/^http/, "ws") + "/ws" + query + dev, { headers: term_auth() } as any),
-    post : (path, body) => fetch(t.url + path, { method: "POST", headers: term_auth(), body }),
+    open : (query) => new WebSocket(t.url.replace(/^http/, "ws") + "/ws" + query, { headers: Client.auth(t.token) } as any),
+    post : (path, body) => fetch(t.url + path, { method: "POST", headers: Client.auth(t.token), body }),
     hear : (msg) => term_hear(t, msg),
     lost : (up) => term_lost(t, up),
   });
 }
 
-// a socket lost (up: it had opened): the footer says offline, the MCP
-// programs run here for chats end (Mcp.lost); one that never opened, if
-// the server refuses this terminal's session, quits
+// a socket lost (up: it had opened): the footer says offline; one that
+// never opened, if the server refuses this terminal's session, quits
 async function term_lost(t: Term, up: boolean): Promise<boolean> {
-  Mcp.lost();
   term_draw(t);
-  if (!up && !await term_signed(t.url)) {
+  if (!up && !await Client.signed(t.url, t.token)) {
     term_note(t, "This terminal is signed out: run unii again to sign in.");
     process.exitCode = 1;
     term_quit(t);
@@ -282,7 +201,7 @@ function term_send(t: Term, msg: View.Client, sent?: View.Sent): void {
   const said = sent === undefined ? "" : sent.text.trim();
   View.link_send(t.v, msg, (a) => {
     if (a.error !== undefined) {
-      term_note(t, term_refusal(a));
+      term_note(t, a.error);
     }
     if (a.error !== undefined && sent !== undefined) {
       term_back(t, sent);
@@ -300,10 +219,6 @@ function term_hear(t: Term, msg: View.Server): void {
     term_send(t, out);
   }
   term_went(t, was);
-  if (msg.$ === "jobs" || msg.$ === "job") {
-    term_jobs(t, msg);
-    return;
-  }
   term_print(t, msg);
   if (first) {
     term_history(t);
@@ -391,7 +306,7 @@ function term_enter(t: Term): void {
 }
 
 // Ctrl+C or Ctrl+D: clears the input; on an empty one, Ctrl+C interrupts
-// UniiChat's turn (never quits: that kills the jobs here), Ctrl+D quits
+// UniiChat's turn (never quits), Ctrl+D quits
 function term_clear(t: Term, key: string): void {
   if (t.scr.ed.text !== "") {
     Screen.ed_take(t.scr.ed);
@@ -586,7 +501,7 @@ async function term_export(t: Term): Promise<void> {
 // this computer's Claude and ChatGPT chats, and the websites' exports
 // given (EXPORT), not imported yet, as the words want (claude, chatgpt;
 // Import.Want: since a day; tools; -#n: not session n): without go,
-// what it finds and costs (sessions: and the list); with go, sent;
+// what it finds (sessions: and the list); with go, sent;
 // pause, resume: the import running
 async function term_import(t: Term, arg: string): Promise<void> {
   if (/^(pause|resume)$/.test(arg)) {
@@ -613,9 +528,9 @@ async function term_import(t: Term, arg: string): Promise<void> {
     return;
   }
   const old   = await done.json();
-  const shown = Import.import_plan(sessions, want, old, View.view_count(t.v)).sessions;
+  const shown = Import.import_plan(sessions, want, old).sessions;
   want.off    = shown.filter((s, k) => words.includes("-#" + (k + 1))).map(Import.import_id);
-  const plan  = Import.import_plan(sessions, want, old, View.view_count(t.v));
+  const plan  = Import.import_plan(sessions, want, old);
   const found = "Found " + Import.import_count(plan.msgs, "new ") + ". ";
   if (plan.msgs === 0) {
     term_note(t, plan.first === "" ? Import.OLD : found + HOW);
@@ -623,9 +538,8 @@ async function term_import(t: Term, arg: string): Promise<void> {
   }
   if (!words.includes("go")) {
     const which = words.includes("sessions") ? shown.map((s, k) => "\n- #" + (k + 1) + " " + s.app + ": " + Import.import_line(s) + (want.off.includes(Import.import_id(s)) ? " (left out)" : "")).join("") + "\n" : "";
-    const out   = await new Promise<View.Answer>((ok) => View.link_send(t.v, { $: "guess", body: () => plan.sizes.join(",") }, ok));
-    const cost  = out.usd === undefined ? "Not priced: " + term_refusal(out) : "Importing them costs about " + Import.guess_usd(out.usd) + ". To import them, type:\n\n```\n/import " + (arg + " go").trim() + "\n```";
-    term_rows(t, View.entry_rows(null, "note", found + which + "\n" + cost + "\n\n" + HOW), false);
+    const go    = "To import them, type:\n\n```\n/import " + (arg + " go").trim() + "\n```";
+    term_rows(t, View.entry_rows(null, "note", found + which + "\n" + go + "\n\n" + HOW), false);
     return;
   }
   term_note(t, found + "Sending them…");
@@ -650,50 +564,18 @@ async function export_sessions(path: string): Promise<Import.Session[]> {
   return Import.import_export(Bun.file(path));
 }
 
-async function term_topup(t: Term, arg: string): Promise<void> {
-  const out = await term_post(t, "/api/topup", { usd: Number(arg) });
-  if (typeof out.url !== "string") {
-    term_note(t, out.error ?? "Could not top up: no connection.");
-    return;
-  }
-  term_browse(t, "The payment", out.url);
-}
-
-async function term_account(t: Term): Promise<void> {
-  const a = await account_get(t);
-  if (a !== null) {
-    term_rows(t, View.entry_rows(null, "note", View.account_md(a)), false);
-  }
-}
-
-// the account; null: not read (term_get)
-async function account_get(t: Term): Promise<View.Account | null> {
-  return (await term_get(t, "/api/account", "read the account"))?.json() ?? null;
-}
-
-// deletes the account, once its name is typed; the server says what
-// deleting does, and the name, when it isn't
-async function term_delete(t: Term, arg: string): Promise<void> {
-  const out = await term_post(t, "/api/delete", { confirm: arg });
-  if (!out.ok) {
-    term_note(t, out.error ?? "No connection.");
-    return;
-  }
-  fs.rmSync(TOKEN, { force: true });
-  term_note(t, "Your account and chat are deleted.");
-  term_quit(t);
-}
-
 async function term_logout(t: Term): Promise<void> {
-  await term_post(t, "/api/logout", {});
-  fs.rmSync(TOKEN, { force: true });
+  await View.post(t.url + "/api/logout", {}, Client.auth(t.token));
+  const conf = Client.read("tui");
+  delete conf.tokens?.[Client.host(t.url)];
+  Client.write("tui", conf);
   term_note(t, "Signed out. Run unii to sign in again.");
   term_quit(t);
 }
 
 // a GET of the server; failing, a note says it could not do `what`
 async function term_get(t: Term, path: string, what: string): Promise<Response | null> {
-  const res = await fetch(t.url + path, { headers: term_auth() }).catch(() => null);
+  const res = await fetch(t.url + path, { headers: Client.auth(t.token) }).catch(() => null);
   if (res === null || !res.ok) {
     term_note(t, "Could not " + what + ": " + (res === null ? "no connection" : "HTTP " + res.status) + ".");
     return null;
@@ -701,17 +583,7 @@ async function term_get(t: Term, path: string, what: string): Promise<Response |
   return res;
 }
 
-// a JSON POST to the server (View.post)
-function term_post(t: Term, path: string, body: object): Promise<any> {
-  return View.post(t.url + path, body, term_auth());
-}
-
-// a refusal's text; one for want of credit (402) says how to add some
-function term_refusal(out: View.Answer): string {
-  return out.status === 402 ? out.error + " " + TOPUP : out.error ?? "";
-}
-
-// quits, telling the server (its jobs here end), once all printed is out
+// quits, telling the server, once all printed is out
 // (a write's callback comes after those before it), with exitCode
 function term_quit(t: Term): void {
   t.v.ws?.close(View.QUIT);
@@ -894,7 +766,7 @@ function piece_trim(text: string): string {
 }
 
 // rows to print above the footer (with wipe: alone on the screen), after
-// the notes before them, painted (/account's waited for a key)
+// the notes before them, painted
 function term_rows(t: Term, rows: View.Row[], wipe: boolean): void {
   t.out  = wipe ? [] : t.out;
   t.wipe = t.wipe || wipe;
@@ -957,223 +829,52 @@ function term_paint(t: Term): void {
   t.due  = false;
 }
 
-// Jobs
-// ----
-
-// the server's word on this terminal's jobs: a job, run unless it runs
-// or its output waits for an answer; or their ids, the rest halted
-function term_jobs(t: Term, msg: View.Server & { $: "jobs" | "job" }): void {
-  if (msg.$ === "job") {
-    const sent = t.v.out.some((p) => p.msg.$ === "out" && p.msg.job === msg.id);
-    if (!t.jobs.has(msg.id) && !sent) {
-      term_run(t, msg.id, msg.job as Job);
-    }
-    return;
-  }
-  for (const [id, abort] of t.jobs) {
-    if (!msg.ids.includes(id)) {
-      abort.abort();
-    }
-  }
-}
-
-// runs a job here, and answers its output; one too large for a socket
-// message (View.FRAME, the 1 KiB left for the act around it) answers its
-// size instead, failed (sent, it would close the socket at every try)
-async function term_run(t: Term, id: string, job: Job): Promise<void> {
-  const abort = new AbortController();
-  t.jobs.set(id, abort);
-  const no   = { text: "This terminal does no computer use.", fail: true };
-  const out  = job.name === "computer" && !COMPUTER ? no : await Machine.run(job, WORK, abort.signal);
-  const size = Buffer.byteLength(JSON.stringify(out));
-  const most = View.FRAME - 1024;
-  const big  = { text: "The output, " + size + " bytes, is over the " + most + " a tool may send.", fail: true };
-  t.jobs.delete(id);
-  term_send(t, { $: "out", job: id, out: size > most ? big : out });
-}
-
-// Login
-// =====
-
-// signs in: what is typed (an email, or @ and a GitHub name where the
-// server takes one) begins a sign-in for a token made here, kept in TOKEN
-// once its link was opened; where the server bills, it accepts its terms.
-// A server that says nothing of itself (/api/hello) bills, as one of
-// before it did
-async function login_run(url: string): Promise<void> {
-  const hello = await fetch(url + "/api/hello").then((res) => res.json()).catch(() => ({}));
-  const { bills = true, github = true } = hello;
-  if (bills) {
-    console.log("Signing in, you accept the terms (" + url + "/terms.html) and the privacy policy (" + url + "/privacy.html).");
-  }
-  const key = Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString("base64url");
-  const out = await login_ask(url, key, github);
-  if (out.url) {
-    browse(out.url);
-  }
-  console.log(out.url ? "Sign in with GitHub in the browser: " + out.url : "A sign-in link is on its way to " + out.who + ". Open it.");
-  console.log("On the page it opens, type this code: " + out.code);
-  // the link lives on the server, so only it ends the wait: signed in (ok),
-  // or the link gone (410); a wait that fails is asked again
-  const wait = { headers: { authorization: "Bearer " + key }, timeout: false } as RequestInit;
-  while (true) {
-    const done = await fetch(url + "/api/wait", wait).catch(() => null);
-    const ans  = await done?.json().catch(() => ({})) ?? {};
-    if (done?.status === 410) {
-      login_fail("the link expired: run unii again");
-    }
-    if (done?.ok && ans.ok) {
-      break;
-    }
-    if (done?.status !== 408) {
-      await Bun.sleep(View.RETRY);
-    }
-  }
-  fs.writeFileSync(TOKEN, key, { mode: 0o600 });
-  console.log("Signed in.");
-}
-
-// asks for an address (a GitHub login too, where the server takes one)
-// until the server takes one (it says why it doesn't): the address, and
-// the server's answer
-async function login_ask(url: string, key: string, github: boolean): Promise<{ who: string; url?: string; code: string }> {
-  while (true) {
-    process.stdout.write(github ? "Email or @github: " : "Email: ");
-    const who  = (await login_line()).trim();
-    const init = { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ who, key }) };
-    const res  = await fetch(url + "/api/login", init).catch(() => null);
-    if (res === null) {
-      login_fail("no connection to " + url);
-    }
-    const out = await res.json().catch(() => ({ error: "HTTP " + res.status }));
-    if (out.error === undefined) {
-      return { ...out, who };
-    }
-    console.log(out.error);
-  }
-}
-
-// the next line typed; stdin is paused after it, till the screen reads it
-function login_line(): Promise<string> {
-  return new Promise((done) => {
-    const end  = () => login_fail("no address typed");
-    const take = (chunk: Buffer) => {
-      process.stdin.off("data", take).off("end", end).pause();
-      done(String(chunk).split("\n")[0]);
-    };
-    process.stdin.on("data", take).on("end", end).resume();
-  });
-}
-
-function login_fail(why: string): never {
-  console.error("unii: " + why);
-  process.exit(1);
-}
-
 // Update
 // ======
-
-// marks this computer as one that self-hosted (SELF), for good
-function self_mark(): void {
-  fs.writeFileSync(SELF, "");
-}
 
 // update_check: once a day, a GET of Update.LATEST, not followed: the
 // version its redirect names is cached in CHECKED (stamped before the
 // request: one a day); a cached ver newer than this one is a note. It
 // never delays nor fails the chat
 async function update_check(t: Term): Promise<void> {
-  if (process.env.UNII_NO_TELEMETRY) {
+  if (process.env.UNII_NO_UPDATE_CHECK) {
     return;
   }
-  let last = { t: 0, ver: VERSION, notice: "" };
+  let last = { t: 0, ver: Update.VERSION, notice: "" };
   try {
     last = { ...last, ...JSON.parse(fs.readFileSync(CHECKED, "utf8")) };
   } catch {}
   try {
     if (Date.now() - last.t > DAY) {
       last.t = Date.now();
+      fs.mkdirSync(Client.DIR, { recursive: true, mode: 0o700 });
       fs.writeFileSync(CHECKED, JSON.stringify(last) + "\n");
       const res = await fetch(Update.LATEST, { redirect: "manual", signal: AbortSignal.timeout(3000) });
-      last.ver = Update.update_tag(res.headers.get("location")) ?? VERSION;
+      last.ver = Update.update_tag(res.headers.get("location")) ?? Update.VERSION;
       last.notice = "";
       fs.writeFileSync(CHECKED, JSON.stringify(last) + "\n");
     }
   } catch {}
-  if (Update.update_newer(last.ver, VERSION)) {
+  if (Update.update_newer(last.ver, Update.VERSION)) {
     const notice = last.notice.replace(/[\x00-\x1f\x7f]/g, "").slice(0, 200);
     term_note(t, "unii " + last.ver + " is available: run unii update" + (notice === "" ? "" : ". " + notice));
   }
 }
 
-// runs an installer: the one way unii changes. It replaces this
-// executable, wherever and however named; from source (bun) there is
-// none to replace. The command prints first, so one can run it alone.
-function update_run(url: string | undefined): void {
-  if (WIN) {
-    console.error("On Windows, build unii.exe again from the source (README).");
-    process.exitCode = 1;
-    return;
-  }
-  if (/^bun(\.exe)?$/.test(process.execPath.split("/").pop() ?? "")) {
-    console.error("This unii runs from source (bun): update it with git.");
-    process.exitCode = 1;
-    return;
-  }
-  const cmd = Update.update_cmd(url, process.execPath);
-  console.error(cmd);
-  process.exitCode = child.spawnSync("sh", ["-c", cmd], { stdio: "inherit" }).status ?? 1;
-}
-
 // Main
 // ====
 
-// the session's header, if signed in
-function term_auth(): Record<string, string> {
-  if (!fs.existsSync(TOKEN)) {
-    return {};
+// the chat in this terminal: signed in first, if not yet (the server
+// it signs in to becomes the default)
+export async function main(given: string | undefined): Promise<void> {
+  const conf = Client.read("tui");
+  const url = Client.server(given, conf);
+  const tokens = conf.tokens ?? {};
+  let token: string | undefined = tokens[Client.host(url)];
+  if (!await Client.signed(url, token)) {
+    token = await Client.login(url, "the terminal on " + os.hostname());
+    Client.write("tui", { ...conf, url, tokens: { ...tokens, [Client.host(url)]: token } });
   }
-  return { authorization: "Bearer " + fs.readFileSync(TOKEN, "utf8").trim() };
-}
-
-// whether this terminal is signed in: it holds a session the server
-// doesn't refuse (one it can't reach may: the chat waits for it)
-async function term_signed(url: string): Promise<boolean> {
-  if (!fs.existsSync(TOKEN)) {
-    return false;
-  }
-  const res = await fetch(url + "/api/me", { headers: term_auth() }).catch(() => null);
-  return res === null || res.status !== 401;
-}
-
-fs.mkdirSync(TOKEN.slice(0, -"/token".length), { recursive: true, mode: 0o700 });
-
-if (HELP || ODD !== undefined) {
-  if (ODD !== undefined) {
-    const moved = ODD === "chatgpt" || ODD === "claude" ? " (now unii serve " + ODD + ")" : "";
-    login_fail("no argument " + ODD + moved + ".\n\n" + USAGE);
-  }
-  console.log(USAGE);
-} else if (ASKVER) {
-  console.log("unii " + VERSION);
-} else if (UPDATE) {
-  update_run(ARGS.find((a) => WEB.test(a)));
-} else if (SUB) {
-  await (await import("./ChatGPT.ts")).ChatGPT.cli(ARGS).catch((err) => login_fail(err.message));
-} else if (CLAUDE) {
-  await (await import("./ClaudeSub.ts")).ClaudeSub.cli(ARGS).catch((err) => login_fail(err.message));
-} else if (SERVE) {
-  self_mark();
-  await (await import("./Server.ts")).serve(Number(PORT ?? 8788), null);
-} else if (LOGIN) {
-  await login_run(SERVER);
-} else {
-  if (!await term_signed(SERVER)) {
-    await login_run(SERVER);
-  }
-  if (SERVER !== OURS) {
-    self_mark();
-  }
-  const t = term_new(SERVER);
+  const t = term_new(url, token!);
   term_connect(t);
 }
