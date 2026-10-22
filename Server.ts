@@ -32,6 +32,8 @@ import { Pick } from "./Pick.ts";
 import { Push } from "./Push.ts";
 import { Reap } from "./Reap.ts";
 import { Settings } from "./Settings.ts";
+import { INSTALL } from "./Update.ts";
+import { write_whole } from "./Write.ts";
 import * as Timer from "./Timer.ts";
 import { PROMPTS, SEARCHES, Tools, type Agent, type Live } from "./Tools.ts";
 import { FRAME, IMAGES, live_push, PING, QUIT, SUMMARIES, TICK, TURN, WIRE, type Answer, type Part, type Server as Out, type Wait } from "./View.ts";
@@ -630,12 +632,11 @@ export namespace Chat {
   }
 
   // a turn's last message, Unii's reply or why there was none, to the
-  // owner's phones and browsers (Owner.push, Owner.web_push)
+  // owner's phones and browsers (Push.notify)
   export function phone(chat: Chat): void {
     const last = Memory.message(chat.mem, chat.mem.count - 1);
     if (last !== null && (last.kind === "unii" || last.kind === "note")) {
-      Owner.push(last.text);
-      Owner.web_push(last.text);
+      Push.notify(Owner.open(), last.text);
     }
   }
 
@@ -1462,8 +1463,9 @@ export namespace Main {
 
   // the server: the chat open (a crash's work resumed), then listening.
   // Data an older unii left in the multi-user layout (users/) is moved by
-  // the installer; till then this refuses to start, so no new chat
-  // starts beside the old one
+  // the installer; till then, or while a move it began isn't done
+  // (.migrating), this refuses to start, so no new chat starts beside
+  // the old one
   export async function start(port: number): Promise<void> {
     Reap.start();
     await Main.lock();

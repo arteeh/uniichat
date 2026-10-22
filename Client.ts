@@ -11,6 +11,7 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as View from "./View.ts";
+import { write_whole } from "./Write.ts";
 
 // Constants
 // =========
@@ -36,8 +37,7 @@ export function read(name: string): Record<string, any> {
 export function write(name: string, conf: object): void {
   const file = DIR + "/" + name + ".json";
   fs.mkdirSync(DIR, { recursive: true, mode: 0o700 });
-  fs.writeFileSync(file + ".new", JSON.stringify(conf, null, 2) + "\n", { mode: 0o600 });
-  fs.renameSync(file + ".new", file);
+  write_whole(file, JSON.stringify(conf, null, 2) + "\n");
 }
 
 // the server: given, else $UNII_URL, else the file's, else this

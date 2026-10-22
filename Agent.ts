@@ -296,7 +296,6 @@ export namespace Agent {
     const own = run.ask.yields === undefined ? model : model + " " + run.ask.yields;
     const tries = run.ask.probe === true && items.length === 1 ? 1 : TRIES;
     const scope = run.ask.vendor + " " + model;
-    const out = run.ask.agent === true || (run.ask.fallback === true && run.end.acted !== true);
     let asking = false;
     let woke = false;
     let refused: string | undefined;
@@ -305,7 +304,7 @@ export namespace Agent {
         const under = woke ? null : Agent.under([scope], false);
         woke = false;
         if (under !== null) {
-          if (out && under - Date.now() >= LONG) {
+          if (Agent.ends(run.ask, run.end.acted === true, under - Date.now())) {
             return Agent.limit_off(Agent.fail("usage limit", []), under, run.ask);
           }
           woke = await Agent.park(run, run.on, signal, run.ask.vendor, under - Date.now(), true);
@@ -351,7 +350,7 @@ export namespace Agent {
           const told = step.until ?? Agent.reset(res, now);
           Agent.note(scope, step.until ?? null);
           const { ms, known } = Agent.limit_wait(told, n, run.ask.patient ? AGAIN : LIMIT, now);
-          if (out && ms >= LONG) {
+          if (Agent.ends(run.ask, run.end.acted === true, ms)) {
             return Agent.limit_off(step, told, run.ask);
           }
           woke = await Agent.park(run, run.on, signal, run.ask.vendor, ms, known);
@@ -370,13 +369,15 @@ export namespace Agent {
     }
   }
 
-  // a promise's value, or null once `signal` aborts; its listener gone
-  // either way (a call at a usage limit asks again without end)
+  // a promise's value, or null once `signal` aborts (or had); its
+  // listener gone either way (a call at a usage limit asks again without
+  // end), and its failure after that ignored
   export function race<T>(go: Promise<T>, signal: AbortSignal): Promise<T | null> {
+    go.catch(() => {});
     let drop = () => {};
     const stopped = new Promise<null>((done) => {
       const stop = () => done(null);
-      signal.addEventListener("abort", stop, { once: true });
+      signal.aborted ? stop() : signal.addEventListener("abort", stop, { once: true });
       drop = () => signal.removeEventListener("abort", stop);
     });
     return Promise.race([go, stopped]).finally(drop);
@@ -433,6 +434,13 @@ export namespace Agent {
       }
     }
     return woke && !signal.aborted;
+  }
+
+  // whether a call waiting `ms` for a usage limit ends instead (limit_off):
+  // a subagent's (it reports it), or one with a fallback to go on to that
+  // did nothing yet; a short wait (under LONG) never does
+  export function ends(ask: { agent?: boolean; fallback?: boolean }, acted: boolean, ms: number): boolean {
+    return ms >= LONG && (ask.agent === true || (ask.fallback === true && !acted));
   }
 
   // a call at a long usage limit, ended for its fallback to go on (off),
