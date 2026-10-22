@@ -10,8 +10,9 @@
 // call: with no tool run it waits for the reset and asks again in a new
 // Claude Code; after a tool it keeps its Claude Code and goes on, the
 // tool not run again; no Claude Code starts under a limit told; a stop
-// ends the wait, a message sent too (but not into extra usage); usage
-// billed past the plan interrupts the turn. A stop while the MCP server
+// ends the wait, a message sent too (but not into extra usage), and a
+// resume (still limited, it waits again); usage billed past the plan
+// interrupts the turn. A stop while the MCP server
 // is set ends at once; one that dies is replaced. And the copies of the
 // carried binary another unii still uses are kept; a model two vendors
 // offer keeps its name, its two picks apart.
@@ -23,6 +24,7 @@ import * as os from "node:os";
 process.env.UNII_DIR = fs.mkdtempSync(os.tmpdir() + "/unii-claude-sub-");
 process.env.UNII_CLAUDE = "/bin/true";
 const { ClaudeSub, SUMS, ON } = await import("./ClaudeSub.ts");
+const { Agent } = await import("./Agent.ts");
 const { Pick, LABELS } = await import("./Pick.ts");
 const { view_pick } = await import("./View.ts");
 
@@ -215,7 +217,7 @@ test("a usage limit, no tool run: the call waits for the reset, then asks again 
   const t0 = Date.now();
   const call = ClaudeSub.ask(asked("L", "LIMIT one"), (ev) => evs.push(ev));
   await tick();
-  expect(minds(evs)).toEqual(["The AI service reached a usage limit: asking again in 1 min."]);
+  expect(minds(evs)).toEqual(["The AI service is busy: asking again in 1 s."]);
   expect(await settled(live)).toBe(live);
   // another call meanwhile waits too, starting nothing
   const other = ClaudeSub.ask(asked("L", "another", { patient: true }), () => {});
@@ -291,9 +293,29 @@ test("a message sent ends a usage limit's wait, as at the other vendors; not whe
   ClaudeSub.forget();
 });
 
+test("a resume ends a usage limit's wait; still limited, the call waits again, saying nothing more; lifted, it goes on", async () => {
+  ClaudeSub.forget();
+  fake.limits = 2;
+  fake.reset = Date.now() + 120e3;
+  const before = fake.spawned;
+  const evs: any[] = [];
+  const limits = () => evs.filter((e) => e.$ === "Limit").map((e) => e.limit);
+  const call = ClaudeSub.ask(asked("R", "LIMIT"), (ev) => evs.push(ev));
+  await tick();
+  expect(limits()).toHaveLength(1);
+  expect(Agent.resume()).toBe(1);
+  await tick();
+  expect(limits()).toEqual([expect.anything(), null, expect.anything()]);
+  expect(minds(evs)).toHaveLength(1);
+  expect(Agent.resume()).toBe(1);
+  expect(await said(call)).toEqual({ system: "R", told: ["LIMIT"] });
+  expect(fake.spawned - before).toBe(3);
+  ClaudeSub.forget();
+});
+
 test("usage billed past the plan interrupts the turn; its whole answer kept, but no call asks again till the reset", async () => {
   ClaudeSub.forget();
-  fake.reset = Date.now() + 60e3;
+  fake.reset = Date.now() + 120e3;
   const interrupts = fake.interrupts;
   const end = await ClaudeSub.ask(asked("O", "OVER"), () => {}).done;
   expect(end).toMatchObject({ ok: true, text: "paid" });

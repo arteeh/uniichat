@@ -9,7 +9,8 @@
 // summary's) asks again, AGAIN after each try nothing answered (the
 // vendor down or refusing it, as when the API key's credit is gone; our
 // setup failing) or, if the vendor said when its refusal lifts (`until`:
-// a ChatGPT plan's usage limit), then (a week at most), till
+// a usage limit a fallback went past: Agent.limit_off), then (a week at
+// most), till
 // one is answered or we end it (a stop; its payer's refusal: its node
 // then waits for the user's credit, with no call: Memory.ts `hold`): an
 // outage only delays it, and no summary is made of a failure that isn't

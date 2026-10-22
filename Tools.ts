@@ -17,7 +17,9 @@
 // gets its context and its whole log, so a told agent goes on even after
 // a restart; its replies reach the chat as one "[Name]" message.
 // The master's schedules (schedule, schedules, unschedule) are kept with
-// its chat, each coming as a "[Timer id]" message (Timer.ts).
+// its chat, each coming as a "[Timer id]" message (Timer.ts). Its resume
+// wakes every call waiting for a usage limit (Agent.resume), for a user
+// who knows one lifted early.
 // A chat moves to another process whole (Tools.give, Tools.take): its
 // key, devices and jobs, and its agents at work, whose calls run on where
 // they started; MCP requests reaching this one then go on there, those
@@ -32,7 +34,7 @@
 
 import * as fs from "node:fs";
 import { AskAI, type Ask, type Bill, type Block, type Call, type Event, type Kind, type Pay } from "./AskAI.ts";
-import type { Out } from "./Agent.ts";
+import { Agent, type Out } from "./Agent.ts";
 import { report_text } from "./Call.ts";
 import { clip_page } from "./Clip.ts";
 import * as config from "./Config.ts";
@@ -248,6 +250,7 @@ const BOSS: Spec[] = [
   }, ["message", "zone"]),
   spec("schedules", "List the chat's schedules: id, when each comes next, its message.", {}, []),
   spec("unschedule", "Cancel a schedule, by its id.", { id: STR }, ["id"]),
+  spec("resume", "Wake every call on this server waiting for an AI service's usage limit (subagents, summaries, other chats' turns), when the user says a limit was reset early. Each asks again once; one still limited waits again.", {}, []),
 ];
 const DEVICE = { device: { type: "string", description: "The name of the device to run on, one listed under Devices." } };
 function kit(who: string): Spec[] {
@@ -549,6 +552,10 @@ export namespace Tools {
       case "unschedule": {
         const id = String(args.id);
         return Tools.unschedule(tools, id) ? { text: "Cancelled " + id + ".", fail: false } : { text: "No schedule " + id + ".", fail: true };
+      }
+      case "resume": {
+        const n = Agent.resume();
+        return { text: n === 0 ? "No call was waiting for a usage limit." : "Woke " + n + " call" + (n === 1 ? "" : "s") + " waiting for a usage limit; any still limited waits again.", fail: false };
       }
       case "computer": {
         const role = tools.agents.get(who)?.role;
