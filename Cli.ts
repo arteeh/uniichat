@@ -42,14 +42,11 @@ const USAGE = `Usage: unii [url]           the chat in this terminal (url: $UNII
                             or all
        unii update          replace this unii with the fork's newest
                             release (curl | sh, shown first)
-       unii update <url>    run that server's installer instead
        unii version         this unii's version
        unii help            this
 The terminal and the device keep their server and sign-in in
-~/.config/unii (tui.json, device.json). Once a day the terminal asks
-GitHub which release of arteeh/uniichat is the newest (one plain GET);
-UNII_NO_UPDATE_CHECK=1 turns that off. In the chat, /help lists every
-command and key.`;
+~/.config/unii (tui.json, device.json). unii never checks for updates by
+itself: run unii update. In the chat, /help lists every command and key.`;
 
 function fail(why: string): never {
   console.error("unii: " + why);
@@ -59,14 +56,14 @@ function fail(why: string): never {
 // runs an installer: the one way unii changes. It replaces this
 // executable, wherever and however named; from source (bun) there is
 // none to replace. The command prints first, so one can run it alone.
-function update(url: string | undefined): void {
+function update(): void {
   if (process.platform === "win32") {
     fail("on Windows, build unii.exe again from the source (README).");
   }
   if (/^bun(\.exe)?$/.test(process.execPath.split("/").pop() ?? "")) {
     fail("this unii runs from source (bun): update it with git.");
   }
-  const cmd = Update.update_cmd(url, process.execPath);
+  const cmd = Update.update_cmd(process.execPath);
   console.error(cmd);
   process.exitCode = child.spawnSync("sh", ["-c", cmd], { stdio: "inherit" }).status ?? 1;
 }
@@ -80,8 +77,8 @@ if (cmd === undefined) {
   console.log(USAGE);
 } else if (cmd === "version" && !odd([cmd])) {
   console.log("unii " + Update.VERSION);
-} else if (cmd === "update" && !odd([cmd])) {
-  update(URL_);
+} else if (cmd === "update" && !odd([cmd]) && URL_ === undefined) {
+  update();
 } else if (cmd === "device" && !odd([cmd])) {
   await (await import("./Device.ts")).run(URL_);
 } else if (cmd === "serve" && sub === "chatgpt" && [undefined, "logout", "status"].includes(more) && !odd([cmd, sub, ...(more ? [more] : [])])) {
