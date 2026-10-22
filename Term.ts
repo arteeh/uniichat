@@ -80,8 +80,9 @@ const SINCE  = /\bsince +(\d{4}-\d\d-\d\d)\b/;
 const EXPORT = /\.(zip|json)$/i;
 const HOW = "Pick with /import [claude] [chatgpt] [since 2026-06-01] [tools] [sessions] [-#n] [<export>.zip] [go] (-#n: not session n; go: import); /import pause or resume: the import running. Exports, on each website: " + Object.entries(Import.EXPORTS).map(([app, how]) => app + ": " + how).join("; ") + "; it emails you a zip.";
 
-// the input's hint on an agent's page
-const OFF = "Commands only: /help";
+// the keys on an agent's page, which has no input: a tab back, quit and
+// suspend; none that types, sends or moves the pick
+const PAGE_KEYS = ["Tab", "Ctrl+D", "Ctrl+Z"];
 
 // the pick's moves by Shift and an arrow
 const ARROWS: Record<string, Move> = { "Shift+Left": "prev", "Shift+Right": "next", "Shift+Up": "up", "Shift+Down": "down" };
@@ -246,8 +247,10 @@ function term_back(t: Term, sent: View.Sent): void {
 }
 
 // the page shown was `was`: another prints below, after its name (a
-// wipe and whole print took seconds on a long page)
+// wipe and whole print took seconds on a long page); an agent's has no
+// input (a pipe's lines still go on)
 function term_went(t: Term, was: View.Page | null): void {
+  t.scr.off = t.scr.tty && !View.view_typing(t.v);
   if (t.v.page !== was) {
     term_rows(t, t.v.page === null ? [View.Cap(View.MAIN)] : [], false);
     term_show(t);
@@ -271,10 +274,11 @@ function term_idle(t: Term): void {
 // Keys
 // ----
 
-// a key ("": text typed): its line of COMMANDS
+// a key ("": text typed): its line of COMMANDS (an agent's page: of
+// PAGE_KEYS)
 function term_press(t: Term, key: string): void {
   const cmd = term_commands(t.v).find((c) => c[1] !== "" && c[1].split(", ").includes(key));
-  if (cmd !== undefined) {
+  if (cmd !== undefined && (!t.scr.off || PAGE_KEYS.includes(key))) {
     cmd[3](t, cmd[0] === "" ? key : "");
   }
   term_draw(t);
@@ -297,9 +301,10 @@ function term_enter(t: Term): void {
 }
 
 // Ctrl+C or Ctrl+D: clears the input; on an empty one, Ctrl+C interrupts
-// UniiChat's turn (never quits), Ctrl+D quits
+// UniiChat's turn (never quits), Ctrl+D quits, as it does on an agent's
+// page (its input's text kept)
 function term_clear(t: Term, key: string): void {
-  if (t.scr.ed.text !== "") {
+  if (t.scr.ed.text !== "" && !t.scr.off) {
     Screen.ed_take(t.scr.ed);
   } else if (key === "Ctrl+D") {
     term_quit(t);
@@ -805,15 +810,16 @@ function term_paint(t: Term): void {
   const w     = Screen.screen_width();
   const iw    = term_inner();
   const room  = (process.stdout.rows || 24) - 1;
-  const off   = !View.view_typing(t.v);
-  const input = Screen.screen_input(t.scr, iw, room - 3, off ? OFF : View.HINT + " · /help", off);
-  const under = Paint.rule_text(t.v.up ? "" : "offline", iw);
-  const own   = term_inset([Paint.rule_line(t.v, iw), ...input.lines, under, Paint.tabs_line(t.v, iw)]);
+  const off   = t.scr.off;
+  const input = off ? null : Screen.screen_input(t.scr, iw, room - 3, View.HINT + " · /help");
+  // with no input, the rule under it only to say offline
+  const under = off && t.v.up ? [] : [Paint.rule_text(t.v.up ? "" : "offline", iw)];
+  const own   = term_inset([Paint.rule_line(t.v, iw), ...(input?.lines ?? []), ...under, Paint.tabs_line(t.v, iw)]);
   const rest  = View.view_stream(t.v).map((l) => ({ kind: l.kind, text: l.text.slice(t.flow.get(l) ?? 0) }));
   const held  = t.v.page === null ? View.view_rows(t.v, t.wait).flat() : [];
   const tail  = term_lines([...held, ...View.view_tail(t.v, rest)]).flatMap((l) => Paint.runs_wrap(l, w, true));
   const above = tail.slice(Math.max(0, tail.length - room + own.length));
-  const at    = { row: above.length + 1 + input.at.row, col: input.at.col + MARGIN };
+  const at    = input === null ? null : { row: above.length + 1 + input.at.row, col: input.at.col + MARGIN };
   Screen.screen_paint(t.scr, t.out, t.wipe, [...above, ...own], at);
   t.out  = [];
   t.wipe = false;

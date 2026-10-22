@@ -7,7 +7,8 @@
 // stream; a paste comes bracketed and is typed whole. Kitty's keys at
 // flag 1 only, so dead keys still compose. The input (Ed) draws as rows
 // starting `> ` and takes its editing keys (ed_key, EDITING) here; Up and
-// Down past its ends walk the messages sent.
+// Down past its ends walk the messages sent. Off (an agent's page, which
+// has none), it takes nothing, its text kept for when it is back.
 
 import * as Paint from "./Paint.ts";
 import * as Theme from "./Theme.ts";
@@ -39,11 +40,12 @@ type Place = Spot & { pos: number };
 // Esc comes as CSI 27u, and a bare ESC only starts a sequence), the
 // input, input not read yet (cut by a read's end), the footer's rows
 // above the cursor (its blank rows too), the rows from the footer's top
-// to the screen's bottom, where keys go
+// to the screen's bottom, where keys go; off: the input is not shown
 export type Screen = {
   tty    : boolean;
   kitty  : boolean;
   ed     : Ed;
+  off    : boolean;
   rest   : string;
   up     : number;
   rows   : number;
@@ -66,9 +68,14 @@ const SYNC_OFF = "\x1b[?2026l";
 const WIPE     = "\x1b[2J\x1b[3J\x1b[H";
 
 // bracketed paste, kitty's keys at flag 1 (popped before pushed), the
-// flags asked (a kitty terminal answers CSI ? flags u); off
+// flags asked (a kitty terminal answers CSI ? flags u); off, the cursor
+// shown again
 const MODES_ON  = "\x1b[?2004h\x1b[<u\x1b[>1u\x1b[?u";
-const MODES_OFF = "\x1b[?2004l\x1b[<u";
+const MODES_OFF = "\x1b[?2004l\x1b[<u\x1b[?25h";
+
+// the cursor shown, hidden
+const CURSOR_ON  = "\x1b[?25h";
+const CURSOR_OFF = "\x1b[?25l";
 
 // a sequence: CSI params [intermediates] final, or SS3 final (kitty's:
 // CSI code[:alts] [; mods] u; modifyOtherKeys': CSI 27 ; mods ; code ~);
@@ -114,7 +121,7 @@ const MODS: [number, string][] = [[4, "Ctrl+"], [2, "Alt+"], [1, "Shift+"]];
 export function screen_new(on: (key: string) => void): Screen {
   const tty = process.stdin.isTTY === true && process.stdout.isTTY === true;
   const ed  = { text: "", pos: 0, hist: [], at: 0, draft: "", moved: false, w: 80, tall: 1 };
-  const scr = { tty, kitty: false, ed, rest: "", up: 0, rows: 0, on };
+  const scr = { tty, kitty: false, ed, off: false, rest: "", up: 0, rows: 0, on };
   if (tty) {
     process.stdin.setRawMode(true);
     process.stdout.write(MODES_ON);
@@ -135,11 +142,12 @@ export function screen_width(): number {
 // ------
 
 // lines printed (wipe: on a screen and scrollback erased), then the
-// footer again, cut at the width, the cursor at its spot. The footer
+// footer again, cut at the width, the cursor at its spot (null: none
+// shown, at the footer's last row). The footer
 // always ends on the screen's last row: the rows it held that the new
 // lines and footer don't fill stay blank above it (a wipe: the whole
 // screen's), as a terminal never scrolls back down to them
-export function screen_paint(scr: Screen, body: Paint.Line[], wipe: boolean, foot: Paint.Line[], at: Spot): void {
+export function screen_paint(scr: Screen, body: Paint.Line[], wipe: boolean, foot: Paint.Line[], at: Spot | null): void {
   if (!scr.tty) {
     process.stdout.write(body.map((l) => l.map((r) => r.x).join("").trimEnd() + "\n").join(""));
     return;
@@ -149,12 +157,13 @@ export function screen_paint(scr: Screen, body: Paint.Line[], wipe: boolean, foo
   const pad   = Math.max(0, held - body.length - foot.length);
   const lines = [...body.map(Paint.line_ansi), ...Array(pad).fill("")].map((l) => l + "\r\n").join("");
   const draw  = foot.map((l) => Paint.line_ansi(Paint.runs_wrap(l, w, true)[0])).join("\r\n");
-  const back  = foot.length - 1 - at.row;
-  const move  = (back > 0 ? "\x1b[" + back + "A" : "") + "\r\x1b[" + (at.col + 1) + "G";
+  const spot  = at ?? { row: foot.length - 1, col: 0 };
+  const back  = foot.length - 1 - spot.row;
+  const move  = (back > 0 ? "\x1b[" + back + "A" : "") + "\r\x1b[" + (spot.col + 1) + "G";
   const erase = wipe ? WIPE : screen_erase(scr);
-  scr.up   = pad + at.row;
+  scr.up   = pad + spot.row;
   scr.rows = pad + foot.length;
-  process.stdout.write(SYNC_ON + erase + lines + draw + move + SYNC_OFF);
+  process.stdout.write(SYNC_ON + erase + lines + draw + move + (at === null ? CURSOR_OFF : CURSOR_ON) + SYNC_OFF);
 }
 
 // the footer erased
@@ -207,16 +216,18 @@ function screen_key(scr: Screen, data: string): number {
     return 1 + ch.length;
   }
   if (text !== null) {
-    ed_type(scr.ed, text[0]);
+    if (!scr.off) {
+      ed_type(scr.ed, text[0]);
+    }
     return text[0].length;
   }
   screen_press(scr, KEYS[code] ?? "Ctrl+" + String.fromCharCode(code + 64));
   return 1;
 }
 
-// a key: an editing key edits the input; any other goes to Term.ts
+// a key: an editing key edits the input, if on; any other goes to Term.ts
 function screen_press(scr: Screen, key: string): void {
-  if (!ed_key(scr.ed, key)) {
+  if (scr.off || !ed_key(scr.ed, key)) {
     scr.on(key);
   }
 }
@@ -239,13 +250,15 @@ export function screen_suspend(scr: Screen): void {
   process.kill(0, "SIGTSTP");
 }
 
-// a paste, typed whole
+// a paste, typed whole (none while the input is off)
 function screen_paste(scr: Screen, data: string): number {
   const end = data.indexOf(PASTE_OFF);
   if (end < 0) {
     return 0;
   }
-  ed_type(scr.ed, data.slice(PASTE_ON.length, end).replace(/\r\n?/g, "\n"));
+  if (!scr.off) {
+    ed_type(scr.ed, data.slice(PASTE_ON.length, end).replace(/\r\n?/g, "\n"));
+  }
   return end + PASTE_OFF.length;
 }
 
@@ -272,18 +285,16 @@ function seq_name(params: string, end: string): string {
 }
 
 // the input's rows in w columns, at most max of them (the cursor's and
-// those before it), a hint when empty, grey when off; and where the
-// cursor shows
-export function screen_input(scr: Screen, w: number, max: number, hint: string, off: boolean): { lines: Paint.Line[]; at: Spot } {
+// those before it), a hint when empty; and where the cursor shows
+export function screen_input(scr: Screen, w: number, max: number, hint: string): { lines: Paint.Line[]; at: Spot } {
   const mark = Paint.Run(Theme.GLYPH.input, Paint.DIM);
-  const ink  = off ? Paint.DIM : Paint.INK;
   const ed   = scr.ed;
   ed.w = w - 2;
   const { rows, places, at } = ed_layout(ed);
   const spot = places[at];
   const top  = Math.max(0, spot.row - Math.max(1, max) + 1);
   const seen = rows.slice(top, top + Math.max(1, max));
-  const text = ed.text === "" ? [[mark, Paint.Run(hint, Paint.DIM)]] : seen.map((x) => [mark, Paint.Run(x, ink)]);
+  const text = ed.text === "" ? [[mark, Paint.Run(hint, Paint.DIM)]] : seen.map((x) => [mark, Paint.Run(x, Paint.INK)]);
   ed.tall    = Math.min(Math.max(ed.tall, text.length), Math.max(1, max));
   text.push(...Array.from({ length: ed.tall - text.length }, () => [Paint.Run("")]));
   return { lines: text, at: { row: spot.row - top, col: spot.col + 2 } };
