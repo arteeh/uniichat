@@ -49,7 +49,8 @@ newest release. The installer also moves data from older versions.
    address.
 2. **Sign in.** On the server's computer, `unii serve link` prints a link
    that signs a browser in. A terminal or a device signs in by a link and
-   a code you confirm in that browser.
+   a code you confirm in that browser. `unii serve sessions` lists them;
+   `unii serve revoke <n>` (or `--all`) signs one out.
 3. **Pick a vendor.** In the web app, ☰ › Settings: vendors, models and
    API keys (kept in `~/.unii/keys.json`). For a plan instead of keys,
    run `unii serve claude` (Claude) or `unii serve chatgpt` (ChatGPT) on

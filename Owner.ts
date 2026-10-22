@@ -55,7 +55,7 @@ const ASKS  = 100;
 const WEB_PUSHES = 32;
 
 const SCHEMA = `
-create table if not exists sessions (hash text primary key, what text not null default '');
+create table if not exists sessions (hash text primary key, what text not null default '', at integer not null default 0);
 create table if not exists tickets  (hash text primary key, data text not null, expires integer not null);
 create table if not exists pushes   (token text primary key, session text not null);
 create trigger if not exists pushes_go after delete on sessions begin delete from pushes where session = old.hash; end;
@@ -128,6 +128,40 @@ export namespace Owner {
   // from the session, so nothing extra is stored
   export function code(session: string): string {
     return (parseInt(session.slice(0, 8), 16) % 1e6).toString().padStart(6, "0");
+  }
+
+  // the sessions kept, by hash: a socket of one gone closes (Server.ts)
+  export function kept(): Set<string> {
+    return new Set((Owner.open().query("select hash from sessions").all() as { hash: string }[]).map((r) => r.hash));
+  }
+
+  // `unii serve sessions`: every sign-in, numbered, this computer's
+  // terminal's and device's marked (their tokens in ~/.config/unii);
+  // `unii serve revoke <n>|--all`: one or all gone, its sockets closed
+  // within PING / 2 by the running server, its pushes with it. Last use
+  // isn't tracked
+  export async function sessions(revoke?: string): Promise<void> {
+    const db = Owner.open();
+    const rows = db.query("select hash, what, at from sessions order by rowid").all() as { hash: string; what: string; at: number }[];
+    if (revoke === "--all") {
+      db.query("delete from sessions").run();
+      return console.log("Signed out " + rows.length + " session" + (rows.length === 1 ? "" : "s") + ": every browser, terminal and device signs in again.");
+    }
+    if (revoke !== undefined) {
+      const row = rows[Number(revoke) - 1];
+      if (!/^\d+$/.test(revoke) || row === undefined) {
+        throw new Error("no session " + revoke + (rows.length === 0 ? ": there are none" : ": `unii serve sessions` numbers them 1 to " + rows.length));
+      }
+      db.query("delete from sessions where hash = ?").run(row.hash);
+      return console.log("Signed out " + revoke + " (" + (row.what || "a session") + ").");
+    }
+    const Client = await import("./Client.ts");
+    const tui = Client.read("tui").tokens ?? {};
+    const mine = new Map<string, string>([...Object.values(tui).map((t) => [Owner.hash(String(t)), "this computer's terminal"] as [string, string]), [Owner.hash(String(Client.read("device").token ?? "")), "this computer's device"]]);
+    const kind = (what: string) => (what.startsWith("the device ") ? "device" : what.startsWith("the terminal ") ? "terminal" : "browser");
+    const when = (at: number) => (at > 0 ? new Date(at).toISOString().slice(0, 16).replace("T", " ") + " UTC" : "before arteeh.17");
+    rows.forEach((r, i) => console.log(String(i + 1).padStart(3) + ". " + kind(r.what).padEnd(9) + (r.what || "-").padEnd(32) + " signed in " + when(r.at) + (mine.has(r.hash) ? "  (" + mine.get(r.hash) + ")" : "")));
+    console.log(rows.length === 0 ? "No sessions." : "Last use isn't tracked. `unii serve revoke <n>` signs one out; `--all`, all.");
   }
 
   // `unii serve link`: a browser's sign-in link, printed; run where the
@@ -288,7 +322,7 @@ export namespace Owner {
       const db = Owner.open();
       db.query("delete from sessions where hash = ?").run(Owner.hash(Owner.token(req)));
       const token = Owner.random();
-      db.query("insert into sessions values (?, ?)").run(Owner.hash(token), "a browser");
+      db.query("insert into sessions values (?, ?, ?)").run(Owner.hash(token), "a browser", Date.now());
       return new Response(null, { status: 303, headers: { location: config.SITE + "/", "set-cookie": COOKIE + "=" + token + KEEP } });
     }
     if (link === null || link.session === null || !Owner.is(req)) {
@@ -297,7 +331,7 @@ export namespace Owner {
     if (typed !== Owner.code(link.session)) {
       return Owner.page_confirm(t, link.what, "That code didn't match. Check the code it shows and try again.");
     }
-    Owner.open().query("insert or ignore into sessions values (?, ?)").run(link.session, link.what);
+    Owner.open().query("insert or ignore into sessions values (?, ?, ?)").run(link.session, link.what, Date.now());
     Owner.ticket_read(t, true);
     WAITS.get(link.session)?.();
     return Owner.page("Signed in", "You can close this tab and go back to " + Owner.safe(link.what) + ".");

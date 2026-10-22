@@ -36,6 +36,10 @@ const USAGE = `Usage: unii [url]           the chat in this terminal (url: $UNII
        unii serve claude [logout|status]
                             the same for a Claude plan (its claude-sub
                             vendor), in Claude Code's own sign-in
+       unii serve sessions  the browsers, terminals and devices signed in
+       unii serve revoke <n>|--all
+                            sign one of them out (its open sockets close),
+                            or all
        unii update          replace this unii with the fork's newest
                             release (curl | sh, shown first)
        unii update <url>    run that server's installer instead
@@ -84,6 +88,10 @@ if (cmd === undefined) {
   await (await import("./ChatGPT.ts")).ChatGPT.cli(REST.slice(1)).catch((err) => fail(err.message));
 } else if (cmd === "serve" && sub === "claude" && [undefined, "logout", "status"].includes(more) && !odd([cmd, sub, ...(more ? [more] : [])])) {
   await (await import("./ClaudeSub.ts")).ClaudeSub.cli(REST.slice(1)).catch((err) => fail(err.message));
+} else if (cmd === "serve" && sub === "sessions" && !odd([cmd, sub])) {
+  await (await import("./Owner.ts")).Owner.sessions();
+} else if (cmd === "serve" && sub === "revoke" && more !== undefined && !odd([cmd, sub, more])) {
+  await (await import("./Owner.ts")).Owner.sessions(more).catch((err) => fail(err.message));
 } else if (cmd === "serve" && sub === "link" && !odd([cmd, sub])) {
   (await import("./Owner.ts")).Owner.cli();
 } else if (cmd === "serve" && (sub === undefined || /^\d+$/.test(sub)) && !odd([cmd, ...(sub ? [sub] : [])]) && URL_ === undefined) {
