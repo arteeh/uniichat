@@ -9,7 +9,9 @@
 // tab of the chat is in front, in place of the one before; a tap opens
 // the chat.
 
-const CACHE = "unii-shell";
+// (a new name, for files a client should not be shown old: the shell's
+// before it is dropped as this one starts)
+const CACHE = "unii-shell-2";
 const SHELL = ["/", "/app.js", "/style.css", "/favicon.svg", "/mark.svg", "/manifest.webmanifest", "/icon-192.png"];
 
 // Safari takes a subscription back from a site whose pushes show nothing,
@@ -21,7 +23,7 @@ self.addEventListener("install", (ev) => {
 });
 
 self.addEventListener("activate", (ev) => {
-  ev.waitUntil(self.clients.claim());
+  ev.waitUntil(caches.keys().then((keys) => Promise.all(keys.filter((key) => key !== CACHE).map((key) => caches.delete(key)))).then(() => self.clients.claim()));
 });
 
 // the shell's files, and a page of the app ("/", "/account": both
