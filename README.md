@@ -93,8 +93,8 @@ Use
 - **Terminal:** `unii [url]` (default: `$UNII_URL`, else the last server,
   else the local one). `/help` lists its commands; `/import` brings in
   this computer's Claude and Codex sessions.
-- `unii help` lists every command. Once a day the terminal asks GitHub
-  for the newest release; `UNII_NO_UPDATE_CHECK=1` turns that off.
+- `unii help` lists every command. unii never checks for updates by
+  itself: `unii update` installs the newest release.
 
 From source (Bun): `bun install`, `bun run web` (rebuilds web/app.js),
 `bun Cli.ts <command>`, `bun run build` (one `unii` executable).

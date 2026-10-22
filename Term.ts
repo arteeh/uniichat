@@ -6,8 +6,6 @@
 // the site is a command here (COMMANDS, /help). From a pipe, each line is
 // a message. Its file is tui.json (Client.ts): the server it opens by
 // default (the last one signed in to) and its sign-in to each, by host.
-// Once a day it asks GitHub for the newest release (update_check) and
-// notes a newer one.
 
 import * as child from "node:child_process";
 import * as fs from "node:fs";
@@ -18,7 +16,6 @@ import * as Import from "./Import.ts";
 import * as Paint from "./Paint.ts";
 import { type Move, Pick } from "./Pick.ts";
 import * as Screen from "./Screen.ts";
-import * as Update from "./Update.ts";
 import * as View from "./View.ts";
 
 // Types
@@ -54,10 +51,6 @@ type Cmd = [use: string, keys: string, text: string, run: (t: Term, arg: string)
 
 // Constants
 // =========
-
-// the daily version check's cache (Client.DIR)
-const CHECKED = Client.DIR + "/check.json";
-const DAY     = 86400000;
 
 // paths on Windows take \\, not /
 const WIN = process.platform === "win32";
@@ -210,8 +203,7 @@ function term_send(t: Term, msg: View.Client, sent?: View.Sent): void {
   }, said);
 }
 
-// a message of the server: to the view, then to the jobs and the page;
-// the update note comes under the first view, where it is seen
+// a message of the server: to the view, then to the jobs and the page
 function term_hear(t: Term, msg: View.Server): void {
   const first = msg.$ === "view" && t.v.parts.length === 0;
   const was   = t.v.page;
@@ -222,7 +214,6 @@ function term_hear(t: Term, msg: View.Server): void {
   term_print(t, msg);
   if (first) {
     term_history(t);
-    update_check(t);
   }
   term_draw(t);
   if (msg.$ === "state") {
@@ -827,39 +818,6 @@ function term_paint(t: Term): void {
   t.out  = [];
   t.wipe = false;
   t.due  = false;
-}
-
-// Update
-// ======
-
-// update_check: once a day, a GET of Update.LATEST, not followed: the
-// version its redirect names is cached in CHECKED (stamped before the
-// request: one a day); a cached ver newer than this one is a note. It
-// never delays nor fails the chat
-async function update_check(t: Term): Promise<void> {
-  // UNII_NO_TELEMETRY: its name before arteeh.17
-  if (process.env.UNII_NO_UPDATE_CHECK || process.env.UNII_NO_TELEMETRY) {
-    return;
-  }
-  let last = { t: 0, ver: Update.VERSION, notice: "" };
-  try {
-    last = { ...last, ...JSON.parse(fs.readFileSync(CHECKED, "utf8")) };
-  } catch {}
-  try {
-    if (Date.now() - last.t > DAY) {
-      last.t = Date.now();
-      fs.mkdirSync(Client.DIR, { recursive: true, mode: 0o700 });
-      fs.writeFileSync(CHECKED, JSON.stringify(last) + "\n");
-      const res = await fetch(Update.LATEST, { redirect: "manual", signal: AbortSignal.timeout(3000) });
-      last.ver = Update.update_tag(res.headers.get("location")) ?? Update.VERSION;
-      last.notice = "";
-      fs.writeFileSync(CHECKED, JSON.stringify(last) + "\n");
-    }
-  } catch {}
-  if (Update.update_newer(last.ver, Update.VERSION)) {
-    const notice = last.notice.replace(/[\x00-\x1f\x7f]/g, "").slice(0, 200);
-    term_note(t, "unii " + last.ver + " is available: run unii update" + (notice === "" ? "" : ". " + notice));
-  }
 }
 
 // Main
