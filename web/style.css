@@ -130,7 +130,10 @@ body.account footer > :not(#toast) { display: none; }
 .composer .voice { display: none; flex: 1; align-items: center; gap: 12px; height: 38px; color: var(--ink); }
 .composer.rec .voice { display: flex; }
 .composer.rec textarea { display: none; }
-.voice canvas { flex: 1; height: 28px; min-width: 0; }
+/* width 0, the row gives it the rest: else its drawn pixels (main.ts meter)
+   set its width through their aspect, a little wider each frame where the
+   screen's pixel ratio isn't whole, until it pushes the buttons off */
+.voice canvas { flex: 1; width: 0; height: 28px; }
 .voice span { font: 14px var(--mono); color: var(--mid); font-variant-numeric: tabular-nums; }
 .composer.off { border-color: var(--hair); }
 .composer.off textarea { color: var(--soft); }
