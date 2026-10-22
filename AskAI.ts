@@ -63,7 +63,9 @@ export type Block = { text: string; mark: boolean };
 
 // searches: the most web searches it runs (0: no web tools); probe: its
 // first request goes once (its pick is DOWN); fallback: a pick follows
-// its own, which a long usage-limit wait goes on with instead (Agent.step)
+// its own, which a long usage-limit wait goes on with instead (Agent.step);
+// agent: a subagent's, which a long usage limit ends (after its
+// fallbacks) instead of parking it, its report saying so
 export type Ask = Pick & {
   system    : string;
   blocks    : Block[];
@@ -73,6 +75,7 @@ export type Ask = Pick & {
   patient?  : boolean;
   yields?   : string;
   probe?    : boolean;
+  agent?    : boolean;
   fallback? : boolean;
 };
 
