@@ -4,23 +4,17 @@
 //
 // - Notifications: once signed in, the app asks to notify, and gives the
 //   server its phone's push token (/api/push); the server pushes each
-//   turn's last message (Cloud.ts). iOS shows none while the app is open.
+//   turn's last message (Push.ts). iOS shows none while the app is open.
 // - Sign-in links open the app (universal links: the server's
 //   apple-app-site-association names /auth), signing in its web view.
 // - The mic dictates (the site's own recorder; iOS asks once).
 // - Export Memory's download goes to the share sheet; the site's prompt()
-//   (Delete account asks the name) is an alert.
-// - Credit is bought through the App Store, the only payment it allows in
-//   an app: the page asks the bridge (`unii`, web/src/main.ts) for
-//   `credits.<dollars>`, StoreKit sells it for the account signed in
-//   (appAccountToken: its id), and its signed transaction goes to the
-//   server (/api/apple), which grants it once; it is finished only once
-//   taken, so one left (the app closed, another account signed in) goes
-//   again at the next start.
+//   is an alert.
+// - The bridge (`unii`, web/src/main.ts) tells the page it is in the app,
+//   which notifies by itself (no Web Push there).
 //
 // Any page off the site opens in Safari. The share extension is Share/.
 
-import StoreKit
 import SwiftUI
 import UserNotifications
 import WebKit
@@ -85,7 +79,6 @@ final class Page: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessageH
     web.navigationDelegate = self
     web.uiDelegate = self
     web.load(URLRequest(url: Site.url))
-    Task { await Store.resume() }
   }
 
   // the page loaded: its sign-in kept for requests and the extension;
@@ -135,12 +128,9 @@ final class Page: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessageH
     type == .microphone ? .grant : .deny
   }
 
-  // the bridge: {buy: dollars}
-  func userContentController(_ ucc: WKUserContentController, didReceive msg: WKScriptMessage) {
-    if let usd = (msg.body as? [String: Any])?["buy"] as? Int {
-      Task { await Store.buy(usd) }
-    }
-  }
+  // the bridge: there, so the page knows it is in the app; it is sent
+  // nothing
+  func userContentController(_ ucc: WKUserContentController, didReceive msg: WKScriptMessage) {}
 
   // Download
   // --------
@@ -191,53 +181,6 @@ final class Page: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessageH
       top = next
     }
     top?.present(vc, animated: true)
-  }
-
-}
-
-// Store
-// =====
-
-@MainActor
-enum Store {
-
-  // `credits.<usd>`, sold for the account signed in, then taken
-  static func buy(_ usd: Int) async {
-    let me = await Site.call("/api/me", nil)
-    guard let id = (me["id"] as? String).flatMap({ Int($0) }) else {
-      return Page.shared.say(me["error"] as? String ?? "Sign in first.")
-    }
-    guard let product = try? await Product.products(for: ["credits.\(usd)"]).first else {
-      return Page.shared.say("The App Store can't sell this credit right now. Try again later.")
-    }
-    let account = UUID(uuidString: String(format: "00000000-0000-4000-8000-%012lx", id))!
-    let result = try? await product.purchase(options: [.appAccountToken(account)])
-    guard case .success(let sold)? = result else {
-      return
-    }
-    await take(sold)
-  }
-
-  // a purchase posted; finished once the server took it
-  static func take(_ sold: VerificationResult<StoreKit.Transaction>) async {
-    let out = await Site.call("/api/apple", Data(sold.jwsRepresentation.utf8))
-    if let error = out["error"] as? String {
-      return Page.shared.say(error)
-    }
-    if case .verified(let done) = sold {
-      await done.finish()
-    }
-  }
-
-  // purchases not taken yet, then any made outside the app's ask (an
-  // approval, an interrupted purchase), as they come
-  static func resume() async {
-    for await sold in StoreKit.Transaction.unfinished {
-      await take(sold)
-    }
-    for await sold in StoreKit.Transaction.updates {
-      await take(sold)
-    }
   }
 
 }
