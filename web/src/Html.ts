@@ -184,7 +184,7 @@ export function fine_html(app: boolean): string {
 // restoring a backup and deleting ask first, in place (main.ts); then,
 // for the server's owner, together at the bottom: the base prompt and
 // the server's settings (main.ts fills .owned)
-export function account_html(a: View.Account, app: boolean, soul: View.Soul | null, owner: boolean, notify: Notify | null = null): string {
+export function account_html(a: View.Account, app: boolean, prompts: View.Prompts | null, owner: boolean, notify: Notify | null = null): string {
   const tops    = a.topups ?? [];
   const days    = View.account_days(a);
   const balance = a.credits === null ? "" : section_html("Balance", `<p class="big">${View.usd_show(a.credits)}</p>` + credit_html(app));
@@ -203,17 +203,17 @@ export function account_html(a: View.Account, app: boolean, soul: View.Soul | nu
     item("Delete account", "Erases chat and memory for good.", `<button class="chip red del">Delete</button>`),
   ];
   const account = section_html("Sign-in and data", acts.join("") + back + kill);
-  const unread  = item("Could not read your instructions.", "", `<button class="chip retry">Try again</button>`);
-  const mine    = section_html("Your instructions", soul === null ? unread : prompt_html("soul", soul.soul, "Who you are, what Unii goes by, its tone: your SOUL.md, in every prompt Unii and its agents get.", "I'm Sam, a designer in Lisbon. Call yourself Kit. Be brief and warm."));
-  const base    = soul?.base === undefined ? "" : section_html("Base prompt", prompt_html("base", soul.base, "Unii's prompt for every user of this server, in place of the built-in one (you own the server). Empty: the built-in one.", ""));
+  const unread  = item("Could not read the prompts.", "", `<button class="chip retry">Try again</button>`);
+  const mine    = section_html("Prompts", prompts === null ? unread : prompt_html("prompt", prompts.prompt.text, "The user prompt: Unii's system prompt in every turn; its subagents read it too. Add who you are and how you want work done at its end. prompt.md in the server's folder; empty: the built-in one.")
+    + prompt_html("compact", prompts.compact.text, "The compaction prompt: all a summary of the memory gets, nothing else. compact.md in the server's folder; empty: the built-in one."));
   const links   = a.bills ? `<p class="foot"><a href="/pricing" target="_blank">Prices</a> · <a href="/terms.html" target="_blank">Terms</a> · <a href="/privacy.html" target="_blank">Privacy</a> · <a href="mailto:contact@higherorderco.com">Help</a></p>` : "";
   const owned   = owner ? `<div class="owned"></div>` : "";
-  return `<a class="back" href="/" data-go="/">← Chat</a><h1>Settings</h1>` + money + mine + account + base + owned + links;
+  return `<a class="back" href="/" data-go="/">← Chat</a><h1>Settings</h1>` + money + mine + account + owned + links;
 }
 
-// a prompt's editor: its note, its text (name: what /api/soul sets), Save
-function prompt_html(name: string, text: string, note: string, hint: string): string {
-  const area = `<textarea name="${name}" rows="8" spellcheck="false" placeholder="${esc(hint)}">${esc(text)}</textarea>`;
+// a prompt's editor: its note, its text (name: what /api/prompts sets), Save
+function prompt_html(name: string, text: string, note: string): string {
+  const area = `<textarea name="${name}" rows="12" spellcheck="false">${esc(text)}</textarea>`;
   return `<form class="prompt"><p class="note">${esc(note)}</p>${area}<div><p class="why"></p><button class="chip">Save</button></div></form>`;
 }
 
