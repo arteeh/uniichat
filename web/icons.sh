@@ -11,11 +11,13 @@
 #       circle of radius 40%) a mask may cut to
 #   apple-touch-icon.png  180x180 (iPhone, iPad home screens): opaque
 #       white, iOS rounds its corners; the bubble 60% wide
-# White is the manifest's background_color (its splash screen); it sets no
-# theme_color, as Chrome on Android paints its navigation bar that one
-# colour whatever the phone's theme; without it the phone colours that bar
-# itself, and index.html's theme-color, light and dark, colours the status
-# bar (#10). Each icon is
+# The manifest's theme_color and background_color are both the dark page
+# colour (#171719, style.css's dark --paper): Chrome on Android paints its
+# navigation bar the theme_color whatever the phone's theme, and picks its
+# buttons to contrast; without one it shows the background_color under
+# unpainted buttons, which were white on white (#10). A manifest takes one
+# colour, so light mode gets a dark bar too. index.html's theme-color,
+# light and dark, colours the status bar. Each icon is
 # centred optically: on the point halfway between the bubble's box centre
 # (32,32 in mark.svg's 64x64) and its ink's centroid (31.5,28.3), as the
 # tail weighs little. Run where rsvg-convert is, e.g. from the repo:
