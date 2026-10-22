@@ -1410,11 +1410,7 @@ export namespace Main {
       return Response.json({ error: "A prompt holds at most 64 KB." }, { status: 413 });
     }
     const { file, def } = PROMPTS[which];
-    if (text === "" || text === def) {
-      fs.rmSync(file, { force: true });
-    } else {
-      fs.writeFileSync(file, text + "\n");
-    }
+    write_whole(file, text === "" || text === def ? null : text + "\n");
     return Response.json(read());
   }
 
@@ -1469,8 +1465,8 @@ export namespace Main {
   export async function start(port: number): Promise<void> {
     Reap.start();
     await Main.lock();
-    if (fs.existsSync(config.DIR + "/users") && !fs.existsSync(CHAT)) {
-      throw new Error(config.DIR + " holds an older unii's data (users/): run the installer (unii update) to move it, then start again");
+    if ((fs.existsSync(config.DIR + "/users") && !fs.existsSync(CHAT)) || fs.existsSync(config.DIR + "/.migrating")) {
+      throw new Error(config.DIR + " holds an older unii's data, not yet (or not all) moved to this version's layout: run the installer (curl -fsSL " + INSTALL + " | sh) with no unii server running, then start again");
     }
     fs.writeFileSync(PID, String(process.pid));
     Owner.open();
