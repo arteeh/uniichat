@@ -79,7 +79,6 @@ export const SETTINGS: Setting[] = [
   { key: "site",      def: "http://127.0.0.1:8788",             apply: "restart", web: true  },
   { key: "apple",     def: "",                                  apply: "restart", web: true  },
   { key: "apns",      def: "",                                  apply: "restart", web: true  },
-  { key: "work",      def: DIR + "/work",                       apply: "restart", web: false },
   { key: "after",     def: "",                                  apply: "now",     web: false },
 ];
 
@@ -101,7 +100,6 @@ export const STARTED: Record<string, string> = Object.fromEntries(SETTINGS.map((
 export const SITE    = config_value(FILE, "site").replace(/\/$/, "");
 export const OFFER: Offer = MADE.offer;
 
-export const WORK       = config_path(config_value(FILE, "work"));
 export let   AFTER      = MADE.after;
 export let   PICK       = MADE.pick;
 

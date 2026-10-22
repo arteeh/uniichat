@@ -1,213 +1,104 @@
-UniiChat
-========
-
-[▶ Watch the announcement video](https://x.com/VictorTaelin/status/2108200878553588091)
-
-**This repo is vibe-coded.** AI agents wrote nearly all of it, and AI
-agents reviewed it. Read it, run it and fork it as such: expect bugs.
+UniiChat (arteeh's fork)
+========================
 
 UniiChat is an AI agent with one chat that never ends. There is no "new
 chat" button: you talk to the same agent for days, weeks, years, and it
-remembers. The hosted version is at https://uniichat.com. This is its
-source, to run your own server on your own API keys.
+remembers. This fork runs it as your own server, for you alone. The
+original is [VictorTaelin/uniichat](https://github.com/VictorTaelin/uniichat).
 
-How it works
-------------
+**This repo is vibe-coded.** AI agents wrote nearly all of it, and AI
+agents reviewed it. Expect bugs.
+
+Features
+--------
 
 - **One chat, a memory tree.** Every message is summarized into one line,
-  and neighboring lines are merged in pairs, again and again, into a
-  binary tree. Each call sees a view of the whole chat, up to 128 KB:
-  recent messages one line each, older ones covered by fewer, broader
-  lines. Detail fades with age, but nothing is lost.
-- **Zoom.** The agent can open any line into the two it was made from,
-  down to the original message. So its context never rots, and it never
-  needs a "compaction" that throws the past away.
-- **Built in the background.** Summaries are written by a cheaper model
-  (the compactor) as messages arrive. The view changes only at its end,
-  so each call reads most of its input from the vendor's prompt cache.
-- **Every window is a view.** The server owns the chat. A browser tab, or
-  `unii` in a terminal, shows it live; any of them can send a message,
-  stop the work, or change the model.
-- **Agents and tools.** The agent runs a shell, reads and edits files,
-  and can drive a Mac's screen, on any computer where `unii` is open
-  (each is a device it can name). It can spawn subagents, which work in
-  the background and report back as messages.
-- **Schedules.** The agent can schedule a message to itself, once or by
-  a cron expression, in the user's time zone. At its time it arrives as
-  the timer's, not the user's, whether or not anyone has the chat open;
-  the site's ⏰ lists and cancels them.
-- **Import.** Bring your past Claude and ChatGPT chats (Claude Code and
-  Codex folders, or the websites' exports); they join the tree.
+  and neighboring lines are merged in pairs, again and again. Each call
+  sees the whole chat, recent messages in detail and older ones in
+  broader lines, and can zoom into any line down to the original message.
+- **Agents and devices.** Unii runs a shell, reads and edits files and
+  views images and videos on your computers that run `unii device`. It
+  spawns subagents, which work in the background and report back.
+- **Schedules, goals, imports.** It can message itself on a schedule,
+  keep working until a `/goal` is met, and take in your past Claude Code
+  and Codex sessions (or the websites' exports).
+- **Web, phone and terminal.** The server hosts the web app (installable,
+  with push notifications); `unii` is the same chat in a terminal.
 
-The design is in the header comment of each file. Start with Memory.ts
-(the tree and the view), Server.ts (the chat, turns, workers) and
-AskAI.ts (model calls and the cache).
+What this fork adds: one owner per server, no accounts or email; Claude
+and ChatGPT plans as vendors (`claude-sub`, `openai-sub`) beside API
+keys; profiles that fall back to the next model when one is out; waiting
+out usage limits; MCP servers (also run on a device); skills; image and
+video viewing; an editable user prompt and compaction prompt; a memory
+tree browser.
 
-Run it
-------
+Install and set up
+------------------
 
-You need [Bun](https://bun.sh) and an Anthropic API key (or an OpenAI
-one, below).
+On Linux or macOS (Windows: WSL):
 
-    export ANTHROPIC_API_KEY=sk-ant-...
-    bun Server.ts                    # http://127.0.0.1:8788, data in ~/.unii
+    curl -fsSL https://github.com/arteeh/uniichat/releases/latest/download/install.sh | sh
 
-Then open http://127.0.0.1:8788 and type your email. With no mail key
-set, the server prints the sign-in link in its output: open it. Or chat
-from a terminal:
+This installs `unii` to `~/.local/bin`; `unii update` installs the
+newest release. The installer also moves data from older versions.
 
-    bun Term.ts http://127.0.0.1:8788
+1. **Start the server** on the computer that keeps your chat (as a
+   systemd user service, say): `unii serve` serves http://127.0.0.1:8788;
+   its data is in `~/.unii` (`$UNII_DIR`). Put it behind HTTPS (e.g.
+   `tailscale serve`) to reach it from elsewhere, and set `site` to that
+   address.
+2. **Sign in.** On the server's computer, `unii serve link` prints a link
+   that signs a browser in. A terminal or a device signs in by a link and
+   a code you confirm in that browser.
+3. **Pick a vendor.** In the web app, ☰ › Settings: vendors, models and
+   API keys (kept in `~/.unii/keys.json`). For a plan instead of keys,
+   run `unii serve claude` (Claude) or `unii serve chatgpt` (ChatGPT) on
+   the server's computer, then pick `claude-sub` or `openai-sub`. Each
+   takes `logout` or `status`.
+4. **Add devices.** On each computer Unii may work on, run `unii device
+   https://your-server` (as a service to keep it up). Its work dir is
+   `~/.unii/work`; its settings are in `~/.config/unii/device.json`.
 
-It asks for your email, the server prints a link, and the page it opens
-asks for the code the terminal shows. `bun Term.ts help` lists the rest.
+The server's settings are in `~/.unii/config.json` (most are on the
+Settings page). Each may also be set as `UNII_<KEY>`, which wins. Besides
+`vendors`, `models`, `pick`, `compactor`, `agents`, `profiles` and `site`:
 
-Other commands:
-
-    bun run test                     # the tests, each file on its own
-    bun run web                      # rebuilds web/app.js from web/src
-    bun run build                    # one `unii` executable; `unii serve`
-                                     # runs the server it carries, and
-                                     # claude-sub's Claude Code (Build.ts)
-
-Your chats live in ~/.unii/users/<id>, one JSON line per message
-(main/) and per summary (tree/). They are the memory: back them up
-(`backup`, below). A user restores theirs from a backup on the account
-page (Restore a backup); a tar.gz of the dir made by hand works too.
-
-Config
-------
-
-`~/.unii/config.json` (optional; the dir is `$UNII_DIR`). Each key may
-also be set as the variable `UNII_<KEY>`, which wins over the file. The
-server's owner can also change most of them, and the keys, at the
-bottom of the Settings page (☰ menu, or /settings); see below.
-
-- `site`: the server's origin, for sign-in links (default
-  http://127.0.0.1:8788). Another port: `UNII_SITE=http://127.0.0.1:9000
-  bun Server.ts 9000`.
-- `vendors`: what the server offers, comma-separated: `claude-api`
-  (default), `openai-api`, `openai-sub` (a ChatGPT plan, below),
-  `claude-sub` (a Claude plan, below).
-- `models`: the models offered, by label (Pick.ts; default all).
-- `pick`: what a chat runs on until it picks another,
-  `vendor:model:effort:speed` (default `claude-api:sonnet-5.5:medium:slow`).
-- `compactor`: what writes the summaries (default
-  `claude-api:haiku-5.5:high:slow`).
-- `agents`: what subagents run on (default: the chat's pick). A
-  subagent spawned with a model runs on that with the model swapped.
-- `profiles`: named rankings of models, listed first in the model menu,
-  e.g. `{"Daily": ["claude-api:sonnet-5.5", "openai-api:gpt-6.1-sol:high"]}`
-  (each `vendor:model[:effort[:speed]]`, the pick's effort and speed if
-  unset; default none). A chat on a profile runs on its first model and
-  goes on with the next when one is out (busy past its retries, out of
-  credit or quota, a bad key, a usage limit that resets in a minute or
-  more), noting each switch and the way back; a model picked has no
-  fallback. `pick`, `compactor` and `agents` may name a profile too.
-- `work`: the agents' working dirs on each device (default
-  ~/.unii/work).
-- `rules`: a file appended to every system prompt. Each user's SOUL.md
-  (set on the Settings page; until then "You are Unii, an AI agent...")
-  starts Unii's prompt; one they wrote ends their agents' too.
-- `backup`: a dir for snapshots of each chat (default none: no
-  backups). Every `backup_every` hours (default 24), a chat changed
-  since its last snapshot gets a new one, `<backup>/<id>/<date>.tar.gz`;
-  the last `backup_keep` (default 7) are kept. `backup_run`, a shell
-  command, gets each new one's path as `$1` (e.g. `rclone copy "$1"
-  remote:unii`), killed after 10 minutes. A failure is a note in that
-  chat, tried again within the hour. Deleting an account deletes its
-  snapshots here.
+- `mcp`: MCP servers, in Claude's `mcpServers` shape (or a file path).
+  Add `"device": "<name>"` to run one on a device.
 - `after`: a shell command run after each turn.
-- `workers`: how many processes serve the users (default none: one
-  process). With a number, `Server.ts` only routes, behind a proxy that
-  honors its `x-unii-worker` header (Server.ts explains).
-- `apple`, `apns`: the iOS app's App ID and push key id (ios/).
-- `owner`: who may see the server's part of the Settings page and
-  replace Unii's base prompt there, for every user (compactions use it
-  too: keep the built-in compaction rules in it): sign-in emails or
-  @logins, comma-separated (e.g. `"owner": "you@example.com"`). Set here
-  or as `UNII_OWNER` only, never on the page. None named: no one may.
-- `chatgpt`: where the ChatGPT sign-in is kept (default
-  ~/.unii/chatgpt.json).
-- `mcp`: MCP servers whose tools the AI and its subagents get beside
-  their own, named `<server>__<tool>`. The shape of Claude's
-  `mcpServers` (its `.mcp.json` works as is), as JSON or a file's path:
-  a program (`command`, `args`, `env`, `cwd`) or a URL (`"type":
-  "http"`, `url`, `headers`; streamable HTTP). `${VAR}` reads the
-  environment. `timeout`: seconds a call may take (600). `"device":
-  "<name>"` runs a program on that device instead; while it isn't open,
-  its tools are left out. E.g. `{"fs": {"command": "npx", "args": ["-y",
-  "@modelcontextprotocol/server-filesystem", "/srv/notes"]}}`. A program
-  gets only `HOME`, `PATH`, `USER`, `LANG` and a few more of unii's
-  variables, plus its `env`. Each chat runs its own copy, with the
-  server's rights: every user of the server gets them. `/mcp <name>` or
-  the site's ☰ menu turns one off or on in a chat. Plain `http` sends
-  headers unencrypted: use it on a network you trust.
-- `claude_sub`, `claude`: claude-sub's Claude Code config dir (default
-  ~/.unii/claude-sub) and executable (default: the one `unii` carries,
-  else the Agent SDK's in node_modules). Each claude-sub call runs its
-  own Claude Code (about 235 MB) while it runs; summaries run 4 at most
-  at once.
+- `claude_sub`, `claude`, `chatgpt`: where the plans' sign-ins are kept.
+- `apple`, `apns`: the iOS app's (ios/) App ID and push key id.
 
-`vapid.json` in the server's dir is its Web Push key pair, made at first
-start; keep it, as a new one silences every browser until notifications
-are turned on again. Installing and notifications need https (or 127.0.0.1).
+The prompts: `~/.unii/prompt.md` (every turn; its subagents read it too)
+and `~/.unii/compact.md` (every summary, nothing else) replace the
+built-in `prompt.txt` and `compact.txt`. Edit them on the Settings page.
 
-Keys are read from the environment: `ANTHROPIC_API_KEY`,
-`OPENAI_API_KEY`, `RESEND_API_KEY` (to email sign-in links; none: they
-print), `APNS_KEY`. One the environment doesn't set is read from
-`~/.unii/keys.json` (mode 600), where the Settings page puts them.
+Use
+---
 
-For the owner, the Settings page also shows the server's settings it
-can change, and each key by its last 4 characters only; a save is
-checked as a start checks config.json and applies at once on every
-worker (vendors, models, pick, compactor, agents, profiles, keys) or on the next
-start (`site`, `apple`, `apns`). `owner`, `workers`, `work`, `rules`,
-`after` and what the environment sets are changed on the server only,
-and not shown.
+- **Web:** the server's address. ☰ has Settings, the memory tree, Import
+  History and the MCP servers on or off.
+- **Terminal:** `unii [url]` (default: `$UNII_URL`, else the last server,
+  else the local one). `/help` lists its commands; `/import` brings in
+  this computer's Claude and Codex sessions.
+- `unii help` lists every command. Once a day the terminal asks GitHub
+  for the newest release; `UNII_NO_UPDATE_CHECK=1` turns that off.
 
-With only an OpenAI key, set `vendors`, `pick` and `compactor` to
-`openai-api` models, e.g. `UNII_VENDORS=openai-api
-UNII_PICK=openai-api:gpt-6.1-sol:medium:slow
-UNII_COMPACTOR=openai-api:gpt-6-luna:high:slow`.
+From source (Bun): `bun install`, `bun run web` (rebuilds web/app.js),
+`bun Cli.ts <command>`, `bun run build` (one `unii` executable).
 
-With a ChatGPT plan instead, run `unii serve chatgpt` (or `bun ChatGPT.ts`;
-it shows a link and a code to enter in any browser; `logout` signs out,
-`status` shows who it's signed in as) and use
-`openai-sub` the same way. The sign-in is the server's: every user's
-calls run on that one plan, so offer it only on a server for yourself.
-A server that bills refuses to start with it.
+Q&A
+---
 
-With a Claude plan instead, run `unii serve claude` (`logout`, `status`;
-from source: `bun install`, then `bun Term.ts serve claude`) to sign in
-through Claude Code, and use `claude-sub` the same way. Every user's calls then run on your
-plan: Anthropic allows no one to offer others their Claude plan, so
-offer it only on a server for yourself. A server that bills refuses it.
+**Can Unii use my screen?** Not by itself: add a computer-use MCP server,
+such as [cua-driver](https://github.com/trycua/cua/tree/main/libs/cua-driver),
+run on that device:
 
-A self-hosted server is free: it bills no one, shows no prices, and calls
-only the model vendors. Billing.ts is the one place a hosted server
-plugs in its billing (uniichat.com sells credits; this repo has none).
+    "mcp": { "screen": { "command": "cua-driver", "args": ["mcp"], "device": "my-mac",
+             "env": { "CUA_DRIVER_RS_TELEMETRY_ENABLED": "0" } } }
 
-The `unii` terminal
--------------------
-
-`web/install.sh` (served at /install.sh) runs the installer of this
-fork's newest GitHub release (arteeh/uniichat), which installs `unii`;
-`unii update` replaces the running `unii` with that release. `unii` alone opens
-uniichat.com; `unii <url>` opens any server. Run with
-`UNII_COMPUTER=1` on a Mac, the agent may use its screen (it compiles
-Computer.swift with swiftc; macOS asks for Screen Recording and
-Accessibility). [Agent Skills](https://agentskills.io) in
-`~/.agents/skills` or `<work>/main/.agents/skills` where `unii` runs are
-offered to the agent.
-
-On Windows without WSL, build `unii.exe` (`bun build --compile
---target=bun-windows-x64 Term.ts --outfile unii.exe`) and run `unii.exe
-<url>` in PowerShell; its shell tool runs PowerShell (pwsh, else powershell.exe).
-
-Telemetry: once a day the `unii` terminal asks GitHub which release of
-arteeh/uniichat is the newest (Term.ts update_check, a GET of
-/releases/latest, not followed) and notes a newer one.
-`UNII_NO_TELEMETRY=1` turns it off.
+**Can others use my server?** No: a server has one owner. Anthropic and
+OpenAI don't allow sharing a plan, either.
 
 License
 -------

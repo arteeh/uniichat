@@ -23,7 +23,6 @@
 // The user's MCP servers (Mcp.ts) add their tools to the master's and its
 // subagents', but those of servers the chat turned off (Memory `off`).
 
-import * as fs from "node:fs";
 import { AskAI, type Ask, type Block, type Call, type Event, type Kind } from "./AskAI.ts";
 import { Agent, type Out } from "./Agent.ts";
 import { report_text } from "./Call.ts";
@@ -99,8 +98,6 @@ export type Tools = {
 
 // Constants
 // =========
-
-export const MAIN = config.WORK + "/main";
 
 // the most web searches a request of a turn or a subagent runs
 export const SEARCHES = 10;
@@ -231,7 +228,6 @@ export namespace Tools {
     const mcp = Mcp.servers((text) => hooks.note(text), config.MCP, run, (device) => typeof Tools.open(tools, device) !== "string");
     const tools: Tools = { mem, devices: new Map(), agents: new Map(), mcp, key, url, hooks };
     CHATS.set(key, tools);
-    fs.mkdirSync(MAIN, { recursive: true });
     return tools;
   }
 
@@ -639,7 +635,6 @@ export namespace Tools {
   export function start(tools: Tools, role: Agent["role"], task: string, view: Block[]): string {
     const name = Memory.agent_new(tools.mem);
     const agent = { name, role, call: null, live: [], calls: {}, stop: false, view, replies: [] };
-    fs.mkdirSync(config.WORK + "/" + name, { recursive: true });
     tools.agents.set(name, agent);
     tools.hooks.push(agent, "note", SUB_NOTE + (role.model === null ? "" : SUB_ON + role.model) + (role.effort === null ? "" : SUB_AT + role.effort));
     tools.hooks.push(agent, "user", task);
