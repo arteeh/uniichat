@@ -30,8 +30,9 @@ export type Node = { text: string; to: string };
 
 export type Live = { kind: Kind; text: string };
 
-// log: null while it loads
-export type Page = { name: string; log: Entry[] | null; live: Live[] };
+// log: null while it loads; pick: what its agent runs on (null: not
+// known yet, or its model no longer offered)
+export type Page = { name: string; log: Entry[] | null; live: Live[]; pick: Pick | null };
 
 // an import's time done and in all (weighed as Server.ts Chat.time), why
 // paused, its messages, its nodes not built by level
@@ -50,7 +51,8 @@ export const OPENING = 1;
 export const SUMMARIES = "summaries";
 export type Wait = string;
 
-// agents: those at work; vendors, models, profiles: those offered;
+// agents: those at work; runs: what each runs on (Tools.shown);
+// vendors, models, profiles: those offered;
 // limits: the calls waiting for a usage
 // limit, by TURN or agent name; timers: the chat's schedules, each
 // message's head (Server.ts Chat.state)
@@ -58,6 +60,7 @@ export type State = {
   busy      : boolean;
   wait      : Wait;
   agents    : string[];
+  runs      : Record<string, Pick>;
   pick      : Pick | null;
   vendors   : Vendor[];
   models    : string[];
@@ -107,7 +110,7 @@ export type Server =
   | { $: "delta"; agent?: string; kind: Kind; text: string; fresh?: boolean }
   | { $: "live"; agent?: string; live: Live[] }
   | ({ $: "state" } & State)
-  | { $: "agent"; name: string; found: boolean }
+  | { $: "agent"; name: string; found: boolean; pick?: Pick | null }
   | { $: "note"; text: string }
   | ({ $: "ack"; id: string } & Answer)
   | { $: "jobs"; ids: string[] }
@@ -174,7 +177,7 @@ export type Row =
 export type Tab = { name: string | null; here: boolean; text: string };
 
 // hint: the knob's value, named (a tooltip; the site's note when it
-// changes); choices: its menu (the site's)
+// changes); choices: its menu (the site's; none: shown only)
 export type Knob = { text: string; move: Move; hint: string; choices: Choice[] };
 
 // a value a knob can take: text, as shown (a model by its label alone,
@@ -260,6 +263,7 @@ export function view_new(): View {
     busy      : false,
     wait      : "",
     agents    : [],
+    runs      : {},
     pick      : null,
     vendors   : [],
     models    : LABELS,
@@ -327,6 +331,9 @@ export function view_hear(v: View, msg: Server): Client[] {
     case "state": {
       const { $, ...state } = msg;
       Object.assign(v, state);
+      for (const page of v.pages.values()) {
+        page.pick = v.runs[page.name] ?? page.pick;
+      }
       return [];
     }
     case "agent": {
@@ -336,6 +343,7 @@ export function view_hear(v: View, msg: Server): Client[] {
       }
       if (msg.found) {
         page.log = [];
+        page.pick = msg.pick ?? page.pick;
         return [];
       }
       v.pages.delete(msg.name);
@@ -432,7 +440,7 @@ export function view_act(v: View, act: Act): Client[] {
         return [];
       }
       const known = v.pages.get(act.name);
-      v.page = known ?? { name: act.name, log: null, live: [] };
+      v.page = known ?? { name: act.name, log: null, live: [], pick: v.runs[act.name] ?? null };
       v.pages.set(act.name, v.page);
       return known === undefined ? [{ $: "agent", name: act.name }] : [];
     }
@@ -546,17 +554,29 @@ export function view_running(v: View): boolean {
 }
 
 export function view_pick(v: View): Knob[] {
-  if (v.pick === null) {
-    return [];
+  return v.pick === null ? [] : view_knobs(v, v.pick, true);
+}
+
+// the pick over the box: the chat's, or on an agent's page what that
+// agent runs on, shown only (none while not known)
+export function view_shown(v: View): Knob[] {
+  if (v.page === null) {
+    return view_pick(v);
   }
-  const { model, effort, speed, profile } = v.pick;
+  return v.page.pick === null ? [] : view_knobs(v, v.page.pick, false);
+}
+
+// a pick's knobs; menus: with their choices
+function view_knobs(v: View, pick: Pick, menus: boolean): Knob[] {
+  const { model, effort, speed, profile } = pick;
   const ranks = (v.profiles?.[profile ?? ""] ?? []).map((f) => f.model.label).join(", ");
   // a model two vendors offer: its vendor in the hint, not in its name
-  const whose = Pick.twin(v.pick.vendor, model, v.vendors) ? ", " + v.pick.vendor : "";
+  const whose = Pick.twin(pick.vendor, model, v.vendors) ? ", " + pick.vendor : "";
+  const choices = (move: Move) => (menus ? view_choices(pick, move, v) : []);
   return [
-    { text: profile ?? model, move: "model", hint: profile === undefined ? model + whose : profile + ": " + ranks, choices: view_choices(v.pick, "model", v) },
-    { text: effort, move: "effort", hint: effort + " effort", choices: view_choices(v.pick, "effort", v) },
-    { text: speed, move: "speed", hint: speed, choices: view_choices(v.pick, "speed", v) },
+    { text: profile ?? model, move: "model", hint: profile === undefined ? model + whose : profile + ": " + ranks, choices: choices("model") },
+    { text: effort, move: "effort", hint: effort + " effort", choices: choices("effort") },
+    { text: speed, move: "speed", hint: speed, choices: choices("speed") },
   ];
 }
 

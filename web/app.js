@@ -918,6 +918,7 @@ function view_new() {
     busy: false,
     wait: "",
     agents: [],
+    runs: {},
     pick: null,
     vendors: [],
     models: LABELS,
@@ -984,6 +985,9 @@ function view_hear(v, msg) {
     case "state": {
       const { $, ...state } = msg;
       Object.assign(v, state);
+      for (const page of v.pages.values()) {
+        page.pick = v.runs[page.name] ?? page.pick;
+      }
       return [];
     }
     case "agent": {
@@ -993,6 +997,7 @@ function view_hear(v, msg) {
       }
       if (msg.found) {
         page.log = [];
+        page.pick = msg.pick ?? page.pick;
         return [];
       }
       v.pages.delete(msg.name);
@@ -1082,7 +1087,7 @@ function view_act(v, act) {
         return [];
       }
       const known = v.pages.get(act.name);
-      v.page = known ?? { name: act.name, log: null, live: [] };
+      v.page = known ?? { name: act.name, log: null, live: [], pick: v.runs[act.name] ?? null };
       v.pages.set(act.name, v.page);
       return known === undefined ? [{ $: "agent", name: act.name }] : [];
     }
@@ -1167,16 +1172,23 @@ function view_typing(v) {
   return v.page === null;
 }
 function view_pick(v) {
-  if (v.pick === null) {
-    return [];
+  return v.pick === null ? [] : view_knobs(v, v.pick, true);
+}
+function view_shown(v) {
+  if (v.page === null) {
+    return view_pick(v);
   }
-  const { model, effort, speed, profile } = v.pick;
+  return v.page.pick === null ? [] : view_knobs(v, v.page.pick, false);
+}
+function view_knobs(v, pick, menus) {
+  const { model, effort, speed, profile } = pick;
   const ranks = (v.profiles?.[profile ?? ""] ?? []).map((f) => f.model.label).join(", ");
-  const whose = Pick.twin(v.pick.vendor, model, v.vendors) ? ", " + v.pick.vendor : "";
+  const whose = Pick.twin(pick.vendor, model, v.vendors) ? ", " + pick.vendor : "";
+  const choices = (move) => menus ? view_choices(pick, move, v) : [];
   return [
-    { text: profile ?? model, move: "model", hint: profile === undefined ? model + whose : profile + ": " + ranks, choices: view_choices(v.pick, "model", v) },
-    { text: effort, move: "effort", hint: effort + " effort", choices: view_choices(v.pick, "effort", v) },
-    { text: speed, move: "speed", hint: speed, choices: view_choices(v.pick, "speed", v) }
+    { text: profile ?? model, move: "model", hint: profile === undefined ? model + whose : profile + ": " + ranks, choices: choices("model") },
+    { text: effort, move: "effort", hint: effort + " effort", choices: choices("effort") },
+    { text: speed, move: "speed", hint: speed, choices: choices("speed") }
   ];
 }
 function view_choices(pick, move, v) {
@@ -1469,7 +1481,7 @@ function images_html(names) {
   return names.length === 0 ? "" : `<div class="pics">${pics.join("")}</div>`;
 }
 function pick_html(fold, on, knobs) {
-  const parts = knobs.map((k) => [
+  const parts = knobs.map((k) => k.choices.length === 0 ? [`<span class="knob" title="${esc(k.hint)}">${esc(k.text)}</span>`] : [
     `<button title="${esc(k.hint)}" data-knob="${k.move}" popovertarget="pick-${k.move}" aria-haspopup="menu">${esc(k.text)}</button>`,
     `<div id="pick-${k.move}" class="choices" popover role="menu" aria-label="${k.move[0].toUpperCase() + k.move.slice(1)}">${k.choices.map(choice_html).join("")}</div>`
   ]);
@@ -2382,15 +2394,13 @@ function bars() {
     $("#timers").hidePopover();
   }
   send.classList.toggle("stop", stop);
-  send.disabled = !on;
-  BOX.disabled = !on;
-  $(".attach").disabled = !on;
-  $(".mic").disabled = !on || v.out.some((p) => p.msg.$ === "voice");
+  $(".composer").hidden = !on;
+  $("#pics").hidden = !on;
+  $(".mic").disabled = v.out.some((p) => p.msg.$ === "voice");
   $(".mic").classList.toggle("rec", P.rec !== null);
-  $(".composer").classList.toggle("off", !on);
   $(".composer").classList.toggle("rec", P.rec !== null);
   const knob = document.activeElement?.dataset?.knob;
-  markup($("#pick"), pick_html(view_fold(v), v.fold === null, view_pick(v)));
+  markup($("#pick"), pick_html(view_fold(v), v.fold === null, view_shown(v)));
   if (knob !== undefined) {
     $("#pick [data-knob=" + knob + "]").focus();
   }

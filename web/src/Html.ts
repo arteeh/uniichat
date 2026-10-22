@@ -116,9 +116,10 @@ function images_html(names: string[]): string {
 
 // the line over the message box: fold/unfold (none on an agent's page),
 // a rule, then the pick's knobs, each opening its menu (the browser's
-// popover, placed by main.ts)
+// popover, placed by main.ts); one without choices (an agent's page)
+// shown only
 export function pick_html(fold: string | null, on: boolean, knobs: View.Knob[]): string[] {
-  const parts = knobs.map((k) => [
+  const parts = knobs.map((k) => k.choices.length === 0 ? [`<span class="knob" title="${esc(k.hint)}">${esc(k.text)}</span>`] : [
     `<button title="${esc(k.hint)}" data-knob="${k.move}" popovertarget="pick-${k.move}" aria-haspopup="menu">${esc(k.text)}</button>`,
     `<div id="pick-${k.move}" class="choices" popover role="menu" aria-label="${k.move[0].toUpperCase() + k.move.slice(1)}">${k.choices.map(choice_html).join("")}</div>`,
   ]);

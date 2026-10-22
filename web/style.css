@@ -100,7 +100,7 @@ body.account footer { position: fixed; inset: auto 0 0; background: none; pointe
 body.account footer > :not(#toast) { display: none; }
 #pick { width: min(var(--col), 100%); margin: 0 auto 6px; display: flex; align-items: center; gap: 6px; font: 12.5px/20px var(--sans); color: var(--mid); }
 #pick .rule { flex: 1; height: 1px; background: var(--hair); margin-right: 4px; }
-#pick > button { padding: 0 6px; border-radius: 6px; }
+#pick > :is(button, .knob) { padding: 0 6px; border-radius: 6px; }
 #pick > button:hover, #pick > button:has(+ :popover-open) { background: var(--block); color: var(--ink); }
 #pick .dot { color: var(--soft); }
 /* a knob's menu (main.ts places it over its knob): a row per value, the
@@ -140,10 +140,6 @@ body.account footer > :not(#toast) { display: none; }
    screen's pixel ratio isn't whole, until it pushes the buttons off */
 .voice canvas { flex: 1; width: 0; height: 28px; }
 .voice span { font: 14px var(--mono); color: var(--mid); font-variant-numeric: tabular-nums; }
-.composer.off { border-color: var(--hair); }
-.composer.off textarea { color: var(--soft); }
-.composer.off .send { background: var(--hair); cursor: default; }
-.composer.off :is(.attach, .mic) { visibility: hidden; }
 /* up to the user's message (main.ts mine): the ☰ button's look, smaller,
    under the header at the column's right edge; down to the bottom (main.ts
    down) the same, above the pick bar's right end */
