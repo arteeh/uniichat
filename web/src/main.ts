@@ -178,9 +178,12 @@ function chat(): void {
   onpopstate = route;
   importer();
   document.ondragover = (ev) => ev.preventDefault();
+  // on an agent's page (no box) a drop is let go: it would wait unseen
   document.ondrop = (ev) => {
     ev.preventDefault();
-    attach([...(ev.dataTransfer?.files ?? [])]);
+    if (View.view_typing(v)) {
+      attach([...(ev.dataTransfer?.files ?? [])]);
+    }
   };
   document.onclick = click;
   // a phone's keyboard up or down: the box's last line stays in sight, if

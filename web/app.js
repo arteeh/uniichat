@@ -1862,7 +1862,9 @@ function chat() {
   document.ondragover = (ev) => ev.preventDefault();
   document.ondrop = (ev) => {
     ev.preventDefault();
-    attach([...ev.dataTransfer?.files ?? []]);
+    if (view_typing(v)) {
+      attach([...ev.dataTransfer?.files ?? []]);
+    }
   };
   document.onclick = click;
   visualViewport.onresize = () => {
