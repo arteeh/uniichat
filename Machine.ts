@@ -3,7 +3,8 @@
 // The tools that touch a device: shell, read, write, edit, view_video
 // (TOOLS), run by a device (Device.ts) as Jobs, each in its agent's dir
 // under the device's work dir. A stop kills the job's shell and its
-// process group. As the device quits, end() kills every
+// process group. The stop tool's halt job kills all an agent's shells
+// left (UNII_AGENT); as the device quits, end() kills every
 // shell's group (SHELLS), and any process marked UNII_RUN that left it.
 // A file changed (write over one, edit) answers as a unified diff (Diff),
 // which both views draw as one (Md.ts). read shows an image file as an
@@ -51,15 +52,20 @@ const SHELL = WIN ? Bun.which("pwsh") ?? "powershell.exe" : process.env.SHELL ??
 const PWSH  = "$ProgressPreference = 'SilentlyContinue'; $OutputEncoding = [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false); ";
 
 // this unii's mark, set as UNII_RUN on every process its shells start
-// (each child inherits it), and how to list this user's processes with
-// their environment, to find those that left their shell's group
+// (each child inherits it, as UNII_AGENT, the agent whose job it was),
+// and how to list this user's processes with their environment, to find
+// those that left their shell's group
 const RUN = crypto.randomUUID();
 const UID = String(process.getuid?.() ?? "");
 const PS  = process.platform === "darwin" ? ["ps", "-wwE", "-U", UID, "-o", "pid=,command="] : ["ps", "-wwe", "-u", UID, "-o", "pid=,args=", "e"];
 
-// the shells started here, kept until their process groups are empty, so
-// end() kills a backgrounded job whose shell already exited
-const SHELLS = new Set<Bun.Subprocess>();
+// the shells started here, by agent, kept until their process groups are
+// empty, so end() and halt() kill a backgrounded job whose shell already
+// exited
+const SHELLS = new Map<Bun.Subprocess, string>();
+
+// how long halt() tries to see an agent's processes gone (ms)
+const GONE = 3000;
 
 // the lines kept around each change in a diff
 const CONTEXT = 3;
@@ -154,6 +160,10 @@ export namespace Machine {
         case "skill": {
           return Machine.skill(os.homedir(), cwd, String(input.name));
         }
+        case "halt": {
+          const left = await Machine.halt(String(input.agent));
+          return { text: left === null ? "Its shells' trees killed; Windows can't find a process that left one." : left + " left", fail: (left ?? 0) > 0 };
+        }
         default: {
           return { text: "No tool " + job.name + ".", fail: true };
         }
@@ -169,12 +179,13 @@ export namespace Machine {
   // comes. A stop kills the group and ends the wait at once, whatever
   // still holds its output
   export async function shell(cwd: string, command: string, signal: AbortSignal): Promise<Out> {
-    SHELLS.forEach((p) => Machine.group(p) || SHELLS.delete(p));
+    SHELLS.forEach((_, p) => Machine.group(p) || SHELLS.delete(p));
+    const agent = path.basename(cwd);
     const start = performance.now();
     const argv = WIN ? [SHELL, "-NoProfile", "-NonInteractive", "-Command", PWSH + command] : [SHELL, "-c", "exec 2>&1\n" + command];
     const proc = Bun.spawn(argv, {
       cwd         : cwd,
-      env         : { ...process.env, UNII_RUN: RUN },
+      env         : { ...process.env, UNII_RUN: RUN, UNII_AGENT: agent },
       stdin       : "ignore",
       stdout      : "pipe",
       stderr      : WIN ? "pipe" : "ignore",
@@ -182,7 +193,7 @@ export namespace Machine {
       windowsHide : true,
     });
     const out = clip();
-    SHELLS.add(proc);
+    SHELLS.set(proc, agent);
     const readers = [proc.stdout, ...(WIN ? [proc.stderr as typeof proc.stdout] : [])].map((s) => s.pipeThrough(new TextDecoderStream()).getReader());
     const kill = () => {
       if (!WIN || Machine.group(proc)) {
@@ -240,20 +251,38 @@ export namespace Machine {
   // it dies), then any process that left its group (UNII_RUN), so none is
   // left orphaned
   export function end(): void {
-    for (const proc of SHELLS) {
-      if (Machine.group(proc)) {
+    Machine.sweep(null);
+  }
+
+  // the stop tool's: every process an agent's shells started killed, in
+  // their groups or out; how many are left after GONE (null: Windows,
+  // which can't tell)
+  export async function halt(agent: string): Promise<number | null> {
+    const until = Date.now() + GONE;
+    let left = Machine.sweep(agent);
+    while (left !== null && left > 0 && Date.now() < until) {
+      await Bun.sleep(100);
+      left = Machine.sweep(agent);
+    }
+    return left;
+  }
+
+  // the shells' groups of `agent` (null: all) killed, then each process
+  // marked theirs that left its group; how many were found so (null: on
+  // Windows, which has no ps to find them)
+  export function sweep(agent: string | null): number | null {
+    for (const [proc, who] of SHELLS) {
+      if ((agent === null || who === agent) && Machine.group(proc)) {
         Machine.kill(-proc.pid);
       }
     }
     if (WIN) {
-      return; // no ps: a process that left its shell's tree lives on
+      return null; // no ps: a process that left its shell's tree lives on
     }
-    const ps = Bun.spawnSync(PS).stdout.toString();
-    for (const line of ps.split("\n")) {
-      if (line.includes("UNII_RUN=" + RUN)) {
-        Machine.kill(Number(line.trim().split(" ")[0]));
-      }
-    }
+    const marks = ["UNII_RUN=" + RUN, ...(agent === null ? [] : ["UNII_AGENT=" + agent])];
+    const found = Bun.spawnSync(PS).stdout.toString().split("\n").map((line) => line.trim().split(/\s+/)).filter((words) => marks.every((m) => words.includes(m)));
+    found.forEach((words) => Machine.kill(Number(words[0])));
+    return found.length;
   }
 
   // `limit` lines from line `offset`, from its character `at`: a page of
