@@ -25,12 +25,25 @@ Features
 - **Web, phone and terminal.** The server hosts the web app (installable,
   with push notifications); `unii` is the same chat in a terminal.
 
-What this fork adds: one owner per server, no accounts or email; Claude
-and ChatGPT plans as vendors (`claude-sub`, `openai-sub`) beside API
-keys; profiles that fall back to the next model when one is out; waiting
-out usage limits; MCP servers (also run on a device); skills; image and
-video viewing; an editable user prompt and compaction prompt; a memory
-tree browser.
+What this fork adds:
+
+- **One owner per server**, no accounts, email or billing; `unii serve
+  sessions` and `revoke` to sign a lost device out.
+- **Claude and ChatGPT plans** as vendors (`claude-sub`, `openai-sub`)
+  beside API keys; profiles that fall back to the next model when one is
+  out; usage limits waited out instead of failing; a model per subagent.
+- **An installable web app (PWA)** on phones and desktops: icons, an
+  offline shell, Web Push for replies, a nav bar that shows on Android;
+  the composer stays above a phone's keyboard.
+- **Native Windows**: server, devices and terminal, with a one-line
+  PowerShell install.
+- **MCP servers** (also run on a device), **skills**, **schedules** (once
+  or by cron), image and video viewing.
+- **A Settings page**, an editable user prompt and compaction prompt,
+  and a memory tree browser.
+- **Subagents**: their own tab, a `stop` that ends one and its jobs, and
+  a report when one hits a usage limit.
+- **No telemetry or update checker**: `unii update` when you want it.
 
 Install and set up
 ------------------
