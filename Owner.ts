@@ -45,10 +45,11 @@ const ACTS = 7 * 864e5;
 
 // how long a ticket lives; a wait for one at most; the tickets of
 // terminals and devices waiting at once (none asks for many: no one
-// fills the db)
+// fills the db, and anyone who reaches the server would have to keep
+// that many waiting to keep the owner's out)
 const LINK  = 15 * 60 * 1000;
 const WAIT  = 5 * 60 * 1000;
-const ASKS  = 10;
+const ASKS  = 100;
 
 // the browsers that get pushes at once (the oldest beyond go)
 const WEB_PUSHES = 32;
@@ -186,12 +187,8 @@ export namespace Owner {
         if (link.session !== null) {
           return owner ? Owner.page_confirm(t, link.what, "") : Owner.page("Sign in this browser first", "Run <code>unii serve link</code> on the server, open the link it prints, then open this link again.");
         }
-        Owner.ticket_read(t, true);
-        // the browser's sign-in before ends, and its pushes with it
-        db.query("delete from sessions where hash = ?").run(Owner.hash(Owner.token(req)));
-        const token = Owner.random();
-        db.query("insert into sessions values (?, ?)").run(Owner.hash(token), "a browser");
-        return new Response(null, { status: 302, headers: { location: config.SITE + "/", "set-cookie": COOKIE + "=" + token + KEEP } });
+        // a button, so a chat app's preview of the link doesn't use it up
+        return Owner.page("Sign in this browser", `Sign in to this unii server as its owner.</p><form method="post" action="/auth"><input type="hidden" name="t" value="${Owner.safe(t)}"><button type="submit" autofocus>Sign in</button></form><p>`);
       }
       case "/api/wait": {
         if (owner) {
@@ -277,14 +274,23 @@ export namespace Owner {
     return new Response(null, { status: 204, headers: { "set-cookie": COOKIE + "=; Path=/; Max-Age=0" } });
   }
 
-  // the code typed on the confirm page (by the owner: a browser signed
-  // in): right, the terminal or device signs in, its wait on /api/wait
-  // woken
+  // a browser's link's button: the browser signs in (its sign-in before
+  // ends, and its pushes with it). Or the code typed on the confirm page
+  // (by the owner: a browser signed in): right, the terminal or device
+  // signs in, its wait on /api/wait woken
   export async function confirm(req: Request): Promise<Response> {
     const form = await req.formData().catch(() => new FormData());
     const t = String(form.get("t") ?? "");
     const typed = String(form.get("code") ?? "").replace(/\D/g, "");
     const link = Owner.ticket_read(t, false);
+    if (link !== null && link.session === null) {
+      Owner.ticket_read(t, true);
+      const db = Owner.open();
+      db.query("delete from sessions where hash = ?").run(Owner.hash(Owner.token(req)));
+      const token = Owner.random();
+      db.query("insert into sessions values (?, ?)").run(Owner.hash(token), "a browser");
+      return new Response(null, { status: 303, headers: { location: config.SITE + "/", "set-cookie": COOKIE + "=" + token + KEEP } });
+    }
     if (link === null || link.session === null || !Owner.is(req)) {
       return Owner.page("This sign-in link expired", "Start the terminal or device again for a new one.");
     }
