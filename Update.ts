@@ -9,7 +9,7 @@
 // this unii's version: each release ships one, a new one for every
 // change to Term.ts or what it imports. The fork's release script reads
 // it here and tags the release v + it; BASE is upstream's part
-export const VERSION = "1.0.138-arteeh.14";
+export const VERSION = "1.0.138-arteeh.15";
 export const BASE    = VERSION.replace(/-.*/, "");
 
 export const REPO    = "https://github.com/arteeh/uniichat";
