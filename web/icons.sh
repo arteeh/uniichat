@@ -12,12 +12,12 @@
 #   apple-touch-icon.png  180x180 (iPhone, iPad home screens): opaque
 #       white, iOS rounds its corners; the bubble 60% wide
 # The manifest's theme_color and background_color are both the dark page
-# colour (#171719, style.css's dark --paper): Chrome on Android paints its
-# navigation bar the theme_color whatever the phone's theme, and picks its
-# buttons to contrast; without one it shows the background_color under
-# unpainted buttons, which were white on white (#10). A manifest takes one
-# colour, so light mode gets a dark bar too. index.html's theme-color,
-# light and dark, colours the status bar. Each icon is
+# colour (#171719, style.css's dark --paper): a workaround for #10, white
+# buttons on a white Android navigation bar. What Chrome does with them
+# depends on its version and on whether the app runs edge to edge; a
+# manifest takes one colour, so light mode gets a dark bar where Chrome
+# paints it. Check on a phone. index.html's theme-color, light and dark,
+# colours the status bar. Each icon is
 # centred optically: on the point halfway between the bubble's box centre
 # (32,32 in mark.svg's 64x64) and its ink's centroid (31.5,28.3), as the
 # tail weighs little. Run where rsvg-convert is, e.g. from the repo:
