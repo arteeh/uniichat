@@ -102,9 +102,10 @@ export namespace Disk {
     return { stdin: proc.stdin, out: proc.stdout.getReader(), got: "" };
   }
 
-  // a file gone since needs none
+  // a file gone since needs none. Windows flushes only a file opened to
+  // write (FlushFileBuffers), so there it is opened so, writing nothing
   export async function fsync(file: string): Promise<void> {
-    const handle = await fs.promises.open(file, "r").catch((err) => {
+    const handle = await fs.promises.open(file, process.platform === "win32" ? "r+" : "r").catch((err) => {
       if (err.code !== "ENOENT") {
         throw err;
       }
