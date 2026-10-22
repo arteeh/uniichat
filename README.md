@@ -51,7 +51,8 @@ This installs `unii.exe` to `%LOCALAPPDATA%\Programs\unii` (set
 `$env:UNII_BIN` first for another place) and adds its folder to your
 user PATH (no admin).
 The server, devices and the terminal all run on Windows as on Linux and
-macOS, with the data in `%USERPROFILE%\.unii`. Nobody has run them on
+macOS, with the data in `%USERPROFILE%\.unii` (no older unii kept any
+on Windows, so the installer moves nothing there). Nobody has run them on
 real Windows yet, though: expect rough edges there. One known gap: the
 `stop` tool kills a job's process tree while its shell runs, but can't
 find a process that left the tree once its shell has ended (Linux and
