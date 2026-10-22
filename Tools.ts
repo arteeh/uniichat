@@ -188,7 +188,8 @@ const SKILLS = "Skills on the devices open now, by device: when a task matches o
 const LOOK = 3000;
 
 // a subagent's prompt: its part, then the view's and the devices' docs;
-// then, after AGENT_PROMPT, Unii's own (the user's instructions are in it)
+// then, after AGENT_PROMPT, the user prompt if the user wrote one (their
+// instructions are in it; the built-in one holds none, only Unii's turns)
 const SUB = SUB_HEAD + "\n\n" + VIEW_DOC + "\n\n" + DEVICES;
 const AGENT_PROMPT = "Unii's own prompt follows, for the user's instructions in it. Where it speaks to Unii, it speaks of the agent you work for, not of you.";
 
@@ -686,7 +687,8 @@ export namespace Tools {
     const log = { text: Memory.agent_show(tools.mem, agent.name), mark: true };
     const server = Tools.at(tools, agent.name);
     const run = Pick.ask(Tools.pick(tools, agent));
-    const system = SUB + "\n\n" + AGENT_PROMPT + "\n\n" + Tools.prompt("prompt");
+    const own = Memory.file_text(PROMPTS.prompt.file);
+    const system = own === "" ? SUB : SUB + "\n\n" + AGENT_PROMPT + "\n\n" + own;
     const blocks = [...agent.view, Tools.devices(tools), Tools.skills(tools), log];
     const effort = agent.role.effort ?? run.effort;
     return { ...run, effort, system, blocks, searches: SEARCHES, server, agent: true };

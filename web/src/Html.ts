@@ -174,7 +174,7 @@ export function account_html(prompts: View.Prompts | null, notify: Notify | null
     item("Export memory", "The chat and its summaries, in one file.", `<a class="chip" href="/export">Download</a>`),
   ];
   const unread  = item("Could not read the prompts.", "", `<button class="chip retry">Try again</button>`);
-  const mine    = section_html("Prompts", prompts === null ? unread : prompt_html("prompt", prompts.prompt.text, "The user prompt: Unii's system prompt in every turn; its subagents read it too. Add who you are and how you want work done at its end. prompt.md in the server's folder; empty: the built-in one.")
+  const mine    = section_html("Prompts", prompts === null ? unread : prompt_html("prompt", prompts.prompt.text, "The user prompt: Unii's system prompt in every turn; its subagents get it too once you change it. Add who you are and how you want work done at its end. prompt.md in the server's folder; empty: the built-in one.")
     + prompt_html("compact", prompts.compact.text, "The compaction prompt: all a summary of the memory gets, nothing else. compact.md in the server's folder; empty: the built-in one."));
   return `<a class="back" href="/" data-go="/">← Chat</a><h1>Settings</h1>` + mine + section_html("This browser", acts.join("")) + `<div class="owned"></div>`;
 }
