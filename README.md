@@ -137,8 +137,8 @@ built-in `prompt.txt` and `compact.txt`. Edit them on the Settings page.
 Use
 ---
 
-- **Web:** the server's address. ☰ has Settings, the memory tree, Import
-  History and the MCP servers on or off.
+- **Web:** the server's address. ☰ has Settings (with the MCP servers
+  on or off), the memory tree and Import History.
 - **Terminal:** `unii [url]` (default: `$UNII_URL`, else the last server,
   else the local one). `/help` lists its commands; `/import` brings in
   this computer's Claude and Codex sessions.
