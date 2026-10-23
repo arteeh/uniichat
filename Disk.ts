@@ -2,33 +2,24 @@
 // ====
 // Durability by group commit. What the server writes under config.DIR
 // goes at once to the OS's cache, so no chat waits on the disk; flushes
-// run one at a time, each making durable every write before it began: on
-// Linux one syncfs of the disk, as cheap for one file as for thousands,
-// by a shell kept for it (Bun has no syncfs); elsewhere an fsync per
-// file. A process crash loses nothing; a machine's, about the last
+// run one at a time, each making durable every write before it began:
+// an fsync of each file written, then of each folder they are in (its
+// entries: a file made or renamed there), each once however often it was
+// written. A process crash loses nothing; a machine's, about the last
 // flush. An act is answered, and a charge sent, only once flushed.
 
 import { Database } from "bun:sqlite";
 import * as fs from "node:fs";
-import type { FileSink } from "bun";
-import * as config from "./Config.ts";
-
-// Types
-// =====
-
-// the shell that flushes: it, what it reads, what it answered not yet read
-type Shell = { proc: { ref(): void; unref(): void }; stdin: FileSink; out: ReadableStream<Uint8Array>; got: string };
+import * as path from "node:path";
 
 // Globals
 // =======
 
 // the files written since the flush running began, the asks waiting on
-// them, the flushes running (null: none), the shell that flushes (null:
-// none started, or it ended)
+// them, the flushes running (null: none)
 const DIRTY = new Set<string>();
 let WAITS: Array<() => void> = [];
 let RUN: Promise<void> | null = null;
-let SHELL: Shell | null = null;
 
 // Disk
 // ====
@@ -71,50 +62,19 @@ export namespace Disk {
     RUN = null;
   }
 
+  // each file fsynced, then (but on Windows, which can't open a folder to
+  // sync it) each folder they are in, so a file new there or moved in
+  // place (a rename) is durable too
   export async function flush(files: string[]): Promise<void> {
-    if (process.platform !== "linux") {
-      await Promise.all(files.map(Disk.fsync));
-      return;
-    }
-    const shell = (SHELL ??= Disk.shell());
-    // it keeps this process up only while a flush waits on it (its pipes'
-    // reader held too)
-    shell.proc.ref();
-    shell.stdin.ref();
-    const out = shell.out.getReader();
-    try {
-      shell.stdin.write("\n");
-      shell.stdin.flush();
-      while (!shell.got.includes("\n")) {
-        const got = await out.read();
-        // the shell ended (a stop's signal): each file by itself
-        if (got.done) {
-          SHELL = null;
-          await Promise.all(files.map(Disk.fsync));
-          return;
-        }
-        shell.got += new TextDecoder().decode(got.value);
-      }
-    } finally {
-      out.releaseLock();
-      shell.proc.unref();
-      shell.stdin.unref();
-    }
-    const code = shell.got.slice(0, shell.got.indexOf("\n"));
-    shell.got = shell.got.slice(code.length + 1);
-    if (code !== "0") {
-      throw new Error("sync -f " + config.DIR + " exited " + code);
+    await Promise.all(files.map(Disk.fsync));
+    if (process.platform !== "win32") {
+      await Promise.all([...new Set(files.map((file) => path.dirname(file)))].map(Disk.fsync));
     }
   }
 
-  export function shell(): Shell {
-    const run = 'while read _; do sync -f "$0"; echo $?; done';
-    const proc = Bun.spawn(["sh", "-c", run, config.DIR], { stdin: "pipe", stdout: "pipe", stderr: "inherit" });
-    return { proc, stdin: proc.stdin, out: proc.stdout, got: "" };
-  }
-
-  // a file gone since needs none. Windows flushes only a file opened to
-  // write (FlushFileBuffers), so there it is opened so, writing nothing
+  // a file (or folder) gone since needs none. Windows flushes only a file
+  // opened to write (FlushFileBuffers), so there it is opened so, writing
+  // nothing
   export async function fsync(file: string): Promise<void> {
     const handle = await fs.promises.open(file, process.platform === "win32" ? "r+" : "r").catch((err) => {
       if (err.code !== "ENOENT") {
