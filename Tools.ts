@@ -22,9 +22,9 @@
 // who knows one lifted early.
 // The user's MCP servers (Mcp.ts) add their tools to the master's and its
 // subagents', but those of servers the chat turned off (Memory `off`):
-// the server's config's, and each open device's own (Tools.servers).
-// Only the owner signs a device in, so a device's servers reach the chat
-// its shell already does, no further.
+// the server's config's, and each open device's own (Tools.servers),
+// changed only between turns. The fork has one user, whose every device
+// is: each one's servers reach the chat, unchecked.
 
 import * as fs from "node:fs";
 import * as os from "node:os";
@@ -96,12 +96,14 @@ type Hooks = {
   halt   : () => AbortSignal;
 };
 
-// the tools: the chat's MCP servers
+// the tools: the chat's MCP servers, and those it runs from the next
+// turn (Tools.plug; null: no change)
 export type Tools = {
   mem     : Memory;
   devices : Map<string, Device>;
   agents  : Map<string, Agent>;
   mcp     : Servers;
+  next    : config.McpServer[] | null;
   key     : string;
   url     : string;
   hooks   : Hooks;
@@ -242,7 +244,7 @@ export namespace Tools {
     const url = Tools.base() + key + "/";
     const run = (device: string, job: Job, signal: AbortSignal) => Tools.job(tools, device, job, signal, crypto.randomUUID());
     const mcp = Mcp.servers((text) => hooks.note(text), config.MCP, run, (device) => typeof Tools.open(tools, device) !== "string");
-    const tools: Tools = { mem, devices: new Map(), agents: new Map(), mcp, key, url, hooks };
+    const tools: Tools = { mem, devices: new Map(), agents: new Map(), mcp, next: null, key, url, hooks };
     CHATS.set(key, tools);
     return tools;
   }
@@ -613,10 +615,20 @@ export namespace Tools {
   }
 
   // the chat's MCP servers as they are now: the server's, and each open
-  // device's; the views told (☰ lists them)
+  // device's, run from the next turn (Tools.apply): never changed in the
+  // middle of one; the views told
   export function plug(tools: Tools): void {
-    Mcp.sync(tools.mcp, [...config.MCP, ...Tools.opened(tools).flatMap(([, d]) => d.mcp)]);
+    tools.next = [...config.MCP, ...Tools.opened(tools).flatMap(([, d]) => d.mcp)];
     tools.hooks.change();
+  }
+
+  // the MCP servers as plugged, as a turn starts or while nothing works
+  // (Server.ts: Chat.turn, Chat.change)
+  export function apply(tools: Tools): void {
+    if (tools.next !== null) {
+      Mcp.sync(tools.mcp, tools.next);
+      tools.next = null;
+    }
   }
 
   // a config.json, as this machine and its real path: two the same are one

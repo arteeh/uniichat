@@ -98,9 +98,10 @@ run while one does: stop it first, update, start it again.
    your browser, then runs in the background. Its work dir is
    `~/.unii/work`; its settings are in `~/.config/unii/device.json`.
    Its own MCP servers go in its `~/.unii/config.json` (`mcp`, below):
-   they come and go with it, an edit applies without a restart, and
-   their tools are named `<device>_<server>__<tool>`. (On the server's
-   computer the two share that file: its programs run as the server's.)
+   they come and go with it and an edit needs no restart, from the next
+   turn; their tools are named `<device>_<server>__<tool>` (one over 64
+   characters is left out). On the server's computer the two share that
+   file: its programs run as the server's.
 
 **In the background**, `-d` runs the server or a device as a service of
 your user (a systemd user service; on Windows a Scheduled Task, no
