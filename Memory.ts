@@ -173,7 +173,7 @@ const SCALE = "-".repeat(NODE);
 const WAIT = "(not summarized yet: zoom it)";
 
 // the view's line where conversation mode starts
-const TALKING = "Conversation mode is on from message {id}: from there on, the user's and Unii's messages are whole, word for word (zooming on them gives nothing more); tool calls, their output, notes and reports stay summary lines.";
+const TALKING = "Conversation mode is on from message {id}: from there on, the user's and Unii's messages are whole, word for word (zoom on one only to see an image it names); tool calls, their output, notes and reports stay summary lines.";
 
 const IMAGES = "/docs/images/";
 
@@ -1056,11 +1056,12 @@ ${Memory.cut(line)}| ← LIMIT`;
     return (root.kind === "user" || root.kind === "unii") && !root.imported;
   }
 
-  // message i's line in conversation mode: whole, or its leaf's
+  // message i's line in conversation mode: whole (a `</chat>` in it
+  // escaped, so it can't end the view's block), or its leaf's
   export function talk_line(mem: Memory, i: number): string {
     const root = Memory.message(mem, i)!;
     const part = { l: 0, i };
-    return Memory.said(root) ? Memory.ref(part) + "|" + Memory.show(root) : Memory.line(part, Memory.node(mem, part) ?? WAIT);
+    return Memory.said(root) ? Memory.ref(part) + "|" + Memory.show(root).replace(/<\/chat>/gi, "<\\/chat>") : Memory.line(part, Memory.node(mem, part) ?? WAIT);
   }
 
   // the bytes conversation mode's lines take, to message `end` (none:
