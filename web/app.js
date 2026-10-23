@@ -1496,7 +1496,7 @@ function pick_html(fold, on, knobs, talk) {
   const all = fold === null ? [] : [`<button class="all"${act_html({ $: "Fold", on })}>${esc(fold)}</button>`];
   const mode = ([name, hint], k) => {
     const here = talk != null === (k === 1);
-    return `<button title="${esc(hint)}" aria-pressed="${here}"${here ? "" : act_html({ $: "Talk", on: k === 1 })}>${name}</button>`;
+    return `<button title="${esc(hint)}" aria-pressed="${here}"${act_html({ $: "Talk", on: talk == null })}>${name}</button>`;
   };
   const modes = talk === undefined ? [] : [`<span class="modes" role="group" aria-label="Memory mode">${MODES.map(mode).join("")}</span>`];
   const used = talk == null ? 0 : Math.round(talk.used * 100);

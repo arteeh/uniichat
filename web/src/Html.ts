@@ -131,9 +131,10 @@ export function pick_html(fold: string | null, on: boolean, knobs: View.Knob[], 
     `<div id="pick-${k.move}" class="choices" popover role="menu" aria-label="${k.move[0].toUpperCase() + k.move.slice(1)}">${k.choices.map(choice_html).join("")}</div>`,
   ]);
   const all = fold === null ? [] : [`<button class="all"${act_html({ $: "Fold", on })}>${esc(fold)}</button>`];
+  // either switches: a narrow screen shows only the mode on (style.css)
   const mode = ([name, hint]: [string, string], k: number) => {
     const here = (talk != null) === (k === 1);
-    return `<button title="${esc(hint)}" aria-pressed="${here}"${here ? "" : act_html({ $: "Talk", on: k === 1 })}>${name}</button>`;
+    return `<button title="${esc(hint)}" aria-pressed="${here}"${act_html({ $: "Talk", on: talk == null })}>${name}</button>`;
   };
   const modes = talk === undefined ? [] : [`<span class="modes" role="group" aria-label="Memory mode">${MODES.map(mode).join("")}</span>`];
   const used = talk == null ? 0 : Math.round(talk.used * 100);

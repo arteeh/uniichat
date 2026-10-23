@@ -109,6 +109,14 @@ body.account footer > :not(#toast) { display: none; }
 #pick .modes button { padding: 0 6px; border-radius: 6px; }
 #pick .modes [aria-pressed=true] { color: var(--ink); background: var(--hover); }
 #pick .modes [aria-pressed=false]:hover { color: var(--ink); }
+/* a narrow screen: the mode on only (a tap switches it), the meter a row of its own above */
+@media (max-width: 600px) {
+  #pick { flex-wrap: wrap; white-space: nowrap; gap: 2px; }
+  #pick > :is(button, .knob), #pick .modes button { padding: 0 4px; }
+  #pick .modes { margin-right: auto; }
+  #pick .modes [aria-pressed=false] { display: none; }
+  #pick .rule.meter { order: -1; flex-basis: 100%; height: 8px; margin: 0; }
+}
 #pick > :is(button, .knob) { padding: 0 6px; border-radius: 6px; }
 #pick > button:hover, #pick > button:has(+ :popover-open) { background: var(--block); color: var(--ink); }
 #pick .dot { color: var(--soft); }
