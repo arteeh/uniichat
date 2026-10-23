@@ -237,6 +237,10 @@ export namespace Chat {
     if (mem.count === 0) {
       Memory.push(mem, [{ kind: "unii", text: HELLO, line: HELLO_LINE }]);
     }
+    for (const note of config.MCP_NOTES) {
+      console.error("unii: " + note);
+      Chat.note(chat, note);
+    }
     chat.eye = Chat.eye(mem, Memory.turn(mem));
     mem.made = (l, i) => Chat.made(chat, l, i);
     mem.wait.add(() => Chat.progress(chat));
@@ -1012,7 +1016,7 @@ export namespace Chat {
     const why = chat.mem.hold[1];
     const importing = batch && { done: batch.all - Chat.time(batch), total: batch.all, why, msgs: batch.b - batch.a, open: batch.open };
     const timers = chat.mem.timers.map((t) => ({ ...t, text: t.text.length > TIMER_TEXT ? t.text.slice(0, TIMER_TEXT) + "…" : t.text }));
-    const mcp = config.MCP.map(({ name }) => ({ name, on: !chat.mem.off.includes(name) }));
+    const mcp = [...chat.tools.mcp.all.keys()].map((name) => ({ name, on: !chat.mem.off.includes(name) }));
     const talk = chat.mem.talk === null ? null : { from: chat.mem.talk, used: Math.min(1, Memory.talk_size(chat.mem) / TALK) };
     return { $: "state", busy: chat.busy, wait: Chat.waits(chat), agents, runs, pick: chat.pick, ...config.OFFER, importing, limits: chat.limits, timers, mcp, talk };
   }
@@ -1098,6 +1102,14 @@ export namespace Chat {
   // a read, answered by what it sends; null: no read
   export function ask(chat: Chat, sock: Sock, msg: any): Answer | null {
     switch (msg.$) {
+      case "servers": {
+        // a device's own MCP servers (Device.ts), told as it joins and as
+        // they change: the state of what it runs, done again the same
+        if (sock.data.device !== null) {
+          Tools.servers(chat.tools, sock.data.device, msg.mcp, String(msg.file));
+        }
+        return {};
+      }
       case "zoom": {
         const [id, n] = [...msg.part].map(Number);
         if (n > 1 && Memory.part(chat.mem, id, n) !== null) {
@@ -1239,7 +1251,7 @@ export namespace Chat {
         // changed
         const name = String(msg.name);
         const on = msg.on === true || msg.on === "true";
-        if (!config.MCP.some((s) => s.name === name)) {
+        if (!chat.tools.mcp.all.has(name)) {
           return { error: "No MCP server " + name + "." };
         }
         if (chat.mem.off.includes(name) !== on) {

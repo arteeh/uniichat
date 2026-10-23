@@ -12,8 +12,12 @@
 // a browser), then holds one socket to the server, opened again as one
 // is lost. A job's output is an act ({ $: "out" }), kept till answered
 // and sent again on the next socket, which the server does once.
+// Its own MCP servers are the `mcp` of its ~/.unii/config.json ($UNII_DIR,
+// README), told the server on each socket and again as they change
+// (Tools.servers), which runs them here (Mcp.here).
 
 import * as child from "node:child_process";
+import * as fs from "node:fs";
 import * as os from "node:os";
 import * as Client from "./Client.ts";
 import { Machine, WIN, type Job } from "./Machine.ts";
@@ -26,6 +30,10 @@ import { FRAME, PING, QUIT, RETRY, TICK, WIRE } from "./View.ts";
 const LOCAL = process.platform === "darwin" ? child.spawnSync("scutil", ["--get", "LocalHostName"]).stdout?.toString().trim() : "";
 const HOST  = LOCAL || os.hostname();
 const WORK  = "~/.unii/work";
+const FILE  = (process.env.UNII_DIR ?? "~/.unii").replace(/^~(?=[\\/]|$)/, os.homedir()) + "/config.json";
+
+// how often config.json is read for a change to its MCP servers, in ms
+const LOOK = 2000;
 
 // Device
 // ======
@@ -54,6 +62,16 @@ export async function run(given: string | undefined): Promise<void> {
   const outs = new Map<string, object>();
   let ws: WebSocket | null = null;
   const send = (msg: object) => ws?.readyState === WebSocket.OPEN && ws.send(JSON.stringify(msg));
+  // the MCP servers as last told ("": not yet on this socket)
+  let told = "";
+  const tell = () => {
+    const mcp = servers();
+    if (mcp !== null && mcp !== told && ws?.readyState === WebSocket.OPEN) {
+      told = mcp;
+      send({ $: "servers", id: crypto.randomUUID(), mcp: JSON.parse(mcp), file: where(FILE) });
+    }
+  };
+  setInterval(tell, LOOK);
   const open = () => {
     const sock = (ws = new WebSocket(url.replace(/^http/, "ws") + "/ws" + query, { headers: Client.auth(token) } as any));
     let heard = Date.now();
@@ -62,6 +80,8 @@ export async function run(given: string | undefined): Promise<void> {
     sock.onopen = () => {
       up = true;
       outs.forEach((msg) => sock.send(JSON.stringify(msg)));
+      told = "";
+      tell();
     };
     sock.onmessage = (ev) => {
       heard = Date.now();
@@ -112,4 +132,36 @@ export async function run(given: string | undefined): Promise<void> {
     });
   }
   open();
+}
+
+// the `mcp` of config.json (the object, or the file it names), as JSON:
+// {} if none; null if it can't be read, why said once
+let said = "";
+function servers(): string | null {
+  try {
+    const file = fs.existsSync(FILE) ? JSON.parse(fs.readFileSync(FILE, "utf8")) : {};
+    let mcp = file?.mcp || {};
+    if (typeof mcp === "string") {
+      mcp = JSON.parse(mcp.trim().startsWith("{") ? mcp : fs.readFileSync(mcp.trim().replace(/^~(?=[\\/]|$)/, os.homedir()), "utf8"));
+    }
+    said = "";
+    return JSON.stringify(mcp);
+  } catch (err: any) {
+    // not the parser's why: it may quote a secret
+    const why = err instanceof SyntaxError ? "isn't JSON" : "can't be read (" + (err?.code ?? err) + ")";
+    if (why !== said) {
+      said = why;
+      console.error("unii: " + FILE + " or its mcp " + why + ": the MCP servers told stay as they were");
+    }
+    return null;
+  }
+}
+
+// a config.json, as this machine and its real path (Tools.where)
+function where(file: string): string {
+  let real = file;
+  try {
+    real = fs.realpathSync(file);
+  } catch {}
+  return os.hostname() + ":" + real;
 }

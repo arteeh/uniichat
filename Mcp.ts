@@ -4,9 +4,11 @@
 // its subagents get beside unii's own (Tools.ts), each named
 // "<server>__<tool>", on every vendor. A server is a program run here
 // (stdio: a JSON-RPC message a line each way), a program run on a device
-// (`device`: each message a job of it, Mcp.device, Mcp.here),
-// or a URL (streamable HTTP: a POST each, answered as JSON or an event
-// stream).
+// (one in that device's own config, as it told: Tools.servers; each
+// message a job of it, Mcp.device, Mcp.here), or a URL (streamable HTTP:
+// a POST each, answered as JSON or an event stream). The servers change
+// as devices come, go and edit theirs (Mcp.sync): an agent's tools as of
+// its call's listing, so from its next call.
 // Each chat runs its own (one user's never see another's), started by
 // the first listing or call, ended as the chat closes, moves (a call
 // running finishes first) or turns it off. One that fails to start, dies
@@ -107,8 +109,30 @@ const HERE = new Map<string, { link: Link; changed: boolean }>();
 export namespace Mcp {
 
   export function servers(note: (text: string) => void, confs: config.McpServer[], run: Run, open: (device: string) => boolean): Servers {
-    const server = (conf: config.McpServer): Server => ({ conf, up: null, fail: null, link: null, names: new Map(), stale: false, said: null, shown: false, heard: new Map(), left: "", calls: 0, gone: false });
-    return { all: new Map(confs.map((conf) => [conf.name, server(conf)])), note, run, open };
+    const servers: Servers = { all: new Map(), note, run, open };
+    Mcp.sync(servers, confs);
+    return servers;
+  }
+
+  // the chat's servers made `confs`: one gone or changed ends as its last
+  // call does (as Mcp.end's), a new one waits for its first listing or
+  // call
+  export function sync(servers: Servers, confs: config.McpServer[]): void {
+    const want = new Map(confs.map((conf) => [conf.name, conf]));
+    for (const [name, s] of servers.all) {
+      if (JSON.stringify(want.get(name)) !== JSON.stringify(s.conf)) {
+        s.gone = true;
+        if (s.calls === 0) {
+          Mcp.close(s);
+        }
+        servers.all.delete(name);
+      }
+    }
+    for (const conf of want.values()) {
+      if (!servers.all.has(conf.name)) {
+        servers.all.set(conf.name, { conf, up: null, fail: null, link: null, names: new Map(), stale: false, said: null, shown: false, heard: new Map(), left: "", calls: 0, gone: false });
+      }
+    }
   }
 
   // the tools of the servers not `off`, each started if it isn't
@@ -551,9 +575,9 @@ export namespace Mcp {
   }
 
   // on a device, a message of a chat's server (Mcp.device) to the program
-  // it runs here: initialize starts it (Mcp.stdio, its `cwd` read here);
-  // close ends it. Answered as JSON: its result or error, why it is dead,
-  // whether its tools changed
+  // it runs here: initialize starts it (Mcp.stdio, its ${VAR}s and `cwd`
+  // read here); close ends it. Answered as JSON: its result or error, why
+  // it is dead, whether its tools changed
   export async function here(input: any, signal: AbortSignal): Promise<Out> {
     const { key, method, params } = input;
     const answer = (got: object): Out => {
@@ -572,9 +596,23 @@ export namespace Mcp {
     }
     if (method === "initialize") {
       s?.link.close();
-      const cwd = String(input.conf.cwd ?? "").replace(/^~(?=\/|$)/, os.homedir());
+      HERE.delete(key);
+      const c: config.McpServer = input.conf;
+      const vars = (text: string) => text.replace(/\$\{([A-Za-z_][A-Za-z0-9_]*)\}/g, (_, v) => {
+        if (process.env[v] === undefined) {
+          throw new Error("uses ${" + v + "}, which isn't set");
+        }
+        return process.env[v]!;
+      });
+      let conf: config.McpServer;
+      try {
+        const env = Object.fromEntries(Object.entries(c.env).map(([k, v]) => [k, vars(v)]));
+        conf = { ...c, command: vars(c.command), args: c.args.map(vars), env, cwd: vars(c.cwd).replace(/^~(?=[\\/]|$)/, os.homedir()) };
+      } catch (err) {
+        return answer({ dead: Mcp.why(err) });
+      }
       const run = { link: null as unknown as Link, changed: false };
-      run.link = Mcp.stdio({ ...input.conf, cwd }, () => (run.changed = true), () => {});
+      run.link = Mcp.stdio(conf, () => (run.changed = true), () => {});
       HERE.set(key, (s = run));
     }
     if (s === undefined) {

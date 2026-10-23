@@ -37,8 +37,8 @@ What this fork adds:
   the composer stays above a phone's keyboard.
 - **Native Windows**: server, devices and terminal, with a one-line
   PowerShell install.
-- **MCP servers** (also run on a device), **skills**, **schedules** (once
-  or by cron), image and video viewing.
+- **MCP servers** (a device's set up on it), **skills**, **schedules**
+  (once or by cron), image and video viewing.
 - **A Settings page**, an editable user prompt and compaction prompt,
   and a memory tree browser.
 - **Subagents**: their own tab, a `stop` that ends one and its jobs, and
@@ -97,6 +97,10 @@ run while one does: stop it first, update, start it again.
    -d https://your-server`: it prints a link and a code to confirm in
    your browser, then runs in the background. Its work dir is
    `~/.unii/work`; its settings are in `~/.config/unii/device.json`.
+   Its own MCP servers go in its `~/.unii/config.json` (`mcp`, below):
+   they come and go with it, an edit applies without a restart, and
+   their tools are named `<device>_<server>__<tool>`. (On the server's
+   computer the two share that file: its programs run as the server's.)
 
 **In the background**, `-d` runs the server or a device as a service of
 your user (a systemd user service; on Windows a Scheduled Task, no
@@ -116,8 +120,10 @@ Settings page). Each may also be set as `UNII_<KEY>`, which wins. Besides
   in KB (default 4), each summary sees beside its message. More lets the
   compactor copy in what the message doesn't say; Sonnet medium does
   that less than Haiku.
-- `mcp`: MCP servers, in Claude's `mcpServers` shape (or a file path).
-  Add `"device": "<name>"` to run one on a device.
+- `mcp`: MCP servers, in Claude's `mcpServers` shape (or a file path):
+  URL servers and programs run on the server. A program to run on a
+  device goes in that device's own `~/.unii/config.json`, in the same
+  shape (no `"device"`); its `${VAR}`s are read there.
 - `after`: a shell command run after each turn (by sh; on Windows by
   PowerShell).
 - `claude_sub`, `claude`, `chatgpt`: where the plans' sign-ins are kept.
@@ -168,9 +174,9 @@ Q&A
 
 **Can Unii use my screen?** Not by itself: add a computer-use MCP server,
 such as [cua-driver](https://github.com/trycua/cua/tree/main/libs/cua-driver),
-run on that device:
+in that device's `~/.unii/config.json` (its tools: `my-mac_screen__...`):
 
-    "mcp": { "screen": { "command": "cua-driver", "args": ["mcp"], "device": "my-mac",
+    "mcp": { "screen": { "command": "cua-driver", "args": ["mcp"],
              "env": { "CUA_DRIVER_RS_TELEMETRY_ENABLED": "0" } } }
 
 **Can others use my server?** No: a server has one owner. Anthropic and
