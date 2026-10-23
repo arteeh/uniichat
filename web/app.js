@@ -1103,7 +1103,7 @@ function view_act(v, act) {
       const on = asked ?? v.mcp.find((p) => p.name === act.name)?.on;
       if (on === undefined) {
         const names = v.mcp.map((p) => p.name).join(", ");
-        v.notes.push("No MCP server " + act.name + (names === "" ? "; the server's config sets none." : "; one of: " + names + "."));
+        v.notes.push("No MCP server " + act.name + (names === "" ? "; none is set up." : "; one of: " + names + "."));
         return [];
       }
       return [{ $: "mcp", name: act.name, on: !on }];
@@ -1489,18 +1489,18 @@ var MODES = [
   ["conversation", "Messages stay word-for-word in Unii's view until you switch back. Use it for discussions. It costs more per turn."]
 ];
 function pick_html(fold, on, knobs, talk) {
-  const parts = knobs.map((k) => k.choices.length === 0 ? [`<span class="knob" title="${esc(k.hint)}">${esc(k.text)}</span>`] : [
-    `<button title="${esc(k.hint)}" data-knob="${k.move}" popovertarget="pick-${k.move}" aria-haspopup="menu">${esc(k.text)}</button>`,
-    `<div id="pick-${k.move}" class="choices" popover role="menu" aria-label="${k.move[0].toUpperCase() + k.move.slice(1)}">${k.choices.map(choice_html).join("")}</div>`
-  ]);
+  const knob = (move, hint, text, rows) => [
+    `<button title="${esc(hint)}" data-knob="${move}" popovertarget="pick-${move}" aria-haspopup="menu">${esc(text)}</button>`,
+    `<div id="pick-${move}" class="choices" popover role="menu" aria-label="${move[0].toUpperCase() + move.slice(1)}">${rows}</div>`
+  ];
+  const parts = knobs.map((k) => k.choices.length === 0 ? [`<span class="knob" title="${esc(k.hint)}">${esc(k.text)}</span>`] : knob(k.move, k.hint, k.text, k.choices.map(choice_html).join("")));
   const all = fold === null ? [] : [`<button class="all"${act_html({ $: "Fold", on })}>${esc(fold)}</button>`];
   const mode = ([name, hint], k) => {
     const here = talk != null === (k === 1);
-    return `<button title="${esc(hint)}" aria-pressed="${here}"${act_html({ $: "Talk", on: k === 1 })}>${name}</button>`;
+    return `<button role="menuitemradio" aria-checked="${here}" title="${esc(hint)}"${here ? " autofocus" : act_html({ $: "Talk", on: k === 1 })}>${name}</button>`;
   };
   const [now, about] = MODES[talk == null ? 0 : 1];
-  const flip = `<button class="flip" title="${esc(about)} Tap for ${MODES[talk == null ? 1 : 0][0]}."${act_html({ $: "Talk", on: talk == null })}>${now}</button>`;
-  const modes = talk === undefined ? [] : [`<span class="modes" role="group" aria-label="Memory mode">${MODES.map(mode).join("")}</span>`, flip];
+  const modes = talk === undefined ? [] : knob("mode", about, now, MODES.map(mode).join(""));
   const used = talk == null ? 0 : Math.round(talk.used * 100);
   const rule = talk == null ? `<span class="rule"></span>` : `<span class="rule meter" style="--used:${used}%" title="Conversation: ${used}% of space used" role="meter" aria-valuenow="${used}" aria-valuemin="0" aria-valuemax="100" aria-label="Conversation space used"></span>`;
   return [...all, ...modes, rule, ...parts.flatMap((part, i) => i === 0 ? part : [`<span class="dot">·</span>`, ...part])];
@@ -1995,10 +1995,12 @@ function place(knob) {
   const menu = $("#pick-" + knob.dataset.knob);
   const box = knob.getBoundingClientRect();
   const { clientWidth: w, clientHeight: h } = document.documentElement;
+  const left = box.left + box.width / 2 < w / 2 ? Math.max(8, box.left) : null;
   const right = Math.max(8, w - box.right);
-  menu.style.right = right + "px";
+  menu.style.left = left === null ? "auto" : left + "px";
+  menu.style.right = left === null ? right + "px" : "auto";
   menu.style.bottom = h - box.top + 4 + "px";
-  menu.style.maxWidth = w - right - 8 + "px";
+  menu.style.maxWidth = (left === null ? w - right : w - left) - 8 + "px";
   menu.style.maxHeight = box.top - 12 + "px";
 }
 function roam(ev) {

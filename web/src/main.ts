@@ -311,16 +311,19 @@ function click(ev: MouseEvent): void {
 }
 
 // a knob's menu, before it opens (the knob's own click opens and closes
-// it): over the knob, its right edge at the knob's, as tall and wide as
-// the screen has room for (style.css: it scrolls past that)
+// it): over the knob, its right edge at the knob's (one on the screen's
+// left half, as the mode's: its left edge at the knob's), as tall and
+// wide as the screen has room for (style.css: it scrolls past that)
 function place(knob: HTMLElement): void {
   const menu = $("#pick-" + knob.dataset.knob);
   const box = knob.getBoundingClientRect();
   const { clientWidth: w, clientHeight: h } = document.documentElement;
+  const left = box.left + box.width / 2 < w / 2 ? Math.max(8, box.left) : null;
   const right = Math.max(8, w - box.right);
-  menu.style.right = right + "px";
+  menu.style.left = left === null ? "auto" : left + "px";
+  menu.style.right = left === null ? right + "px" : "auto";
   menu.style.bottom = h - box.top + 4 + "px";
-  menu.style.maxWidth = w - right - 8 + "px";
+  menu.style.maxWidth = (left === null ? w - right : w - left) - 8 + "px";
   menu.style.maxHeight = box.top - 12 + "px";
 }
 
