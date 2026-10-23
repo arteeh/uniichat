@@ -484,7 +484,7 @@ function term_mcp(t: Term, arg: string): void {
     return;
   }
   const list = t.v.mcp.map((p) => p.name + (p.on ? " (on)" : " (off)"));
-  term_note(t, list.length === 0 ? "No MCP servers: the server's config sets none." : "MCP servers: " + list.join(", ") + ". Turn one on or off with /mcp <name>.");
+  term_note(t, list.length === 0 ? "No MCP servers: none is set up." : "MCP servers: " + list.join(", ") + ". Turn one on or off with /mcp <name>.");
 }
 
 // the memory mode (Html.ts MODES), or with a name, that one

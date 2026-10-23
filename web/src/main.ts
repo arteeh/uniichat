@@ -965,8 +965,9 @@ async function account(): Promise<void> {
 // the page's MCP servers, as the chat's state has them (Html.mcp_html);
 // a switch focused stays so as it flips
 function mcp_draw(): void {
+  // (no pick: the chat's state not here yet)
   const box = document.querySelector("#account .mcp");
-  if (box === null) {
+  if (box === null || v.pick === null) {
     return;
   }
   const on = box.contains(document.activeElement) ? document.activeElement!.getAttribute("aria-label") : null;

@@ -115,6 +115,7 @@ body.account footer > :not(#toast) { display: none; }
   #pick { flex-wrap: wrap; white-space: nowrap; gap: 2px; }
   #pick > :is(button, .knob) { padding: 0 4px; }
   #pick .rule.meter { order: -1; flex-basis: 100%; margin: 0; }
+  #pick .rule.meter::before { inset: -7px 0 -2px; }
   #pick:has(> .meter) > [data-knob=mode] { margin-right: auto; }
 }
 /* a knob's menu (main.ts places it over its knob): a row per value, the
