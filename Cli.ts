@@ -5,9 +5,11 @@
 // three parts, each with its own config and state: the server (`unii
 // serve`, Server.ts; its data and sign-ins in ~/.unii), a device (`unii
 // device`, Device.ts) and the terminal chat (`unii [url]`, Term.ts),
-// these two with their files in ~/.config/unii (Client.ts). `unii
-// update` runs the newest release's installer, which replaces this
-// executable. All three run on Linux, macOS and Windows alike.
+// these two with their files in ~/.config/unii (Client.ts). Either of
+// the first two runs in the background too, as a user service of the OS
+// (`-d`, `stop`, `logs`: Service.ts). `unii update` runs the newest
+// release's installer, which replaces this executable (and restarts
+// those services). All three run on Linux, macOS and Windows alike.
 //
 // Usage: USAGE (`unii help` prints it).
 
@@ -19,16 +21,35 @@ import * as Update from "./Update.ts";
 const ARGS = process.argv.slice(2);
 const WEB  = /^https?:\/\//;
 const URL_ = ARGS.find((a) => WEB.test(a));
-const REST = ARGS.filter((a) => !WEB.test(a));
+// -d: to the background; -f: logs followed; --service: as a service's
+// supervisor runs (Service.ts), not typed by hand
+const FLAGS = ["-d", "-f", "--service"];
+const REST = ARGS.filter((a) => !WEB.test(a) && !FLAGS.includes(a));
+const FLAG = new Set(ARGS.filter((a) => FLAGS.includes(a)));
+
+// a background service's own run (Service.ts), which no program it runs
+// inherits: the part it runs, and on Windows and macOS its supervisor
+const SERVICE = process.env.UNII_SERVICE;
+const SUPERVISOR = Number(process.env.UNII_SUPERVISOR ?? 0);
+delete process.env.UNII_SERVICE;
+delete process.env.UNII_SUPERVISOR;
 
 const USAGE = `Usage: unii [url]           the chat in this terminal (url: $UNII_URL, else
                             the last one, else http://127.0.0.1:8788)
        unii device [url]    this computer as a device of the server: the
-                            agent's shell and files here (run it as a
-                            service to keep it up)
+                            agent's shell and files here
        unii serve [port]    your UniiChat server, at http://127.0.0.1:8788
                             (another port: set its "site" too); data in
                             ~/.unii ($UNII_DIR)
+       unii device|serve -d [url|port]
+                            the same in the background, as a service of
+                            your user (systemd; Windows: a Scheduled Task;
+                            macOS: a LaunchAgent) that starts at login and
+                            again if it crashes; run again, it restarts
+       unii device|serve stop
+                            stop that service and remove it
+       unii device|serve logs [-f]
+                            its output (-f: and follow it)
        unii serve link      a link that signs a browser in to the server
                             here (run it where the server runs)
        unii serve chatgpt [logout|status]
@@ -50,6 +71,21 @@ The terminal and the device keep their server and sign-in in
 ~/.config/unii (tui.json, device.json). unii never checks for updates by
 itself: run unii update. In the chat, /help lists every command and key.`;
 
+// before serve -d: no server running here but the service's (it would
+// hold the data, and the service could never start)
+async function serve_free(): Promise<void> {
+  const Service = await import("./Service.ts");
+  const dir = (process.env.UNII_DIR ?? "~/.unii").replace(/^~(?=[\\/]|$)/, (await import("node:os")).homedir());
+  const pid = Number(fs.existsSync(dir + "/server.pid") ? fs.readFileSync(dir + "/server.pid", "utf8") : 0);
+  let up = false;
+  try {
+    up = pid > 0 && process.kill(pid, 0);
+  } catch {}
+  if (up && Service.running("serve") === null) {
+    fail("a unii server runs here already (pid " + pid + "), not as unii serve -d's service: stop it first.");
+  }
+}
+
 function fail(why: string): never {
   console.error("unii: " + why);
   process.exit(1);
@@ -65,7 +101,8 @@ const BUN  = /^bun(\.exe)?$/i.test(path.basename(process.execPath));
 // ends setting $LASTEXITCODE, as an `exit` would close the window of one
 // who runs it by hand; 1 until it does, so one that never got that far
 // failed). The installer is told this process's pid (UNII_UPDATER): on
-// Windows it refuses while a device or server runs, but not for this
+// Windows it refuses while a device or server runs that no service of
+// -d's runs (it restarts those), but not for this
 function update(): void {
   if (BUN) {
     fail("this unii runs from source (bun): update it with git.");
@@ -100,8 +137,30 @@ if (WIN && !BUN) {
 
 const [cmd, sub, more] = REST;
 const odd = (words: string[]) => REST.slice(words.length).length > 0;
+// flags only where they go: -d and --service on a part's run, -f on logs
+const part = cmd === "serve" || cmd === "device" ? cmd : null;
+const flags = (...ok: string[]) => [...FLAG].every((f) => ok.includes(f)) && !(FLAG.has("-d") && FLAG.has("--service"));
+const runs = part !== null && (part === "device" ? sub === undefined : sub === undefined || /^\d+$/.test(sub)) && !odd([cmd, ...(sub ? [sub] : [])]) && (part === "device" || URL_ === undefined) && flags("-d", "--service");
+if (SUPERVISOR > 0) {
+  (await import("./Service.ts")).watch(SUPERVISOR);
+}
 
-if (cmd === undefined) {
+if (FLAG.size > 0 && !runs && !(part !== null && sub === "logs" && flags("-f"))) {
+  fail("no command " + ARGS.join(" ") + ".\n\n" + USAGE);
+} else if (runs && FLAG.has("--service")) {
+  await (await import("./Service.ts")).supervise(part!, REST.slice(1).concat(URL_ ?? []));
+} else if (runs && FLAG.has("-d")) {
+  if (part === "device") {
+    await (await import("./Device.ts")).signin(URL_);
+  } else {
+    await serve_free();
+  }
+  await (await import("./Service.ts")).start(part!, REST.slice(1));
+} else if (part !== null && sub === "stop" && !odd([cmd, sub]) && URL_ === undefined) {
+  await (await import("./Service.ts")).stop(part);
+} else if (part !== null && sub === "logs" && !odd([cmd, sub]) && URL_ === undefined) {
+  await (await import("./Service.ts")).logs(part, FLAG.has("-f"));
+} else if (cmd === undefined) {
   await (await import("./Term.ts")).main(URL_);
 } else if (["help", "--help", "-h"].includes(cmd)) {
   console.log(USAGE);
@@ -109,7 +168,10 @@ if (cmd === undefined) {
   console.log("unii " + Update.VERSION);
 } else if (cmd === "update" && !odd([cmd]) && URL_ === undefined) {
   update();
-} else if (cmd === "device" && !odd([cmd])) {
+} else if (runs && part === "device") {
+  if (SERVICE === undefined) {
+    (await import("./Service.ts")).foreground(part!);
+  }
   await (await import("./Device.ts")).run(URL_);
 } else if (cmd === "serve" && sub === "chatgpt" && [undefined, "logout", "status"].includes(more) && !odd([cmd, sub, ...(more ? [more] : [])])) {
   await (await import("./ChatGPT.ts")).ChatGPT.cli(REST.slice(1)).catch((err) => fail(err.message));
@@ -121,7 +183,10 @@ if (cmd === undefined) {
   await (await import("./Owner.ts")).Owner.sessions(more).catch((err) => fail(err.message));
 } else if (cmd === "serve" && sub === "link" && !odd([cmd, sub])) {
   (await import("./Owner.ts")).Owner.cli();
-} else if (cmd === "serve" && (sub === undefined || /^\d+$/.test(sub)) && !odd([cmd, ...(sub ? [sub] : [])]) && URL_ === undefined) {
+} else if (runs && part === "serve") {
+  if (SERVICE === undefined) {
+    (await import("./Service.ts")).foreground(part!);
+  }
   await (await import("./Server.ts")).serve(Number(sub ?? 8788));
 } else {
   const moved = cmd === "chatgpt" || cmd === "claude" ? " (now unii serve " + cmd + ")" : "";
