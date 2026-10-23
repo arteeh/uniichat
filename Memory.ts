@@ -1082,11 +1082,14 @@ ${Memory.cut(line)}| ← LIMIT`;
   }
 
   // where conversation mode starts if switched on now: at the last
-  // message it keeps whole (one notices a talk a message late), else
-  // the next
+  // message it keeps whole (one notices a talk a message late), its
+  // first page; else the next
   export function talk_from(mem: Memory): number {
     for (let i = mem.count - 1; i >= 0; i--) {
       if (Memory.said(Memory.message(mem, i)!)) {
+        while (i > 0 && Memory.message(mem, i - 1)!.more) {
+          i--;
+        }
         return i;
       }
     }
