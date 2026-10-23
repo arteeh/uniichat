@@ -16,8 +16,8 @@ import * as config from "./Config.ts";
 // Types
 // =====
 
-// the shell that flushes: what it reads, what it answered not yet read
-type Shell = { stdin: FileSink; out: ReadableStreamDefaultReader<Uint8Array>; got: string };
+// the shell that flushes: it, what it reads, what it answered not yet read
+type Shell = { proc: { ref(): void; unref(): void }; stdin: FileSink; out: ReadableStream<Uint8Array>; got: string };
 
 // Globals
 // =======
@@ -77,17 +77,28 @@ export namespace Disk {
       return;
     }
     const shell = (SHELL ??= Disk.shell());
-    shell.stdin.write("\n");
-    shell.stdin.flush();
-    while (!shell.got.includes("\n")) {
-      const got = await shell.out.read();
-      // the shell ended (a stop's signal): each file by itself
-      if (got.done) {
-        SHELL = null;
-        await Promise.all(files.map(Disk.fsync));
-        return;
+    // it keeps this process up only while a flush waits on it (its pipes'
+    // reader held too)
+    shell.proc.ref();
+    shell.stdin.ref();
+    const out = shell.out.getReader();
+    try {
+      shell.stdin.write("\n");
+      shell.stdin.flush();
+      while (!shell.got.includes("\n")) {
+        const got = await out.read();
+        // the shell ended (a stop's signal): each file by itself
+        if (got.done) {
+          SHELL = null;
+          await Promise.all(files.map(Disk.fsync));
+          return;
+        }
+        shell.got += new TextDecoder().decode(got.value);
       }
-      shell.got += new TextDecoder().decode(got.value);
+    } finally {
+      out.releaseLock();
+      shell.proc.unref();
+      shell.stdin.unref();
     }
     const code = shell.got.slice(0, shell.got.indexOf("\n"));
     shell.got = shell.got.slice(code.length + 1);
@@ -99,7 +110,7 @@ export namespace Disk {
   export function shell(): Shell {
     const run = 'while read _; do sync -f "$0"; echo $?; done';
     const proc = Bun.spawn(["sh", "-c", run, config.DIR], { stdin: "pipe", stdout: "pipe", stderr: "inherit" });
-    return { stdin: proc.stdin, out: proc.stdout.getReader(), got: "" };
+    return { proc, stdin: proc.stdin, out: proc.stdout, got: "" };
   }
 
   // a file gone since needs none. Windows flushes only a file opened to
