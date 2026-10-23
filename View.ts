@@ -465,7 +465,7 @@ export function view_act(v: View, act: Act): Client[] {
       const on = asked ?? v.mcp.find((p) => p.name === act.name)?.on;
       if (on === undefined) {
         const names = v.mcp.map((p) => p.name).join(", ");
-        v.notes.push("No MCP server " + act.name + (names === "" ? "; the server's config sets none." : "; one of: " + names + "."));
+        v.notes.push("No MCP server " + act.name + (names === "" ? "; none is set up." : "; one of: " + names + "."));
         return [];
       }
       return [{ $: "mcp", name: act.name, on: !on }];

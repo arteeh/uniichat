@@ -21,8 +21,13 @@
 // wakes every call waiting for a usage limit (Agent.resume), for a user
 // who knows one lifted early.
 // The user's MCP servers (Mcp.ts) add their tools to the master's and its
-// subagents', but those of servers the chat turned off (Memory `off`).
+// subagents', but those of servers the chat turned off (Memory `off`):
+// the server's config's, and each open device's own (Tools.servers).
+// Only the owner signs a device in, so a device's servers reach the chat
+// its shell already does, no further.
 
+import * as fs from "node:fs";
+import * as os from "node:os";
 import { AskAI, type Ask, type Block, type Call, type Event, type Kind } from "./AskAI.ts";
 import { Agent, type Out } from "./Agent.ts";
 import { report_text } from "./Call.ts";
@@ -44,13 +49,16 @@ export type { Live };
 
 // a device: its sign-in (a session's hash), the host it said it is
 // (its name may be host-2...), its links by tab (none: closed), jobs by
-// id, and its skills as last looked at (Tools.look)
+// id, and its skills as last looked at (Tools.look); the MCP servers it
+// told of (Tools.servers), and why some were left out
 type Device = {
   who    : string;
   host   : string;
   terms  : Map<string, Link>;
   jobs   : Map<string, Running>;
   skills : Skill[];
+  mcp    : config.McpServer[];
+  why    : string;
 };
 
 // a job: the link it runs on, what it runs, its output, what ends it
@@ -527,7 +535,7 @@ export namespace Tools {
     if (own === undefined) {
       Tools.forget(tools, name);
     }
-    const d = tools.devices.get(name) ?? { who, host, terms: new Map(), jobs: new Map(), skills: [] };
+    const d = tools.devices.get(name) ?? { who, host, terms: new Map(), jobs: new Map(), skills: [], mcp: [], why: "" };
     d.terms.set(term, link);
     tools.devices.set(name, d);
     Tools.sync(d, term, () => true);
@@ -554,6 +562,7 @@ export namespace Tools {
         job.end({ text: "The device " + device + " that ran this stopped.", fail: true });
       }
     }
+    Tools.plug(tools);
   }
 
   // a device gone with its sign-in: its links and jobs end, its name is
@@ -568,6 +577,56 @@ export namespace Tools {
     for (const job of [...d.jobs.values()]) {
       job.end({ text: "The device " + device + " that ran this was signed out.", fail: true });
     }
+    Tools.plug(tools);
+  }
+
+  // the MCP servers a device has in its own config.json (`mcp`, as it
+  // read it: Device.ts), run there, each named <device>_<server>; none if
+  // that file is the server's own (one machine, one ~/.unii: the server
+  // runs those). Why one is left out is told the chat, once
+  export function servers(tools: Tools, device: string, mcp: unknown, file: string): void {
+    const d = tools.devices.get(device);
+    if (d === undefined) {
+      return;
+    }
+    const notes: string[] = [];
+    let confs: config.McpServer[] = [];
+    try {
+      confs = file === Tools.where(config.FILE_PATH) ? [] : config.config_mcp(mcp, device, notes);
+    } catch (err: any) {
+      notes.push(String(err?.message ?? err));
+    }
+    const theirs = new Set(config.MCP.map((s) => s.name));
+    for (const s of confs.filter((s) => theirs.has(s.name))) {
+      notes.push("MCP server " + s.name + " is the server's own name too, so the device's is left out");
+    }
+    d.mcp = confs.filter((s) => !theirs.has(s.name));
+    const why = notes.join("; ");
+    if (why !== d.why) {
+      d.why = why;
+      if (why !== "") {
+        console.error("unii: device " + device + ": " + why);
+        tools.hooks.note("The device " + device + "'s MCP servers: " + why + ".");
+      }
+    }
+    Tools.plug(tools);
+  }
+
+  // the chat's MCP servers as they are now: the server's, and each open
+  // device's; the views told (☰ lists them)
+  export function plug(tools: Tools): void {
+    Mcp.sync(tools.mcp, [...config.MCP, ...Tools.opened(tools).flatMap(([, d]) => d.mcp)]);
+    tools.hooks.change();
+  }
+
+  // a config.json, as this machine and its real path: two the same are one
+  // file (Device.ts tells its own)
+  export function where(file: string): string {
+    let real = file;
+    try {
+      real = fs.realpathSync(file);
+    } catch {}
+    return os.hostname() + ":" + real;
   }
 
   // every device whose sign-in isn't kept forgotten
