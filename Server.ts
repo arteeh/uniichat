@@ -142,6 +142,7 @@ const GOAL_NO    = "The goal isn't satisfied yet: keep working.";
 // switched on with its first messages over its space already: refused
 const TALK_FULL  = "Conversation mode switched itself off: the messages it kept word for word, from message {id} on, filled their space in Unii's view. They show as summaries again; switch it on to keep the next ones whole.";
 const TALK_BIG   = "Conversation mode can't start: the messages since message {id} already fill its space in Unii's view.";
+const TALK_IMP   = "Conversation mode switched itself off: the messages imported filled its space in Unii's view (from message {id} on). Switch it on to keep the next ones whole.";
 const FULL       = "UniiChat's disk is full; try again soon.";
 // an import running: its batch's file in the chat's dir (Chat.keep)
 const BATCH      = "/import.json";
@@ -525,7 +526,7 @@ export namespace Chat {
   // a message logged in conversation mode: the views see its space fill
   // (their meter); past it (TALK) it switches itself off, said in the
   // chat: never a message of it quietly summarized again
-  export function talked(chat: Chat): void {
+  export function talked(chat: Chat, why = TALK_FULL): void {
     const mem = chat.mem;
     if (mem.talk === null) {
       return;
@@ -535,7 +536,7 @@ export namespace Chat {
     }
     const from = mem.talk;
     Chat.talk(chat, null);
-    Chat.note(chat, TALK_FULL.replace("{id}", String(from)));
+    Chat.note(chat, why.replace("{id}", String(from)));
   }
 
   // conversation mode from message `from` on, or off (null): saved, and
@@ -724,6 +725,8 @@ export namespace Chat {
     }
     Memory.push(chat.mem, held.map((m) => tag(m, false)));
     chat.batch = Chat.batch(chat, { a, b: chat.mem.count, said, spent: 0 });
+    // in conversation mode, its space with them counted (most fill it)
+    Chat.talked(chat, TALK_IMP);
     chat.socks.forEach((sock) => Chat.show(chat, sock));
     Chat.progress(chat);
     return { going: chat.batch !== null };
