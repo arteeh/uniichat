@@ -200,7 +200,7 @@ function linux_check(part: Part): void {
   const from = run(["systemctl", "--user", "show", "--property=FragmentPath", "--value", n + ".service"]).out;
   const theirs = mine !== null && !mine.includes(MARK) ? file : from !== "" && !same(from, file) ? from : null;
   if (theirs !== null) {
-    fail(n + " is in the way: " + theirs + " is a unit unii didn't make, so it stays as it is. To run unii " + part + " -d, remove it (systemctl --user disable --now " + n + ", then the file); or keep using it.");
+    fail(n + " isn't unii's: " + theirs + " is a unit unii didn't make, so unii leaves it as it is. To use unii " + part + " -d, remove it (systemctl --user disable --now " + n + ", then the file); or keep using it.");
   }
 }
 
@@ -241,7 +241,7 @@ async function mac_start(part: Part, args: string[], env: Record<string, string>
   const was = read(file);
   const loaded = run(["launchctl", "print", job]).code === 0;
   if ((was !== null && !was.includes(MARK)) || (was === null && loaded)) {
-    fail(n + " is in the way: " + (was === null ? "a launchd job by that name" : file) + " isn't one unii made, so it stays as it is. To run unii " + part + " -d, remove it (launchctl bootout " + job + ", then its plist); or keep using it.");
+    fail(n + " isn't unii's: " + (was === null ? "a launchd job by that name" : file) + " isn't one unii made, so unii leaves it as it is. To use unii " + part + " -d, remove it (launchctl bootout " + job + ", then its plist); or keep using it.");
   }
   const x = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   const strings = (list: string[]) => list.map((a) => "<string>" + x(a) + "</string>").join("");
@@ -284,7 +284,7 @@ async function mac_stop(part: Part): Promise<void> {
     return;
   }
   if (!was.includes(MARK)) {
-    fail(file + " isn't one unii made, so it stays as it is.");
+    fail(n + " isn't unii's: " + file + " isn't one unii made, so unii leaves it as it is.");
   }
   fs.rmSync(file);
   run(["launchctl", "bootout", "gui/" + process.getuid!() + "/" + n]);
@@ -316,7 +316,7 @@ Register-ScheduledTask -TaskName $env:UNII_TASK -TaskPath '\\' -Action $act -Tri
 Start-ScheduledTask -TaskName $env:UNII_TASK -TaskPath '\\'
 'ok'`, { UNII_TASK: n, UNII_LINE: line, UNII_ABOUT: MARK + ": `unii " + part + " -d` made this task, and makes it again; `unii " + part + " stop` removes it." });
   if (out === "theirs") {
-    fail(n + " is in the way: that Scheduled Task isn't one unii made, so it stays as it is. To run unii " + part + " -d, remove it (Unregister-ScheduledTask " + n + "); or keep using it.");
+    fail(n + " isn't unii's: that Scheduled Task isn't one unii made, so unii leaves it as it is. To use unii " + part + " -d, remove it (Unregister-ScheduledTask " + n + "); or keep using it.");
   }
   say(part, await up(part, pid), "the Scheduled Task " + n + ", started at logon");
 }
@@ -331,7 +331,7 @@ Stop-ScheduledTask -TaskName $env:UNII_TASK -TaskPath '\\'
 Unregister-ScheduledTask -TaskName $env:UNII_TASK -TaskPath '\\' -Confirm:$false
 'ok'`, { UNII_TASK: n });
   if (out === "theirs") {
-    fail("the Scheduled Task " + n + " isn't one unii made, so it stays as it is.");
+    fail(n + " isn't unii's: that Scheduled Task isn't one unii made, so unii leaves it as it is.");
   }
   // what the task ran, and what that started (Windows ends only the
   // task's own process)
