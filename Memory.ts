@@ -141,9 +141,9 @@ const NODE  = 512;
 export const JOBS = 64;
 const TRIES = 5;
 // a view past its `high` merges to half: the chat's 64-128 KB (96 KB on
-// average), the compactions' 16-32 KB (24 KB)
+// average), the compactions' half to all of config COMPACTOR_CONTEXT (by
+// default 2-4 KB), each call's cut to that much
 const HIGH  = 128000;
-const SEEN  = 32000;
 const BLOCK = 4;
 const SLOT  = 16;
 const DAY   = 864e5;
@@ -192,7 +192,7 @@ export namespace Memory {
   export function load(dir: string, share: Memory["share"], acted: Memory["acted"] = () => {}): Memory {
     const mem: Memory = {
       dir, fds: new Map(), count: 0, open: 0, pick: null, goal: null, off: [], work: [], timers: [], nodes: new Map(), agents: new Map(), ready: [[], []], ends: { main: [0, 0], tree: [0, 0] },
-      view: { parts: [], size: 0, batch: false, high: HIGH }, seen: { parts: [], size: 0, batch: false, high: SEEN },
+      view: { parts: [], size: 0, batch: false, high: HIGH }, seen: { parts: [], size: 0, batch: false, high: config.COMPACTOR_CONTEXT },
       busy: new Map(), sides: new Map(), calls: new Map(), hold: [null, "paused"], done: false, wait: new Set(), share, acted,
     };
     const saved = Memory.saved(dir);
@@ -713,7 +713,7 @@ export namespace Memory {
   export async function build(mem: Memory, l: number, i: number, text: string): Promise<void> {
     const task = { text: Memory.task(l, i) + text + "\n</input>", mark: false };
     const upto = Math.min(Memory.ctx(l, i), Memory.first(mem, 0, Memory.side(mem, l, i)));
-    const blocks = [...Memory.view(mem, upto, mem.seen.parts), task];
+    const blocks = [...Memory.view(mem, upto, Memory.last(mem, Memory.before(mem.seen.parts, upto), config.COMPACTOR_CONTEXT)), task];
     const lines: string[] = [];
     let end = await Memory.compact(mem, l, i, Memory.ask(mem, l, i, text, blocks));
     while (end.ok && end.text.trim() !== "") {
@@ -812,6 +812,7 @@ ${Memory.cut(line)}| ← LIMIT`;
     const gone: Part[] = [];
     let changed = false;
     const sides = [0, 1].filter((side) => mem.hold[side] === null).map((side) => Memory.first(mem, 0, side));
+    mem.seen.high = config.COMPACTOR_CONTEXT;
     Memory.reach(mem, mem.view, mem.count);
     Memory.reach(mem, mem.seen, Math.min(mem.count, ...sides));
     for (const view of [mem.view, mem.seen]) {
@@ -974,6 +975,20 @@ ${Memory.cut(line)}| ← LIMIT`;
 
   export function before(view: Part[], end: number): Part[] {
     return view.filter((part) => Memory.span(part)[1] < end);
+  }
+
+  // the last of `parts` whose lines, built, take `most` bytes at most
+  export function last(mem: Memory, parts: Part[], most: number): Part[] {
+    let [k, size] = [parts.length, 0];
+    for (; k > 0; k--) {
+      const part = parts[k - 1];
+      const n = Memory.built(mem, part.l, part.i) ? Memory.bytes(Memory.line(part, Memory.text(mem, part))) + 1 : 0;
+      if (size + n > most) {
+        break;
+      }
+      size += n;
+    }
+    return parts.slice(k);
   }
 
   // the view's lines built before message `end`, in blocks (the last cut

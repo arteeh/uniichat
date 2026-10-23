@@ -38,6 +38,7 @@ type Made = {
   offer     : Offer;
   pick      : Pick;
   compactor : Pick;
+  context   : number;
   agents    : Pick | null;
   after     : string;
 };
@@ -75,6 +76,7 @@ export const SETTINGS: Setting[] = [
   { key: "models",    def: LABELS.join(),                       apply: "now",     web: true  },
   { key: "pick",      def: "claude-api:sonnet-5.5:medium:slow", apply: "now",     web: true  },
   { key: "compactor", def: "claude-api:haiku-5.5:high:slow",    apply: "now",     web: true  },
+  { key: "compactor_context", def: "4",                         apply: "now",     web: true  },
   { key: "agents",    def: "",                                  apply: "now",     web: true  },
   { key: "site",      def: "http://127.0.0.1:8788",             apply: "restart", web: true  },
   { key: "apple",     def: "",                                  apply: "restart", web: true  },
@@ -106,6 +108,10 @@ export let   PICK       = MADE.pick;
 // what every compaction runs on, a chat's and an import's alike, whatever
 // the chat's pick
 export let   COMPACTOR  = MADE.compactor;
+// how much of the chat (bytes; config compactor_context, in KB) a
+// compaction sees before its input: less context, less for it to copy
+// into its line that the input lacks
+export let   COMPACTOR_CONTEXT = MADE.context;
 export let   AGENTS     = MADE.agents;
 
 // the iOS app (ios/, Owner.ts): its App ID, the team's then the bundle's
@@ -223,9 +229,19 @@ export function config_make(file: Record<string, unknown>): Made {
     offer,
     pick      : config_run("pick", config_value(file, "pick"), offer),
     compactor : config_run("compactor", config_value(file, "compactor"), offer),
+    context   : config_context(config_value(file, "compactor_context")),
     agents    : agents ? config_run("agents", agents, offer) : null,
     after     : config_value(file, "after"),
   };
+}
+
+// compactor_context: whole KB, 1 to 128, as bytes
+function config_context(text: string): number {
+  const kb = Number(text.trim());
+  if (!/^\d+$/.test(text.trim()) || kb < 1 || kb > 128) {
+    throw new Error("config: compactor_context is no whole number of KB from 1 to 128: " + text);
+  }
+  return kb * 1000;
 }
 
 // vendor:model:effort:speed, or a profile's name (at medium and slow
@@ -379,6 +395,7 @@ export function config_reload(): void {
   OFFER.profiles = made.offer.profiles;
   PICK = made.pick;
   COMPACTOR = made.compactor;
+  COMPACTOR_CONTEXT = made.context;
   AGENTS = made.agents;
   AFTER = made.after;
   Object.assign(KEYS, keys);

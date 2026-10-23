@@ -134,6 +134,10 @@ The server's settings are in `~/.unii/config.json` (most are on the
 Settings page). Each may also be set as `UNII_<KEY>`, which wins. Besides
 `vendors`, `models`, `pick`, `compactor`, `agents`, `profiles` and `site`:
 
+- `compactor_context` (also on the Settings page): how much of the chat,
+  in KB (default 4), each summary sees beside its message. More lets the
+  compactor copy in what the message doesn't say; Sonnet medium does
+  that less than Haiku.
 - `mcp`: MCP servers, in Claude's `mcpServers` shape (or a file path).
   Add `"device": "<name>"` to run one on a device.
 - `after`: a shell command run after each turn (by sh; on Windows by
