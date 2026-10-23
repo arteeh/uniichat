@@ -52,9 +52,11 @@ const RESTARTS = WIN ? 3 : 0;
 const AFTER    = 60000;
 const RAN      = 600000;
 
-// what the environment the service runs in takes from the shell that ran
-// -d (Linux, macOS: their service managers give a bare PATH)
-const KEEP = WIN ? [] : ["PATH", "UNII_DIR", "XDG_CONFIG_HOME"];
+// the dirs the service sees as the shell that ran -d did, resolved: on
+// Linux and macOS in its environment, with PATH (their service managers
+// give a bare one); on Windows, whose task has no environment of the
+// shell's, as --env=<name>=<dir> arguments (Cli.ts sets them)
+export const DIRS = ["UNII_DIR", "XDG_CONFIG_HOME"];
 
 const ABOUT: Record<Part, string> = { serve: "UniiChat server (unii serve)", device: "UniiChat device (unii device)" };
 
@@ -74,10 +76,14 @@ export function command(): string[] {
 // -d: the service made (or made again) and (re)started by the OS, its
 // status told
 export async function start(part: Part, args: string[]): Promise<void> {
-  const env = Object.fromEntries(KEEP.flatMap((k) => (process.env[k] ? [[k, process.env[k]!]] : [])));
-  if (WIN) {
-    return win_start(part, args);
+  const dirs = Object.fromEntries(DIRS.flatMap((k) => (process.env[k] ? [[k, path.resolve(k === "UNII_DIR" ? DATA : process.env[k]!)]] : [])));
+  if (part === "device") {
+    alone();
   }
+  if (WIN) {
+    return win_start(part, [...Object.entries(dirs).map(([k, v]) => "--env=" + k + "=" + v), ...args]);
+  }
+  const env = { ...(process.env.PATH ? { PATH: process.env.PATH } : {}), ...dirs };
   return MAC ? mac_start(part, args, env) : linux_start(part, args, env);
 }
 
@@ -104,7 +110,7 @@ export async function logs(part: Part, follow: boolean): Promise<void> {
 // where the service unii made runs now; null: it doesn't
 export function running(part: Part): string | null {
   if (WIN || MAC) {
-    return alive(pids(part)[0]) ? (WIN ? "the Scheduled Task " : "the LaunchAgent ") + name(part) : null;
+    return ours(part, pids(part).slice(0, 1)).length > 0 ? (WIN ? "the Scheduled Task " : "the LaunchAgent ") + name(part) : null;
   }
   const file = unit(part);
   if (!read(file)?.includes(MARK) || Bun.which("systemctl") === null) {
@@ -304,7 +310,7 @@ async function mac_stop(part: Part): Promise<void> {
 async function win_start(part: Part, args: string[]): Promise<void> {
   const n = name(part);
   const pid = read(LOGS + "/" + part + ".pid");
-  const line = ["--headless", ...command(), part, "--service", ...args].map((a) => (/[\s"]/.test(a) ? '"' + a + '"' : a)).join(" ");
+  const line = ["--headless", ...command(), part, "--service", ...args].map(winq).join(" ");
   const out = ps(`
 $t = Get-ScheduledTask -TaskName $env:UNII_TASK -TaskPath '\\' -ErrorAction SilentlyContinue
 if ($t -and ([string]$t.Description) -notmatch '${MARK}') { 'theirs'; return }
@@ -325,6 +331,11 @@ Start-ScheduledTask -TaskName $env:UNII_TASK -TaskPath '\\'
 
 async function win_stop(part: Part): Promise<void> {
   const n = name(part);
+  // what the task ran, and what that started (Windows ends only the
+  // task's own process), if still unii; its file gone first: run from
+  // the service's own shell, the stop ends this
+  const mine = ours(part, pids(part));
+  fs.rmSync(LOGS + "/" + part + ".pid", { force: true });
   const out = ps(`
 $t = Get-ScheduledTask -TaskName $env:UNII_TASK -TaskPath '\\' -ErrorAction SilentlyContinue
 if (-not $t) { 'none'; return }
@@ -335,19 +346,15 @@ Unregister-ScheduledTask -TaskName $env:UNII_TASK -TaskPath '\\' -Confirm:$false
   if (out === "theirs") {
     fail(n + " isn't unii's: that Scheduled Task isn't one unii made, so unii leaves it as it is.");
   }
-  // what the task ran, and what that started (Windows ends only the
-  // task's own process)
-  for (const pid of pids(part).filter(alive)) {
+  for (const pid of out === "none" ? [] : mine) {
     run(["taskkill", "/T", "/F", "/PID", String(pid)]);
   }
-  fs.rmSync(LOGS + "/" + part + ".pid", { force: true });
   console.log(out === "none" ? "unii " + part + " isn't set up as a background service here: nothing to stop." : "unii " + part + " stopped: its background service " + n + " is removed.");
 }
 
 function ps(script: string, env: Record<string, string>): string {
-  const shell = Bun.which("pwsh") ?? "powershell.exe";
   // an error as its message alone (PowerShell 7 adds colour codes)
-  const out = run([shell, "-NoProfile", "-NonInteractive", "-Command", "$ErrorActionPreference = 'Stop'; try {" + script + "\n} catch { [Console]::Error.WriteLine($_.Exception.Message); exit 1 }"], env);
+  const out = run([pwsh(), "-NoProfile", "-NonInteractive", "-Command", "$ErrorActionPreference = 'Stop'; try {" + script + "\n} catch { [Console]::Error.WriteLine($_.Exception.Message); exit 1 }"], env);
   if (out.code !== 0) {
     fail("PowerShell failed: " + (out.err || out.out || "exit " + out.code));
   }
@@ -361,17 +368,19 @@ function ps(script: string, env: Record<string, string>): string {
 // output to LOGS/<part>.log, each line timed, capped (CAP). Its pid and
 // the part's are in LOGS/<part>.pid; one left by a supervisor before it
 // (a restart: Windows ended that one alone) is waited for, then ended,
-// so the new part finds its port free. On Windows a part that failed
-// starts again (RESTARTS).
+// so the new part finds its port free: if still unii's (`ours`; a file
+// left by a crash or a sign-out may name pids reused since). On Windows a
+// part that failed starts again (RESTARTS). Stopped (a signal), it ends
+// with 0, so launchd leaves it stopped.
 
 export async function supervise(part: Part, args: string[]): Promise<never> {
   if (WIN) {
     // the task's conhost, which Windows ends alone
     watch(process.ppid);
   }
-  fs.mkdirSync(LOGS, { recursive: true });
+  fs.mkdirSync(LOGS, { recursive: true, mode: 0o700 });
   const file = LOGS + "/" + part + ".pid";
-  for (const pid of pids(part).filter((pid) => pid !== process.pid)) {
+  for (const pid of ours(part, pids(part).filter((pid) => pid !== process.pid))) {
     for (let k = 0; k < 40 && alive(pid); k++) {
       await Bun.sleep(250);
     }
@@ -405,7 +414,7 @@ export async function supervise(part: Part, args: string[]): Promise<never> {
     await Bun.sleep(AFTER);
   }
   fs.rmSync(file, { force: true });
-  process.exit(code);
+  process.exit(stopping ? 0 : code);
 }
 
 // a log's writer: each line timed; past CAP the file goes to .1
@@ -502,6 +511,62 @@ function say(part: Part, up: boolean, where: string): void {
 // the supervisor's pid and its part's (none: [])
 function pids(part: Part): number[] {
   return (read(LOGS + "/" + part + ".pid") ?? "").trim().split(/\s+/).map(Number).filter((n) => Number.isInteger(n) && n > 0);
+}
+
+// of `list`, the pids still of this unii running `part`, by their command
+// lines (Windows: one it won't show isn't)
+export function ours(part: Part, list: number[]): number[] {
+  const live = list.filter(alive);
+  if (live.length === 0) {
+    return [];
+  }
+  const got = procs(live.map((pid) => "ProcessId=" + pid).join(" OR "));
+  return live.filter((pid) => got.some(([p, line]) => p === pid && runs(line, part)));
+}
+
+// -d's for a device: a warning if a device runs here in the foreground
+// (`unii device`, not the service's), as two with one device.json take
+// turns as one device
+function alone(): void {
+  const service = WIN || MAC ? pids("device") : [];
+  const theirs = (pid: number) => (WIN || MAC ? service.includes(pid) : (read("/proc/" + pid + "/cgroup") ?? "").includes("/" + name("device") + ".service"));
+  const found = procs("CommandLine LIKE '%device%'").filter(([pid, line]) => pid !== process.pid && runs(line, "device", '(\\s+"?https?://[^\\s"]*"?)?\\s*$') && !theirs(pid));
+  if (found.length > 0) {
+    console.error("unii: warning: a unii device runs here in the foreground already (pid " + found.map(([pid]) => pid).join(", ") + "). With the same sign-in (device.json) the two take turns as one device: stop it.");
+  }
+}
+
+// whether a command line is this unii's (its executable's name) running
+// `part`, then `then`
+function runs(line: string, part: Part, then = "(\\s|$)"): boolean {
+  const exe = path.basename(command().at(-1)!).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp('(^|[\\\\/\\s"])' + exe + '"?\\s+"?' + part + '"?' + then, "i").test(line);
+}
+
+// the processes here, [pid, command line]; on Windows those `wql` picks
+// (a CIM filter)
+function procs(wql: string): Array<[number, string]> {
+  const out = WIN
+    ? run([pwsh(), "-NoProfile", "-NonInteractive", "-Command", "Get-CimInstance Win32_Process -Filter $env:UNII_WQL | ForEach-Object { [string]$_.ProcessId + ' ' + $_.CommandLine }"], { UNII_WQL: wql }).out
+    : run(["ps", "-A", "-ww", "-o", "pid=,args="]).out;
+  return out.split(/\r?\n/).flatMap((line): Array<[number, string]> => {
+    const m = line.trim().match(/^(\d+)\s*(.*)$/);
+    return m === null ? [] : [[Number(m[1]), m[2]]];
+  });
+}
+
+function pwsh(): string {
+  return Bun.which("pwsh") ?? "powershell.exe";
+}
+
+// an argument as Windows reads it back from a command line
+// (CommandLineToArgvW): quoted if need be, a backslash run before a quote
+// or the end doubled
+export function winq(a: string): string {
+  if (a !== "" && !/[\s"]/.test(a)) {
+    return a;
+  }
+  return '"' + a.replace(/(\\*)"/g, '$1$1\\"').replace(/(\\+)$/, "$1$1") + '"';
 }
 
 function alive(pid: number | undefined): boolean {

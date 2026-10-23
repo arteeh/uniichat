@@ -18,7 +18,15 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import * as Update from "./Update.ts";
 
-const ARGS = process.argv.slice(2);
+// a Windows service's dirs (Service.ts DIRS), as `--env=<name>=<dir>`:
+// set before any part reads them
+const SET = /^--env=(UNII_DIR|XDG_CONFIG_HOME)=(.+)$/;
+const ARGS = process.argv.slice(2).filter((a) => !SET.test(a));
+const SETS = process.argv.slice(2).filter((a) => SET.test(a));
+for (const a of SETS) {
+  const [, k, v] = a.match(SET)!;
+  process.env[k] = v;
+}
 const WEB  = /^https?:\/\//;
 const URL_ = ARGS.find((a) => WEB.test(a));
 // -d: to the background; -f: logs followed; --service: as a service's
@@ -77,10 +85,8 @@ async function serve_free(): Promise<void> {
   const Service = await import("./Service.ts");
   const dir = (process.env.UNII_DIR ?? "~/.unii").replace(/^~(?=[\\/]|$)/, (await import("node:os")).homedir());
   const pid = Number(fs.existsSync(dir + "/server.pid") ? fs.readFileSync(dir + "/server.pid", "utf8") : 0);
-  let up = false;
-  try {
-    up = pid > 0 && process.kill(pid, 0);
-  } catch {}
+  // still a unii server (a pid reused since isn't)
+  const up = pid > 0 && Service.ours("serve", [pid]).length > 0;
   if (up && Service.running("serve") === null) {
     fail("a unii server runs here already (pid " + pid + "), not as unii serve -d's service: stop it first.");
   }
@@ -145,7 +151,16 @@ if (SUPERVISOR > 0) {
   (await import("./Service.ts")).watch(SUPERVISOR);
 }
 
-if (FLAG.size > 0 && !runs && !(part !== null && sub === "logs" && flags("-f"))) {
+// what a service -d makes or stop ends must not carry the marks of the
+// unii shell this may run in (Machine.ts: as that device quits, it kills
+// what has them), nor its systemd unit's id
+if (part !== null && (FLAG.has("-d") || sub === "stop")) {
+  for (const k of ["UNII_RUN", "UNII_AGENT", "INVOCATION_ID"]) {
+    delete process.env[k];
+  }
+}
+
+if ((SETS.length > 0 && !FLAG.has("--service")) || (FLAG.size > 0 && !runs && !(part !== null && sub === "logs" && flags("-f")))) {
   fail("no command " + ARGS.join(" ") + ".\n\n" + USAGE);
 } else if (runs && FLAG.has("--service")) {
   await (await import("./Service.ts")).supervise(part!, REST.slice(1).concat(URL_ ?? []));
