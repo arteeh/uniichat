@@ -760,12 +760,13 @@ export namespace Chat {
   }
 
   // kept as it is till it ends (a restart changes nothing): written
-  // whole, then moved in place
+  // whole, then moved in place; flushed soon (Disk.ts)
   export function keep(batch: Batch, chat: Chat): void {
     const file = chat.mem.dir + BATCH;
     const { a, b, said, spent } = batch;
     fs.writeFileSync(file + ".new", JSON.stringify({ a, b, said, spent, why: chat.mem.hold[1] }));
     move_over(file + ".new", file);
+    Disk.wrote(file);
   }
 
   // the import a chat ran when let go (BATCH); null: none
