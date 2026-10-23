@@ -63,7 +63,7 @@ const NODE = 512;
 const LINE = 480;
 
 // what a compaction call costs on the compactor (Config.ts COMPACTOR, its
-// 16-32 KB view), in micro-USD: base, `byte` a doubling of its source past
+// view of up to COMPACTOR_CONTEXT), in micro-USD: base, `byte` a doubling of its source past
 // NODE, `depth` a summary under it (its own too); no view term: the view
 // is read from cache, and a view term fit here takes a negative base; fit
 // on 5,617 compaction calls of real imports
