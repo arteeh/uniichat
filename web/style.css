@@ -103,6 +103,12 @@ body.account footer { position: fixed; inset: auto 0 0; background: none; pointe
 body.account footer > :not(#toast) { display: none; }
 #pick { width: min(var(--col), 100%); margin: 0 auto 6px; display: flex; align-items: center; gap: 6px; font: 12.5px/20px var(--sans); color: var(--mid); }
 #pick .rule { flex: 1; height: 1px; background: var(--hair); margin-right: 4px; }
+/* conversation mode's meter: the rule, thicker, filled to --used, grey to orange as it fills */
+#pick .rule.meter { height: 14px; background: linear-gradient(to right, color-mix(in srgb, #f07a1a var(--used), var(--mid)) var(--used), var(--hair) var(--used)) center / 100% 3px no-repeat; }
+#pick .modes { display: flex; border-radius: 6px; background: var(--block); }
+#pick .modes button { padding: 0 6px; border-radius: 6px; }
+#pick .modes [aria-pressed=true] { color: var(--ink); background: var(--hover); }
+#pick .modes [aria-pressed=false]:hover { color: var(--ink); }
 #pick > :is(button, .knob) { padding: 0 6px; border-radius: 6px; }
 #pick > button:hover, #pick > button:has(+ :popover-open) { background: var(--block); color: var(--ink); }
 #pick .dot { color: var(--soft); }
@@ -348,8 +354,8 @@ header > .imping { display: flex; flex-direction: column; justify-content: cente
 /* a finger needs 44px: small buttons take taps around them (a box
    centered on each, not drawn), links in small print above and below */
 @media (pointer: coarse) {
-  :is(header > :is(button, a), #pick > button, #tabs button) { position: relative; }
-  :is(header > :is(button, a), #pick > button, #tabs button, .mine, .down, .copy, .open.one > .fold)::after { content: ""; position: absolute; left: 50%; top: 50%; width: max(100%, 44px); height: max(100%, 44px); transform: translate(-50%, -50%); }
+  :is(header > :is(button, a), #pick > button, #pick .modes button, #tabs button) { position: relative; }
+  :is(header > :is(button, a), #pick > button, #pick .modes button, #tabs button, .mine, .down, .copy, .open.one > .fold)::after { content: ""; position: absolute; left: 50%; top: 50%; width: max(100%, 44px); height: max(100%, 44px); transform: translate(-50%, -50%); }
   .foot a { padding: 14px 0; }
   .chip { height: 44px; }
   :is([popover] > button, #menu .mcp button) { min-height: 44px; }
