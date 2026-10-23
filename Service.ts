@@ -142,9 +142,9 @@ function unit(part: Part): string {
 async function linux_start(part: Part, args: string[], env: Record<string, string>): Promise<void> {
   const n = name(part);
   linux_check(part);
-  // systemd's quoting: a value in "", \ and " escaped, % doubled (and in
-  // a command $ too)
-  const q = (s: string) => '"' + s.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/%/g, "%%") + '"';
+  // systemd's quoting: a value in "", \ and " escaped, a line break as
+  // \n, % doubled (and in a command $ too)
+  const q = (s: string) => '"' + s.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/\n/g, "\\n").replace(/%/g, "%%") + '"';
   const text = [
     "# " + MARK + ": `unii " + part + " -d` wrote this unit, and writes it again; `unii " + part + " stop` removes it.",
     "[Unit]",
