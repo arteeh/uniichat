@@ -153,14 +153,17 @@ function choice_html(c: View.Choice): string {
   return `${head}<button role="menuitemradio" aria-checked="${c.here}"${act}>${esc(c.text)}</button>`;
 }
 
-// the MCP servers in the ☰ menu, each on or off in this chat (a click
-// switches it); none: nothing
+// the settings page's MCP servers (the server's, and each open device's),
+// a row each, on or off in this chat (its switch flips it); none: where
+// they are set up
 export function mcp_html(plugs: View.Plug[]): string[] {
   const one = (p: View.Plug) => {
-    const hint = "Its tools are " + (p.on ? "on" : "off") + " in this chat; click to turn them " + (p.on ? "off" : "on") + ".";
-    return `<button class="${p.on ? "on" : "off"}" title="${esc(hint)}"${act_html({ $: "Plug", name: p.name })}>${esc(p.name)}<span>${p.on ? "on" : "off"}</span></button>`;
+    const act = act_html({ $: "Plug", name: p.name });
+    const button = `<button class="chip" role="switch" aria-checked="${p.on}" aria-label="${esc(p.name)}"${act}>${p.on ? "Turn off" : "Turn on"}</button>`;
+    return `<div class="item"><p>${esc(p.name)}<small>Its tools are ${p.on ? "on" : "off"} in this chat.</small></p>${button}</div>`;
   };
-  return plugs.length === 0 ? [] : [`<p>MCP servers</p>`, ...plugs.map(one)];
+  const none = `<p class="sub">None set up. Add them as <code>mcp</code> in config.json: the server's, or a device's own for programs run on that device.</p>`;
+  return plugs.length === 0 ? [none] : plugs.map(one);
 }
 
 export function tabs_html(tabs: View.Tab[]): string[] {
@@ -195,7 +198,8 @@ export function account_html(prompts: View.Prompts | null, notify: Notify | null
   const unread  = item("Could not read the prompts.", "", `<button class="chip retry">Try again</button>`);
   const mine    = section_html("Prompts", prompts === null ? unread : prompt_html("prompt", prompts.prompt.text, "The user prompt: Unii's system prompt in every turn; its subagents get it too once you change it. Add who you are and how you want work done at its end. prompt.md in the server's folder; empty: the built-in one.")
     + prompt_html("compact", prompts.compact.text, "The compaction prompt: all a summary of the memory gets, nothing else. compact.md in the server's folder; empty: the built-in one."));
-  return `<a class="back" href="/" data-go="/">← Chat</a><h1>Settings</h1>` + mine + section_html("This browser", acts.join("")) + `<div class="owned"></div>`;
+  const mcp     = section_html("MCP servers", `<div class="mcp"></div>`);
+  return `<a class="back" href="/" data-go="/">← Chat</a><h1>Settings</h1>` + mine + section_html("This browser", acts.join("")) + mcp + `<div class="owned"></div>`;
 }
 
 // a prompt's editor: its note, its text (name: what /api/prompts sets), Save

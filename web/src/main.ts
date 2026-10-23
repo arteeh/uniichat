@@ -851,7 +851,7 @@ function bars(): void {
   if (knob !== undefined) {
     $("#pick [data-knob=" + knob + "]").focus();
   }
-  markup($("#menu .mcp"), Html.mcp_html(v.mcp));
+  mcp_draw();
   $("#tabs").hidden = tabs.length < 2;
   markup($("#tabs"), Html.tabs_html(tabs));
   import_bar();
@@ -946,6 +946,7 @@ async function account(): Promise<void> {
     ev.preventDefault();
     account_prompt(form);
   }));
+  mcp_draw();
   el.querySelectorAll<HTMLButtonElement>(".retry").forEach((retry) => (retry.onclick = () => account()));
   $("#account .out").onclick = signout;
   const bell = document.querySelector<HTMLButtonElement>("#account .notify");
@@ -959,6 +960,18 @@ async function account(): Promise<void> {
     return;
   }
   settings_draw(page);
+}
+
+// the page's MCP servers, as the chat's state has them (Html.mcp_html);
+// a switch focused stays so as it flips
+function mcp_draw(): void {
+  const box = document.querySelector("#account .mcp");
+  if (box === null) {
+    return;
+  }
+  const on = box.contains(document.activeElement) ? document.activeElement!.getAttribute("aria-label") : null;
+  markup(box, Html.mcp_html(v.mcp));
+  [...box.querySelectorAll<HTMLElement>("[role=switch]")].find((b) => b.getAttribute("aria-label") === on)?.focus();
 }
 
 async function signout(): Promise<void> {

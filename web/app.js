@@ -1512,10 +1512,12 @@ function choice_html(c) {
 }
 function mcp_html(plugs) {
   const one = (p) => {
-    const hint = "Its tools are " + (p.on ? "on" : "off") + " in this chat; click to turn them " + (p.on ? "off" : "on") + ".";
-    return `<button class="${p.on ? "on" : "off"}" title="${esc(hint)}"${act_html({ $: "Plug", name: p.name })}>${esc(p.name)}<span>${p.on ? "on" : "off"}</span></button>`;
+    const act = act_html({ $: "Plug", name: p.name });
+    const button = `<button class="chip" role="switch" aria-checked="${p.on}" aria-label="${esc(p.name)}"${act}>${p.on ? "Turn off" : "Turn on"}</button>`;
+    return `<div class="item"><p>${esc(p.name)}<small>Its tools are ${p.on ? "on" : "off"} in this chat.</small></p>${button}</div>`;
   };
-  return plugs.length === 0 ? [] : [`<p>MCP servers</p>`, ...plugs.map(one)];
+  const none = `<p class="sub">None set up. Add them as <code>mcp</code> in config.json: the server's, or a device's own for programs run on that device.</p>`;
+  return plugs.length === 0 ? [none] : plugs.map(one);
 }
 function tabs_html(tabs) {
   return tabs.map((tab) => {
@@ -1538,7 +1540,8 @@ function account_html(prompts, notify = null) {
   ];
   const unread = item("Could not read the prompts.", "", `<button class="chip retry">Try again</button>`);
   const mine = section_html("Prompts", prompts === null ? unread : prompt_html("prompt", prompts.prompt.text, "The user prompt: Unii's system prompt in every turn; its subagents get it too once you change it. Add who you are and how you want work done at its end. prompt.md in the server's folder; empty: the built-in one.") + prompt_html("compact", prompts.compact.text, "The compaction prompt: all a summary of the memory gets, nothing else. compact.md in the server's folder; empty: the built-in one."));
-  return `<a class="back" href="/" data-go="/">← Chat</a><h1>Settings</h1>` + mine + section_html("This browser", acts.join("")) + `<div class="owned"></div>`;
+  const mcp = section_html("MCP servers", `<div class="mcp"></div>`);
+  return `<a class="back" href="/" data-go="/">← Chat</a><h1>Settings</h1>` + mine + section_html("This browser", acts.join("")) + mcp + `<div class="owned"></div>`;
 }
 function prompt_html(name, text, note) {
   const area = `<textarea name="${name}" rows="12" spellcheck="false">${esc(text)}</textarea>`;
@@ -2429,7 +2432,7 @@ function bars() {
   if (knob !== undefined) {
     $("#pick [data-knob=" + knob + "]").focus();
   }
-  markup($("#menu .mcp"), mcp_html(v.mcp));
+  mcp_draw();
   $("#tabs").hidden = tabs.length < 2;
   markup($("#tabs"), tabs_html(tabs));
   import_bar();
@@ -2492,6 +2495,7 @@ async function account() {
     ev.preventDefault();
     account_prompt(form);
   });
+  mcp_draw();
   el.querySelectorAll(".retry").forEach((retry) => retry.onclick = () => account());
   $("#account .out").onclick = signout;
   const bell = document.querySelector("#account .notify");
@@ -2505,6 +2509,15 @@ async function account() {
     return;
   }
   settings_draw(page);
+}
+function mcp_draw() {
+  const box = document.querySelector("#account .mcp");
+  if (box === null) {
+    return;
+  }
+  const on = box.contains(document.activeElement) ? document.activeElement.getAttribute("aria-label") : null;
+  markup(box, mcp_html(v.mcp));
+  [...box.querySelectorAll("[role=switch]")].find((b) => b.getAttribute("aria-label") === on)?.focus();
 }
 async function signout() {
   await notify_sub().then((sub) => sub?.unsubscribe()).catch(() => {});
