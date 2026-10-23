@@ -71,15 +71,16 @@ real Windows yet, though: expect rough edges there. One known gap: the
 find a process that left the tree once its shell has ended (Linux and
 macOS find those by a mark in their environment).
 
-`unii update` installs the newest release. A server or device running
-keeps the old one till it restarts; on Windows the installer won't run
-while one does: stop it first (its task, below), update, start it again.
+`unii update` installs the newest release and restarts the background
+services `-d` made (below) on it. A server or device you run another
+way keeps the old one till it restarts; on Windows the installer won't
+run while one does: stop it first, update, start it again.
 
-1. **Start the server** on the computer that keeps your chat (as a
-   service, like a device below): `unii serve` serves
-   http://127.0.0.1:8788; its data is in `~/.unii` (`$UNII_DIR`). Put it
-   behind HTTPS (e.g. `tailscale serve`) to reach it from elsewhere, and
-   set `site` to that address.
+1. **Start the server** on the computer that keeps your chat: `unii
+   serve -d` runs it in the background (below); `unii serve` in the
+   foreground. It serves http://127.0.0.1:8788; its data is in `~/.unii`
+   (`$UNII_DIR`). Put it behind HTTPS (e.g. `tailscale serve`) to reach
+   it from elsewhere, and set `site` to that address.
 2. **Sign in.** On the server's computer, `unii serve link` prints a link
    that signs a browser in. A terminal or a device signs in by a link and
    a code you confirm in that browser. `unii serve sessions` lists them;
@@ -91,44 +92,19 @@ while one does: stop it first (its task, below), update, start it again.
    (ChatGPT) on the server's computer, then pick `claude-sub` or
    `openai-sub`. Each takes `logout` or `status`.
 4. **Add devices.** On each computer Unii may work on, run `unii device
-   https://your-server` once by hand: it prints a link and a code to
-   confirm in your browser. Its work dir is `~/.unii/work`; its settings
-   are in `~/.config/unii/device.json`. Then keep it up as a service,
-   e.g. `~/.config/systemd/user/unii-device.service`:
+   -d https://your-server`: it prints a link and a code to confirm in
+   your browser, then runs in the background. Its work dir is
+   `~/.unii/work`; its settings are in `~/.config/unii/device.json`.
 
-       [Service]
-       ExecStart=%h/.local/bin/unii device
-       Restart=always
-       [Install]
-       WantedBy=default.target
-
-   `systemctl --user enable --now unii-device` (and `loginctl
-   enable-linger` to run it while you're logged out). The server's
-   `unii-serve.service` is the same with `ExecStart=%h/.local/bin/unii
-   serve`.
-
-   On Windows, a task that starts it at logon, hidden (no window), and
-   again within a minute whenever it has stopped (it is tried every
-   minute, and skipped while it runs). For the server, set `$part` to
-   `serve`:
-
-       $part = "device"
-       $unii = "$env:LOCALAPPDATA\Programs\unii\unii.exe"
-       $act = New-ScheduledTaskAction -Execute conhost.exe -Argument "--headless `"$unii`" $part"
-       $at = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
-       $at.Repetition = (New-ScheduledTaskTrigger -Once -At 0:00 -RepetitionInterval (New-TimeSpan -Minutes 1)).Repetition
-       $set = New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::Zero) -MultipleInstances IgnoreNew -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
-       Register-ScheduledTask "unii-$part" -Action $act -Trigger $at -Settings $set
-       Start-ScheduledTask "unii-$part"
-
-   To stop it (for an update, say), turn the task off, then end what it
-   runs (Windows ends only the task's own conhost, maybe not unii):
-
-       Disable-ScheduledTask "unii-$part"; Stop-ScheduledTask "unii-$part"
-       Get-CimInstance Win32_Process -Filter "Name = 'unii.exe'" | Where-Object CommandLine -match "\s$part(\s|$)" | ForEach-Object { taskkill /T /F /PID $_.ProcessId }
-
-   and to start it again: `Enable-ScheduledTask "unii-$part";
-   Start-ScheduledTask "unii-$part"`.
+**In the background**, `-d` runs the server or a device as a service of
+your user (a systemd user service; on Windows a Scheduled Task, no
+admin; on macOS a LaunchAgent), started at login and again if it
+crashes. `-d` again restarts it, `stop` (`unii serve stop`, `unii device
+stop`) stops and removes it, and `logs [-f]` shows (follows) its output:
+the journal on Linux, `~/.unii/logs/` on Windows and macOS. On Linux,
+`loginctl enable-linger` starts it at boot and keeps it up after you log
+out. A service by its name (`unii-serve`, `unii-device`) that you made
+yourself is left as it is: remove it to use `-d`.
 
 The server's settings are in `~/.unii/config.json` (most are on the
 Settings page). Each may also be set as `UNII_<KEY>`, which wins. Besides
@@ -170,17 +146,12 @@ Back up the server's data (`~/.unii`) first if you may want your chat
 again. The paths below are the defaults: if you set `UNII_BIN`,
 `UNII_DIR` or `XDG_CONFIG_HOME`, remove those places instead.
 
-- **Linux:** stop and remove the services you made (`systemctl --user
-  disable --now unii-device`, and `unii-serve` if you made one, then
-  their files in `~/.config/systemd/user`), then `rm ~/.local/bin/unii`
-  and `rm -rf ~/.unii ~/.config/unii`.
-- **macOS:** stop and remove the launch agents you made, if any
-  (`launchctl bootout gui/$(id -u)/<its label>`, then its plist in
-  `~/Library/LaunchAgents`), then `rm ~/.local/bin/unii` and `rm -rf
-  ~/.unii ~/.config/unii`.
-- **Windows:** stop each task you made (above), then
-  `Unregister-ScheduledTask unii-device -Confirm:$false` (and
-  `unii-serve`), quit any other `unii` you run, then `Remove-Item
+First run `unii device stop` and `unii serve stop` where you used `-d`
+(and stop any service you made yourself).
+
+- **Linux, macOS:** `rm ~/.local/bin/unii` and `rm -rf ~/.unii
+  ~/.config/unii`.
+- **Windows:** quit any other `unii` you run, then `Remove-Item
   -Recurse -Force "$env:LOCALAPPDATA\Programs\unii", "$HOME\.unii",
   "$HOME\.config\unii"`, and take `%LOCALAPPDATA%\Programs\unii` out of
   your user Path (`rundll32 sysdm.cpl,EditEnvironmentVariables`).

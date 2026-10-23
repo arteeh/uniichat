@@ -1,8 +1,8 @@
 // Device
 // ======
 // `unii device [url]`: this computer as a device of a unii server, on
-// its own, with no terminal open (a systemd user service runs it as
-// `unii device`). The agent's tools (Machine.ts) and the MCP programs a
+// its own, with no terminal open (`unii device -d` runs it as a
+// background service: Service.ts). The agent's tools (Machine.ts) and the MCP programs a
 // server runs on a device (Mcp.here) run here as jobs, each in its
 // agent's dir under the work dir, till done or halted; all they left
 // running dies as the device stops. Its file is device.json (Client.ts):
@@ -30,7 +30,10 @@ const WORK  = "~/.unii/work";
 // Device
 // ======
 
-export async function run(given: string | undefined): Promise<void> {
+// device.json, signed in to the server given (else its own: Client.server),
+// the owner confirming it in a browser if it isn't yet: before `unii
+// device -d` goes to the background too (Service.ts)
+export async function signin(given: string | undefined): Promise<{ url: string; token: string; name: string; work: string }> {
   const conf = Client.read("device");
   const url = Client.server(given, conf);
   const name = String(conf.name ?? HOST);
@@ -40,6 +43,11 @@ export async function run(given: string | undefined): Promise<void> {
     token = await Client.login(url, "the device " + name);
   }
   Client.write("device", { ...conf, url, token, name, work });
+  return { url, token: token!, name, work };
+}
+
+export async function run(given: string | undefined): Promise<void> {
+  const { url, token, name, work } = await signin(given);
   console.log("unii device " + name + " on " + url + ", work dir " + work);
   const query = "?tab=" + crypto.randomUUID() + "&wire=" + WIRE + "&device=" + encodeURIComponent(name) + "&work=" + encodeURIComponent(work) + (WIN ? "&shell=PowerShell" : "");
   const jobs = new Map<string, AbortController>();
