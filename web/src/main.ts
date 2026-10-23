@@ -844,7 +844,7 @@ function bars(): void {
   $(".composer").classList.toggle("rec", P.rec !== null);
   // a knob focused (its menu just closed) stays so as its value changes
   const knob = (document.activeElement as HTMLElement | null)?.dataset?.knob;
-  markup($("#pick"), Html.pick_html(View.view_fold(v), v.fold === null, View.view_shown(v)));
+  markup($("#pick"), Html.pick_html(View.view_fold(v), v.fold === null, View.view_shown(v), v.page === null ? v.talk : undefined));
   if (knob !== undefined) {
     $("#pick [data-knob=" + knob + "]").focus();
   }

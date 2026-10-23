@@ -55,7 +55,8 @@ export type Wait = string;
 // vendors, models, profiles: those offered;
 // limits: the calls waiting for a usage
 // limit, by TURN or agent name; timers: the chat's schedules, each
-// message's head (Server.ts Chat.state)
+// message's head; talk: conversation mode (null: standard) (Server.ts
+// Chat.state)
 export type State = {
   busy      : boolean;
   wait      : Wait;
@@ -69,7 +70,12 @@ export type State = {
   limits    : Record<string, Parked>;
   timers    : Timer[];
   mcp       : Plug[];
+  talk      : Talk | null;
 };
+
+// conversation mode (Memory.ts): its first message whole, the share of
+// its space its messages take (0 to 1)
+export type Talk = { from: number; used: number };
 
 // an MCP server of the server's config (Mcp.ts), on or off in this chat
 export type Plug = { name: string; on: boolean };
@@ -136,6 +142,7 @@ export type Client =
   | { $: "go"; on: boolean } // the import's: resume (true) or pause
   | { $: "pick"; to: Pick }
   | { $: "mcp"; name: string; on: boolean } // an MCP server turned on or off in this chat
+  | { $: "talk"; on: boolean } // conversation mode on, or standard
   | { $: "out"; job: string; out: object }
   | { $: "unschedule"; id: string } // a schedule cancelled
   | { $: "zoom"; part: Part }
@@ -166,6 +173,7 @@ export type Act =
   | { $: "Goto"; name: string | null }          // a tab, a name, the logo (null: UniiChat)
   | { $: "Unschedule"; id: string }             // a schedule's Cancel
   | { $: "Plug"; name: string }                 // an MCP server turned on if off, else off
+  | { $: "Talk"; on: boolean }                  // conversation mode, or standard
 
 // what a page draws, top to bottom
 export type Row =
@@ -271,6 +279,7 @@ export function view_new(): View {
     limits    : {},
     timers    : [],
     mcp       : [],
+    talk      : null,
     parts     : [],
     turn      : Infinity,
     fold      : null,
@@ -446,6 +455,9 @@ export function view_act(v: View, act: Act): Client[] {
     }
     case "Unschedule": {
       return [{ $: "unschedule", id: act.id }];
+    }
+    case "Talk": {
+      return [{ $: "talk", on: act.on }];
     }
     case "Plug": {
       // from the last asked for and not acked, else the chat's

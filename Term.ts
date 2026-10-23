@@ -101,6 +101,7 @@ function term_groups(v: View.View): [group: string, cmds: Cmd[]][] {
       ["/open #id",         "",                        "open block #id, as it shows, and keep it open",  (t, a) => term_block(t, a, true)],
       ["/close #id",        "",                        "close block #id and keep it closed",             (t, a) => term_block(t, a, false)],
       ["/fold",             "Ctrl+F",                  "the chat in the fewest blocks; again: unfold (Ctrl+F eaten? type /fold)", term_fold],
+      ["/mode [mode]",      "",                        "the memory mode, standard or conversation (messages stay word for word in Unii's view); with one, that one", term_mode],
       ["/import [...]",     "",                        "import your Claude and ChatGPT chats (alone: options)", term_import],
       ["/export",           "",                        "save the memory as ./unii-memory.json",          term_export],
       ["/tree",             "",                        "the whole memory, in the browser (its link prints too)", (t) => term_browse(t, "The memory tree", t.url + "/tree")],
@@ -484,6 +485,17 @@ function term_mcp(t: Term, arg: string): void {
   }
   const list = t.v.mcp.map((p) => p.name + (p.on ? " (on)" : " (off)"));
   term_note(t, list.length === 0 ? "No MCP servers: the server's config sets none." : "MCP servers: " + list.join(", ") + ". Turn one on or off with /mcp <name>.");
+}
+
+// the memory mode (Html.ts MODES), or with a name, that one
+function term_mode(t: Term, arg: string): void {
+  if (arg === "standard" || arg === "conversation") {
+    term_act(t, { $: "Talk", on: arg === "conversation" });
+    return;
+  }
+  const talk = t.v.talk;
+  const now = talk === null ? "standard" : "conversation, from message " + talk.from + ", " + Math.round(talk.used * 100) + "% of its space used";
+  term_note(t, (arg === "" ? "" : "No mode " + arg + ". ") + "The memory mode is " + now + ". /mode standard or /mode conversation switches it.");
 }
 
 async function term_export(t: Term): Promise<void> {

@@ -25,7 +25,7 @@ import { clip_pages } from "./Clip.ts";
 import { Disk } from "./Disk.ts";
 import { Mcp } from "./Mcp.ts";
 import * as Import from "./Import.ts";
-import { JOBS, Memory, type Msg as Log, type Share } from "./Memory.ts";
+import { JOBS, Memory, TALK, type Msg as Log, type Share } from "./Memory.ts";
 import { OpenAI } from "./OpenAI.ts";
 import { Owner } from "./Owner.ts";
 import { Pick } from "./Pick.ts";
@@ -138,6 +138,10 @@ const HEAD       = "Turn: the user's new message:\n\n";
 const GOAL       = "You check a goal. Below is a chat between a user and Unii, an AI agent: its older messages as summary lines (id+n|text), then its latest messages whole, then the goal the user set with /goal. Answer yes if the chat shows the goal fully satisfied now, else no. Write that one word, nothing else.";
 const GOAL_ASK   = "\nThe goal:\n\n";
 const GOAL_NO    = "The goal isn't satisfied yet: keep working.";
+// conversation mode (Memory.ts) full: switched off, as the chat says;
+// switched on with its first messages over its space already: refused
+const TALK_FULL  = "Conversation mode switched itself off: the messages it kept word for word, from message {id} on, filled their space in Unii's view. They show as summaries again; switch it on to keep the next ones whole.";
+const TALK_BIG   = "Conversation mode can't start: the messages since message {id} already fill its space in Unii's view.";
 const FULL       = "UniiChat's disk is full; try again soon.";
 // an import running: its batch's file in the chat's dir (Chat.keep)
 const BATCH      = "/import.json";
@@ -408,7 +412,7 @@ export namespace Chat {
     }
     const msgs = (chat.sent = chat.wait.splice(0));
     const says = msgs.filter((m) => m.end > from).map((m) => Memory.say(mem, Math.max(m.id, from), m.end));
-    const view = Memory.view(mem, from);
+    const view = Memory.view(mem, from, mem.view.parts, mem.talk);
     // the MCP servers' notes the chat showed are in the view: the call's
     // listing gives the master the rest, and those made since (Mcp.heard)
     Mcp.heard(chat.tools.mcp, Tools.off(chat.tools), "main", true);
@@ -514,7 +518,33 @@ export namespace Chat {
     for (const { i, kind, text, date, images } of roots) {
       Chat.all(chat, { $: "entry", id: i, kind, text, date, images });
     }
+    Chat.talked(chat);
     return { id: roots[0].i, end: chat.mem.count };
+  }
+
+  // a message logged in conversation mode: the views see its space fill
+  // (their meter); past it (TALK) it switches itself off, said in the
+  // chat: never a message of it quietly summarized again
+  export function talked(chat: Chat): void {
+    const mem = chat.mem;
+    if (mem.talk === null) {
+      return;
+    }
+    if (Memory.talk_size(mem) <= TALK) {
+      return Chat.all(chat, Chat.state(chat));
+    }
+    const from = mem.talk;
+    Chat.talk(chat, null);
+    Chat.note(chat, TALK_FULL.replace("{id}", String(from)));
+  }
+
+  // conversation mode from message `from` on, or off (null): saved, and
+  // told to every view
+  export function talk(chat: Chat, from: number | null): void {
+    chat.mem.talk = from;
+    chat.mem.talked.clear();
+    Memory.save(chat.mem);
+    Chat.change(chat);
   }
 
   // a message the call took was logged as it came
@@ -979,7 +1009,8 @@ export namespace Chat {
     const importing = batch && { done: batch.all - Chat.time(batch), total: batch.all, why, msgs: batch.b - batch.a, open: batch.open };
     const timers = chat.mem.timers.map((t) => ({ ...t, text: t.text.length > TIMER_TEXT ? t.text.slice(0, TIMER_TEXT) + "…" : t.text }));
     const mcp = config.MCP.map(({ name }) => ({ name, on: !chat.mem.off.includes(name) }));
-    return { $: "state", busy: chat.busy, wait: Chat.waits(chat), agents, runs, pick: chat.pick, ...config.OFFER, importing, limits: chat.limits, timers, mcp };
+    const talk = chat.mem.talk === null ? null : { from: chat.mem.talk, used: Math.min(1, Memory.talk_size(chat.mem) / TALK) };
+    return { $: "state", busy: chat.busy, wait: Chat.waits(chat), agents, runs, pick: chat.pick, ...config.OFFER, importing, limits: chat.limits, timers, mcp, talk };
   }
 
   export function waits(chat: Chat): Wait {
@@ -1178,6 +1209,24 @@ export namespace Chat {
         if (Tools.unschedule(chat.tools, id)) {
           Chat.note(chat, "Schedule " + id + " cancelled by the user.");
         }
+        return {};
+      }
+      case "talk": {
+        // conversation mode on (from its last message whole: Memory.talk_from)
+        // or off; one on already keeps where it started
+        const on = msg.on === true || msg.on === "true";
+        const mem = chat.mem;
+        if ((mem.talk !== null) === on) {
+          return {};
+        }
+        const from = on ? Memory.talk_from(mem) : null;
+        mem.talk = from;
+        if (from !== null && Memory.talk_size(mem) > TALK) {
+          mem.talk = null;
+          mem.talked.clear();
+          return { error: TALK_BIG.replace("{id}", String(from)) };
+        }
+        Chat.talk(chat, from);
         return {};
       }
       case "mcp": {
