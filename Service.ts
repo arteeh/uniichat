@@ -37,8 +37,10 @@ const UNITS = (process.env.XDG_CONFIG_HOME || HOME + "/.config") + "/systemd/use
 const PLIST = HOME + "/Library/LaunchAgents";
 
 // a log file's most bytes: past it, it becomes <part>.log.1 (the one
-// before that dropped) and starts anew
+// before that dropped) and starts anew; a line's most characters (past
+// them, cut)
 const CAP   = 2 ** 20;
+const LINE  = 16384;
 
 // what `logs` shows before it follows
 const LINES = 200;
@@ -411,7 +413,8 @@ function logger(file: string): (text: string) => void {
   let size = fs.existsSync(file) ? fs.statSync(file).size : 0;
   return (text) => {
     const stamp = new Date().toISOString() + " ";
-    const out = text.split("\n").map((line) => stamp + line + "\n").join("");
+    const cut = (line: string) => (line.length > LINE ? line.slice(0, LINE) + " [cut: " + (line.length - LINE) + " more characters]" : line);
+    const out = text.split("\n").map((line) => stamp + cut(line) + "\n").join("");
     if (size > 0 && size + Buffer.byteLength(out) > CAP) {
       try {
         fs.renameSync(file, file + ".1");
@@ -425,7 +428,8 @@ function logger(file: string): (text: string) => void {
   };
 }
 
-// a stream's lines, each to `put` as it ends
+// a stream's lines, each to `put` as it ends (one past LINE as it gets
+// there: never held whole)
 async function lines(stream: ReadableStream<Uint8Array>, put: (line: string) => void): Promise<void> {
   const dec = new TextDecoder();
   let rest = "";
@@ -434,6 +438,10 @@ async function lines(stream: ReadableStream<Uint8Array>, put: (line: string) => 
     const all = (rest + dec.decode(got.value, { stream: true })).split(/\r?\n/);
     rest = all.pop()!;
     all.forEach(put);
+    if (rest.length > LINE) {
+      put(rest);
+      rest = "";
+    }
   }
   if (rest !== "") {
     put(rest);
