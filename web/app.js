@@ -2512,7 +2512,7 @@ async function account() {
 }
 function mcp_draw() {
   const box = document.querySelector("#account .mcp");
-  if (box === null) {
+  if (box === null || v.pick === null) {
     return;
   }
   const on = box.contains(document.activeElement) ? document.activeElement.getAttribute("aria-label") : null;
