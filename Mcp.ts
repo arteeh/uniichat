@@ -7,8 +7,8 @@
 // (one in that device's own config, as it told: Tools.servers; each
 // message a job of it, Mcp.device, Mcp.here), or a URL (streamable HTTP:
 // a POST each, answered as JSON or an event stream). The servers change
-// as devices come, go and edit theirs (Mcp.sync): an agent's tools as of
-// its call's listing, so from its next call.
+// as devices come, go and edit theirs (Mcp.sync), between turns only
+// (Tools.apply).
 // Each chat runs its own (one user's never see another's), started by
 // the first listing or call, ended as the chat closes, moves (a call
 // running finishes first) or turns it off. One that fails to start, dies
@@ -16,8 +16,8 @@
 // gives it the notes it hasn't heard (Mcp.heard), for the request it
 // builds. Only a why the user can act on (a server that won't start) is
 // also a note in the chat; the rest (its device isn't open, it died and
-// starts again at the next call) only the model is told, and tools left
-// out go to the log. A dead one starts again at the next call; one that
+// starts again at the next call) only the model is told. Tools left out
+// (a name too long, say) go to the log and the chat. A dead one starts again at the next call; one that
 // failed to start rests LIMITS.again first. While a device server's
 // device isn't open, its tools are left out.
 
@@ -220,9 +220,9 @@ export namespace Mcp {
     }
   }
 
-  // its tools, named for the model; one whose name clashes with another's
-  // once made the vendors', or whose input schema they refuse, left out,
-  // logged
+  // its tools, named for the model; one whose name is over the vendors'
+  // 64 characters or clashes with another's once made theirs, or whose
+  // input schema they refuse, left out, logged and told the chat
   export async function listed(servers: Servers, s: Server, signal: AbortSignal): Promise<Spec[]> {
     const specs: Spec[] = [];
     const names = new Map<string, string>();
@@ -232,7 +232,8 @@ export namespace Mcp {
       const got = await s.link!.ask("tools/list", cursor === undefined ? {} : { cursor }, signal);
       for (const tool of Array.isArray(got?.tools) ? got.tools : []) {
         const name = Mcp.name(s.conf.name, String(tool?.name));
-        const schema = names.has(name) ? "its name is another's for the model" : Mcp.schema(tool?.inputSchema);
+        const long = name.length > 64 ? "its name for the model, " + name + ", is over 64 characters" : null;
+        const schema = long ?? (names.has(name) ? "its name is another's for the model" : Mcp.schema(tool?.inputSchema));
         if (typeof schema === "string") {
           left.push(JSON.stringify(String(tool?.name)) + " (" + schema + ")");
           continue;
@@ -246,6 +247,7 @@ export namespace Mcp {
       s.left = left.join(", ");
       if (s.left !== "") {
         console.error("unii: MCP server " + s.conf.name + " has tools left out: " + s.left);
+        Mcp.say(servers, s, "MCP server " + s.conf.name + " has tools left out: " + s.left + ".");
       }
     }
     s.names = names;
@@ -388,7 +390,7 @@ export namespace Mcp {
   }
 
   export function name(server: string, tool: string): string {
-    return (server + "__" + tool).replace(/[^A-Za-z0-9_-]/g, "_").slice(0, 64);
+    return (server + "__" + tool).replace(/[^A-Za-z0-9_-]/g, "_");
   }
 
   export function why(err: any): string {

@@ -367,6 +367,7 @@ export namespace Chat {
 
   export async function turn(chat: Chat): Promise<void> {
     chat.busy = true;
+    Tools.apply(chat.tools);
     try {
       let go = true;
       while (go && chat.wait.length > 0) {
@@ -1047,6 +1048,10 @@ export namespace Chat {
   // what runs is saved, and told to every view
   export function change(chat: Chat): void {
     const work = Chat.running(chat);
+    // nothing at work: the MCP servers' changes need not wait for a turn
+    if (work.length === 0) {
+      Tools.apply(chat.tools);
+    }
     if (String(work) !== String(chat.mem.work)) {
       chat.mem.work = work;
       Memory.save(chat.mem);
