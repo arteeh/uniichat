@@ -138,7 +138,8 @@ Use
 - **Conversation mode:** the standard / conversation switch by "fold all"
   (`/mode` in the terminal) keeps your and Unii's messages word for word
   in Unii's view from then on, for a discussion; it costs more per turn.
-  Its line fills as that space does; full, it switches itself off.
+  Its line fills as that space (96 KB, beside the summaries before it)
+  does; full, it switches itself off.
 - `unii help` lists every command. unii never checks for updates by
   itself: `unii update` installs the newest release.
 
