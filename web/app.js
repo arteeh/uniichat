@@ -1496,9 +1496,11 @@ function pick_html(fold, on, knobs, talk) {
   const all = fold === null ? [] : [`<button class="all"${act_html({ $: "Fold", on })}>${esc(fold)}</button>`];
   const mode = ([name, hint], k) => {
     const here = talk != null === (k === 1);
-    return `<button title="${esc(hint)}" aria-pressed="${here}"${act_html({ $: "Talk", on: talk == null })}>${name}</button>`;
+    return `<button title="${esc(hint)}" aria-pressed="${here}"${act_html({ $: "Talk", on: k === 1 })}>${name}</button>`;
   };
-  const modes = talk === undefined ? [] : [`<span class="modes" role="group" aria-label="Memory mode">${MODES.map(mode).join("")}</span>`];
+  const [now, about] = MODES[talk == null ? 0 : 1];
+  const flip = `<button class="flip" title="${esc(about)} Tap for ${MODES[talk == null ? 1 : 0][0]}."${act_html({ $: "Talk", on: talk == null })}>${now}</button>`;
+  const modes = talk === undefined ? [] : [`<span class="modes" role="group" aria-label="Memory mode">${MODES.map(mode).join("")}</span>`, flip];
   const used = talk == null ? 0 : Math.round(talk.used * 100);
   const rule = talk == null ? `<span class="rule"></span>` : `<span class="rule meter" style="--used:${used}%" title="Conversation: ${used}% of space used" role="meter" aria-valuenow="${used}" aria-valuemin="0" aria-valuemax="100" aria-label="Conversation space used"></span>`;
   return [...all, ...modes, rule, ...parts.flatMap((part, i) => i === 0 ? part : [`<span class="dot">·</span>`, ...part])];
