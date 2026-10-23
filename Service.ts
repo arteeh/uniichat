@@ -344,7 +344,8 @@ Unregister-ScheduledTask -TaskName $env:UNII_TASK -TaskPath '\\' -Confirm:$false
 
 function ps(script: string, env: Record<string, string>): string {
   const shell = Bun.which("pwsh") ?? "powershell.exe";
-  const out = run([shell, "-NoProfile", "-NonInteractive", "-Command", "$ErrorActionPreference = 'Stop'; " + script], env);
+  // an error as its message alone (PowerShell 7 adds colour codes)
+  const out = run([shell, "-NoProfile", "-NonInteractive", "-Command", "$ErrorActionPreference = 'Stop'; try {" + script + "\n} catch { [Console]::Error.WriteLine($_.Exception.Message); exit 1 }"], env);
   if (out.code !== 0) {
     fail("PowerShell failed: " + (out.err || out.out || "exit " + out.code));
   }
