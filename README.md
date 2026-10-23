@@ -44,6 +44,8 @@ What this fork adds:
 - **Subagents**: their own tab, a `stop` that ends one and its jobs, and
   a report when one hits a usage limit.
 - **No telemetry or update checker**: `unii update` when you want it.
+- **Background services** (`-d`, `stop`, `logs`) that updates restart,
+  and a **conversation mode**.
 
 Install and set up
 ------------------
@@ -133,6 +135,10 @@ Use
 - **Terminal:** `unii [url]` (default: `$UNII_URL`, else the last server,
   else the local one). `/help` lists its commands; `/import` brings in
   this computer's Claude and Codex sessions.
+- **Conversation mode:** the standard / conversation switch by "fold all"
+  (`/mode` in the terminal) keeps your and Unii's messages word for word
+  in Unii's view from then on, for a discussion; it costs more per turn.
+  Its line fills as that space does; full, it switches itself off.
 - `unii help` lists every command. unii never checks for updates by
   itself: `unii update` installs the newest release.
 
