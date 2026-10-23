@@ -172,6 +172,8 @@ async function linux_start(part: Part, args: string[], env: Record<string, strin
   fs.writeFileSync(unit(part), text);
   systemctl("daemon-reload");
   systemctl("enable", "--quiet", n);
+  // a restart asked for, never refused for the crash restarts' limit
+  run(["systemctl", "--user", "reset-failed", n]);
   systemctl("restart", "--no-block", n);
   const up = await linux_up(n);
   say(part, up, "the systemd user service " + n + ", started at login");
