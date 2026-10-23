@@ -23,8 +23,10 @@
 // The user's MCP servers (Mcp.ts) add their tools to the master's and its
 // subagents', but those of servers the chat turned off (Memory `off`):
 // the server's config's, and each open device's own (Tools.servers),
-// changed only between turns. The fork has one user, whose every device
-// is: each one's servers reach the chat, unchecked.
+// changed only while nothing runs or as a turn starts with no subagent
+// working (one keeps the servers it started with). The fork has one
+// user, whose every device is: each one's servers reach the chat,
+// unchecked.
 
 import * as fs from "node:fs";
 import * as os from "node:os";
@@ -96,14 +98,16 @@ type Hooks = {
   halt   : () => AbortSignal;
 };
 
-// the tools: the chat's MCP servers, and those it runs from the next
-// turn (Tools.plug; null: no change)
+// the tools: the chat's MCP servers, those it runs from the next turn
+// (Tools.plug; null: no change), and the server's own (its config.json's,
+// as read again by a device sharing it: Tools.servers)
 export type Tools = {
   mem     : Memory;
   devices : Map<string, Device>;
   agents  : Map<string, Agent>;
   mcp     : Servers;
   next    : config.McpServer[] | null;
+  own     : config.McpServer[];
   key     : string;
   url     : string;
   hooks   : Hooks;
@@ -243,8 +247,8 @@ export namespace Tools {
     const key = crypto.randomUUID();
     const url = Tools.base() + key + "/";
     const run = (device: string, job: Job, signal: AbortSignal) => Tools.job(tools, device, job, signal, crypto.randomUUID());
-    const mcp = Mcp.servers((text) => hooks.note(text), config.MCP, run, (device) => typeof Tools.open(tools, device) !== "string");
-    const tools: Tools = { mem, devices: new Map(), agents: new Map(), mcp, next: null, key, url, hooks };
+    const mcp = Mcp.servers((text) => hooks.note(text), config.MCP, run, (device) => Tools.live(tools.devices.get(device)));
+    const tools: Tools = { mem, devices: new Map(), agents: new Map(), mcp, next: null, own: config.MCP, key, url, hooks };
     CHATS.set(key, tools);
     return tools;
   }
@@ -542,6 +546,7 @@ export namespace Tools {
     tools.devices.set(name, d);
     Tools.sync(d, term, () => true);
     Tools.look(tools, name);
+    Tools.plug(tools);
     return name;
   }
 
@@ -583,27 +588,35 @@ export namespace Tools {
   }
 
   // the MCP servers a device has in its own config.json (`mcp`, as it
-  // read it: Device.ts), run there, each named <device>_<server>; none if
-  // that file is the server's own (one machine, one ~/.unii: the server
-  // runs those). Why one is left out is told the chat, once
+  // read it: Device.ts), run there, each named <device>_<server>. If that
+  // file is the server's own (one machine, one ~/.unii), they are the
+  // server's, run by it as its config's are, and replace those: an edit
+  // there needs no restart. Why one is left out is told the chat, once
   export function servers(tools: Tools, device: string, mcp: unknown, file: string): void {
     const d = tools.devices.get(device);
     if (d === undefined) {
       return;
     }
+    const own = file === Tools.where(config.FILE_PATH);
     const notes: string[] = [];
-    let confs: config.McpServer[] = [];
+    let confs: config.McpServer[] | null = null;
     try {
-      confs = file === Tools.where(config.FILE_PATH) ? [] : config.config_mcp(mcp, device, notes);
+      confs = config.config_mcp(mcp, own ? "" : device, notes);
     } catch (err: any) {
-      notes.push(String(err?.message ?? err));
+      notes.push(String(err?.message ?? err).replace(/^config: /, ""));
     }
-    const theirs = new Set(config.MCP.map((s) => s.name));
-    for (const s of confs.filter((s) => theirs.has(s.name))) {
-      notes.push("MCP server " + s.name + " is the server's own name too, so the device's is left out");
+    if (own) {
+      tools.own = confs ?? tools.own;
+      d.mcp = [];
+    } else {
+      const theirs = new Set(tools.own.map((s) => s.name));
+      for (const s of (confs ?? []).filter((s) => theirs.has(s.name))) {
+        notes.push("MCP server " + s.name + " is the server's own name too, so the device's is left out");
+      }
+      d.mcp = (confs ?? []).filter((s) => !theirs.has(s.name));
     }
-    d.mcp = confs.filter((s) => !theirs.has(s.name));
-    const why = notes.join("; ");
+    // those the server said as it started (config.MCP_NOTES) not again
+    const why = notes.filter((n) => !config.MCP_NOTES.includes(n)).join("; ");
     if (why !== d.why) {
       d.why = why;
       if (why !== "") {
@@ -614,16 +627,22 @@ export namespace Tools {
     Tools.plug(tools);
   }
 
-  // the chat's MCP servers as they are now: the server's, and each open
-  // device's, run from the next turn (Tools.apply): never changed in the
-  // middle of one; the views told
+  // the chat's MCP servers as they are now: the server's, and each
+  // linked device's (one whose link was lost has none till it is back),
+  // run from the next turn (Tools.apply): never changed in the middle of
+  // one; the views told
   export function plug(tools: Tools): void {
-    tools.next = [...config.MCP, ...Tools.opened(tools).flatMap(([, d]) => d.mcp)];
+    tools.next = [...tools.own, ...[...tools.devices.values()].filter(Tools.live).flatMap((d) => d.mcp)];
     tools.hooks.change();
   }
 
-  // the MCP servers as plugged, as a turn starts or while nothing works
-  // (Server.ts: Chat.turn, Chat.change)
+  // whether a device has a live link
+  export function live(d: Device | undefined): boolean {
+    return d !== undefined && [...d.terms.values()].some((t) => t.live());
+  }
+
+  // the MCP servers as plugged, as a turn starts with no subagent working
+  // or while nothing works (Server.ts: Chat.turn, Chat.change)
   export function apply(tools: Tools): void {
     if (tools.next !== null) {
       Mcp.sync(tools.mcp, tools.next);

@@ -367,7 +367,10 @@ export namespace Chat {
 
   export async function turn(chat: Chat): Promise<void> {
     chat.busy = true;
-    Tools.apply(chat.tools);
+    // a subagent working keeps the MCP servers it started with
+    if (Tools.working(chat.tools).length === 0) {
+      Tools.apply(chat.tools);
+    }
     try {
       let go = true;
       while (go && chat.wait.length > 0) {
@@ -1078,11 +1081,13 @@ export namespace Chat {
   }
 
   // a socket closed; a device goes only if it quit (a link lost is no
-  // quit)
+  // quit: its jobs wait for it, its MCP servers don't)
   export function leave(chat: Chat, sock: Sock, quit: boolean): void {
     chat.socks.delete(sock);
     if (quit && sock.data.device !== null) {
       Tools.detach(chat.tools, sock.data.tab, sock.data.device);
+    } else if (sock.data.device !== null) {
+      Tools.plug(chat.tools);
     }
   }
 
