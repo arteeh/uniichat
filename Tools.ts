@@ -28,8 +28,6 @@
 // one user, whose every device is: each one's servers reach the chat,
 // unchecked.
 
-import * as fs from "node:fs";
-import * as os from "node:os";
 import { AskAI, type Ask, type Block, type Call, type Event, type Kind } from "./AskAI.ts";
 import { Agent, type Out } from "./Agent.ts";
 import { report_text } from "./Call.ts";
@@ -99,8 +97,8 @@ type Hooks = {
 };
 
 // the tools: the chat's MCP servers, those it runs from the next turn
-// (Tools.plug; null: no change), and whether it was told the server's own
-// are left out (Tools.left)
+// (Tools.plug; null: no change), and whether it was told UNII_MCP's
+// servers are left out (Tools.left)
 export type Tools = {
   mem     : Memory;
   devices : Map<string, Device>;
@@ -125,10 +123,6 @@ const HALT = 5000;
 // the chats' tools, by their secret; the server, once one is
 const CHATS = new Map<string, Tools>();
 let HTTP: ReturnType<typeof Bun.serve> | null = null;
-
-// whether a device read the server's own config.json (one machine, one
-// ~/.unii): its `mcp` is that device's, not left out (Tools.left)
-let SHARED = false;
 
 // the requests running, by chat, caller, MCP session and JSON-RPC id:
 // what a `notifications/cancelled` for one stops
@@ -595,12 +589,11 @@ export namespace Tools {
   // read it: Device.ts), run there, each named <device>_<server>; that
   // file may be the server's own too (one machine, one ~/.unii). Why one
   // is left out is told the chat, once
-  export function servers(tools: Tools, device: string, mcp: unknown, file: string): void {
+  export function servers(tools: Tools, device: string, mcp: unknown): void {
     const d = tools.devices.get(device);
     if (d === undefined) {
       return;
     }
-    SHARED ||= file === Tools.where(config.FILE_PATH);
     const notes: string[] = [];
     try {
       d.mcp = config.config_mcp(mcp, device, notes);
@@ -627,14 +620,13 @@ export namespace Tools {
     tools.hooks.change();
   }
 
-  // the server's own MCP servers left out (config.MCP_LEFT), told the chat
-  // once, as its first turn here starts; config.json's `mcp` not if a
-  // device on this computer read it as its own
+  // UNII_MCP's servers left out (config.MCP_LEFT), told the chat once, as
+  // its first turn here starts (config.json's `mcp` only the log tells:
+  // config.MCP_FILE)
   export function left(tools: Tools): void {
-    const left = config.MCP_LEFT;
-    if (!tools.left && left !== null && (left.env || !SHARED)) {
+    if (!tools.left && config.MCP_LEFT !== null) {
       tools.left = true;
-      tools.hooks.note(left.text);
+      tools.hooks.note(config.MCP_LEFT);
     }
   }
 
@@ -650,16 +642,6 @@ export namespace Tools {
       Mcp.sync(tools.mcp, tools.next);
       tools.next = null;
     }
-  }
-
-  // a config.json, as this machine and its real path: two the same are one
-  // file (Device.ts tells its own)
-  export function where(file: string): string {
-    let real = file;
-    try {
-      real = fs.realpathSync(file);
-    } catch {}
-    return os.hostname() + ":" + real;
   }
 
   // every device whose sign-in isn't kept forgotten

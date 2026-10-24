@@ -135,18 +135,19 @@ export const CLAUDE     = config_path(config_get("claude", ""));
 const ENV_KEYS: Record<string, string> = Object.fromEntries(Object.entries(VARS).map(([name, v]) => [name, config_key(v)]));
 export const KEYS: Record<string, string> = config_keys(keys_read());
 
-// MCP servers run only on devices (Mcp.ts): the server's own `mcp` and
-// UNII_MCP are left out, MCP_LEFT the note that says so (null: neither is
-// set; env: UNII_MCP's, which no device reads). A device on this computer
-// reads this config.json's `mcp` as its own (Tools.servers). UNII_MCP
-// leaves the environment (its headers may hold a secret)
+// MCP servers run only on devices (Mcp.ts): UNII_MCP's are left out,
+// MCP_LEFT the note that says so (null: unset), for the log and the chat;
+// MCP_FILE: this config.json has servers in its `mcp`, which only a
+// device on this computer reading it as its own runs (Tools.servers):
+// only the log says so as the server starts, since as a turn starts
+// (one a restart cut, resumed) that device may not have joined yet.
+// UNII_MCP leaves the environment (its headers may hold a secret)
 const MCP_VAR = process.env.UNII_MCP;
 delete process.env.UNII_MCP;
-export const MCP_LEFT: { text: string; env: boolean } | null = MCP_VAR !== undefined && MCP_VAR.trim() !== ""
-  ? { env: true, text: "UNII_MCP is set, but unii serve runs no MCP servers, so they are left out: put them in the mcp of a device's own ~/.unii/config.json (for this computer, run unii device beside the server)." }
-  : FILE.mcp !== undefined && FILE.mcp !== "" && JSON.stringify(FILE.mcp) !== "{}"
-    ? { env: false, text: "The server's config.json has mcp, but unii serve runs no MCP servers, so they are left out: run unii device beside the server to run them on this computer, or move them to another device's own ~/.unii/config.json." }
-    : null;
+export const MCP_LEFT: string | null = config_mcp_some(MCP_VAR)
+  ? "UNII_MCP is set, but unii serve runs no MCP servers, so they are left out: put them in the mcp of a device's own ~/.unii/config.json (for this computer, run unii device beside the server)."
+  : null;
+export const MCP_FILE = config_mcp_some(FILE.mcp);
 
 // Config
 // ======
@@ -297,6 +298,20 @@ function config_vendors(text: string): Vendor[] {
     throw new Error("config: vendors can't offer " + bad);
   }
   return list;
+}
+
+// whether an `mcp` has any server: Claude's `mcpServers` shape with one,
+// its JSON, or a file's path (Device.ts reads that)
+function config_mcp_some(raw: unknown): boolean {
+  if (typeof raw === "string") {
+    try {
+      return raw.trim() !== "" && config_mcp_some(JSON.parse(raw));
+    } catch {
+      return true;
+    }
+  }
+  const all: any = (raw as any)?.mcpServers ?? raw;
+  return typeof all === "object" && all !== null && Object.keys(all).length > 0;
 }
 
 // a device's MCP servers, from the `mcp` of its own config.json

@@ -1113,7 +1113,7 @@ export namespace Chat {
         // a device's own MCP servers (Device.ts), told as it joins and as
         // they change: the state of what it runs, done again the same
         if (sock.data.device !== null) {
-          Tools.servers(chat.tools, sock.data.device, msg.mcp, String(msg.file));
+          Tools.servers(chat.tools, sock.data.device, msg.mcp);
         }
         return {};
       }
@@ -1656,7 +1656,10 @@ export namespace Main {
     });
     console.log("unii: " + config.SITE + ", data in " + config.DIR + ", on 127.0.0.1:" + port);
     if (config.MCP_LEFT !== null) {
-      console.error("unii: " + (config.MCP_LEFT.env ? config.MCP_LEFT.text : "unii serve runs no MCP servers: the mcp in " + config.FILE_PATH + " runs only on a unii device that reads this file (unii device beside the server)."));
+      console.error("unii: " + config.MCP_LEFT);
+    }
+    if (config.MCP_FILE) {
+      console.error("unii: unii serve runs no MCP servers: the mcp in " + config.FILE_PATH + " runs only on a unii device that reads this file (unii device beside the server).");
     }
   }
 
