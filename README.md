@@ -48,128 +48,91 @@ What this fork adds:
 - **Subagent improvements**: their own tab, a `stop` that ends one
   and its jobs, and a report when one hits a usage limit.
 - **No telemetry or update checker**: `unii update` when you want it.
+- **Better defaults**: Sonnet 5.5 medium does the compaction, seeing 4 KB
+  of chat around each message (was Haiku 5.5 high with 32 KB), so
+  summaries make up less.
 
-Install and set up
-------------------
+Install
+-------
 
-On Linux or macOS (or in WSL):
+Linux, macOS or WSL:
 
     curl -fsSL https://github.com/arteeh/uniichat/releases/latest/download/install.sh | sh
 
-This installs `unii` to `~/.local/bin`. The installer also moves data
-from older versions.
-
-Windows: native, or WSL with the Linux installer. Natively, in
-PowerShell:
+Windows (PowerShell, no admin needed):
 
     irm https://github.com/arteeh/uniichat/releases/latest/download/install.ps1 | iex
 
-This installs `unii.exe` to `%LOCALAPPDATA%\Programs\unii` (set
-`$env:UNII_BIN` first for another place) and adds its folder to your
-user PATH (no admin).
-The server, devices and the terminal all run on Windows as on Linux and
-macOS, with the data in `%USERPROFILE%\.unii` (no older unii kept any
-on Windows, so the installer moves nothing there). Nobody has run them on
-real Windows yet, though: expect rough edges there. One known gap: the
-`stop` tool kills a job's process tree while its shell runs, but can't
-find a process that left the tree once its shell has ended (Linux and
-macOS find those by a mark in their environment).
+Either way you get one `unii` program (in `~/.local/bin`, or
+`%LOCALAPPDATA%\Programs\unii` on Windows). `unii update` installs the
+newest release and restarts the background services on it.
 
-`unii update` installs the newest release and restarts the background
-services `-d` made (below) on it. A server or device you run another
-way keeps the old one till it restarts; on Windows the installer won't
-run while one does: stop it first, update, start it again.
+Set up
+------
 
-1. **Start the server** on the computer that keeps your chat: `unii
-   serve -d` runs it in the background (below); `unii serve` in the
-   foreground. It serves http://127.0.0.1:8788; its data is in `~/.unii`
-   (`$UNII_DIR`). Put it behind HTTPS (e.g. `tailscale serve`) to reach
-   it from elsewhere, and set `site` to that address.
-2. **Sign in.** On the server's computer, `unii serve link` prints a link
-   that signs a browser in. A terminal or a device signs in by a link and
-   a code you confirm in that browser. `unii serve sessions` lists them;
-   `unii serve revoke <n>` (or `--all`) signs one out.
-3. **Pick a vendor.** In the web app, ☰ › Settings: vendors, models and
-   API keys (kept in `~/.unii/keys.json`, readable by you alone: on
-   Windows by your profile folder's permissions). For a plan instead of
-   keys, run `unii serve claude` (Claude) or `unii serve chatgpt`
-   (ChatGPT) on the server's computer, then pick `claude-sub` or
-   `openai-sub`. Each takes `logout` or `status`.
-4. **Add devices.** On each computer Unii may work on, run `unii device
-   -d https://your-server`: it prints a link and a code to confirm in
-   your browser, then runs in the background. Its work dir is
-   `~/.unii/work`; its settings are in `~/.config/unii/device.json`.
-   MCP servers run on devices only, never in `unii serve`: each device's
-   go in its own `~/.unii/config.json` as `mcp`, in Claude's
-   `mcpServers` shape (programs, and URLs the device reaches; `${VAR}`s
-   are read there). They come and go with it and an edit needs no
-   restart, from the next turn (once no subagent is working); their
-   tools are named `<device>_<server>__<tool>` (one over 64 characters
-   is left out). For MCP on the server's computer, run `unii device`
-   there too: it reads the same file.
+1. **Start the server** on the computer that keeps your chat:
+   `unii serve -d`. It runs in the background from then on, at
+   http://127.0.0.1:8788, with its data in `~/.unii`. To use it from
+   other devices, put it behind HTTPS (see Q&A) and set `site` in
+   Settings to that address.
+2. **Sign in.** `unii serve link` on that computer prints a link that
+   signs your browser in. Terminals and devices sign in with a link
+   and a code you confirm in that browser.
+3. **Pick a model.** In the web app, ☰ › Settings: add API keys. To use
+   your Claude or ChatGPT plan instead, run `unii serve claude` or
+   `unii serve chatgpt` on the server's computer, then pick `claude-sub`
+   or `openai-sub`.
+4. **Add your computers.** On each one Unii may work on:
+   `unii device -d https://your-server`. Unii works in `~/.unii/work`
+   there. Want it working on the server's computer too? Run a device
+   there as well.
+
+**MCP servers** belong to a device: list them in that device's
+`~/.unii/config.json`, in the same shape as Claude's `mcpServers`:
+
+    { "mcp": { "blender": { "command": "uvx", "args": ["blender-mcp"] } } }
+
+Unii sees them from its next turn, no restart. Switch them on or off in
+Settings.
 
 **In the background**, `-d` runs the server or a device as a service of
-your user (a systemd user service; on Windows a Scheduled Task, no
-admin; on macOS a LaunchAgent), started at login and again if it
-crashes. `-d` again restarts it, `stop` (`unii serve stop`, `unii device
-stop`) stops and removes it, and `logs [-f]` shows (follows) its output:
-the journal on Linux, `~/.unii/logs/` on Windows and macOS. On Linux,
-`loginctl enable-linger` starts it at boot and keeps it up after you log
-out. A service by its name (`unii-serve`, `unii-device`) that you made
-yourself is left as it is: remove it to use `-d`.
+your user (systemd on Linux, a Scheduled Task on Windows, a LaunchAgent
+on macOS): it starts at login and restarts if it crashes.
+`unii serve stop` / `unii device stop` removes it, `logs -f` follows its
+output. On Linux, `loginctl enable-linger` keeps it running while you're
+logged out.
 
-The server's settings are in `~/.unii/config.json` (most are on the
-Settings page). Each may also be set as `UNII_<KEY>`, which wins. Besides
-`vendors`, `models`, `pick`, `compactor`, `agents`, `profiles` and `site`:
-
-- `compactor_context` (also on the Settings page): how much of the chat,
-  in KB (default 4), each summary sees beside its message. More lets the
-  compactor copy in what the message doesn't say; Sonnet medium does
-  that less than Haiku.
-- `after`: a shell command run after each turn (by sh; on Windows by
-  PowerShell).
-- `claude_sub`, `claude`, `chatgpt`: where the plans' sign-ins are kept.
-- `apple`, `apns`: the iOS app's (ios/) App ID and push key id.
-
-The prompts: `~/.unii/prompt.md` (every turn; subagents get it too)
-and `~/.unii/compact.md` (every summary, nothing else) replace the
-built-in `prompt.txt` and `compact.txt`. Edit them on the Settings page.
+**Settings** are mostly on the Settings page, including Unii's system
+prompt and compaction prompt. They're kept in `~/.unii/config.json`,
+where `UNII_<KEY>` environment variables override them. One lives only
+there: `after`, a shell command to run after each turn.
 
 Use
 ---
 
-- **Web:** the server's address. ☰ has Settings (with the MCP servers
-  on or off), the memory tree and Import History.
-- **Terminal:** `unii [url]` (default: `$UNII_URL`, else the last server,
-  else the local one). `/help` lists its commands; `/import` brings in
-  this computer's Claude and Codex sessions.
-- **Conversation mode:** the standard / conversation switch by "fold all"
-  (`/mode` in the terminal) keeps your and Unii's messages word for word
-  in Unii's view from then on, for a discussion; it costs more per turn.
-  Its line fills as that space (96 KB, beside the summaries before it)
-  does; full, it switches itself off.
-- `unii help` lists every command. unii never checks for updates by
-  itself: `unii update` installs the newest release.
+- **Web:** open the server's address. Install it as an app from your
+  browser to get notifications when Unii replies.
+- **Terminal:** `unii [url]`. `/help` lists its commands; `/import`
+  brings in this computer's Claude Code and Codex sessions.
+- **Conversation mode:** the switch next to "fold all" (`/mode` in the
+  terminal). From then on, your and Unii's messages stay word for word
+  in Unii's memory, for a real discussion. It costs more per turn and
+  turns itself off when its 96 KB fills up.
+- `unii help` lists every command.
 
-From source (Bun): `bun install`, `bun run web` (rebuilds web/app.js),
-`bun Cli.ts <command>`, `bun run build` (one `unii` executable).
+From source (Bun): `bun install`, `bun run web`, `bun Cli.ts <command>`,
+`bun run build` for a single `unii` program.
 
 Uninstall
 ---------
 
-Back up the server's data (`~/.unii`) first if you may want your chat
-again. The paths below are the defaults: if you set `UNII_BIN`,
-`UNII_DIR` or `XDG_CONFIG_HOME`, remove those places instead.
+Back up `~/.unii` first if you may want your chat back. Run
+`unii device stop` and `unii serve stop` where you used `-d`, then:
 
-First run `unii device stop` and `unii serve stop` where you used `-d`
-(and stop any service you made yourself).
-
-- **Linux, macOS:** `rm ~/.local/bin/unii` and `rm -rf ~/.unii
-  ~/.config/unii`.
-- **Windows:** quit any other `unii` you run, then `Remove-Item
-  -Recurse -Force "$env:LOCALAPPDATA\Programs\unii", "$HOME\.unii",
-  "$HOME\.config\unii"`, and take `%LOCALAPPDATA%\Programs\unii` out of
-  your user Path (`rundll32 sysdm.cpl,EditEnvironmentVariables`).
+- **Linux, macOS:** `rm ~/.local/bin/unii` and
+  `rm -rf ~/.unii ~/.config/unii`.
+- **Windows:** `Remove-Item -Recurse -Force "$env:LOCALAPPDATA\Programs\unii", "$HOME\.unii", "$HOME\.config\unii"`,
+  and take `%LOCALAPPDATA%\Programs\unii` out of your user Path.
 
 Q&A
 ---
@@ -180,16 +143,18 @@ Not by itself: ask Unii to add a computer-use MCP server, such as
 [cua-driver](https://github.com/trycua/cua/tree/main/libs/cua-driver),
 to the device whose screen it should use.
 
-**Can I sandbox Unii? I don't trust its unlimited tool calling.**
+**I don't trust its unlimited tool calling. Can I sandbox Unii?**
 
 Yes, with [Docker Sandboxes](https://docs.docker.com/ai/sandboxes/). Run
-`unii device` in the sandbox and on no other computer, pointed at your
-`unii serve` outside it (`http://host.docker.internal:8788` if the server
-runs on the same PC). Then let the sandbox reach it:
-`sbx policy allow network localhost:8788`. The sandbox turns
-host.docker.internal into localhost, so the rule names localhost. MCP
-servers run on devices only, so the sandboxed device's run in the
-sandbox too.
+`unii device` inside the sandbox and on no other computer, pointed at
+your server outside it (`http://host.docker.internal:8788` if it runs on
+the same PC), and let the sandbox reach it:
+`sbx policy allow network localhost:8788`. That device's MCP servers
+run in the sandbox too.
+
+**I don't trust its unlimited tool calling. Can I make it ask for permission on tool calls?**
+
+You enjoy pressing enter?
 
 **How can I reach UniiChat from outside my home network?**
 
@@ -205,13 +170,13 @@ plan, either.
 **Upgrading from arteeh.16 or older?**
 
 Stop the server first (`systemctl --user stop unii-serve`), run the
-installer, then start it: it moves your data to the new layout and won't
-while a server runs. Your user prompt is then fixed in `prompt.md` (empty
-it on the Settings page to get later built-in changes). The terminal is no
-device any more: set up `unii device` (above) on each computer Unii should
-work on.
+installer, then start it again: it moves your data to the new layout.
+The terminal no longer works on files itself: run `unii device` on each
+computer Unii should work on.
 
 License
 -------
 
-Apache-2.0 (LICENSE). Copyright 2026 Higher Order Company.
+Apache-2.0 (LICENSE).
+Copyright 2026 Higher Order Company.
+Copyright 2026 Maarten de Jong.
