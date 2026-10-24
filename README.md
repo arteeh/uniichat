@@ -174,22 +174,40 @@ First run `unii device stop` and `unii serve stop` where you used `-d`
 Q&A
 ---
 
-**Can Unii use my screen?** Not by itself: add a computer-use MCP server,
-such as [cua-driver](https://github.com/trycua/cua/tree/main/libs/cua-driver),
-in that device's `~/.unii/config.json` (its tools: `my-mac_screen__...`):
+**Can Unii use my screen?**
 
-    "mcp": { "screen": { "command": "cua-driver", "args": ["mcp"],
-             "env": { "CUA_DRIVER_RS_TELEMETRY_ENABLED": "0" } } }
+Not by itself: ask Unii to add a computer-use MCP server, such as
+[cua-driver](https://github.com/trycua/cua/tree/main/libs/cua-driver),
+to the device whose screen it should use.
 
-**Can others use my server?** No: a server has one owner. Anthropic and
-OpenAI don't allow sharing a plan, either.
+**Can I sandbox Unii? I don't trust its unlimited tool calling.**
 
-**Upgrading from arteeh.16 or older?** Stop the server first (`systemctl
---user stop unii-serve`), run the installer, then start it: it moves your
-data to the new layout and won't while a server runs. Your user prompt is
-then fixed in `prompt.md` (empty it on the Settings page to get later
-built-in changes). The terminal is no device any more: set up `unii
-device` (above) on each computer Unii should work on.
+Yes, with [Docker Sandboxes](https://docs.docker.com/ai/sandboxes/). Run
+`unii device` in the sandbox and on no other computer, pointed at your
+`unii serve` outside it (`http://host.docker.internal:8788` if the server
+runs on the same PC). Then let the sandbox reach it:
+`sbx policy allow network localhost:8788`. The sandbox turns
+host.docker.internal into localhost, so the rule names localhost.
+
+**How can I reach UniiChat from outside my home network?**
+
+With Tailscale: ask Unii to set up Tailscale Serve on HTTPS port 443,
+pointing at `unii serve`. Only your own Tailscale devices can reach it,
+not the whole internet.
+
+**Can others use my server?**
+
+No: a server has one owner. Anthropic and OpenAI don't allow sharing a
+plan, either.
+
+**Upgrading from arteeh.16 or older?**
+
+Stop the server first (`systemctl --user stop unii-serve`), run the
+installer, then start it: it moves your data to the new layout and won't
+while a server runs. Your user prompt is then fixed in `prompt.md` (empty
+it on the Settings page to get later built-in changes). The terminal is no
+device any more: set up `unii device` (above) on each computer Unii should
+work on.
 
 License
 -------
