@@ -3,49 +3,51 @@ UniiChat (arteeh's fork)
 
 UniiChat is an AI agent with one chat that never ends. There is no "new
 chat" button: you talk to the same agent for days, weeks, years, and it
-remembers. This fork runs it as your own server, for you alone. The
-original is [VictorTaelin/uniichat](https://github.com/VictorTaelin/uniichat).
+remembers.
 
-**This repo is vibe-coded.** AI agents wrote nearly all of it, and AI
-agents reviewed it. Expect bugs.
+Based on [Victor Taelin's UniiChat source code](https://github.com/VictorTaelin/uniichat).
 
 Features
 --------
 
-- **One chat, a memory tree.** Every message is summarized into one line,
-  and neighboring lines are merged in pairs, again and again. Each call
-  sees the whole chat, recent messages in detail and older ones in
-  broader lines, and can zoom into any line down to the original message.
-- **Agents and devices.** Unii runs a shell, reads and edits files and
-  views images and videos on your computers that run `unii device`. It
-  spawns subagents, which work in the background and report back.
-- **Schedules, goals, imports.** It can message itself on a schedule,
-  keep working until a `/goal` is met, and take in your past Claude Code
-  and Codex sessions (or the websites' exports).
-- **Web, phone and terminal.** The server hosts the web app (installable,
-  with push notifications); `unii` is the same chat in a terminal.
+- **One chat, forever.** No new chats or sessions. Every tab, phone
+  and terminal shows the same live chat.
+- **A memory system that keeps everything.** Messages are summarized into a
+  tree that the agent sees every turn: recent messages in detail, older
+  ones more broadly. It can zoom into any line, down to the original
+  message.
+- **All your computers.** Run `unii device` on a machine and the agent
+  can run commands and edit files there.
+- **Subagents** do the grunt work in the background and report back.
+- **Goals and imports.** `/goal` keeps it working until something is
+  done. It can also import your Claude Code and Codex sessions, or the
+  websites' exports.
 
 What this fork adds:
 
-- **One owner per server**, no accounts, email or billing; `unii serve
-  sessions` and `revoke` to sign a lost device out.
 - **Claude and ChatGPT plans** as vendors (`claude-sub`, `openai-sub`)
   beside API keys; profiles that fall back to the next model when one is
-  out; usage limits waited out instead of failing; a model per subagent.
+  out; auto-resume after hitting usage limits; a model per subagent.
+- **Native Windows**: server, devices and terminal, with a one-line
+  PowerShell install.
+- **MCP servers** per device.
+- **Skills** read from the ~/.agents/skills folder.
+- **Scheduling tools** to give your agent future or repeating tasks.
+- **Image and video viewing tools** to let it see images and video files.
+- **Settings page** where you can customize the system prompt and compaction prompt.
+- **Improved memory tree viewer** to browse what your agent knows.
+- **Conversation mode** for when you want a short continuous
+  back-and-forth without the agent forgetting anything you said.
 - **An installable web app (PWA)** on phones and desktops: icons, an
   offline shell, Web Push for replies, a nav bar that shows on Android;
   the composer stays above a phone's keyboard.
-- **Native Windows**: server, devices and terminal, with a one-line
-  PowerShell install.
-- **MCP servers** (a device's set up on it), **skills**, **schedules**
-  (once or by cron), image and video viewing.
-- **A Settings page**, an editable user prompt and compaction prompt,
-  and a memory tree browser.
-- **Subagents**: their own tab, a `stop` that ends one and its jobs, and
-  a report when one hits a usage limit.
+- **One owner per server**, no accounts, email, billing, or anything
+  else exclusive to the uniichat.com version; `unii serve sessions`
+  and `revoke` to sign a lost device out.
+- **Background services** (`-d`, `stop`, `logs`) that updates restart.
+- **Subagent improvements**: their own tab, a `stop` that ends one
+  and its jobs, and a report when one hits a usage limit.
 - **No telemetry or update checker**: `unii update` when you want it.
-- **Background services** (`-d`, `stop`, `logs`) that updates restart,
-  and a **conversation mode**.
 
 Install and set up
 ------------------
