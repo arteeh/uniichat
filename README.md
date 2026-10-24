@@ -97,12 +97,14 @@ run while one does: stop it first, update, start it again.
    -d https://your-server`: it prints a link and a code to confirm in
    your browser, then runs in the background. Its work dir is
    `~/.unii/work`; its settings are in `~/.config/unii/device.json`.
-   Its own MCP servers go in its `~/.unii/config.json` (`mcp`, below):
-   they come and go with it and an edit needs no restart, from the next
-   turn (once no subagent is working); their tools are named
-   `<device>_<server>__<tool>` (one over 64 characters is left out). On
-   the server's computer the two share that file: its programs run as
-   the server's, and the device brings in its edits.
+   MCP servers run on devices only, never in `unii serve`: a device's
+   go in its own `~/.unii/config.json` as `mcp`, in Claude's
+   `mcpServers` shape (programs, and URLs the device reaches; `${VAR}`s
+   are read there). They come and go with it and an edit needs no
+   restart, from the next turn (once no subagent is working); their
+   tools are named `<device>_<server>__<tool>` (one over 64 characters
+   is left out). For MCP on the server's computer, run `unii device`
+   there too: it reads the same file.
 
 **In the background**, `-d` runs the server or a device as a service of
 your user (a systemd user service; on Windows a Scheduled Task, no
@@ -122,10 +124,6 @@ Settings page). Each may also be set as `UNII_<KEY>`, which wins. Besides
   in KB (default 4), each summary sees beside its message. More lets the
   compactor copy in what the message doesn't say; Sonnet medium does
   that less than Haiku.
-- `mcp`: MCP servers, in Claude's `mcpServers` shape (or a file path):
-  URL servers and programs run on the server. A program to run on a
-  device goes in that device's own `~/.unii/config.json`, in the same
-  shape (no `"device"`); its `${VAR}`s are read there.
 - `after`: a shell command run after each turn (by sh; on Windows by
   PowerShell).
 - `claude_sub`, `claude`, `chatgpt`: where the plans' sign-ins are kept.
@@ -187,7 +185,8 @@ Yes, with [Docker Sandboxes](https://docs.docker.com/ai/sandboxes/). Run
 `unii serve` outside it (`http://host.docker.internal:8788` if the server
 runs on the same PC). Then let the sandbox reach it:
 `sbx policy allow network localhost:8788`. The sandbox turns
-host.docker.internal into localhost, so the rule names localhost.
+host.docker.internal into localhost, so the rule names localhost. MCP
+servers run on devices only, so they stay in the sandbox too.
 
 **How can I reach UniiChat from outside my home network?**
 

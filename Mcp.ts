@@ -1,12 +1,13 @@
 // Mcp
 // ===
-// The user's MCP servers (config.MCP: README), whose tools the master and
-// its subagents get beside unii's own (Tools.ts), each named
-// "<server>__<tool>", on every vendor. A server is a program run here
-// (stdio: a JSON-RPC message a line each way), a program run on a device
-// (one in that device's own config, as it told: Tools.servers; each
-// message a job of it, Mcp.device, Mcp.here), or a URL (streamable HTTP:
-// a POST each, answered as JSON or an event stream). The servers change
+// The user's MCP servers (README), whose tools the master and its
+// subagents get beside unii's own (Tools.ts), each named
+// "<device>_<server>__<tool>", on every vendor. Each is in a device's own
+// config.json, as it told (Tools.servers), and runs on that device: each
+// message a job of it (Mcp.device, Mcp.here). unii serve runs none
+// itself. There, a server is a program (stdio: a JSON-RPC message a line
+// each way) or a URL the device reaches (streamable HTTP: a POST each,
+// answered as JSON or an event stream). The servers change
 // as devices come, go and edit theirs (Mcp.sync), between turns only
 // (Tools.apply).
 // Each chat runs its own (one user's never see another's), started by
@@ -18,8 +19,8 @@
 // also a note in the chat; the rest (its device isn't open, it died and
 // starts again at the next call) only the model is told. Tools left out
 // (a name too long, say) go to the log and the chat. A dead one starts again at the next call; one that
-// failed to start rests LIMITS.again first. While a device server's
-// device isn't open, its tools are left out.
+// failed to start rests LIMITS.again first. While a server's device
+// isn't open, its tools are left out.
 
 import * as os from "node:os";
 import type { Out } from "./Agent.ts";
@@ -160,7 +161,7 @@ export namespace Mcp {
   // a server's tools: started (anew if its link died), listed again if
   // it said they changed; else why none, told
   export async function start(servers: Servers, s: Server): Promise<Spec[] | string> {
-    if (s.conf.device && !servers.open(s.conf.device)) {
+    if (!servers.open(s.conf.device)) {
       Mcp.close(s);
       s.fail = null;
       const why = "can't run: device " + s.conf.device + " isn't open";
@@ -200,7 +201,7 @@ export namespace Mcp {
     return got;
   }
 
-  // a server run (or reached) and initialized, its tools listed, within
+  // a server run on its device and initialized, its tools listed, within
   // LIMITS.start; else why not. Once up, its link dying is told
   export async function open(servers: Servers, s: Server): Promise<Spec[] | string> {
     const timer = AbortSignal.timeout(LIMITS.start);
@@ -209,7 +210,7 @@ export namespace Mcp {
     let link: Link | null = null;
     const died = (why: string) => up && s.link === link && Mcp.tell(servers, s, why + "; the next call starts it again", false);
     try {
-      link = s.link = s.conf.url ? Mcp.http(s.conf, changed) : s.conf.device ? Mcp.device(s.conf, servers.run, changed, died) : Mcp.stdio(s.conf, changed, died);
+      link = s.link = Mcp.device(s.conf, servers.run, changed, died);
       await link.ask("initialize", INIT, timer);
       await link.tell("notifications/initialized", {}, timer);
       const specs = await Mcp.listed(servers, s, timer);
@@ -306,7 +307,7 @@ export namespace Mcp {
     s.calls += 1;
     try {
       for (let again = true; ; again = false) {
-        if (s.link === null || s.link.dead() !== null || !s.names.has(name) || (s.conf.device && !servers.open(s.conf.device))) {
+        if (s.link === null || s.link.dead() !== null || !s.names.has(name) || !servers.open(s.conf.device)) {
           const got = await Mcp.start(servers, s);
           if (typeof got === "string") {
             return fail(head + got + ".");
@@ -327,7 +328,7 @@ export namespace Mcp {
           if (timer.aborted) {
             return fail(head + "didn't answer within " + s.conf.timeout + " s; the call was cancelled.");
           }
-          if (again && why === EXPIRED) {
+          if (again && why?.startsWith(EXPIRED)) {
             continue;
           }
           const next = why === "was ended by unii" ? "." : "; the next call starts it again.";
@@ -577,9 +578,10 @@ export namespace Mcp {
   }
 
   // on a device, a message of a chat's server (Mcp.device) to the program
-  // it runs here: initialize starts it (Mcp.stdio, its ${VAR}s and `cwd`
-  // read here); close ends it. Answered as JSON: its result or error, why
-  // it is dead, whether its tools changed
+  // it runs here (Mcp.stdio) or the URL it reaches from here (Mcp.http):
+  // initialize starts it, its ${VAR}s and `cwd` read here; close ends it.
+  // Answered as JSON: its result or error, why it is dead, whether its
+  // tools changed
   export async function here(input: any, signal: AbortSignal): Promise<Out> {
     const { key, method, params } = input;
     const answer = (got: object): Out => {
@@ -609,12 +611,17 @@ export namespace Mcp {
       let conf: config.McpServer;
       try {
         const env = Object.fromEntries(Object.entries(c.env).map(([k, v]) => [k, vars(v)]));
-        conf = { ...c, command: vars(c.command), args: c.args.map(vars), env, cwd: vars(c.cwd).replace(/^~(?=[\\/]|$)/, os.homedir()) };
+        const headers = Object.fromEntries(Object.entries(c.headers).map(([k, v]) => [k, vars(v)]));
+        conf = { ...c, command: vars(c.command), args: c.args.map(vars), env, cwd: vars(c.cwd).replace(/^~(?=[\\/]|$)/, os.homedir()), url: vars(c.url), headers };
+        if (conf.url !== "" && !URL.canParse(conf.url)) {
+          throw new Error("needs a url");
+        }
       } catch (err) {
         return answer({ dead: Mcp.why(err) });
       }
       const run = { link: null as unknown as Link, changed: false };
-      run.link = Mcp.stdio(conf, () => (run.changed = true), () => {});
+      const changed = () => (run.changed = true);
+      run.link = conf.url ? Mcp.http(conf, changed) : Mcp.stdio(conf, changed, () => {});
       HERE.set(key, (s = run));
     }
     if (s === undefined) {

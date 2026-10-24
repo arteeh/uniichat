@@ -476,7 +476,7 @@ function term_pick(t: Term, move: Move, arg: string): void {
   term_note(t, move[0].toUpperCase() + move.slice(1) + "s: " + list + ". Pick one with " + how + ".");
 }
 
-// the MCP servers the server's config sets, on or off in this chat; with
+// the chat's MCP servers (its devices'), on or off in this chat; with
 // a name, that one switched
 function term_mcp(t: Term, arg: string): void {
   if (arg !== "") {

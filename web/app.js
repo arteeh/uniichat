@@ -1516,7 +1516,7 @@ function mcp_html(plugs) {
     const button = `<button class="chip" role="switch" aria-checked="${p.on}" aria-label="${esc(p.name)}"${act}>${p.on ? "Turn off" : "Turn on"}</button>`;
     return `<div class="item"><p>${esc(p.name)}<small>Its tools are ${p.on ? "on" : "off"} in this chat.</small></p>${button}</div>`;
   };
-  const none = `<p class="sub">None set up. Add them as <code>mcp</code> in config.json: the server's, or a device's own for programs run on that device.</p>`;
+  const none = `<p class="sub">None set up. Add them as <code>mcp</code> in a device's own config.json: they run on that device.</p>`;
   return plugs.length === 0 ? [none] : plugs.map(one);
 }
 function tabs_html(tabs) {

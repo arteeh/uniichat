@@ -77,7 +77,7 @@ export type State = {
 // its space its messages take (0 to 1)
 export type Talk = { from: number; used: number };
 
-// an MCP server of the server's config (Mcp.ts), on or off in this chat
+// an MCP server of a device (Mcp.ts), on or off in this chat
 export type Plug = { name: string; on: boolean };
 
 // fold: the tops shown (null: not folded); nodes and whole: the summaries
