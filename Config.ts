@@ -300,6 +300,12 @@ function config_vendors(text: string): Vendor[] {
   return list;
 }
 
+// a device's name as its MCP servers' start: other than letters, digits
+// and -, each character a - (so desk_a's and desk-a's are one: Tools.plug)
+export function config_mcp_prefix(device: string): string {
+  return device.replace(/[^A-Za-z0-9-]/g, "-");
+}
+
 // whether an `mcp` has any server: Claude's `mcpServers` shape with one,
 // its JSON, or a file's path (Device.ts reads that)
 function config_mcp_some(raw: unknown): boolean {
@@ -366,8 +372,8 @@ function config_server(name: string, s: any, device: string): McpServer {
   if (s.device !== undefined) {
     throw bad("has \"device\", which a device's own config.json doesn't take (its servers run on it)");
   }
-  // named for its device too, so two devices' never clash
-  const server = { name: device.replace(/[^A-Za-z0-9-]/g, "-") + "_" + name, device, command: "", args: [], env: {}, cwd: "", url: "", headers: {}, timeout };
+  // named for its device too (two devices of one prefix: Tools.plug)
+  const server = { name: config_mcp_prefix(device) + "_" + name, device, command: "", args: [], env: {}, cwd: "", url: "", headers: {}, timeout };
   if (type === "stdio") {
     if (typeof s.command !== "string" || s.command === "" || (s.cwd !== undefined && typeof s.cwd !== "string")) {
       throw bad("needs a command (and cwd, if any, as a string)");
