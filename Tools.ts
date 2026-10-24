@@ -59,6 +59,7 @@ type Device = {
   skills : Skill[];
   mcp    : config.McpServer[];
   why    : string;
+  clash  : string;
 };
 
 // a job: the link it runs on, what it runs, its output, what ends it
@@ -539,7 +540,7 @@ export namespace Tools {
     if (own === undefined) {
       Tools.forget(tools, name);
     }
-    const d = tools.devices.get(name) ?? { who, host, terms: new Map(), jobs: new Map(), skills: [], mcp: [], why: "" };
+    const d = tools.devices.get(name) ?? { who, host, terms: new Map(), jobs: new Map(), skills: [], mcp: [], why: "", clash: "" };
     d.terms.set(term, link);
     tools.devices.set(name, d);
     Tools.sync(d, term, () => true);
@@ -614,9 +615,33 @@ export namespace Tools {
 
   // the chat's MCP servers as they are now: each linked device's (one
   // whose link was lost has none till it is back), run from the next turn
-  // (Tools.apply): never changed in the middle of one; the views told
+  // (Tools.apply): never changed in the middle of one; the views told.
+  // Two devices whose names make one prefix (desk_a, desk-a:
+  // config.config_mcp_prefix) would give tools of one name: the first
+  // here with servers keeps it, linked or not (so a name never moves to
+  // the other), the other's are left out, told the chat once
   export function plug(tools: Tools): void {
-    tools.next = [...tools.devices.values()].filter(Tools.live).flatMap((d) => d.mcp);
+    const taken = new Map<string, string>();
+    const next: config.McpServer[] = [];
+    for (const [name, d] of tools.devices) {
+      const prefix = config.config_mcp_prefix(name);
+      const other = d.mcp.length === 0 ? undefined : taken.get(prefix);
+      const clash = other === undefined ? "" : "The device " + name + "'s MCP servers are left out: their tools would be named " + prefix + "_…, as the device " + other + "'s are. Rename one of the two (name in its ~/.config/unii/device.json).";
+      if (clash !== d.clash) {
+        d.clash = clash;
+        if (clash !== "") {
+          console.error("unii: " + clash);
+          tools.hooks.note(clash);
+        }
+      }
+      if (d.mcp.length > 0 && other === undefined) {
+        taken.set(prefix, name);
+        if (Tools.live(d)) {
+          next.push(...d.mcp);
+        }
+      }
+    }
+    tools.next = next;
     tools.hooks.change();
   }
 
