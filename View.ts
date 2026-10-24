@@ -271,10 +271,15 @@ export function Cap(text: string): Row {
   return { $: "Cap", text };
 }
 
-// conversation mode's fill in tokens (about 4 bytes each), as its meter's
-// tooltip says it: "about 120K of 718K tokens"
+// the bytes a token takes, low (code, JSON and paths run about 3; prose
+// about 4), so conversation mode never thinks the model has more room
+// than it does (Memory.talk_room)
+export const TOKEN = 3;
+
+// conversation mode's fill in tokens (TOKEN bytes each), as its meter's
+// tooltip says it: "about 120K of 707K tokens"
 export function talk_tokens(talk: Talk): string {
-  const k = (bytes: number) => Math.round(bytes / 4000) + "K";
+  const k = (bytes: number) => Math.round(bytes / TOKEN / 1000) + "K";
   return "about " + k(talk.size) + " of " + k(talk.room) + " tokens";
 }
 

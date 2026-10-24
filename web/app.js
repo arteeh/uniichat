@@ -410,7 +410,7 @@ function msg_show(id, n) {
 }
 function tasks_show(tasks, model, effort) {
   const list = Array.isArray(tasks) ? tasks : [];
-  const knobs = [knobs_show(model, effort), ...list.map((t) => knobs_show(t?.model, t?.effort))].filter((k) => k !== "").map((k) => " · " + k).join("");
+  const knobs = [...new Set([knobs_show(model, effort), ...list.map((t) => knobs_show(t?.model, t?.effort))])].filter((k) => k !== "").map((k) => " · " + k).join("");
   return list.length + (list.length === 1 ? " agent" : " agents") + knobs;
 }
 function knobs_show(model, effort) {
@@ -933,8 +933,9 @@ var FOLD = "The whole chat, folded into the fewest blocks.";
 function Cap(text) {
   return { $: "Cap", text };
 }
+var TOKEN = 3;
 function talk_tokens(talk) {
-  const k = (bytes) => Math.round(bytes / 4000) + "K";
+  const k = (bytes) => Math.round(bytes / TOKEN / 1000) + "K";
   return "about " + k(talk.size) + " of " + k(talk.room) + " tokens";
 }
 function view_new() {

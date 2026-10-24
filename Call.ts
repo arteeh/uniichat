@@ -147,7 +147,7 @@ function msg_show(id: unknown, n: unknown): string {
 // (a log from before release 26: the call's, its tasks plain strings)
 function tasks_show(tasks: unknown, model: unknown, effort: unknown): string {
   const list = Array.isArray(tasks) ? tasks : [];
-  const knobs = [knobs_show(model, effort), ...list.map((t) => knobs_show(t?.model, t?.effort))].filter((k) => k !== "").map((k) => " · " + k).join("");
+  const knobs = [...new Set([knobs_show(model, effort), ...list.map((t) => knobs_show(t?.model, t?.effort))])].filter((k) => k !== "").map((k) => " · " + k).join("");
   return list.length + (list.length === 1 ? " agent" : " agents") + knobs;
 }
 

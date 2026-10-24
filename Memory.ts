@@ -53,7 +53,7 @@ import { Disk } from "./Disk.ts";
 import { Pick } from "./Pick.ts";
 import * as names from "./Names.ts";
 import type { Timer } from "./Timer.ts";
-import { FIT, IMAGE, image_kind, PIXELS } from "./View.ts";
+import { FIT, IMAGE, image_kind, PIXELS, TOKEN } from "./View.ts";
 import { move_over } from "./Write.ts";
 
 // Types
@@ -1065,12 +1065,12 @@ ${Memory.cut(line)}| ← LIMIT`;
   }
 
   // conversation mode's space (bytes) on a model of `window` tokens,
-  // about 4 bytes each: three quarters of it (the rest the turn's own:
+  // TOKEN bytes each: three quarters of it (the rest the turn's own:
   // the prompt, the tools, its output and tool results), less the most
   // the view's lines before it take (HIGH). Past it, it switches itself
   // off (Server.ts). The model's limit: no cap of our own
   export function talk_room(window: number): number {
-    return window * 3 - HIGH;
+    return (window * TOKEN * 3) / 4 - HIGH;
   }
 
   // the bytes conversation mode's lines take, to message `end` (none:

@@ -161,8 +161,9 @@ const SPENT = /insufficient_quota|billing_hard_limit_reached|credit balance is t
 export const BUSY  = "the AI service is busy or unavailable right now";
 
 // a refusal of a request too long for the model (Anthropic's, OpenAI's,
-// Claude Code's words): conversation mode ends on it (Server.ts)
-export const TOO_LONG = /prompt is too long|context.length|context (limit|window)|too many (input )?tokens/i;
+// Claude Code's words), or Anthropic's stop at the window's end:
+// conversation mode ends on it (Server.ts)
+export const TOO_LONG = /prompt is too long|context.length|context (limit|window)|model_context_window_exceeded|too many (input )?tokens/i;
 
 // a usage limit's waits: from how long one parks its call, and the
 // longest it waits between tries when no reset is told

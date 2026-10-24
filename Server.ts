@@ -36,7 +36,7 @@ import { INSTALL, INSTALL_PS1 } from "./Update.ts";
 import { move_over, write_whole } from "./Write.ts";
 import * as Timer from "./Timer.ts";
 import { PROMPTS, SEARCHES, Tools, type Agent, type Live } from "./Tools.ts";
-import { ACTIVE, FRAME, IDLE, IMAGES, live_push, PING, QUIT, SUMMARIES, TICK, TURN, WIRE, type Answer, type Part, type Server as Out, type Wait } from "./View.ts";
+import { ACTIVE, FRAME, IDLE, IMAGES, live_push, PING, QUIT, SUMMARIES, TICK, TOKEN, TURN, WIRE, type Answer, type Part, type Server as Out, type Wait } from "./View.ts";
 import * as config from "./Config.ts";
 import hello_md from "./hello.md" with { type: "text" };
 import app_js from "./web/app.js" with { type: "file" };
@@ -1287,7 +1287,7 @@ export namespace Chat {
         }
         Chat.talk(chat, from);
         if (from !== null) {
-          const k = String(Math.round(Chat.room(chat) / 4000));
+          const k = String(Math.round(Chat.room(chat) / TOKEN / 1000));
           Chat.note(chat, TALK_ON.replace("{id}", String(from)).replace("{k}", k).replace("{model}", Chat.model_name(chat)));
         }
         return {};

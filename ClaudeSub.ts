@@ -81,8 +81,13 @@ const WEB = ["WebSearch"];
 // names it lacks
 const MORE = ["Task", "DesignSync"];
 
-// what turns off what Claude Code does beyond calling the model
+// what turns off what Claude Code does beyond calling the model; its
+// prompt cache pinned to an hour (CLAUDE_CODE_PROMPT_CACHE_TTL comes
+// before its own choice, which is an hour on a plan but 5 minutes under
+// extra usage), as is our mark (ClaudeSub.inbox): the API refuses a 1h
+// mark after a 5m one
 const ENV = {
+  CLAUDE_CODE_PROMPT_CACHE_TTL             : "1h",
   CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC : "1", // updates, telemetry, error reports
   CLAUDE_CODE_DISABLE_AUTO_MEMORY          : "1",
   CLAUDE_CODE_DISABLE_ATTACHMENTS          : "1", // "@path" in a message stays text
@@ -90,6 +95,8 @@ const ENV = {
   DISABLE_AUTO_COMPACT                     : "1",
   CLAUDE_AGENT_SDK_CLIENT_APP              : "uniichat",
 };
+
+const HOUR = { type: "ephemeral", ttl: "1h" };
 
 const SIGN_IN = "claude-sub is not signed in, or its sign-in expired: run `unii serve claude` on the server";
 
@@ -234,12 +241,13 @@ export namespace ClaudeSub {
   }
 
   // its environment: ours, less what would sign it in or send it
-  // elsewhere (an API key, a token, a base URL, Bedrock, Vertex...)
+  // elsewhere (an API key, a token, a base URL, Bedrock, Vertex...) or
+  // change its cache's TTL (FORCE_PROMPT_CACHING_5M)
   // (its config dir made, or kept, its owner's alone)
   export function env(): Record<string, string | undefined> {
     fs.mkdirSync(DIR, { recursive: true, mode: 0o700 });
     fs.chmodSync(DIR, 0o700);
-    const ours = Object.entries(process.env).filter(([k]) => !/^(ANTHROPIC_|CLAUDE_)/.test(k));
+    const ours = Object.entries(process.env).filter(([k]) => !/^(ANTHROPIC_|CLAUDE_|FORCE_PROMPT_CACHING)/.test(k));
     return { ...Object.fromEntries(ours), ...ENV, CLAUDE_CONFIG_DIR: DIR };
   }
 
@@ -300,8 +308,11 @@ export namespace ClaudeSub {
   // call has it too). Our tools load up front, never behind its tool
   // search, and a call may run past the 60 s Claude Code gives an HTTP
   // MCP request. Our MCP server is set once it runs (ClaudeSub.connect),
-  // over its pipe: its secret URL is never on its command line
-  export function options(ask: Ask, abort: AbortController, builtin: readonly string[]): Options {
+  // over its pipe: its secret URL is never on its command line. Our
+  // system prompt after the SDK's `boundary`: Claude Code then marks it
+  // alone for the cache, not its own first line too, so a request has a
+  // mark to spare (ClaudeSub.inbox)
+  export function options(ask: Ask, abort: AbortController, builtin: readonly string[], boundary: string): Options {
     const tools = WEB;
     const deny = [...builtin, ...MORE].filter((t) => !tools.includes(t));
     return {
@@ -311,7 +322,7 @@ export namespace ClaudeSub {
       model                  : ask.model,
       effort                 : ask.effort as Options["effort"],
       thinking               : { type: "adaptive", display: "summarized" },
-      systemPrompt           : ask.system,
+      systemPrompt           : [boundary, ask.system],
       tools,
       allowedTools           : [...tools, "mcp__unii"],
       disallowedTools        : deny,
@@ -400,7 +411,7 @@ export namespace ClaudeSub {
       proc.once("error", () => proc.pid === undefined && gone());
       return proc;
     };
-    const options = { ...ClaudeSub.options(ask, new AbortController(), sdk.BUILTIN_TOOL_NAMES), pathToClaudeCodeExecutable: bin, spawnClaudeCodeProcess: spawn };
+    const options = { ...ClaudeSub.options(ask, new AbortController(), sdk.BUILTIN_TOOL_NAMES, sdk.SYSTEM_PROMPT_DYNAMIC_BOUNDARY), pathToClaudeCodeExecutable: bin, spawnClaudeCodeProcess: spawn };
     try {
       code.q = sdk.query({ prompt: box.read(), options });
     } catch (err) {
@@ -683,10 +694,11 @@ export namespace ClaudeSub {
   }
 
   // the messages Claude Code reads, as they come; closed: it ends. A put's
-  // text `mark` (-1: none) ends a cache entry: the view's last whole block
-  // (Memory.view), so a turn reads the view the turn before cached. One
-  // only: Claude Code marks three blocks of its own (its system prompt's
-  // two, its environment message after ours), and a request takes four
+  // text `mark` (-1: none) ends a cache entry, an hour's (ENV): the view's
+  // last whole block (Memory.view), so a turn reads the view the turn
+  // before cached. One only: a request takes four, and Claude Code marks
+  // two of its own (our system prompt, its last message), three if its
+  // system prompt isn't split at the boundary (ClaudeSub.options)
   export function inbox() {
     const queue: SDKUserMessage[] = [];
     let wake = () => {};
@@ -695,7 +707,7 @@ export namespace ClaudeSub {
       queue.push({ type: "user", message: { role: "user", content }, parent_tool_use_id: null });
       wake();
     };
-    const put = (texts: string[], imgs: Img[], mark = -1) => push(Anthropic.content(texts, imgs).map((b: any, k) => (k === mark ? { ...b, cache_control: { type: "ephemeral" } } : b)));
+    const put = (texts: string[], imgs: Img[], mark = -1) => push(Anthropic.content(texts, imgs).map((b: any, k) => (k === mark ? { ...b, cache_control: HOUR } : b)));
     const close = () => {
       shut = true;
       wake();
