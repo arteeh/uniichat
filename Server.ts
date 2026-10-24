@@ -29,14 +29,14 @@ import { JOBS, Memory, TALK, type Msg as Log, type Share } from "./Memory.ts";
 import { OpenAI } from "./OpenAI.ts";
 import { Owner } from "./Owner.ts";
 import { Pick } from "./Pick.ts";
-import { Push } from "./Push.ts";
+import { ACTIVE_MS, Push } from "./Push.ts";
 import { Reap } from "./Reap.ts";
 import { Settings } from "./Settings.ts";
 import { INSTALL, INSTALL_PS1 } from "./Update.ts";
 import { move_over, write_whole } from "./Write.ts";
 import * as Timer from "./Timer.ts";
 import { PROMPTS, SEARCHES, Tools, type Agent, type Live } from "./Tools.ts";
-import { FRAME, IMAGES, live_push, PING, QUIT, SUMMARIES, TICK, TURN, WIRE, type Answer, type Part, type Server as Out, type Wait } from "./View.ts";
+import { ACTIVE, FRAME, IDLE, IMAGES, live_push, PING, QUIT, SUMMARIES, TICK, TURN, WIRE, type Answer, type Part, type Server as Out, type Wait } from "./View.ts";
 import * as config from "./Config.ts";
 import hello_md from "./hello.md" with { type: "text" };
 import app_js from "./web/app.js" with { type: "file" };
@@ -56,8 +56,9 @@ import icon_apple from "./web/apple-touch-icon.png" with { type: "file" };
 // =====
 
 // a socket: its sign-in (hashed), its query's fields, a device's name
-// (null: a view), the parts it was shown (Chat.teach)
-type Sock = ServerWebSocket<{ who: string; tab: string; wire: string | null; host: string | null; work: string; shell: string | null; device: string | null; seen: Set<string> }>;
+// (null: a view), the parts it was shown (Chat.teach), when its view last
+// said its page is in use (View.ACTIVE; 0: not)
+type Sock = ServerWebSocket<{ who: string; tab: string; wire: string | null; host: string | null; work: string; shell: string | null; device: string | null; seen: Set<string>; active: number }>;
 
 // a body: its file, its size so far
 type Body = { fh: fs.promises.FileHandle; size: number };
@@ -676,10 +677,12 @@ export namespace Chat {
   }
 
   // a turn's last message, Unii's reply or why there was none, to the
-  // owner's phones and browsers (Push.notify)
+  // owner's phones and browsers (Push.notify); none while a view is in
+  // use (said so in the last ACTIVE_MS: sock.data.active)
   export function phone(chat: Chat): void {
     const last = Memory.message(chat.mem, chat.mem.count - 1);
-    if (last !== null && (last.kind === "unii" || last.kind === "note")) {
+    const used = [...chat.socks].some((sock) => Date.now() - sock.data.active < ACTIVE_MS);
+    if (!used && last !== null && (last.kind === "unii" || last.kind === "note")) {
       Push.notify(Owner.open(), last.text);
     }
   }
@@ -1567,7 +1570,7 @@ export namespace Main {
       if (p === "/ws") {
         const q    = new URL(req.url).searchParams;
         const who  = Owner.hash(Owner.token(req));
-        const data = { who, tab: q.get("tab") ?? "", wire: q.get("wire"), host: q.get("device"), work: q.get("work") ?? "~/.unii/work", shell: q.get("shell") === "PowerShell" ? "PowerShell" : null, device: null, seen: new Set<string>() };
+        const data = { who, tab: q.get("tab") ?? "", wire: q.get("wire"), host: q.get("device"), work: q.get("work") ?? "~/.unii/work", shell: q.get("shell") === "PowerShell" ? "PowerShell" : null, device: null, seen: new Set<string>(), active: 0 };
         return server.upgrade(req, { data }) ? undefined : new Response("upgrade failed", { status: 400 });
       }
       return await Main.page(Main.chat, p, req);
@@ -1625,8 +1628,11 @@ export namespace Main {
           }, () => ws.close(1011));
         },
         message(ws: Sock, data) {
-          if (Main.chat.socks.has(ws)) {
-            Chat.answer(Main.chat, ws, String(data));
+          const text = String(data);
+          if (text === ACTIVE || text === IDLE) {
+            ws.data.active = text === ACTIVE ? Date.now() : 0;
+          } else if (Main.chat.socks.has(ws)) {
+            Chat.answer(Main.chat, ws, text);
           }
         },
         close(ws: Sock, code) {

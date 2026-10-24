@@ -61,7 +61,8 @@ const BACK = $<HTMLInputElement>("#import [name=back]");
 // frame: awaited (0: none); rows: the log's rows changed, to draw;
 // found: the sources read, by name; done: sessions imported before; off:
 // left out (Import.Want); step: the import's; away: the chat's scroll as
-// a page (the settings, the tree) was opened over it, kept for its return
+// a page (the settings, the tree) was opened over it, kept for its return;
+// used: what the server was last told of this page's use (in_use)
 const P = {
   imgs  : [] as Blob[],
   rec   : null as MediaRecorder | null,
@@ -78,6 +79,7 @@ const P = {
   step  : "" as "" | "start" | "send" | "run" | "seen" | "done",
   push  : null as { reg: ServiceWorkerRegistration; key: string } | null,
   away  : null as { y: number; end: boolean } | null,
+  used  : { ws: null as WebSocket | null, on: false, at: 0 },
 };
 
 function $<T extends HTMLElement>(sel: string): T {
@@ -108,6 +110,14 @@ async function boot(): Promise<void> {
   signed();
   route();
   connect();
+  // (input a person makes: a page scrolling itself, to a reply, is none)
+  for (const ev of ["keydown", "pointerdown", "pointermove", "wheel", "touchstart"]) {
+    addEventListener(ev, () => in_use(), { capture: true, passive: true });
+  }
+  addEventListener("focus", () => in_use());
+  document.addEventListener("visibilitychange", () => in_use());
+  addEventListener("blur", () => in_use(true));
+  addEventListener("pagehide", () => in_use(true));
 }
 
 // whether signed in (null: no, as the server refuses the session);
@@ -479,6 +489,19 @@ function connect(): void {
   });
 }
 
+// whether this page is in use (shown and focused; off: leaving it), told
+// the server on each socket, and again while in use at most each
+// USE_PING: no push goes out meanwhile (Server.ts Chat.phone)
+function in_use(off = false): void {
+  const on = !off && document.visibilityState === "visible" && document.hasFocus();
+  const ws = v.ws;
+  if (ws === null || !v.up || ws.readyState !== WebSocket.OPEN || (ws === P.used.ws && on === P.used.on && (!on || Date.now() - P.used.at < View.USE_PING))) {
+    return;
+  }
+  ws.send(on ? View.ACTIVE : View.IDLE);
+  P.used = { ws, on, at: Date.now() };
+}
+
 async function lost(up: boolean): Promise<boolean> {
   draw(true);
   const me = up ? null : await fetch("/api/me").catch(() => null);
@@ -493,6 +516,9 @@ async function lost(up: boolean): Promise<boolean> {
 // rows change with what they show: a state (~10/s importing)
 // only by its agents, an agent's page saying whether it runs
 function hear(msg: View.Server): void {
+  if (v.ws !== P.used.ws) {
+    in_use();
+  }
   const was = View.view_pick(v);
   const agents = v.agents.join();
   for (const out of View.view_hear(v, msg)) {

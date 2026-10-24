@@ -62,6 +62,10 @@ for (const cidr of ["0.0.0.0/8", "10.0.0.0/8", "100.64.0.0/10", "127.0.0.0/8", "
 // how much of a message a push shows
 const GIST = 200;
 
+// how long a view saying its page is in use (View.ACTIVE) counts: no
+// push goes out meanwhile, nor later for what came then
+export const ACTIVE_MS = 60 * 1000;
+
 // Globals
 // =======
 

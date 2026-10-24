@@ -904,6 +904,9 @@ var WIRE = 3;
 var PING = 1e4;
 var RETRY = 1000;
 var TICK = "+";
+var ACTIVE = "active";
+var IDLE = "idle";
+var USE_PING = 20000;
 var FRAME = 2 ** 22;
 var HINT = "Message UniiChat";
 var AI = "Unii is an AI, not a person, and can make mistakes.";
@@ -2237,7 +2240,8 @@ var P = {
   off: new Set,
   step: "",
   push: null,
-  away: null
+  away: null,
+  used: { ws: null, on: false, at: 0 }
 };
 function $2(sel) {
   return document.querySelector(sel);
@@ -2260,6 +2264,13 @@ async function boot() {
   signed();
   route();
   connect();
+  for (const ev of ["keydown", "pointerdown", "pointermove", "wheel", "touchstart"]) {
+    addEventListener(ev, () => in_use(), { capture: true, passive: true });
+  }
+  addEventListener("focus", () => in_use());
+  document.addEventListener("visibilitychange", () => in_use());
+  addEventListener("blur", () => in_use(true));
+  addEventListener("pagehide", () => in_use(true));
 }
 async function boot_me() {
   for (let k = 0;; k++) {
@@ -2555,6 +2566,15 @@ function connect() {
     lost
   });
 }
+function in_use(off = false) {
+  const on = !off && document.visibilityState === "visible" && document.hasFocus();
+  const ws = v.ws;
+  if (ws === null || !v.up || ws.readyState !== WebSocket.OPEN || ws === P.used.ws && on === P.used.on && (!on || Date.now() - P.used.at < USE_PING)) {
+    return;
+  }
+  ws.send(on ? ACTIVE : IDLE);
+  P.used = { ws, on, at: Date.now() };
+}
 async function lost(up) {
   draw(true);
   const me = up ? null : await fetch("/api/me").catch(() => null);
@@ -2565,6 +2585,9 @@ async function lost(up) {
   return true;
 }
 function hear(msg) {
+  if (v.ws !== P.used.ws) {
+    in_use();
+  }
   const was = view_pick(v);
   const agents = v.agents.join();
   for (const out of view_hear(v, msg)) {

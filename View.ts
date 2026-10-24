@@ -215,6 +215,13 @@ export const RETRY = 1000;
 export const TICK  = "+";
 export const QUIT  = 4000;
 
+// a view's word that its page is in use (shown and focused; said again on
+// input, at most each USE_PING), or no longer: no push goes out while one
+// is (Server.ts Chat.phone)
+export const ACTIVE   = "active";
+export const IDLE     = "idle";
+export const USE_PING = 20000;
+
 // the most a socket message may be (bytes; Bun's own cap is 16 MiB),
 // room for a tool's largest output, an image (Machine.ts). A bigger one
 // closes its socket (Server.ts)
