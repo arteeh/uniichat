@@ -2,8 +2,8 @@
 // ======
 // `unii device [url]`: this computer as a device of a unii server, on
 // its own, with no terminal open (`unii device -d` runs it as a
-// background service: Service.ts). The agent's tools (Machine.ts) and the MCP programs a
-// server runs on a device (Mcp.here) run here as jobs, each in its
+// background service: Service.ts). The agent's tools (Machine.ts) and its
+// own MCP servers (Mcp.here) run here as jobs, each in its
 // agent's dir under the work dir, till done or halted; all they left
 // running dies as the device stops. Its file is device.json (Client.ts):
 // the server, its sign-in, its name as the agent sees it (default: on
@@ -14,7 +14,7 @@
 // and sent again on the next socket, which the server does once.
 // Its own MCP servers are the `mcp` of its ~/.unii/config.json ($UNII_DIR,
 // README), told the server on each socket and again as they change
-// (Tools.servers), which runs them here (Mcp.here).
+// (Tools.servers): programs run here, URLs reached from here (Mcp.here).
 
 import * as child from "node:child_process";
 import * as fs from "node:fs";

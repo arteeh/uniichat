@@ -153,7 +153,7 @@ function choice_html(c: View.Choice): string {
   return `${head}<button role="menuitemradio" aria-checked="${c.here}"${act}>${esc(c.text)}</button>`;
 }
 
-// the settings page's MCP servers (the server's, and each open device's),
+// the settings page's MCP servers (each open device's),
 // a row each, on or off in this chat (its switch flips it); none: where
 // they are set up
 export function mcp_html(plugs: View.Plug[]): string[] {
@@ -162,7 +162,7 @@ export function mcp_html(plugs: View.Plug[]): string[] {
     const button = `<button class="chip" role="switch" aria-checked="${p.on}" aria-label="${esc(p.name)}"${act}>${p.on ? "Turn off" : "Turn on"}</button>`;
     return `<div class="item"><p>${esc(p.name)}<small>Its tools are ${p.on ? "on" : "off"} in this chat.</small></p>${button}</div>`;
   };
-  const none = `<p class="sub">None set up. Add them as <code>mcp</code> in config.json: the server's, or a device's own for programs run on that device.</p>`;
+  const none = `<p class="sub">None set up. Add them as <code>mcp</code> in a device's own config.json: they run on that device.</p>`;
   return plugs.length === 0 ? [none] : plugs.map(one);
 }
 

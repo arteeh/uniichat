@@ -237,10 +237,6 @@ export namespace Chat {
     if (mem.count === 0) {
       Memory.push(mem, [{ kind: "unii", text: HELLO, line: HELLO_LINE }]);
     }
-    for (const note of config.MCP_NOTES) {
-      console.error("unii: " + note);
-      Chat.note(chat, note);
-    }
     chat.eye = Chat.eye(mem, Memory.turn(mem));
     mem.made = (l, i) => Chat.made(chat, l, i);
     mem.wait.add(() => Chat.progress(chat));
@@ -367,6 +363,7 @@ export namespace Chat {
 
   export async function turn(chat: Chat): Promise<void> {
     chat.busy = true;
+    Tools.left(chat.tools);
     // a subagent working keeps the MCP servers it started with
     if (Tools.working(chat.tools).length === 0) {
       Tools.apply(chat.tools);
@@ -1658,6 +1655,9 @@ export namespace Main {
       Memory.stop(Main.chat.mem);
     });
     console.log("unii: " + config.SITE + ", data in " + config.DIR + ", on 127.0.0.1:" + port);
+    if (config.MCP_LEFT !== null) {
+      console.error("unii: " + (config.MCP_LEFT.env ? config.MCP_LEFT.text : "unii serve runs no MCP servers: the mcp in " + config.FILE_PATH + " runs only on a unii device that reads this file (unii device beside the server)."));
+    }
   }
 
   // the settings page's (Settings.ts): a GET reads them, a POST saves
