@@ -494,7 +494,7 @@ function term_mode(t: Term, arg: string): void {
     return;
   }
   const talk = t.v.talk;
-  const now = talk === null ? "standard" : "conversation, from message " + talk.from + ", " + Math.round(talk.used * 100) + "% of its space used";
+  const now = talk === null ? "standard" : "conversation, from message " + talk.from + ", " + Math.round(talk.used * 100) + "% of its space used (" + View.talk_tokens(talk) + ")";
   term_note(t, (arg === "" ? "" : "No mode " + arg + ". ") + "The memory mode is " + now + ". /mode standard or /mode conversation switches it.");
 }
 

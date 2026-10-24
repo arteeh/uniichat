@@ -146,6 +146,11 @@ export namespace OpenAI {
   // the step a stream gave
   export function step(st: State, ask: Ask): Step {
     const res = st.res ?? { status: "failed", error: st.error, output: [] };
+    const u = res.usage;
+    if (typeof u?.input_tokens === "number") {
+      const read = u.input_tokens_details?.cached_tokens ?? 0;
+      Agent.cached(ask, read, null, u.input_tokens - read);
+    }
     const out: any[] = res.output;
     const calls = out.filter((o) => o.type === "function_call");
     const uses: Use[] = calls.map((o) => ({ id: o.call_id, name: o.name, input: Agent.parse(o.arguments) }));

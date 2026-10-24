@@ -53,7 +53,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import type { Options, Query, SDKMessage, SDKRateLimitInfo, SDKUserMessage, SpawnOptions } from "@anthropic-ai/claude-agent-sdk";
 import { AGAIN, AskAI, type Ask, type End, type Event, type Img, type Say, type Try } from "./AskAI.ts";
-import { Agent, BUSY, LIMIT, type Emit, type Hold } from "./Agent.ts";
+import { Agent, BUSY, LIMIT, TOO_LONG, type Emit, type Hold } from "./Agent.ts";
 import { Anthropic } from "./Anthropic.ts";
 import { Machine } from "./Machine.ts";
 import { live_push, type Live } from "./View.ts";
@@ -550,7 +550,8 @@ export namespace ClaudeSub {
           if (signal.aborted) {
             return {};
           }
-          code.box.put(ask.blocks.filter((b) => b.text !== "").map((b) => b.text), ask.imgs ?? []);
+          const blocks = ask.blocks.filter((b) => b.text !== "");
+          code.box.put(blocks.map((b) => b.text), ask.imgs ?? [], blocks.slice(0, -1).findLastIndex((b) => b.mark));
         } else if (n > 0) {
           const says = sent.splice(0);
           says.forEach((say) => log({ $: "Entry", kind: "user", text: say.text }));
@@ -558,7 +559,7 @@ export namespace ClaudeSub {
         }
         let got: Out | null;
         try {
-          got = await ClaudeSub.turn(code, emit, log, sent, signal, acted, () => (seen = []));
+          got = await ClaudeSub.turn(code, ask, emit, log, sent, signal, acted, () => (seen = []));
         } catch (err) {
           if (!(err instanceof Died) || said || signal.aborted || tries > 0) {
             throw err;
@@ -598,7 +599,7 @@ export namespace ClaudeSub {
   // message sent taken, marks the call `acted`. At usage billed past the
   // plan the turn is interrupted: its end a limit, unless its answer came
   // whole (paid already) with no message to take (another request)
-  export async function turn(code: Code, emit: Emit, log: (ev: Event) => void, sent: Say[], signal: AbortSignal, acted: { v: boolean }, fresh: () => void): Promise<Out | null> {
+  export async function turn(code: Code, ask: Ask, emit: Emit, log: (ev: Event) => void, sent: Say[], signal: AbortSignal, acted: { v: boolean }, fresh: () => void): Promise<Out | null> {
     const stopped = new Promise<"stop">((ok) => (signal.aborted ? ok("stop") : signal.addEventListener("abort", () => ok("stop"), { once: true })));
     let info: SDKRateLimitInfo | null = null;
     let hit = false;
@@ -615,6 +616,10 @@ export namespace ClaudeSub {
       const msg = r.value;
       if (msg.type === "stream_event" && msg.parent_tool_use_id === null) {
         Anthropic.live(msg.event, emit);
+        const used = msg.event.type === "message_start" ? Anthropic.used(msg.event.message.usage ?? {}) : null;
+        if (used !== null) {
+          Agent.cached(ask, used.read, used.write, used.input);
+        }
       }
       if (msg.type === "rate_limit_event") {
         info = msg.rate_limit_info;
@@ -649,7 +654,7 @@ export namespace ClaudeSub {
       }
       if (!ok) {
         console.error("claude-sub: " + (err ? err + ": " : "") + (why || msg.subtype).slice(0, 300));
-        return { text: BUSY, stop: "down", off: err !== undefined && OFF.includes(err) };
+        return { text: BUSY, stop: "down", off: err !== undefined && OFF.includes(err), long: TOO_LONG.test(why) };
       }
       const says = sent.splice(0);
       if (says.length === 0) {
@@ -677,7 +682,11 @@ export namespace ClaudeSub {
     return results.map((b) => ({ kind: "echo", text: (b.is_error ? "error: " : "") + (AskAI.show(b.content) || "(no output)"), of: b.tool_use_id }));
   }
 
-  // the messages Claude Code reads, as they come; closed: it ends
+  // the messages Claude Code reads, as they come; closed: it ends. A put's
+  // text `mark` (-1: none) ends a cache entry: the view's last whole block
+  // (Memory.view), so a turn reads the view the turn before cached. One
+  // only: Claude Code marks three blocks of its own (its system prompt's
+  // two, its environment message after ours), and a request takes four
   export function inbox() {
     const queue: SDKUserMessage[] = [];
     let wake = () => {};
@@ -686,7 +695,7 @@ export namespace ClaudeSub {
       queue.push({ type: "user", message: { role: "user", content }, parent_tool_use_id: null });
       wake();
     };
-    const put = (texts: string[], imgs: Img[]) => push(Anthropic.content(texts, imgs));
+    const put = (texts: string[], imgs: Img[], mark = -1) => push(Anthropic.content(texts, imgs).map((b: any, k) => (k === mark ? { ...b, cache_control: { type: "ephemeral" } } : b)));
     const close = () => {
       shut = true;
       wake();

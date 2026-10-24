@@ -150,9 +150,6 @@ const TRIES = 5;
 const HIGH  = 128000;
 const BLOCK = 4;
 
-// conversation mode's space: its lines' bytes at most (most of what the
-// chat's view takes), past which it switches itself off (Server.ts)
-export const TALK = 96000;
 const SLOT  = 16;
 const DAY   = 864e5;
 
@@ -1006,13 +1003,16 @@ ${Memory.cut(line)}| ← LIMIT`;
   // the view's lines built before message `end`, in blocks (the last cut
   // short), one marked: the last whole one, else the opening one. One
   // mark only: a request takes four, and Anthropic.ts adds three (the
-  // system prompt's, a reply's end's, the top-level)
-  export function view(mem: Memory, end = mem.count, parts = mem.view.parts, talk: number | null = null): Block[] {
+  // system prompt's, a reply's end's, the top-level). Whole block `back`
+  // (-1: none), the one the call before marked, is marked `back` too:
+  // a second mark further back, for claude-api in conversation mode
+  // (Anthropic.ts), so a turn that added many lines still reads the cache
+  export function view(mem: Memory, end = mem.count, parts = mem.view.parts, talk: number | null = null, back = -1): Block[] {
     const lines = talk === null ? Memory.before(parts, end).filter((part) => Memory.built(mem, part.l, part.i)).map((part) => Memory.line(part, Memory.text(mem, part)) + "\n") : Memory.talking(mem, end, parts, talk);
     const whole = Math.floor(lines.length / BLOCK);
     const blocks: Block[] = [{ text: "<chat>\n", mark: whole === 0 }];
     for (let k = 0; k < whole; k++) {
-      blocks.push({ text: lines.slice(k * BLOCK, (k + 1) * BLOCK).join(""), mark: k === whole - 1 });
+      blocks.push({ text: lines.slice(k * BLOCK, (k + 1) * BLOCK).join(""), mark: k === whole - 1, ...(k === back && k < whole - 1 ? { back: true } : {}) });
     }
     blocks.push({ text: lines.slice(whole * BLOCK).join("") + "</chat>\n", mark: false });
     return blocks;
@@ -1062,6 +1062,15 @@ ${Memory.cut(line)}| ← LIMIT`;
     const root = Memory.message(mem, i)!;
     const part = { l: 0, i };
     return Memory.said(root) ? Memory.ref(part) + "|" + Memory.show(root).replace(/<\/chat>/gi, "<\\/chat>") : Memory.line(part, Memory.node(mem, part) ?? WAIT);
+  }
+
+  // conversation mode's space (bytes) on a model of `window` tokens,
+  // about 4 bytes each: three quarters of it (the rest the turn's own:
+  // the prompt, the tools, its output and tool results), less the most
+  // the view's lines before it take (HIGH). Past it, it switches itself
+  // off (Server.ts). The model's limit: no cap of our own
+  export function talk_room(window: number): number {
+    return window * 3 - HIGH;
   }
 
   // the bytes conversation mode's lines take, to message `end` (none:

@@ -6,12 +6,15 @@
 // marked end the top-level one too (which Anthropic counts apart: a
 // request takes four in all), and so does the system prompt: what every
 // call shares (tools, system) stays cached whatever its view does, so a
-// view written anew writes only itself. A stream builds blocks from
+// view written anew writes only itself. A turn in conversation mode
+// (Ask `talk`) caches an hour, not 5 minutes, and marks a block further
+// back too (Block `back`): its end then needs no mark of its own, the
+// top-level one ends it (four in all still). A stream builds blocks from
 // pieces; tool_use and end_turn end a step, pause_turn asks again, an
 // error event is busy (a rate_limit_error a usage limit). It pings while
 // the model thinks, so 5 silent minutes mean it is dead.
 
-import type { Ask, Img } from "./AskAI.ts";
+import type { Ask, Block, Img } from "./AskAI.ts";
 import { Agent, type Emit, type Entry, type Item, type Step, type Tool, type Use, type Wire } from "./Agent.ts";
 
 // Types
@@ -19,7 +22,7 @@ import { Agent, type Emit, type Entry, type Item, type Step, type Tool, type Use
 
 // a stream read so far: the content blocks, the JSON of each tool input
 // that came in pieces, how it stopped and why, the speed it ran at, an
-// error
+// error, its usage (input tokens: cache reads, writes, the rest)
 type State = {
   blocks : any[];
   json   : string[];
@@ -27,12 +30,14 @@ type State = {
   why    : any;
   speed  : string;
   error  : any;
+  used   : { read: number; write: number; input: number } | null;
 };
 
 // Constants
 // =========
 
 const MARK  = { type: "ephemeral" };
+const HOUR  = { type: "ephemeral", ttl: "1h" };
 const WEB   = { type: "web_search_20260318", name: "web_search" };
 const FAST  = "fast-mode-2026-02-01";
 
@@ -59,8 +64,9 @@ export namespace Anthropic {
       defs.push({ ...WEB, max_uses: ask.searches });
     }
     const messages: any[] = [];
+    const mark = ask.talk === true ? HOUR : MARK;
     for (const item of items) {
-      const msg = Anthropic.message(item);
+      const msg = Anthropic.message(item, mark, ask.talk === true && item === items[0]);
       const top = messages[messages.length - 1];
       if (top?.role === msg.role) {
         top.content.push(...msg.content);
@@ -68,12 +74,12 @@ export namespace Anthropic {
         messages.push(msg);
       }
     }
-    const cache = ask.blocks[ask.blocks.length - 1]?.mark ? MARK : undefined;
+    const cache = ask.blocks[ask.blocks.length - 1]?.mark ? mark : undefined;
     return {
       model         : ask.model,
       max_tokens    : max,
       stream        : true,
-      system        : [{ type: "text", text: ask.system, cache_control: MARK }],
+      system        : [{ type: "text", text: ask.system, cache_control: mark }],
       thinking      : { type: "adaptive", display: "summarized" },
       output_config : { effort: ask.effort },
       cache_control : cache,
@@ -83,10 +89,14 @@ export namespace Anthropic {
     };
   }
 
-  export function message(item: Item): { role: string; content: any[] } {
+  // talk: the call's first message in conversation mode, its `back`
+  // block marked, its last (the top-level mark's) not
+  export function message(item: Item, mark: object = MARK, talk = false): { role: string; content: any[] } {
     switch (item.$) {
       case "User": {
-        const texts = item.parts.map((p) => ({ type: "text", text: p.text, cache_control: p.mark ? MARK : undefined }));
+        const last = item.parts.length - 1;
+        const marked = (p: Block, k: number) => (talk ? (p.mark && k < last) || p.back === true : p.mark);
+        const texts = item.parts.map((p, k) => ({ type: "text", text: p.text, cache_control: marked(p, k) ? mark : undefined }));
         return { role: "user", content: [...texts, ...item.imgs.map(Anthropic.image)] };
       }
       case "Turn": {
@@ -119,6 +129,7 @@ export namespace Anthropic {
     switch (ev.type) {
       case "message_start": {
         Anthropic.usage(st, ev.message.usage ?? {});
+        st.used = Anthropic.used(ev.message.usage ?? {});
         return false;
       }
       case "content_block_start": {
@@ -143,6 +154,12 @@ export namespace Anthropic {
       }
     }
     return ev.type === "message_stop";
+  }
+
+  // a usage's input tokens: cache reads, writes, the rest (null: none told)
+  export function used(u: any): State["used"] {
+    const n = (x: unknown) => (typeof x === "number" ? x : 0);
+    return typeof u.input_tokens === "number" ? { read: n(u.cache_read_input_tokens), write: n(u.cache_creation_input_tokens), input: u.input_tokens } : null;
   }
 
   // the speed it ran at, as its usage tells
@@ -198,6 +215,9 @@ export namespace Anthropic {
 
   // the step a stream gave
   export function step(st: State, ask: Ask): Step {
+    if (st.used !== null) {
+      Agent.cached(ask, st.used.read, st.used.write, st.used.input);
+    }
     const uses: Use[] = [];
     st.blocks.forEach((b, k) => {
       if (st.json[k] !== undefined) {
@@ -290,7 +310,7 @@ export namespace Anthropic {
     url     : "https://api.anthropic.com/v1/messages",
     headers : Anthropic.headers,
     body    : Anthropic.body,
-    start   : () => ({ blocks: [], json: [], stop: "", why: null, speed: "slow", error: null }),
+    start   : () => ({ blocks: [], json: [], stop: "", why: null, speed: "slow", error: null, used: null }),
     read    : Anthropic.read,
     begun   : (ev) => ev.type === "message_start",
     step    : Anthropic.step,

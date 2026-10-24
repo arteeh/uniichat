@@ -770,13 +770,13 @@ function row_cells(line) {
 
 // Pick.ts
 var VENDORS = ["claude-api", "openai-api", "openai-sub", "claude-sub"];
-var OPUS = { label: "opus-5.5", id: "claude-opus-5-5", speeds: ["slow", "fast"] };
-var SONNET = { label: "sonnet-5.5", id: "claude-sonnet-5-5", speeds: ["slow"] };
-var HAIKU = { label: "haiku-5.5", id: "claude-haiku-5-5", speeds: ["slow"] };
+var OPUS = { label: "opus-5.5", id: "claude-opus-5-5", speeds: ["slow", "fast"], window: 1e6 };
+var SONNET = { label: "sonnet-5.5", id: "claude-sonnet-5-5", speeds: ["slow"], window: 1e6 };
+var HAIKU = { label: "haiku-5.5", id: "claude-haiku-5-5", speeds: ["slow"], window: 1e6 };
 var OPENAI = [
-  { label: "gpt-6-luna", id: "gpt-6-luna", speeds: ["slow", "fast"] },
-  { label: "gpt-6.1-sol", id: "gpt-6.1-sol", speeds: ["slow", "fast"] },
-  { label: "gpt-6-astra", id: "gpt-6-astra", speeds: ["slow", "fast", "ultrafast"] }
+  { label: "gpt-6-luna", id: "gpt-6-luna", speeds: ["slow", "fast"], window: 272000 },
+  { label: "gpt-6.1-sol", id: "gpt-6.1-sol", speeds: ["slow", "fast"], window: 500000 },
+  { label: "gpt-6-astra", id: "gpt-6-astra", speeds: ["slow", "fast", "ultrafast"], window: 272000 }
 ];
 var PLAN = OPENAI.map((m) => ({ ...m, speeds: m.speeds.filter((s) => s !== "ultrafast") }));
 var MODELS = {
@@ -894,6 +894,12 @@ var Pick;
     return { vendor: x.vendor, model: x.model, effort: x.effort, speed: x.speed };
   }
   Pick2.read = read;
+  function window2(pick, offer) {
+    const falls = pick.profile === undefined ? [] : offer.profiles?.[pick.profile] ?? [];
+    const models = [Pick.model(pick.vendor, pick.model), ...falls.map((f) => f.model)];
+    return Math.min(...models.map((m) => m?.window ?? 272000));
+  }
+  Pick2.window = window2;
   function load(saved, offer, def) {
     return Pick.read(saved ?? def, offer) ?? def;
   }
@@ -926,6 +932,10 @@ var TOOL2 = "tool: ";
 var FOLD = "The whole chat, folded into the fewest blocks.";
 function Cap(text) {
   return { $: "Cap", text };
+}
+function talk_tokens(talk) {
+  const k = (bytes) => Math.round(bytes / 4000) + "K";
+  return "about " + k(talk.size) + " of " + k(talk.room) + " tokens";
 }
 function view_new() {
   return {
@@ -1516,7 +1526,8 @@ function pick_html(fold, on, knobs, talk) {
   const [now, about] = MODES[talk == null ? 0 : 1];
   const modes = talk === undefined ? [] : knob("mode", about, now, MODES.map(mode).join(""));
   const used = talk == null ? 0 : Math.round(talk.used * 100);
-  const rule = talk == null ? `<span class="rule"></span>` : `<span class="rule meter" style="--used:${used}%" title="Conversation: ${used}% of space used" role="meter" aria-valuenow="${used}" aria-valuemin="0" aria-valuemax="100" aria-label="Conversation space used"></span>`;
+  const heat = used >= 80 ? " hot" : used >= 50 ? " warm" : "";
+  const rule = talk == null ? `<span class="rule"></span>` : `<span class="rule meter${heat}" style="--used:${used}%" title="Conversation: ${used}% of space used (${talk_tokens(talk)})" role="meter" aria-valuenow="${used}" aria-valuemin="0" aria-valuemax="100" aria-label="Conversation space used"></span>`;
   return [...all, ...modes, rule, ...parts.flatMap((part, i) => i === 0 ? part : [`<span class="dot">·</span>`, ...part])];
 }
 function choice_html(c) {

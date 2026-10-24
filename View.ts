@@ -74,8 +74,9 @@ export type State = {
 };
 
 // conversation mode (Memory.ts): its first message whole, the share of
-// its space its messages take (0 to 1)
-export type Talk = { from: number; used: number };
+// its space its messages take (0 to 1), their bytes and the space's (the
+// pick's model's: Memory.talk_room)
+export type Talk = { from: number; used: number; size: number; room: number };
 
 // an MCP server of a device (Mcp.ts), on or off in this chat
 export type Plug = { name: string; on: boolean };
@@ -268,6 +269,13 @@ const FOLD = "The whole chat, folded into the fewest blocks.";
 
 export function Cap(text: string): Row {
   return { $: "Cap", text };
+}
+
+// conversation mode's fill in tokens (about 4 bytes each), as its meter's
+// tooltip says it: "about 120K of 718K tokens"
+export function talk_tokens(talk: Talk): string {
+  const k = (bytes: number) => Math.round(bytes / 4000) + "K";
+  return "about " + k(talk.size) + " of " + k(talk.room) + " tokens";
 }
 
 // View

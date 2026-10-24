@@ -117,7 +117,7 @@ Use
 - **Conversation mode:** the switch next to "fold all" (`/mode` in the
   terminal). From then on, your and Unii's messages stay word for word
   in Unii's memory, for a real discussion. It costs more per turn and
-  turns itself off when its 96 KB fills up.
+  turns itself off when the model's context window fills up.
 - `unii help` lists every command.
 
 From source (Bun): `bun install`, `bun run web`, `bun Cli.ts <command>`,

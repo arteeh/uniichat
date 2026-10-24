@@ -160,6 +160,10 @@ const SPENT = /insufficient_quota|billing_hard_limit_reached|credit balance is t
 // what a call the vendor never answered says
 export const BUSY  = "the AI service is busy or unavailable right now";
 
+// a refusal of a request too long for the model (Anthropic's, OpenAI's,
+// Claude Code's words): conversation mode ends on it (Server.ts)
+export const TOO_LONG = /prompt is too long|context.length|context (limit|window)|too many (input )?tokens/i;
+
 // a usage limit's waits: from how long one parks its call, and the
 // longest it waits between tries when no reset is told
 export const LONG  = 60e3;
@@ -188,6 +192,14 @@ const ROOMS = new Map<string, Room>();
 // =====
 
 export namespace Agent {
+
+  // a request's cache use as its vendor tells it (tokens; write null: not
+  // told, as OpenAI's), logged for each call but summaries' and imports'
+  export function cached(ask: Ask, read: number, write: number | null, input: number): void {
+    if (ask.patient !== true) {
+      console.error("cache " + ask.vendor + " " + ask.model + ": read " + read + (write === null ? "" : ", write " + write) + ", uncached " + input);
+    }
+  }
 
   export function ask(ask: Ask, on: (ev: Event) => void): Try {
     const end = AskAI.end("");
@@ -237,6 +249,7 @@ export namespace Agent {
       }
       if (step.stop === "down" || step.stop === "lost" || step.stop === "fail") {
         end.text ||= step.stop === "down" ? step.refusal?.say ?? BUSY : step.why;
+        end.long = step.stop !== "lost" && TOO_LONG.test(step.why);
         end.stop = step.stop;
         end.off = step.off;
         end.until = step.refusal?.until;

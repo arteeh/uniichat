@@ -25,7 +25,7 @@ import { clip_pages } from "./Clip.ts";
 import { Disk } from "./Disk.ts";
 import { Mcp } from "./Mcp.ts";
 import * as Import from "./Import.ts";
-import { JOBS, Memory, TALK, type Msg as Log, type Share } from "./Memory.ts";
+import { JOBS, Memory, type Msg as Log, type Share } from "./Memory.ts";
 import { OpenAI } from "./OpenAI.ts";
 import { Owner } from "./Owner.ts";
 import { Pick } from "./Pick.ts";
@@ -88,7 +88,9 @@ type Batch = Kept & { micros: number[][]; open: number[]; left: number; all: num
 // after another, and the logging held meanwhile (null: none); limits:
 // the calls waiting for a usage limit, by TURN or agent name; fell: the
 // fallback its calls ("") or an agent's (by name, till it reports) run
-// on (Chat.ran), forgotten as a pick is picked
+// on (Chat.ran), forgotten as a pick is picked; back: the view's block
+// the turn's last call (in conversation mode) marked last, which the
+// next marks too, for claude-api's cache (Memory.view)
 type Chat = {
   mem   : Memory;
   tools : Tools;
@@ -113,6 +115,7 @@ type Chat = {
   held  : Array<() => void> | null;
   limits: Record<string, Parked>;
   fell  : Map<string, string>;
+  back  : number;
 };
 
 // Constants
@@ -140,8 +143,13 @@ const GOAL       = "You check a goal. Below is a chat between a user and Unii, a
 const GOAL_ASK   = "\nThe goal:\n\n";
 const GOAL_NO    = "The goal isn't satisfied yet: keep working.";
 // conversation mode (Memory.ts) full: switched off, as the chat says;
-// switched on with its first messages over its space already: refused
+// switched on with its first messages over its space already: refused.
+// On: what it holds, and costs. Off as a model is picked with less room
+// than its messages take, or as the model refuses a turn as too long
 const TALK_FULL  = "Conversation mode switched itself off: the messages it kept word for word, from message {id} on, filled their space in Unii's view. They show as summaries again; switch it on to keep the next ones whole.";
+const TALK_ON    = "Conversation mode is on from message {id}: the user's and Unii's messages stay word for word in Unii's view, up to about {k}K tokens on {model}. Every turn sends all of them again, so a long conversation uses up plan limits or API credit fast.";
+const TALK_SMALL = "Conversation mode switched itself off: the messages it kept word for word, from message {id} on, take more room than {model} has in Unii's view. They show as summaries again; switch it on to keep the next ones whole.";
+const TALK_LONG  = "Conversation mode switched itself off: {model} refused the turn as too long for it, with the messages it kept word for word from message {id} on. They show as summaries again; send a message to try again.";
 const TALK_BIG   = "Conversation mode can't start: the messages since message {id} already fill its space in Unii's view.";
 const TALK_IMP   = "Conversation mode switched itself off: the messages imported filled its space in Unii's view (from message {id} on). Switch it on to keep the next ones whole.";
 const FULL       = "UniiChat's disk is full; try again soon.";
@@ -226,7 +234,7 @@ export namespace Chat {
     const chat: Chat = {
       mem, tools, pick, socks: new Set(), acts: new Map(), busy: false, call: null, model: "", check: null, asked: false, open: 0, sent: [], wait: [],
       halt: new AbortController(), live: [], calls: {}, eye: { parts: [], from: 0 }, after: Promise.resolve(), batch: null,
-      writes: Promise.resolve(), held: null, limits: {}, fell: new Map(),
+      writes: Promise.resolve(), held: null, limits: {}, fell: new Map(), back: -1,
     };
     // a saved pick (a profile, by name) not offered gave way: told once
     const shown = (p: Pick) => p.profile ?? Pick.label(p);
@@ -420,7 +428,8 @@ export namespace Chat {
     }
     const msgs = (chat.sent = chat.wait.splice(0));
     const says = msgs.filter((m) => m.end > from).map((m) => Memory.say(mem, Math.max(m.id, from), m.end));
-    const view = Memory.view(mem, from, mem.view.parts, mem.talk);
+    const view = Memory.view(mem, from, mem.view.parts, mem.talk, mem.talk === null ? -1 : chat.back);
+    chat.back = mem.talk === null ? -1 : view.length - 3;
     // the MCP servers' notes the chat showed are in the view: the call's
     // listing gives the master the rest, and those made since (Mcp.heard)
     Mcp.heard(chat.tools.mcp, Tools.off(chat.tools), "main", true);
@@ -430,7 +439,7 @@ export namespace Chat {
     chat.eye = Chat.eye(mem, from);
     chat.socks.forEach((sock) => Chat.show(chat, sock));
     const blocks = [...view, Tools.devices(chat.tools), Tools.skills(chat.tools), Tools.at_work(chat.tools), { text: HEAD + text, mark: true }];
-    const ask = { ...Chat.share(chat, Tools.prompt("prompt")), searches: SEARCHES, server, blocks, imgs };
+    const ask = { ...Chat.share(chat, Tools.prompt("prompt")), searches: SEARCHES, server, blocks, imgs, talk: mem.talk !== null };
     chat.model = chat.pick.model;
     chat.asked = true;
     chat.open = 0;
@@ -449,6 +458,9 @@ export namespace Chat {
     chat.wait.unshift(...chat.sent.slice(chat.sent.length - end.left.length));
     if (!end.ok && !halt.signal.aborted) {
       Chat.failed(chat, end.text);
+    }
+    if (end.long && chat.mem.talk !== null) {
+      Chat.talk_off(chat, TALK_LONG);
     }
     if (end.note) {
       Chat.all(chat, { $: "note", text: end.note });
@@ -530,20 +542,36 @@ export namespace Chat {
     return { id: roots[0].i, end: chat.mem.count };
   }
 
-  // a message logged in conversation mode: the views see its space fill
-  // (their meter); past it (TALK) it switches itself off, said in the
-  // chat: never a message of it quietly summarized again
+  // a message logged in conversation mode (or a model picked): the views
+  // see its space fill (their meter); past it (Chat.room) it switches
+  // itself off, said in the chat: never a message of it quietly
+  // summarized again
   export function talked(chat: Chat, why = TALK_FULL): void {
     const mem = chat.mem;
     if (mem.talk === null) {
       return;
     }
-    if (Memory.talk_size(mem) <= TALK) {
+    if (Memory.talk_size(mem) <= Chat.room(chat)) {
       return Chat.all(chat, Chat.state(chat));
     }
-    const from = mem.talk;
+    Chat.talk_off(chat, why);
+  }
+
+  // conversation mode off, said in the chat (why: a TALK_ note)
+  export function talk_off(chat: Chat, why: string): void {
+    const from = chat.mem.talk;
     Chat.talk(chat, null);
-    Chat.note(chat, why.replace("{id}", String(from)));
+    Chat.note(chat, why.replace("{id}", String(from)).replace("{model}", Chat.model_name(chat)));
+  }
+
+  // conversation mode's space on the chat's pick (bytes: Memory.talk_room)
+  export function room(chat: Chat): number {
+    return Memory.talk_room(Pick.window(chat.pick, config.OFFER));
+  }
+
+  // the chat's pick, as the chat names it: its profile, else its model
+  export function model_name(chat: Chat): string {
+    return chat.pick.profile ?? chat.pick.model;
   }
 
   // conversation mode from message `from` on, or off (null): saved, and
@@ -1022,7 +1050,9 @@ export namespace Chat {
     const importing = batch && { done: batch.all - Chat.time(batch), total: batch.all, why, msgs: batch.b - batch.a, open: batch.open };
     const timers = chat.mem.timers.map((t) => ({ ...t, text: t.text.length > TIMER_TEXT ? t.text.slice(0, TIMER_TEXT) + "…" : t.text }));
     const mcp = [...chat.tools.mcp.all.keys()].map((name) => ({ name, on: !chat.mem.off.includes(name) }));
-    const talk = chat.mem.talk === null ? null : { from: chat.mem.talk, used: Math.min(1, Memory.talk_size(chat.mem) / TALK) };
+    const room = Chat.room(chat);
+    const size = chat.mem.talk === null ? 0 : Memory.talk_size(chat.mem);
+    const talk = chat.mem.talk === null ? null : { from: chat.mem.talk, used: Math.min(1, size / room), size, room };
     return { $: "state", busy: chat.busy, wait: Chat.waits(chat), agents, runs, pick: chat.pick, ...config.OFFER, importing, limits: chat.limits, timers, mcp, talk };
   }
 
@@ -1047,6 +1077,7 @@ export namespace Chat {
       Chat.note(chat, saved + " isn't offered here, so the chat now runs on " + Pick.label(pick) + ".");
     }
     Chat.change(chat);
+    Chat.talked(chat, TALK_SMALL);
   }
 
   // what runs is saved, and told to every view
@@ -1225,6 +1256,7 @@ export namespace Chat {
         chat.fell.clear();
         Memory.save(chat.mem);
         Chat.change(chat);
+        Chat.talked(chat, TALK_SMALL);
         return {};
       }
       case "out": {
@@ -1248,12 +1280,16 @@ export namespace Chat {
         }
         const from = on ? Memory.talk_from(mem) : null;
         mem.talk = from;
-        if (from !== null && Memory.talk_size(mem) > TALK) {
+        if (from !== null && Memory.talk_size(mem) > Chat.room(chat)) {
           mem.talk = null;
           mem.talked.clear();
           return { error: TALK_BIG.replace("{id}", String(from)) };
         }
         Chat.talk(chat, from);
+        if (from !== null) {
+          const k = String(Math.round(Chat.room(chat) / 4000));
+          Chat.note(chat, TALK_ON.replace("{id}", String(from)).replace("{k}", k).replace("{model}", Chat.model_name(chat)));
+        }
         return {};
       }
       case "mcp": {

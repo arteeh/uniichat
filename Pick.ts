@@ -36,8 +36,9 @@ export type Pick = {
 // a key's change to the pick
 export type Move = "next" | "prev" | "model" | "up" | "down" | "effort" | "speed";
 
-// a model: as shown, as the vendor names it, its speeds
-export type Model = { label: string; id: string; speeds: string[] };
+// a model: as shown, as the vendor names it, its speeds, its context
+// window (tokens)
+export type Model = { label: string; id: string; speeds: string[]; window: number };
 
 // what a server offers: vendors, models by label, profiles by name
 export type Offer = { vendors: Vendor[]; models: string[]; profiles?: Record<string, Fall[]> };
@@ -50,13 +51,18 @@ export type Fall = { vendor: Vendor; model: Model; effort?: string; speed?: stri
 
 export const VENDORS: Vendor[] = ["claude-api", "openai-api", "openai-sub", "claude-sub"];
 
-const OPUS  : Model = { label: "opus-5.5",   id: "claude-opus-5-5",   speeds: ["slow", "fast"] };
-const SONNET: Model = { label: "sonnet-5.5", id: "claude-sonnet-5-5", speeds: ["slow"] };
-const HAIKU : Model = { label: "haiku-5.5",  id: "claude-haiku-5-5",  speeds: ["slow"] };
+// the windows: Claude's 1M, its models' default (Claude Code's docs:
+// Opus 4.7+, Sonnet 5+, Haiku 5.5 need no [1m]), at the API and on a
+// plan alike; OpenAI's as Codex's models cache has them for a ChatGPT
+// plan (context_window; a request can't ask for more), the API's taken
+// as the same
+const OPUS  : Model = { label: "opus-5.5",   id: "claude-opus-5-5",   speeds: ["slow", "fast"], window: 1e6 };
+const SONNET: Model = { label: "sonnet-5.5", id: "claude-sonnet-5-5", speeds: ["slow"], window: 1e6 };
+const HAIKU : Model = { label: "haiku-5.5",  id: "claude-haiku-5-5",  speeds: ["slow"], window: 1e6 };
 const OPENAI: Model[] = [
-  { label: "gpt-6-luna",  id: "gpt-6-luna",  speeds: ["slow", "fast"] },
-  { label: "gpt-6.1-sol", id: "gpt-6.1-sol", speeds: ["slow", "fast"] },
-  { label: "gpt-6-astra", id: "gpt-6-astra", speeds: ["slow", "fast", "ultrafast"] },
+  { label: "gpt-6-luna",  id: "gpt-6-luna",  speeds: ["slow", "fast"], window: 272e3 },
+  { label: "gpt-6.1-sol", id: "gpt-6.1-sol", speeds: ["slow", "fast"], window: 500e3 },
+  { label: "gpt-6-astra", id: "gpt-6-astra", speeds: ["slow", "fast", "ultrafast"], window: 272e3 },
 ];
 
 // a ChatGPT plan's (ChatGPT.ts): fast is its priority tier, no ultrafast
@@ -198,6 +204,14 @@ export namespace Pick {
       return null;
     }
     return { vendor: x.vendor, model: x.model, effort: x.effort, speed: x.speed };
+  }
+
+  // the context window a pick's calls have (tokens): its model's; a
+  // profile's, the least of its models', as a call may go on with any
+  export function window(pick: Pick, offer: Offer): number {
+    const falls = pick.profile === undefined ? [] : offer.profiles?.[pick.profile] ?? [];
+    const models = [Pick.model(pick.vendor, pick.model), ...falls.map((f) => f.model)];
+    return Math.min(...models.map((m) => m?.window ?? 272e3));
   }
 
   // the pick saved (the chat's log keeps it: Memory.ts) if offered, else

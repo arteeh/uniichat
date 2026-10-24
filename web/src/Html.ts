@@ -125,7 +125,8 @@ export const MODES: Array<[string, string]> = [
 // each opening its menu (the browser's popover, placed by main.ts); one
 // without choices (an agent's page) shown only. The mode is a knob too,
 // its menu the two modes. In conversation mode the rule is its meter,
-// as thin: filled as far as its space is, from grey to orange
+// as thin: filled as far as its space is, its usual grey turning orange
+// from half full, red from 80%
 export function pick_html(fold: string | null, on: boolean, knobs: View.Knob[], talk?: View.Talk | null): string[] {
   const knob = (move: string, hint: string, text: string, rows: string) => [
     `<button title="${esc(hint)}" data-knob="${move}" popovertarget="pick-${move}" aria-haspopup="menu">${esc(text)}</button>`,
@@ -141,7 +142,8 @@ export function pick_html(fold: string | null, on: boolean, knobs: View.Knob[], 
   const [now, about] = MODES[talk == null ? 0 : 1];
   const modes = talk === undefined ? [] : knob("mode", about, now, MODES.map(mode).join(""));
   const used = talk == null ? 0 : Math.round(talk.used * 100);
-  const rule = talk == null ? `<span class="rule"></span>` : `<span class="rule meter" style="--used:${used}%" title="Conversation: ${used}% of space used" role="meter" aria-valuenow="${used}" aria-valuemin="0" aria-valuemax="100" aria-label="Conversation space used"></span>`;
+  const heat = used >= 80 ? " hot" : used >= 50 ? " warm" : "";
+  const rule = talk == null ? `<span class="rule"></span>` : `<span class="rule meter${heat}" style="--used:${used}%" title="Conversation: ${used}% of space used (${View.talk_tokens(talk)})" role="meter" aria-valuenow="${used}" aria-valuemin="0" aria-valuemax="100" aria-label="Conversation space used"></span>`;
   return [...all, ...modes, rule, ...parts.flatMap((part, i) => (i === 0 ? part : [`<span class="dot">·</span>`, ...part]))];
 }
 

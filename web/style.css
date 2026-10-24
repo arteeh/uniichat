@@ -25,6 +25,7 @@
   --del    : #cf222e; /* a diff's line dropped */
   --accent : #6d3fd8; /* the name UniiChat in a message */
   --red    : #b42318; /* deleting the account */
+  --warm   : #e8590c; /* conversation mode's meter, half full */
   --veil   : rgb(0 0 0 / .3); /* the page behind a box over it */
   --shadow : 0 1px 2px rgba(0, 0, 0, .05), 0 6px 20px rgba(0, 0, 0, .05);
 }
@@ -44,6 +45,7 @@
     --del    : #f8857c;
     --accent : #ad94ff;
     --red    : var(--del);
+    --warm   : #f59f4c;
     --veil   : rgb(0 0 0 / .5);
     --shadow : 0 1px 2px rgb(0 0 0 / .4), 0 8px 28px rgb(0 0 0 / .45);
   }
@@ -105,9 +107,11 @@ body:is(.account, .tree) footer { position: fixed; inset: auto 0 0; background: 
 body:is(.account, .tree) footer > :not(#toast) { display: none; }
 #pick { width: min(var(--col), 100%); margin: 0 auto 6px; display: flex; align-items: center; gap: 6px; font: 12.5px/20px var(--sans); color: var(--mid); }
 #pick .rule { flex: 1; height: 1px; background: var(--hair); margin-right: 4px; }
-/* conversation mode's meter: the rule, as thin, filled to --used, grey to orange as it fills; a
-   taller strip (::before) over it takes the hover for its tooltip */
-#pick .rule.meter { position: relative; background: linear-gradient(to right, color-mix(in srgb, #f07a1a var(--used), var(--mid)) var(--used), var(--hair) var(--used)); }
+/* conversation mode's meter: the rule, as thin, filled to --used, grey, orange from half full
+   (warm), red from 80% (hot); a taller strip (::before) over it takes the hover for its tooltip */
+#pick .rule.meter { --fill: var(--mid); position: relative; background: linear-gradient(to right, var(--fill) var(--used), var(--hair) var(--used)); }
+#pick .rule.meter.warm { --fill: var(--warm); }
+#pick .rule.meter.hot { --fill: var(--del); }
 #pick .rule.meter::before { content: ""; position: absolute; inset: -7px 0; }
 #pick > :is(button, .knob) { padding: 0 6px; border-radius: 6px; }
 #pick > button:hover, #pick > button:has(+ :popover-open) { background: var(--block); color: var(--ink); }
