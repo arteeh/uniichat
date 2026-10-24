@@ -11,8 +11,9 @@
 
 // (a new name, for files a client should not be shown old: the shell's
 // before it is dropped as this one starts)
-const CACHE = "unii-shell-2";
+const CACHE = "unii-shell-3";
 const SHELL = ["/", "/app.js", "/style.css", "/favicon.svg", "/mark.svg", "/manifest.webmanifest", "/icon-192.png"];
+const PAGES = ["/", "/settings", "/account", "/tree"];
 
 // Safari takes a subscription back from a site whose pushes show nothing,
 // so there every push shows
@@ -26,12 +27,12 @@ self.addEventListener("activate", (ev) => {
   ev.waitUntil(caches.keys().then((keys) => Promise.all(keys.filter((key) => key !== CACHE).map((key) => caches.delete(key)))).then(() => self.clients.claim()));
 });
 
-// the shell's files, and a page of the app ("/", "/account": both
-// index.html, kept as "/")
+// the shell's files, and a page of the app (PAGES: all index.html, kept
+// as "/")
 self.addEventListener("fetch", (ev) => {
   const req = ev.request;
   const url = new URL(req.url);
-  const page = req.mode === "navigate" && (url.pathname === "/" || url.pathname === "/account");
+  const page = req.mode === "navigate" && PAGES.includes(url.pathname);
   if (req.method !== "GET" || url.origin !== location.origin || !(page || SHELL.includes(url.pathname))) {
     return;
   }

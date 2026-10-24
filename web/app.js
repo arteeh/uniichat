@@ -1786,6 +1786,432 @@ function span_html(s) {
   }
 }
 
+// web/src/Tree.ts
+var LEGEND = { VIEW: "What Unii's prompt holds now, in order: old messages as summaries, recent ones whole.", TREE: "" };
+var S = {
+  want: null,
+  asked: 0,
+  run: null
+};
+function tree_show(which) {
+  const was = S.want;
+  S.want = which;
+  tabs(which);
+  if (S.run !== null) {
+    S.run.show(which);
+    focus(which);
+    return;
+  }
+  if (was !== null) {
+    return;
+  }
+  const me = ++S.asked;
+  fetch("/api/tree").then((r) => r.ok ? r.json() : Promise.reject()).then((meta) => {
+    if (me === S.asked && S.want !== null) {
+      S.run = start(meta);
+      S.run.show(S.want);
+      focus(S.want);
+    }
+  }, () => {
+    if (me === S.asked && S.want !== null) {
+      S.want = null;
+      $(".legend").textContent = "Could not read the memory. Try again in a moment.";
+    }
+  });
+}
+function tree_hide() {
+  if (S.want === null) {
+    return;
+  }
+  S.want = null;
+  S.asked++;
+  S.run?.stop();
+  S.run = null;
+  $(".view").replaceChildren();
+  $(".bracket").replaceChildren();
+}
+function $(sel) {
+  return document.querySelector("#tree " + sel);
+}
+function focus(which) {
+  $(which === "TREE" ? ".bracket" : ".view").focus({ preventScroll: true });
+}
+function tabs(which) {
+  $(".prev").hidden = $(".next").hidden = which !== "TREE";
+  $(".legend").innerHTML = LEGEND[which];
+  document.querySelectorAll("#tree .tab").forEach((a) => a.classList.toggle("here", a.dataset.tab === which));
+  $(".view").classList.toggle("on", which === "VIEW");
+  $(".bracket").classList.toggle("on", which === "TREE");
+}
+function start(meta) {
+  const ac = new AbortController, signal = ac.signal;
+  const { count: N, has: B, parts: V } = meta;
+  const tree = $(".bracket"), back = $(".prev"), next = $(".next");
+  $(".view").replaceChildren(...meta.view.flatMap(({ h, t }) => {
+    const [a, b] = [document.createElement("h4"), document.createElement("pre")];
+    a.textContent = h;
+    b.textContent = t;
+    return [a, b];
+  }));
+  tree.replaceChildren(...["ROOT", ...B.map((_, l) => "LVL" + l)].map((name) => {
+    const col = document.createElement("div"), h3 = document.createElement("h3");
+    col.className = "col";
+    h3.tabIndex = 0;
+    h3.textContent = name;
+    col.append(h3);
+    return col;
+  }));
+  tree.scrollTop = 0;
+  let which = "TREE";
+  const cols = [...tree.children], em = parseFloat(getComputedStyle(tree).fontSize), G = 0.75 * em, Y = 2.6 * em, HC = 9 * em;
+  const HL = 1.5 * 11.5, HM = 0.7 * 11.5, PB = 0.7 * em, calm = matchMedia("(prefers-reduced-motion: reduce)");
+  tree.style.setProperty("--card", HC + "px");
+  const T = B.length - 1, vt = Math.max(-1, ...V.map((p) => p[0])), seen = new Set(V.map((p) => p.join(".")));
+  const has = (l, i) => l < 0 ? i < N : B[l][i] === "1", at = (l, i) => i * 2 ** Math.max(0, l), len = (l) => 2 ** Math.max(0, l);
+  const note = document.createElement("p");
+  note.className = "note";
+  const lo = (list, ok) => {
+    let a = 0, z = list.length;
+    while (a < z) {
+      const m = a + z >> 1;
+      ok(list[m]) ? z = m : a = m + 1;
+    }
+    return a;
+  };
+  const step = () => cols[1].offsetLeft - cols[0].offsetLeft || 1;
+  const got = new Map, shown = new Map;
+  let L = vt, plan, moving = 0, wait, width = 0, started = false, left = 0, sliding = false, done = () => {}, goal = null, big = null;
+  const height = (_l, _i) => HC;
+  const frontier = (L) => Array.from({ length: L < 0 ? N : B[L].length }, (_, i) => [L, i]);
+  const layout = (L) => {
+    const F = frontier(L), A = F.map((p) => at(...p)), slot = F.map((p) => height(...p) + G), P = new Float64Array(F.length + 1);
+    const find = (m) => lo(A, (a) => a > m) - 1;
+    const sums = () => slot.forEach((s, k) => P[k + 1] = P[k] + s);
+    const ups = [];
+    for (let l = L + 1;l <= T; l++) {
+      sums();
+      ups[l] = [];
+      for (let i = 0;i < B[l].length; i++) {
+        const a = find(i * 2 ** l), b = find((i + 1) * 2 ** l - 1) + 1, short = height(l, i) + G - (P[b] - P[a]);
+        short > 0 && (slot[b - 1] += short);
+        ups[l].push([i, a, b]);
+      }
+    }
+    sums();
+    const cards = cols.map(() => []);
+    const halves = (l, i, y, h, d) => {
+      if (l < 0)
+        return;
+      const n = len(l) / len(l - 1), g = Math.min(G, 0.08 * h), k = (h - (n - 1) * g) / n;
+      if (k < 2)
+        return;
+      for (let j = 0;j < n; j++) {
+        const c = at(l, i) / len(l - 1) + j, t = y + j * (k + g);
+        cards[l].push([l - 1, c, t, k, at(l - 1, c), at(l - 1, c) + len(l - 1), d]);
+        halves(l - 1, c, t, k, d + 1);
+      }
+    };
+    F.forEach(([l, i], k) => {
+      const t = P[k] + (slot[k] - G - height(l, i)) / 2;
+      cards[L + 1].push([l, i, t, height(l, i), A[k], A[k] + len(l), 0]);
+      halves(l, i, t, height(l, i), 1);
+    });
+    ups.forEach((list, l) => list.forEach(([i, a, b]) => cards[l + 1].push([l, i, (P[a] + P[b] - G - height(l, i)) / 2, height(l, i), at(l, i), at(l, i) + len(l), 0])));
+    cards.forEach((list, c) => list.forEach((q, x) => {
+      const v = link(cards, c, x);
+      q.push(v, v[2] < 0 ? q[2] : Math.min(q[2], q[2] + v[1]), v[2] < 0 ? q[2] + q[3] : Math.max(q[2] + q[3], q[2] + v[1] + v[2] + 1));
+    }));
+    return { F, A, P, slot, find, cards, total: P[F.length] };
+  };
+  const link = (cards, c, x) => {
+    const [l, i, y, h, a, b] = cards[c][x], mid = y + h / 2, kids = cards[c - 1] ?? [];
+    const up = c <= T && at(l, i) < B[c].length * 2 ** c ? 1 : 0;
+    const k0 = kids[lo(kids, (q) => q[4] >= a)], k1 = kids[lo(kids, (q) => q[4] >= b) - 1];
+    if (!k0 || k0[4] !== a || !k1)
+      return [up, 0, -1, 0];
+    const y0 = Math.min(k0[2] + k0[3] / 2, mid), y1 = Math.max(k1[2] + k1[3] / 2, mid);
+    return [up, y0 - y, y1 - y0, mid - y0];
+  };
+  const make = (l, i) => {
+    const s = document.createElement("div");
+    let x = got.get(l + "." + i);
+    s.className = seen.has(l + "." + i) ? "s wait in" : "s wait";
+    s.tabIndex = 0;
+    s.li = [l, i];
+    s.append(document.createElement("h4"), document.createElement("pre"));
+    s.firstChild.textContent = l < 0 ? "ROOT #" + i : "LVL" + l + " #" + at(l, i) + (l > 0 ? "-" + (at(l, i) + len(l) - 1) : "");
+    has(l, i) || (s.classList.add("none"), x = { h: s.firstChild.textContent, t: "Not summarized yet." });
+    x && fill(s, x);
+    return s;
+  };
+  const fill = (s, x) => {
+    s.classList.remove("wait");
+    /^\w+$/.test(x.k ?? "") && s.classList.add(x.k);
+    s.firstChild.textContent = x.h;
+    s.lastChild.textContent = x.t;
+    s.fresh = true;
+  };
+  const near = () => [Math.floor(tree.scrollLeft / step()) - 1, (tree.scrollLeft + tree.clientWidth) / step()];
+  const load = () => {
+    const { scrollTop: y, clientHeight: sh } = tree, [c0, c1] = near(), want = [...shown.keys()].filter((k) => !shown.get(k).thin);
+    plan.cards.forEach((list, c) => {
+      for (let x = c < c0 || c > c1 ? list.length : lo(list, (q) => q[9] >= y - 4 * sh);x < list.length && list[x][8] <= y + 5 * sh; x++) {
+        list[x][6] < 2 && want.push(list[x][0] + "." + list[x][1]);
+      }
+    });
+    const keys = [...new Set(want)].filter((k) => !got.has(k) && has(...k.split(".").map(Number)));
+    for (let j = 0;j < keys.length; j += 200) {
+      const part = keys.slice(j, j + 200), put = (list) => {
+        if (signal.aborted)
+          return;
+        part.forEach((k, x) => (got.set(k, list[x] ?? { h: k, t: "(none)" }), shown.has(k) && fill(shown.get(k), got.get(k))));
+        moving || draw();
+      };
+      part.forEach((k) => got.set(k, null));
+      fetch("/api/tree?get=" + part.join(","), { signal }).then((r) => r.json()).then(put, () => put(part.map((k) => ({ h: k, t: "Could not load this: reload the page." }))));
+    }
+  };
+  const draw = (y = tree.scrollTop, e = 1, old) => {
+    if (signal.aborted)
+      return;
+    const p = plan, sh = tree.clientHeight, keep = new Set, [c0, c1] = near();
+    cols.forEach((col, c) => {
+      col.style.height = Y + Math.max(p.total, e < 1 ? old.total : 0) + 4 * em + "px";
+      const list = p.cards[c];
+      for (let x = c < c0 || c > c1 ? list.length : lo(list, (q) => q[9] >= y - sh / 2);x < list.length && list[x][8] <= y + 1.5 * sh; x++) {
+        const [l, i, t, h, , , , [up, ...v]] = list[x], k = l + "." + i, w = e < 1 && (old.get(k) ?? from(old, l, i));
+        const s = shown.get(k) ?? make(l, i);
+        s.parentNode !== col && col.append(s);
+        shown.set(k, s);
+        keep.add(k);
+        s.v = [t, h, ...v].map((z, j) => w ? w[j] + (z - w[j]) * e : z);
+        s.classList.toggle("up", up === 1);
+        s.classList.toggle("dn", v[1] >= 0);
+        pos(s);
+      }
+    });
+    shown.forEach((s, k) => keep.has(k) || (s === big && shut(true), s.remove(), shown.delete(k)));
+    const upto = L < 0 ? N : B[L].length * 2 ** L;
+    upto < N ? note.textContent = (N - upto === 1 ? "Message #" + upto + " isn't" : "Messages #" + upto + "-" + (N - 1) + " aren't") + " in a LVL" + L + " summary yet: each holds " + 2 ** L + "." : note.remove();
+    upto < N && (note.style.top = Y + p.total + "px", note.parentNode !== cols[L + 1] && cols[L + 1].append(note));
+    y !== tree.scrollTop && (tree.scrollTop = y);
+    back.disabled = tree.scrollLeft < 1;
+    next.disabled = tree.scrollLeft + tree.clientWidth >= tree.scrollWidth - 1;
+    load();
+    const fresh = [...shown.values()].filter((s) => s.fresh && !s.one);
+    fresh.map((s) => s.lastChild.scrollHeight > s.lastChild.clientHeight + 1).forEach((cut, j) => {
+      const s = fresh[j];
+      s.fresh = false;
+      s.classList.toggle("more", cut);
+      cut ? s.setAttribute("aria-expanded", String(s === big)) : s.removeAttribute("aria-expanded");
+    });
+  };
+  const pos = (s) => {
+    const [t, hc, a, h, m] = s.v, d = s === big ? s.dy : 0, f = Math.max(0, Math.min(1, 2 * hc / HC - 1)), one = hc < HC - 1;
+    s.style.top = Y + t + d + "px";
+    s === big || (s.style.height = hc + "px");
+    [["--t", a - d], ["--h", h], ["--m", m], ["--c", hc / 2 - d], ["--hm", Math.max(0, (1 - f) * (hc - HL) / 2 + f * HM)], ["--pb", f * PB]].forEach(([name, z]) => s.style.setProperty(name, z + "px"));
+    s.style.setProperty("--o", String(f));
+    if (one !== !!s.one) {
+      s.one = one;
+      s.classList.toggle("one", one);
+      s.tabIndex = one ? -1 : 0;
+      s.fresh = !s.classList.contains("wait");
+    }
+    s.classList.toggle("line", f < 0.2);
+    s.thin = hc < HL;
+    s.classList.toggle("thin", s.thin);
+  };
+  const from = (old, l, i) => {
+    for (let u = l + 1;u <= T; u++) {
+      const w = old.get(u + "." + Math.floor(at(l, i) / len(u)));
+      if (w)
+        return [w[0] + w[1] / 2, 0, 0, -1, 0];
+    }
+    return null;
+  };
+  const ease = (s) => {
+    s.offsetHeight;
+    s.classList.add("ease");
+    clearTimeout(s.eased);
+    s.eased = setTimeout(() => s.classList.remove("ease"), 200);
+  };
+  const grow = (s) => {
+    const pre = s.lastChild;
+    s.classList.add("big");
+    s.style.height = "auto";
+    pre.style.flex = "none";
+    const need = s.offsetHeight, top0 = Y + s.v[0], { scrollTop: st, clientHeight: sh } = tree;
+    s.style.height = pre.style.flex = "";
+    const hb = Math.min(need, Math.max(HC, sh - Y - G));
+    if (hb <= HC + 1)
+      return s.classList.remove("big", "more"), s.removeAttribute("aria-expanded");
+    let top = top0 + (HC - hb) / 2;
+    top = Math.max(st + Y, Math.min(top, st + sh - G - hb));
+    top = Math.max(Y, Math.min(top, Y + plan.total - G - hb));
+    big = s;
+    s.dy = top - top0;
+    s.setAttribute("aria-expanded", "true");
+    ease(s);
+    s.style.height = hb + "px";
+    pos(s);
+  };
+  const shut = (now) => {
+    const s = big;
+    if (!s)
+      return;
+    big = null;
+    s.classList.remove("big");
+    s.setAttribute("aria-expanded", "false");
+    s.lastChild.scrollTop = 0;
+    now ? s.classList.remove("ease") : ease(s);
+    s.style.height = "";
+    pos(s);
+  };
+  const press = (s) => {
+    if (s.one)
+      return shut(), slide(cols.indexOf(s.parentNode));
+    const sel = getSelection();
+    if (s === big)
+      return (sel.isCollapsed || !s.contains(sel.anchorNode)) && shut();
+    shut();
+    s.classList.contains("more") && grow(s);
+  };
+  const anchor = () => {
+    const { F, A, P, slot } = plan, k = Math.max(0, Math.min(plan.F.length - 1, lo(P, (z) => z > tree.scrollTop) - 1)), d = tree.scrollTop - P[k];
+    return F.length ? { key: F[k].join("."), d, m: A[k] + Math.min(0.999, d / slot[k]) * len(F[k][0]) } : null;
+  };
+  const place = (a, p) => {
+    if (!a)
+      return 0;
+    const k = p.find(Math.floor(a.m)), [l, i] = p.F[k];
+    return p.P[k] + (l + "." + i === a.key ? Math.min(a.d, p.slot[k]) : (a.m - p.A[k]) / len(l) * p.slot[k]);
+  };
+  const redo = () => {
+    if (!moving && !sliding) {
+      const a = anchor();
+      plan = layout(L);
+      draw(place(a, plan));
+    }
+  };
+  const pack = () => {
+    if (signal.aborted)
+      return;
+    const to = Math.max(-1, Math.min(T, Math.round(tree.scrollLeft / step()) - 1));
+    left = tree.scrollLeft;
+    sliding = false;
+    goal = null;
+    if (to === L)
+      return moving || redo();
+    shut(true);
+    const a = anchor(), old = new Map, y0 = tree.scrollTop, t0 = performance.now(), me = ++moving, D = calm.matches ? 0 : 300;
+    plan.cards.forEach((list) => list.forEach((q) => old.set(q[0] + "." + q[1], [q[2], q[3], ...q[7].slice(1)])));
+    shown.forEach((s, k) => old.set(k, s.v));
+    old.total = plan.total;
+    L = to;
+    plan = layout(L);
+    const y1 = place(a, plan);
+    const frame = (now) => {
+      const e = D ? Math.min(1, (now - t0) / D) : 1, f = 1 - (1 - e) ** 3;
+      if (me === moving) {
+        e < 1 ? (draw(y0 + (y1 - y0) * f, f, old), requestAnimationFrame(frame)) : done();
+      }
+    };
+    done = () => me === moving && (moving = 0, draw(y1));
+    requestAnimationFrame(frame);
+  };
+  const end = "onscrollend" in tree;
+  tree.addEventListener(end ? "scrollend" : "scroll", () => {
+    if (drag?.on)
+      return;
+    tree.classList.remove("drag");
+    clearTimeout(wait);
+    wait = setTimeout(pack, end ? 0 : 150);
+  }, { signal });
+  tree.addEventListener("scroll", () => {
+    tree.scrollLeft !== left && (left = tree.scrollLeft, sliding = true, moving = 0, shut(true));
+    moving || draw();
+  }, { signal });
+  plan = layout(L);
+  const show = () => {
+    which === "TREE" || shut(true);
+    if (which === "TREE" && tree.clientWidth > 0) {
+      if (cols[0].offsetWidth !== width) {
+        width = cols[0].offsetWidth;
+        shut(true);
+        shown.forEach((s) => s.fresh = !s.classList.contains("wait"));
+      }
+      started || (started = true, tree.scrollLeft = (L + 1) * step());
+      redo();
+    }
+  };
+  addEventListener("resize", show, { signal });
+  const slide = (c) => {
+    goal = Math.max(0, Math.min(cols.length - 1, c));
+    done();
+    tree.scrollTo({ left: goal * step(), behavior: calm.matches ? "instant" : "smooth" });
+  };
+  let drag = null, dragged = false;
+  tree.addEventListener("pointerdown", (e) => {
+    dragged = false;
+    const bar = e.target === tree && e.offsetX >= tree.clientWidth;
+    drag = e.pointerType === "mouse" && e.button === 0 && !bar && !e.target.closest(".big, h3") ? { x: e.clientX, y: e.clientY, left: tree.scrollLeft, id: e.pointerId, on: false } : null;
+  }, { signal });
+  addEventListener("pointermove", (e) => {
+    if (!drag || e.pointerId !== drag.id)
+      return;
+    const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
+    if (!drag.on) {
+      if (Math.abs(dy) > 8 && Math.abs(dy) > Math.abs(dx))
+        return void (drag = null);
+      if (Math.abs(dx) < 8)
+        return;
+      drag.on = dragged = true;
+      shut(true);
+      tree.classList.add("drag");
+    }
+    getSelection()?.removeAllRanges();
+    tree.scrollLeft = drag.left - dx;
+  }, { signal });
+  const drop = (e) => {
+    if (!drag || e.pointerId !== drag.id)
+      return;
+    const on = drag.on;
+    drag = null;
+    if (!on)
+      return;
+    const c = Math.max(0, Math.min(Math.round(tree.scrollLeft / step()), Math.ceil((tree.scrollWidth - tree.clientWidth) / step())));
+    Math.abs(tree.scrollLeft - c * step()) < 1 ? (tree.classList.remove("drag"), pack()) : slide(c);
+  };
+  addEventListener("pointerup", drop, { signal });
+  addEventListener("pointercancel", drop, { signal });
+  tree.addEventListener("click", (e) => dragged && (dragged = false, e.stopPropagation(), e.preventDefault()), { capture: true, signal });
+  const here = () => goal ?? Math.round(tree.scrollLeft / step());
+  back.addEventListener("click", () => slide(here() - 1), { signal });
+  next.addEventListener("click", () => slide(Math.min(here() + 1, Math.ceil((tree.scrollWidth - tree.clientWidth) / step()))), { signal });
+  const go = (t) => {
+    const col = t.closest("h3")?.parentNode;
+    col && slide(cols.indexOf(col));
+  };
+  tree.addEventListener("click", (e) => {
+    const s = e.target.closest(".s");
+    s ? press(s) : (shut(), go(e.target));
+  }, { signal });
+  tree.addEventListener("keydown", (e) => {
+    const t = e.target;
+    if ((e.key === "Enter" || e.key === " ") && t.matches("h3, .s")) {
+      e.preventDefault();
+      t.matches("h3") ? go(t) : press(t);
+    }
+  }, { signal });
+  addEventListener("click", (e) => tree.contains(e.target) || shut(), { signal });
+  addEventListener("keydown", (e) => e.key === "Escape" && big && (big.focus({ preventScroll: true }), shut()), { signal });
+  return {
+    show: (w) => (which = w, show()),
+    stop: () => (moving = 0, clearTimeout(wait), ac.abort())
+  };
+}
+
 // web/src/main.ts
 var APP = window.webkit?.messageHandlers?.unii ?? null;
 var DESK = matchMedia("(hover: hover)");
@@ -1794,8 +2220,8 @@ var SCENES = `
   <div class="scene"><p>Your entire life.</p><p>One single chat.</p></div>
   <div class="scene"><i class="mark"></i><h1>UniiChat</h1></div>`;
 var v = view_new();
-var BOX = $("textarea");
-var BACK = $("#import [name=back]");
+var BOX = $2("textarea");
+var BACK = $2("#import [name=back]");
 var P = {
   imgs: [],
   rec: null,
@@ -1810,9 +2236,10 @@ var P = {
   done: {},
   off: new Set,
   step: "",
-  push: null
+  push: null,
+  away: null
 };
-function $(sel) {
+function $2(sel) {
   return document.querySelector(sel);
 }
 function kept(fact) {
@@ -1823,7 +2250,8 @@ async function boot() {
   if (APP === null) {
     navigator.serviceWorker?.register("/sw.js").catch(() => {});
   }
-  history.replaceState(null, "", PAGES.includes(location.pathname) ? "/settings" : "/");
+  const tree = location.pathname === TREE ? TREE + (tree_view() ? "#view" : "") : null;
+  history.replaceState(null, "", PAGES.includes(location.pathname) ? "/settings" : tree ?? "/");
   if (await boot_me() === null) {
     solo("Sign in", "This UniiChat server is private. On the computer it runs on, run <code>unii serve link</code> and open the link it prints here.");
     return;
@@ -1838,7 +2266,7 @@ async function boot_me() {
     const res = await fetch("/api/me").catch(() => null);
     if (res?.status === 200 || res?.status === 401) {
       if (k > 0) {
-        $("#toast").hidden = true;
+        $2("#toast").hidden = true;
       }
       return res.ok ? res.json() : null;
     }
@@ -1849,16 +2277,20 @@ async function boot_me() {
   }
 }
 var PAGES = ["/settings", "/account"];
+var TREE = "/tree";
+function tree_view() {
+  return location.hash.toLowerCase() === "#view";
+}
 function solo(title, sub) {
   document.body.className = "solo";
   document.body.innerHTML = `<main><h1>${title}</h1><p class="sub">${sub}</p></main>`;
 }
 function chat() {
-  const file = $("input[type=file]");
+  const file = $2("input[type=file]");
   BOX.oninput = () => {
     sessionStorage.setItem(kept("draft"), BOX.value);
     if (BOX.offsetParent !== null) {
-      const foot = $("footer");
+      const foot = $2("footer");
       foot.style.minHeight = foot.offsetHeight + "px";
       BOX.style.height = "auto";
       BOX.style.height = Math.min(BOX.scrollHeight, innerHeight * 0.4) + "px";
@@ -1873,15 +2305,15 @@ function chat() {
     }
   };
   BOX.onpaste = (ev) => attach([...ev.clipboardData?.files ?? []]);
-  $("form").onsubmit = (ev) => {
+  $2("form").onsubmit = (ev) => {
     ev.preventDefault();
     submit();
   };
-  $(".attach").onclick = () => file.click();
-  $("#pick").onkeydown = roam;
-  $("#pick").addEventListener("focusout", left);
-  $("#menu .out").onclick = signout;
-  $(".mic").onclick = mic;
+  $2(".attach").onclick = () => file.click();
+  $2("#pick").onkeydown = roam;
+  $2("#pick").addEventListener("focusout", left);
+  $2("#menu .out").onclick = signout;
+  $2(".mic").onclick = mic;
   file.onchange = () => {
     attach([...file.files ?? []]);
     file.value = "";
@@ -1911,15 +2343,15 @@ function chat() {
     P.y = scrollY;
     mine_show();
   };
-  $(".mine").onclick = mine;
-  $(".down").onclick = down;
+  $2(".mine").onclick = mine;
+  $2(".down").onclick = down;
   const keep = new ResizeObserver(() => {
-    if (P.end && $("#account").hidden && !at_end()) {
+    if (P.end && !$2("#log").hidden && !at_end()) {
       scrollTo(0, document.documentElement.scrollHeight);
     }
   });
-  keep.observe($("#log"));
-  keep.observe($("footer"));
+  keep.observe($2("#log"));
+  keep.observe($2("footer"));
   draw(true);
 }
 function signed() {
@@ -1960,7 +2392,7 @@ function pics(imgs) {
     return el;
   });
   P.imgs = imgs;
-  $("#pics").replaceChildren(...els);
+  $2("#pics").replaceChildren(...els);
   draw(true);
 }
 function act(a) {
@@ -1986,7 +2418,7 @@ function click(ev) {
   const { act: a, copy: text, go: path } = el.dataset;
   const menu = el.closest("#menu") !== null;
   if (menu) {
-    $("#menu").hidePopover();
+    $2("#menu").hidePopover();
   }
   if (path !== undefined || a !== undefined && menu) {
     ev.preventDefault();
@@ -2000,7 +2432,7 @@ function click(ev) {
   }
 }
 function place(knob) {
-  const menu = $("#pick-" + knob.dataset.knob);
+  const menu = $2("#pick-" + knob.dataset.knob);
   const box = knob.getBoundingClientRect();
   const { clientWidth: w, clientHeight: h } = document.documentElement;
   const left = box.left + box.width / 2 < w / 2 ? Math.max(8, box.left) : null;
@@ -2069,7 +2501,7 @@ function meter(stream, rec) {
   const probe = audio.createAnalyser();
   audio.createMediaStreamSource(stream).connect(probe);
   const buf = new Uint8Array(probe.fftSize);
-  const canvas = $(".voice canvas");
+  const canvas = $2(".voice canvas");
   const pen = canvas.getContext("2d");
   const levels = [];
   const start = performance.now();
@@ -2084,7 +2516,7 @@ function meter(stream, rec) {
     const slot = Math.floor((now - start) / 50);
     levels[slot] = Math.max(levels[slot] ?? 0, level);
     const secs = Math.floor((now - start) / 1000);
-    $(".voice span").textContent = Math.floor(secs / 60) + ":" + String(secs % 60).padStart(2, "0");
+    $2(".voice span").textContent = Math.floor(secs / 60) + ":" + String(secs % 60).padStart(2, "0");
     const dpr = devicePixelRatio;
     const w = canvas.width = canvas.clientWidth * dpr;
     const h = canvas.height = canvas.clientHeight * dpr;
@@ -2147,23 +2579,23 @@ function hear(msg) {
   draw(true);
 }
 function importer() {
-  const form = $("#import form");
-  const dir = $("#import [name=dir]");
-  $(".imp").onclick = () => import_open(false);
-  const zip = $("#import [name=zip]");
-  $(".pickdir").onclick = () => dir.click();
+  const form = $2("#import form");
+  const dir = $2("#import [name=dir]");
+  $2(".imp").onclick = () => import_open(false);
+  const zip = $2("#import [name=zip]");
+  $2(".pickdir").onclick = () => dir.click();
   for (const src of import_srcs()) {
     src.querySelector(".pickzip").onclick = () => zip.click();
     src.querySelector(".pickzip").title = "From the website: " + EXPORTS[src.dataset.app] + ", which emails you a zip.";
   }
-  $(".into").onclick = () => {
+  $2(".into").onclick = () => {
     P.step = "";
     import_draw("");
   };
-  $("#import").onclick = (ev) => ev.target.closest(".skip") && $("#import").hidePopover();
-  $("#import .prog .sub").textContent = MIDWAY;
-  $("#import .flow").onclick = import_flow;
-  $("#import").ontoggle = (ev) => {
+  $2("#import").onclick = (ev) => ev.target.closest(".skip") && $2("#import").hidePopover();
+  $2("#import .prog .sub").textContent = MIDWAY;
+  $2("#import .flow").onclick = import_flow;
+  $2("#import").ontoggle = (ev) => {
     if (ev.newState === "closed") {
       P.step = P.step === "start" || P.step === "done" ? "" : P.step;
     }
@@ -2184,7 +2616,7 @@ function importer() {
     const reading = (k) => "Reading " + k + " of " + files.length + " files…";
     import_draw(reading(1));
     for (const [k, f] of files.entries()) {
-      $("#import .guess").textContent = reading(k + 1);
+      $2("#import .guess").textContent = reading(k + 1);
       const s = await import_copy(f).then((b) => import_session(b, "log"), () => {
         return;
       });
@@ -2215,12 +2647,12 @@ function import_flow() {
   link_send(v, { $: "go", on: Boolean(v.importing?.why) }, (out) => out.error && toast(out.error));
 }
 async function import_open(first) {
-  $("#menu").hidePopover();
+  $2("#menu").hidePopover();
   P.done = await fetch("/api/imported").then((res) => res.json()).catch(() => ({}));
-  $("#import form .skip").textContent = first ? "Start fresh" : "Close";
+  $2("#import form .skip").textContent = first ? "Start fresh" : "Close";
   P.step = first ? "start" : P.step === "done" ? "" : P.step;
   import_draw("");
-  $("#import").showPopover();
+  $2("#import").showPopover();
 }
 function import_took(name, read, status) {
   P.found.set(name, read);
@@ -2249,10 +2681,10 @@ function import_sent(out) {
     P.found.clear();
   }
   import_draw(out.error === undefined ? "" : "Not imported: " + out.error);
-  $("#import").showPopover();
+  $2("#import").showPopover();
 }
 function import_plan2() {
-  const form = new FormData($("#import form"));
+  const form = new FormData($2("#import form"));
   const want = { off: [...P.off], since: import_since(), tools: form.has("tools") };
   const found = [...P.found.values()].flatMap((read) => read.sessions);
   return import_plan(found, want, P.done);
@@ -2268,19 +2700,19 @@ function import_bar() {
   const part = run === null ? Number(done) : run.done / Math.max(1, run.total);
   const why = Boolean(run?.why);
   const said = run !== null ? progress_show(run) : done ? DONE : P.step === "send" ? "Sending…" : "Starting…";
-  $("#import .start").hidden = P.step !== "start";
-  $("#import form").hidden = going || P.step === "start";
-  $("#import .prog").hidden = !going;
-  $("#import .prog .title").textContent = done ? "Memory tree built" : "Building your memory tree";
-  $("#import progress").value = part;
-  $(".imping progress").value = part;
-  $(".imping").hidden = run === null;
-  $(".imping").classList.toggle("why", why);
-  $(".imping span").textContent = why ? "Import paused" : "Building memory";
-  $(".imping").title = $("#import .pct").textContent = said;
-  $("#import .prog .sub").hidden = why || done;
-  $("#import .flow").textContent = why ? "Resume" : "Pause";
-  $("#import .flow").hidden = run === null;
+  $2("#import .start").hidden = P.step !== "start";
+  $2("#import form").hidden = going || P.step === "start";
+  $2("#import .prog").hidden = !going;
+  $2("#import .prog .title").textContent = done ? "Memory tree built" : "Building your memory tree";
+  $2("#import progress").value = part;
+  $2(".imping progress").value = part;
+  $2(".imping").hidden = run === null;
+  $2(".imping").classList.toggle("why", why);
+  $2(".imping span").textContent = why ? "Import paused" : "Building memory";
+  $2(".imping").title = $2("#import .pct").textContent = said;
+  $2("#import .prog .sub").hidden = why || done;
+  $2("#import .flow").textContent = why ? "Resume" : "Pause";
+  $2("#import .flow").hidden = run === null;
   return going;
 }
 function import_draw(status) {
@@ -2297,12 +2729,12 @@ function import_draw(status) {
   const day = (at) => new Date(at).getUTCDate() + " " + new Date(at).toLocaleDateString("en-US", { month: "short", year: "numeric", timeZone: "UTC" });
   BACK.min = String(Math.floor(Date.parse(plan.first || new Date().toISOString()) / 86400000));
   BACK.max = String(Math.floor(Date.now() / 86400000));
-  $("#import .since .from").textContent = day(import_since() || plan.first || Date.now());
-  $("#import .since .to").textContent = day(Date.now());
+  $2("#import .since .from").textContent = day(import_since() || plan.first || Date.now());
+  $2("#import .since .to").textContent = day(Date.now());
   BACK.style.setProperty("--at", 100 * (BACK.valueAsNumber - Number(BACK.min)) / Math.max(1, Number(BACK.max) - Number(BACK.min)) + "%");
-  $("#import .want").hidden = plan.first === "";
-  $("#import .tools").hidden = !sessions.some((s) => s.heads.some((m) => m.kind === "tool" || m.kind === "echo"));
-  $("#import .found").textContent = found + moved;
+  $2("#import .want").hidden = plan.first === "";
+  $2("#import .tools").hidden = !sessions.some((s) => s.heads.some((m) => m.kind === "tool" || m.kind === "echo"));
+  $2("#import .found").textContent = found + moved;
   for (const src of import_srcs()) {
     const list = src.querySelector(".sessions");
     const shown = plan.sessions.filter((s) => s.app === src.dataset.app);
@@ -2312,8 +2744,8 @@ function import_draw(status) {
     src.querySelector(".pick").hidden = shown.length === 0;
     src.querySelector(".pick summary").textContent = (on < shown.length ? on + " of " : shown.length > 1 ? "All " : "") + shown.length + (shown.length === 1 ? " session" : " sessions") + " picked · choose";
   }
-  $("#import .guess").textContent = status;
-  const [go, dir] = [$("#import .go"), $(".pickdir")];
+  $2("#import .guess").textContent = status;
+  const [go, dir] = [$2("#import .go"), $2(".pickdir")];
   go.hidden = msgs === 0;
   go.disabled = status.startsWith("Reading");
   dir.textContent = msgs > 0 ? "Add a folder" : "Choose folder";
@@ -2371,23 +2803,24 @@ function draw(stick) {
   }
 }
 function paint() {
-  if (!$("#account").hidden) {
+  if ($2("#log").hidden) {
     P.frame = 0;
+    P.stick = true;
     bars();
     return;
   }
   const doc = document.documentElement;
   const follow = P.stick && P.end;
   const at = P.rows && !follow ? anchor() : null;
-  const shown = (v.page === null ? "" : v.page.name) + (v.fold === null ? "" : "/fold");
+  const shown = shown_key();
   P.frame = 0;
   P.stick = true;
   bars();
   if (P.rows) {
-    markup($("#log .rows"), view_body(v).map(row_html));
+    markup($2("#log .rows"), view_body(v).map(row_html));
     P.rows = false;
   }
-  markup($("#log .tail"), view_tail(v).map(row_html));
+  markup($2("#log .tail"), view_tail(v).map(row_html));
   if (shown !== P.shown) {
     P.shown = shown;
     P.end = v.fold === null;
@@ -2408,6 +2841,9 @@ function paint() {
     P.end = at_end();
   }
 }
+function shown_key() {
+  return (v.page === null ? "" : v.page.name) + (v.fold === null ? "" : "/fold");
+}
 function at_end() {
   return innerHeight + scrollY >= document.documentElement.scrollHeight - 1;
 }
@@ -2418,28 +2854,28 @@ function bars() {
   const on = view_typing(v);
   const stop = on && v.busy && BOX.value.trim() === "" && P.imgs.length === 0;
   const tabs = view_tabs(v);
-  const send = $(".send");
-  $(".net").hidden = v.up;
-  $(".timers").hidden = v.timers.length === 0;
-  $(".timers span").textContent = String(v.timers.length);
-  markup($("#timers ul"), timers_html(v.timers));
-  if (v.timers.length === 0 && $("#timers").matches(":popover-open")) {
-    $("#timers").hidePopover();
+  const send = $2(".send");
+  $2(".net").hidden = v.up;
+  $2(".timers").hidden = v.timers.length === 0;
+  $2(".timers span").textContent = String(v.timers.length);
+  markup($2("#timers ul"), timers_html(v.timers));
+  if (v.timers.length === 0 && $2("#timers").matches(":popover-open")) {
+    $2("#timers").hidePopover();
   }
   send.classList.toggle("stop", stop);
-  $(".composer").hidden = !on;
-  $("#pics").hidden = !on;
-  $(".mic").disabled = v.out.some((p) => p.msg.$ === "voice");
-  $(".mic").classList.toggle("rec", P.rec !== null);
-  $(".composer").classList.toggle("rec", P.rec !== null);
+  $2(".composer").hidden = !on;
+  $2("#pics").hidden = !on;
+  $2(".mic").disabled = v.out.some((p) => p.msg.$ === "voice");
+  $2(".mic").classList.toggle("rec", P.rec !== null);
+  $2(".composer").classList.toggle("rec", P.rec !== null);
   const knob = document.activeElement?.dataset?.knob;
-  markup($("#pick"), pick_html(view_fold(v), v.fold === null, view_shown(v), v.page === null ? v.talk : undefined));
+  markup($2("#pick"), pick_html(view_fold(v), v.fold === null, view_shown(v), v.page === null ? v.talk : undefined));
   if (knob !== undefined) {
-    $("#pick [data-knob=" + knob + "]").focus();
+    $2("#pick [data-knob=" + knob + "]").focus();
   }
   mcp_draw();
-  $("#tabs").hidden = tabs.length < 2;
-  markup($("#tabs"), tabs_html(tabs));
+  $2("#tabs").hidden = tabs.length < 2;
+  markup($2("#tabs"), tabs_html(tabs));
   import_bar();
 }
 function anchor() {
@@ -2462,8 +2898,8 @@ function mine() {
 }
 function mine_show() {
   const first = document.querySelector("#log .msg.user");
-  $(".mine").hidden = first === null || !mine_above(first);
-  $(".down").hidden = P.end || innerHeight + scrollY >= document.documentElement.scrollHeight - 1;
+  $2(".mine").hidden = first === null || !mine_above(first);
+  $2(".down").hidden = P.end || innerHeight + scrollY >= document.documentElement.scrollHeight - 1;
 }
 function down() {
   scrollTo(0, document.documentElement.scrollHeight);
@@ -2471,27 +2907,45 @@ function down() {
   mine_show();
 }
 function mine_above(el) {
-  return el.getBoundingClientRect().top < $("header").getBoundingClientRect().bottom;
+  return el.getBoundingClientRect().top < $2("header").getBoundingClientRect().bottom;
 }
 function go(path) {
-  if (location.pathname !== path) {
+  if (location.pathname + location.hash !== path) {
     history.pushState(null, "", path);
   }
   route();
 }
 function route() {
   const page = PAGES.includes(location.pathname);
-  $("#log").hidden = page;
+  const tree = location.pathname === TREE;
+  const chat = !page && !tree;
+  if (!chat && !$2("#log").hidden) {
+    P.away = { y: scrollY, end: P.end };
+  }
+  $2("#log").hidden = !chat;
   document.body.classList.toggle("account", page);
-  $("#account").hidden = !page;
-  P.shown = location.pathname;
+  document.body.classList.toggle("tree", tree);
+  $2("#account").hidden = !page;
+  $2("#tree").hidden = !tree;
+  P.shown = chat && P.away !== null ? shown_key() : location.pathname;
+  if (chat && P.away !== null) {
+    P.end = P.away.end;
+    scrollTo(0, P.end ? document.documentElement.scrollHeight : P.away.y);
+    P.y = scrollY;
+    P.away = null;
+  }
   if (page) {
     account();
   }
-  draw(false);
+  if (tree) {
+    tree_show(tree_view() ? "VIEW" : "TREE");
+  } else {
+    tree_hide();
+  }
+  draw(chat && P.end);
 }
 async function account() {
-  const el = $("#account");
+  const el = $2("#account");
   const [got, set] = await Promise.all([fetch("/api/prompts").catch(() => null), fetch("/api/settings").catch(() => null)]);
   const prompts = got !== null && got.ok ? await got.json().catch(() => null) : null;
   const push = await notify_state().catch(() => null);
@@ -2502,7 +2956,7 @@ async function account() {
   });
   mcp_draw();
   el.querySelectorAll(".retry").forEach((retry) => retry.onclick = () => account());
-  $("#account .out").onclick = signout;
+  $2("#account .out").onclick = signout;
   const bell = document.querySelector("#account .notify");
   bell?.addEventListener("click", () => {
     bell.disabled = true;
@@ -2510,7 +2964,7 @@ async function account() {
   });
   const page = set?.ok ? await set.json().catch(() => null) : null;
   if (page === null) {
-    $("#account .owned").innerHTML = `<p class="sub">Could not read the server's settings. Try again in a moment.</p>`;
+    $2("#account .owned").innerHTML = `<p class="sub">Could not read the server's settings. Try again in a moment.</p>`;
     return;
   }
   settings_draw(page);
@@ -2615,8 +3069,8 @@ async function notify_off(reg) {
   return {};
 }
 function settings_draw(page) {
-  $("#account .owned").innerHTML = settings_html(page);
-  const form = $("#account form.settings");
+  $2("#account .owned").innerHTML = settings_html(page);
+  const form = $2("#account form.settings");
   const rows = new Map(page.settings.map((r) => [r.key, r]));
   const unset = new Set;
   const profs = Object.entries(page.profiles ?? {});
@@ -2840,7 +3294,7 @@ async function settings_save(form, page, unset, listed, profs) {
   toast(later.length === 0 ? "Saved." : "Saved. " + later.join(", ") + " " + (later.length === 1 ? "applies" : "apply") + " once the server restarts.");
 }
 function toast(text, stay = false) {
-  const el = $("#toast");
+  const el = $2("#toast");
   el.textContent = text;
   el.hidden = false;
   clearTimeout(P.toast);

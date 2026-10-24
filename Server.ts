@@ -170,7 +170,7 @@ const BUFFER     = 2 ** 31 - 1;
 const PIECE      = 2 ** 16;
 
 // the paths of the owner's, but /api/'s (the rest: the site's files)
-const OWN        = ["/ws", "/tree", "/export"];
+const OWN        = ["/ws", "/export"];
 
 // the chat's first message, ending in the installer of the terminal
 // (Term.ts), and its line
@@ -195,8 +195,9 @@ const WEB: Record<string, string> = {
   "/sw.js"          : sw_js,
 };
 
-// the settings page, drawn by the site's page
+// the settings page and the memory tree, drawn by the site's page
 WEB["/settings"] = WEB["/"];
+WEB["/tree"]     = WEB["/"];
 
 // Chat
 // ====
@@ -1484,11 +1485,12 @@ export namespace Main {
   export async function page(chat: Chat, p: string, req: Request): Promise<Response> {
     const mem = chat.mem;
     switch (p) {
-      case "/tree": {
-        return new Response(Main.stream(Memory.page(mem)), { headers: { "content-type": "text/html; charset=utf-8" } });
-      }
       case "/api/tree": {
-        const get = (new URL(req.url).searchParams.get("get") ?? "").split(",").slice(0, 200);
+        const q = new URL(req.url).searchParams.get("get");
+        if (q === null) {
+          return Response.json(Memory.meta(mem));
+        }
+        const get = q.split(",").slice(0, 200);
         return Response.json(get.map((key) => Memory.card(mem, ...(key.split(".").map(Number) as [number, number]))));
       }
       case "/export": {

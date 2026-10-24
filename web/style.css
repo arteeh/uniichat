@@ -99,8 +99,8 @@ header .net { font-size: 13px; color: var(--mid); }
    so a phone with its keyboard up still shows the chat; the account
    page keeps only its toasts, at the screen's foot */
 footer { position: sticky; bottom: 0; z-index: 2; padding: 18px max(20px, env(safe-area-inset-right)) max(14px, env(safe-area-inset-bottom)) max(20px, env(safe-area-inset-left)); background: linear-gradient(transparent, var(--paper) 14px); }
-body.account footer { position: fixed; inset: auto 0 0; background: none; pointer-events: none; }
-body.account footer > :not(#toast) { display: none; }
+body:is(.account, .tree) footer { position: fixed; inset: auto 0 0; background: none; pointer-events: none; }
+body:is(.account, .tree) footer > :not(#toast) { display: none; }
 #pick { width: min(var(--col), 100%); margin: 0 auto 6px; display: flex; align-items: center; gap: 6px; font: 12.5px/20px var(--sans); color: var(--mid); }
 #pick .rule { flex: 1; height: 1px; background: var(--hair); margin-right: 4px; }
 /* conversation mode's meter: the rule, as thin, filled to --used, grey to orange as it fills; a
@@ -350,8 +350,8 @@ header > .imping { display: flex; flex-direction: column; justify-content: cente
 /* a finger needs 44px: small buttons take taps around them (a box
    centered on each, not drawn), links in small print above and below */
 @media (pointer: coarse) {
-  :is(header > :is(button, a), #pick > button, #tabs button) { position: relative; }
-  :is(header > :is(button, a), #pick > button, #tabs button, .mine, .down, .copy, .open.one > .fold)::after { content: ""; position: absolute; left: 50%; top: 50%; width: max(100%, 44px); height: max(100%, 44px); transform: translate(-50%, -50%); }
+  :is(header > :is(button, a), #pick > button, #tabs button, #tree .tab) { position: relative; }
+  :is(header > :is(button, a), #pick > button, #tabs button, #tree .tab, .mine, .down, .copy, .open.one > .fold)::after { content: ""; position: absolute; left: 50%; top: 50%; width: max(100%, 44px); height: max(100%, 44px); transform: translate(-50%, -50%); }
   .foot a { padding: 14px 0; }
   .chip { height: 44px; }
   [popover] > button { min-height: 44px; }
@@ -493,3 +493,35 @@ header > .imping { display: flex; flex-direction: column; justify-content: cente
 .profiles :is(.grip, .out):is(:hover, :focus-visible) { background: var(--hover); color: var(--ink); }
 .profiles .pnew { margin-top: 6px; }
 @media (pointer: coarse) { .profiles :is(.grip, .out) { width: 44px; height: 44px; } }
+
+/* The memory tree (/tree, web/src/Tree.ts): under the header its bar
+   (← Chat, the VIEW and TREE tabs, a legend, ‹ ›), then the view or the
+   tree, each scrolling in the screen's height; the footer keeps only its
+   toasts, as on the account page */
+body.tree { height: 100dvh; }
+#tree { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+#tree .top { display: flex; align-items: center; gap: 6px; padding: 10px 20px 0; } #tree .back { padding: 8px 0; margin-right: 6px; font-size: 14px; color: var(--mid); text-decoration: none; } #tree .back:hover { color: var(--ink); }
+#tree .top small { flex: 1; min-width: 0; margin-left: 10px; font: 12px/1.35 var(--sans); color: var(--mid); } #tree .top small b { font-weight: 600; letter-spacing: .06em; font-size: 11px; padding-left: 5px; box-shadow: inset 3px 0 var(--mid); }
+#tree .top :is(button, .tab) { height: 32px; min-width: 36px; padding: 0 12px; border-radius: 8px; background: var(--block); font-size: 13.5px; font-weight: 500; } #tree .top :is(button, .tab):hover { background: var(--hover); } #tree .top button:disabled { opacity: .4; cursor: default; }
+#tree .tab { display: grid; place-items: center; text-decoration: none; } #tree .tab.here, #tree .tab.here:hover { background: var(--ink); color: var(--paper); }
+#tree .top [hidden] { display: none; } #tree .note { position: absolute; left: 0; right: 0; padding: 0 14px; font: 12.5px/1.45 var(--sans); color: var(--mid); }
+#tree section { display: none; flex: 1; overflow: auto; padding: 0 20px 20px; outline: none; font: 15px/1.55 var(--serif); text-wrap: pretty; } #tree section.on { display: block; }
+#tree h4 { margin: .8em 0 .2em; font: 600 11.5px/1.5 var(--sans); color: var(--mid); } #tree pre { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; }
+#tree .bracket { --g: 30px; gap: var(--g); scroll-snap-type: x mandatory; scroll-padding: 0 20px; } #tree .bracket.on { display: flex; }
+#tree .bracket::after { content: ""; flex: 0 0 calc(100% - min(22em, 65vw) - var(--g)); }
+#tree .col { flex: 0 0 min(22em, 65vw); position: relative; scroll-snap-align: start; }
+#tree .col h3 { position: sticky; top: 0; z-index: 2; margin: 0; height: 3em; font: 600 .8em/3em var(--sans); letter-spacing: .06em; color: var(--mid); background: var(--paper); cursor: pointer; margin-right: calc(0px - var(--g)); } #tree .col h3:hover { color: var(--ink); }
+#tree .s { position: absolute; left: 0; right: 0; height: var(--card); display: flex; flex-direction: column; padding: 0 14px .7em; border-radius: 10px; background: var(--block); } #tree .s h4 { flex: none; margin-top: .7em; } #tree .s pre { flex: 1; min-height: 0; overflow: hidden; }
+#tree .s.more { cursor: pointer; } #tree .s.more pre { -webkit-mask-image: linear-gradient(#000 calc(100% - 2.4em), transparent 90%); mask-image: linear-gradient(#000 calc(100% - 2.4em), transparent 90%); }
+#tree .s.big { z-index: 1; --lift-shadow: 0 0 0 1px var(--frame), var(--shadow), 0 10px 30px rgb(0 0 0 / .16); box-shadow: var(--lift-shadow); } #tree .s.big.in { box-shadow: inset 3px 0 var(--mid), var(--lift-shadow); }
+#tree .s.big pre { overflow: auto; overscroll-behavior: contain; -webkit-mask-image: none; mask-image: none; } #tree .s.ease { z-index: 1; transition: top .16s ease-out, height .16s ease-out, box-shadow .16s ease-out; }
+#tree .s:focus-visible { outline: 2px solid var(--ink); outline-offset: -2px; } #tree .wait { overflow: hidden; } #tree .s.in { box-shadow: inset 3px 0 var(--mid); } #tree .s.in h4::after { content: " · IN CONTEXT"; } #tree .s.none { background: none; outline: 1px dashed var(--hair); outline-offset: -1px; color: var(--mid); }
+#tree .up::after { content: ""; position: absolute; left: 100%; width: calc(var(--g) / 2); top: var(--c, 50%); border-top: 1px solid var(--frame); }
+#tree .dn::before { content: ""; position: absolute; right: 100%; width: calc(var(--g) / 2); top: var(--t); height: calc(var(--h) + 1px); border-left: 1px solid var(--frame); background: linear-gradient(var(--frame), var(--frame)) 0 var(--m) / 100% 1px no-repeat; }
+#tree .s.user pre, #tree .s.unii pre { font: 16px/1.55 var(--sans); } #tree .s.tool pre, #tree .s.echo pre { font: 12.5px/1.5 var(--mono); }
+#tree .s { padding-bottom: var(--pb, .7em); } #tree .s h4 { margin-top: var(--hm, .7em); } #tree .s pre { opacity: var(--o, 1); }
+#tree .s.one { cursor: pointer; } #tree .s.line h4 { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; } #tree .s.thin h4 { visibility: hidden; }
+#tree .s.one pre { -webkit-mask-image: linear-gradient(#000 calc(100% - 2.4em), transparent 90%); mask-image: linear-gradient(#000 calc(100% - 2.4em), transparent 90%); }
+#tree .bracket.drag { scroll-snap-type: none; user-select: none; cursor: grabbing; }
+@media (prefers-reduced-motion: reduce) { #tree .s.ease { transition: none; } }
+@media (max-width: 600px) { #tree section { padding: 0 14px 14px; } #tree .bracket { scroll-padding: 0 14px; } #tree .top { padding: 4px 14px 0; } #tree .top .tab { height: 30px; padding: 0 10px; font-size: 13px; } }

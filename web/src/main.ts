@@ -7,17 +7,18 @@
 // the log's rows only once a message (but a stream's piece) or an act
 // changed them, what streams in a place of its own, so typing, or a reply
 // streaming, touches no row.
-// The markup is index.html's: the header, the chat or the settings page
-// (/settings, once /account), and the footer as the terminal's. A tab is
-// no device; a signed-out one is told how to sign in (`unii serve
-// link`). The site installs as an app (manifest.webmanifest, sw.js) and
-// may notify (Notifications); in the iOS app (ios/: APP) the app
-// notifies.
+// The markup is index.html's: the header, the chat, the settings page
+// (/settings, once /account) or the memory tree (/tree: Tree.ts), and the
+// footer as the terminal's. A tab is no device; a signed-out one is told
+// how to sign in (`unii serve link`). The site installs as an app
+// (manifest.webmanifest, sw.js) and may notify (Notifications); in the
+// iOS app (ios/: APP) the app notifies.
 
 import * as Import from "../../Import.ts";
 import { theme_css } from "../../Theme.ts";
 import * as View from "../../View.ts";
 import * as Html from "./Html.ts";
+import * as Tree from "./Tree.ts";
 
 // Types
 // =====
@@ -59,7 +60,8 @@ const BACK = $<HTMLInputElement>("#import [name=back]");
 // y: its scroll when last scrolled;
 // frame: awaited (0: none); rows: the log's rows changed, to draw;
 // found: the sources read, by name; done: sessions imported before; off:
-// left out (Import.Want); step: the import's
+// left out (Import.Want); step: the import's; away: the chat's scroll as
+// a page (the settings, the tree) was opened over it, kept for its return
 const P = {
   imgs  : [] as Blob[],
   rec   : null as MediaRecorder | null,
@@ -75,6 +77,7 @@ const P = {
   off   : new Set<string>(),
   step  : "" as "" | "start" | "send" | "run" | "seen" | "done",
   push  : null as { reg: ServiceWorkerRegistration; key: string } | null,
+  away  : null as { y: number; end: boolean } | null,
 };
 
 function $<T extends HTMLElement>(sel: string): T {
@@ -95,7 +98,8 @@ async function boot(): Promise<void> {
   if (APP === null) {
     navigator.serviceWorker?.register("/sw.js").catch(() => {});
   }
-  history.replaceState(null, "", PAGES.includes(location.pathname) ? "/settings" : "/");
+  const tree = location.pathname === TREE ? TREE + (tree_view() ? "#view" : "") : null;
+  history.replaceState(null, "", PAGES.includes(location.pathname) ? "/settings" : tree ?? "/");
   if (await boot_me() === null) {
     solo("Sign in", "This UniiChat server is private. On the computer it runs on, run <code>unii serve link</code> and open the link it prints here.");
     return;
@@ -128,6 +132,14 @@ async function boot_me(): Promise<any> {
 
 // the settings page's paths, drawn in #account (/account: an older link)
 const PAGES = ["/settings", "/account"];
+
+// the memory tree's path, drawn in #tree (Tree.ts): its TREE, or with
+// #view its VIEW (#VIEW: the old page's link)
+const TREE = "/tree";
+
+function tree_view(): boolean {
+  return location.hash.toLowerCase() === "#view";
+}
 
 // a page of one note: how to sign in
 function solo(title: string, sub: string): void {
@@ -210,7 +222,7 @@ function chat(): void {
   $(".mine").onclick = mine;
   $(".down").onclick = down;
   const keep = new ResizeObserver(() => {
-    if (P.end && $("#account").hidden && !at_end()) {
+    if (P.end && !$("#log").hidden && !at_end()) {
       scrollTo(0, document.documentElement.scrollHeight);
     }
   });
@@ -774,18 +786,19 @@ function draw(stick: boolean): void {
   }
 }
 
-// a new chat shown opens at its bottom (folded: its top); the account
-// page shown, only the bars
+// a new chat shown opens at its bottom (folded: its top); a page shown
+// (the settings, the tree), only the bars
 function paint(): void {
-  if (!$("#account").hidden) {
+  if ($("#log").hidden) {
     P.frame = 0;
+    P.stick = true;
     bars();
     return;
   }
   const doc = document.documentElement;
   const follow = P.stick && P.end;
   const at = P.rows && !follow ? anchor() : null;
-  const shown = (v.page === null ? "" : v.page.name) + (v.fold === null ? "" : "/fold");
+  const shown = shown_key();
   P.frame = 0;
   P.stick = true;
   bars();
@@ -813,6 +826,12 @@ function paint(): void {
     scrollBy(0, el.getBoundingClientRect().top - at.top);
     P.end = at_end();
   }
+}
+
+// which chat shows (an agent's, folded): one other than last drawn opens
+// anew
+function shown_key(): string {
+  return (v.page === null ? "" : v.page.name) + (v.fold === null ? "" : "/fold");
 }
 
 // the page at its bottom
@@ -915,25 +934,46 @@ function mine_above(el: HTMLElement): boolean {
 // since is refused. A key typed is sent once and gone from the page as
 // it is drawn again.
 
-// shows the page at path: the chat ("/") or the settings
+// shows the page at path: the chat ("/"), the settings or the tree (its
+// #view too)
 function go(path: string): void {
-  if (location.pathname !== path) {
+  if (location.pathname + location.hash !== path) {
     history.pushState(null, "", path);
   }
   route();
 }
 
-// the settings page keeps of the footer only its toasts (style.css)
+// the settings page and the tree keep of the footer only its toasts
+// (style.css); the chat, back from them, is where it was (P.away): at its
+// bottom, kept there
 function route(): void {
   const page = PAGES.includes(location.pathname);
-  $("#log").hidden = page;
+  const tree = location.pathname === TREE;
+  const chat = !page && !tree;
+  if (!chat && !$("#log").hidden) {
+    P.away = { y: scrollY, end: P.end };
+  }
+  $("#log").hidden = !chat;
   document.body.classList.toggle("account", page);
+  document.body.classList.toggle("tree", tree);
   $("#account").hidden = !page;
-  P.shown = location.pathname;
+  $("#tree").hidden = !tree;
+  P.shown = chat && P.away !== null ? shown_key() : location.pathname;
+  if (chat && P.away !== null) {
+    P.end = P.away.end;
+    scrollTo(0, P.end ? document.documentElement.scrollHeight : P.away.y);
+    P.y = scrollY;
+    P.away = null;
+  }
   if (page) {
     account();
   }
-  draw(false);
+  if (tree) {
+    Tree.tree_show(tree_view() ? "VIEW" : "TREE");
+  } else {
+    Tree.tree_hide();
+  }
+  draw(chat && P.end);
 }
 
 async function account(): Promise<void> {
