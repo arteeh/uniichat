@@ -366,6 +366,10 @@ function call_parse(text) {
     return { name: "", head: text, device: "", blocks: [] };
   }
   const name = m[1].replace(MCP, "");
+  const theirs = /^(?:([A-Za-z0-9-]+)_)?([A-Za-z0-9-]+(?:_[A-Za-z0-9-]+)*)__(.+)$/.exec(name);
+  if (theirs !== null) {
+    return { name: theirs[2] + ": " + theirs[3], device: theirs[1] ?? "", ...input_shown(input) };
+  }
   const { device, ...rest } = input;
   const shown = (READS.get(name) ?? input_shown)(rest);
   return { name, device: typeof device === "string" ? device : "", ...shown };
