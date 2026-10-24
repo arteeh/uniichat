@@ -16,6 +16,11 @@
 // unless alone. A call still streaming reads as its input so far: its open
 // string and brackets closed, else up to its last whole field.
 //
+// A user's MCP server's tool (`<device>_<server>__<tool>`: Mcp.ts) shows as
+// `<server>: <tool>` on its device, its input as any other call's; its
+// device is up to the first `_` (a device's name has none: Config.ts), and
+// one from before release 24, `<server>__<tool>`, names none.
+//
 // An agent's report is logged as `[Name]` on its own line, its replies,
 // and a line naming its whole chat (the model reads who sent it); it
 // shows as its replies alone, framed and named by its agent.
@@ -80,6 +85,10 @@ export function call_parse(text: string): Call {
     return { name: "", head: text, device: "", blocks: [] };
   }
   const name = m[1].replace(MCP, "");
+  const theirs = /^(?:([A-Za-z0-9-]+)_)?([A-Za-z0-9-]+(?:_[A-Za-z0-9-]+)*)__(.+)$/.exec(name);
+  if (theirs !== null) {
+    return { name: theirs[2] + ": " + theirs[3], device: theirs[1] ?? "", ...input_shown(input) };
+  }
   const { device, ...rest } = input;
   const shown = (READS.get(name) ?? input_shown)(rest);
   return { name, device: typeof device === "string" ? device : "", ...shown };
