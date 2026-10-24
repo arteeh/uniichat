@@ -18,8 +18,10 @@
 //
 // A user's MCP server's tool (`<device>_<server>__<tool>`: Mcp.ts) shows as
 // `<server>: <tool>` on its device, its input as any other call's; its
-// device is up to the first `_` (a device's name has none: Config.ts), and
-// one from before release 24, `<server>__<tool>`, names none.
+// device is up to the first `_` (as Config.config_mcp_prefix writes it:
+// other characters a -), and one from before release 24,
+// `<server>__<tool>`, names none (one of those whose server has a `_`,
+// `my_server__x`, can't be told from one of device my's, so shows so).
 //
 // An agent's report is logged as `[Name]` on its own line, its replies,
 // and a line naming its whole chat (the model reads who sent it); it
@@ -102,9 +104,12 @@ export function call_line(c: Call): string {
   return [c.head, ...blocks, ...where].join(" ").replace(/\s+/g, " ").trim();
 }
 
-// the call as it shows, for Copy: its name and head, then each block
+// the call as it shows, for Copy: its name and head, then each block; an
+// MCP call's device after its head (its name no longer says it), not a
+// shell's (its command copies as is)
 export function call_text(c: Call): string {
-  return [(c.name + " " + c.head).trim(), ...c.blocks.map((b) => b.x)].join("\n");
+  const where = c.name.includes(": ") && c.device !== "" ? " · " + c.device : "";
+  return [(c.name + " " + c.head).trim() + where, ...c.blocks.map((b) => b.x)].join("\n");
 }
 
 // any tool's input: its short values as arguments, the rest in blocks

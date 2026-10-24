@@ -109,10 +109,9 @@ const HERE = new Map<string, { link: Link; changed: boolean }>();
 
 export namespace Mcp {
 
-  export function servers(note: (text: string) => void, confs: config.McpServer[], run: Run, open: (device: string) => boolean): Servers {
-    const servers: Servers = { all: new Map(), note, run, open };
-    Mcp.sync(servers, confs);
-    return servers;
+  // a chat's servers: none till its devices tell theirs (Mcp.sync)
+  export function servers(note: (text: string) => void, run: Run, open: (device: string) => boolean): Servers {
+    return { all: new Map(), note, run, open };
   }
 
   // the chat's servers made `confs`: one gone or changed ends as its last

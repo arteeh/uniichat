@@ -246,7 +246,7 @@ export namespace Tools {
     const key = crypto.randomUUID();
     const url = Tools.base() + key + "/";
     const run = (device: string, job: Job, signal: AbortSignal) => Tools.job(tools, device, job, signal, crypto.randomUUID());
-    const mcp = Mcp.servers((text) => hooks.note(text), [], run, (device) => Tools.live(tools.devices.get(device)));
+    const mcp = Mcp.servers((text) => hooks.note(text), run, (device) => Tools.live(tools.devices.get(device)));
     const tools: Tools = { mem, devices: new Map(), agents: new Map(), mcp, next: null, left: false, key, url, hooks };
     CHATS.set(key, tools);
     return tools;

@@ -380,7 +380,8 @@ function call_line(c) {
   return [c.head, ...blocks, ...where].join(" ").replace(/\s+/g, " ").trim();
 }
 function call_text(c) {
-  return [(c.name + " " + c.head).trim(), ...c.blocks.map((b) => b.x)].join(`
+  const where = c.name.includes(": ") && c.device !== "" ? " · " + c.device : "";
+  return [(c.name + " " + c.head).trim() + where, ...c.blocks.map((b) => b.x)].join(`
 `);
 }
 function input_shown(input) {
