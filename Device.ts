@@ -68,7 +68,7 @@ export async function run(given: string | undefined): Promise<void> {
     const mcp = servers();
     if (mcp !== null && mcp !== told && ws?.readyState === WebSocket.OPEN) {
       told = mcp;
-      send({ $: "servers", id: crypto.randomUUID(), mcp: JSON.parse(mcp), file: where(FILE) });
+      send({ $: "servers", id: crypto.randomUUID(), mcp: JSON.parse(mcp) });
     }
   };
   setInterval(tell, LOOK);
@@ -155,13 +155,4 @@ function servers(): string | null {
     }
     return null;
   }
-}
-
-// a config.json, as this machine and its real path (Tools.where)
-function where(file: string): string {
-  let real = file;
-  try {
-    real = fs.realpathSync(file);
-  } catch {}
-  return os.hostname() + ":" + real;
 }
