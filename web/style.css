@@ -110,13 +110,10 @@ body.account footer > :not(#toast) { display: none; }
 #pick > :is(button, .knob) { padding: 0 6px; border-radius: 6px; }
 #pick > button:hover, #pick > button:has(+ :popover-open) { background: var(--block); color: var(--ink); }
 #pick .dot { color: var(--soft); }
-/* a narrow screen: the meter a row of its own above, the knobs still at the right */
+/* a narrow screen: the knobs closer; the rule (the meter too) stays in their row */
 @media (max-width: 600px) {
   #pick { flex-wrap: wrap; white-space: nowrap; gap: 2px; }
   #pick > :is(button, .knob) { padding: 0 4px; }
-  #pick .rule.meter { order: -1; flex-basis: 100%; margin: 0; }
-  #pick .rule.meter::before { inset: -7px 0 -2px; }
-  #pick:has(> .meter) > [data-knob=mode] { margin-right: auto; }
 }
 /* a knob's menu (main.ts places it over its knob): a row per value, the
    pick's checked; a model's vendor over its group */
