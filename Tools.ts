@@ -69,6 +69,9 @@ type Running = { term: string; job: Job; out: Promise<Out>; end: (out: Out) => v
 // work dir, its shell if not a POSIX one
 export type Link = { send: (msg: object) => void; live: () => boolean; work: string; shell: string | null };
 
+// a task to spawn, with what it runs on
+export type Spawn = { task: string; role: Agent["role"] };
+
 // at work, the view its calls get and its replies so far
 export type Agent = {
   name    : string;
@@ -184,7 +187,14 @@ const SUB_AT     = " at effort ";
 const SUB_ROLE   = new RegExp("^" + SUB_NOTE + "(?:" + SUB_ON + "(\\S+))?(?:" + SUB_AT + "(\\S+))?$");
 
 // the models a subagent may be given (Tools.call)
-const MODELS = Pick.models(config.OFFER.vendors, config.OFFER.models).map(([, m]) => m.label);
+const MODELS = [...new Set(Pick.models(config.OFFER.vendors, config.OFFER.models).map(([, m]) => m.label))];
+
+// a spawn's task: what to do, and its own model and effort, if any
+const TASK = { type: "object", properties: {
+  task   : STR,
+  model  : { type: "string", enum: MODELS, description: "Its model; by default, the one it'd run on. Set it ONLY when the user asks for that model or vendor in this chat, since another vendor may come with additional costs." },
+  effort : { type: "string", enum: EFFORTS, description: "How hard it thinks; by default, as hard as you." },
+}, required: ["task"] };
 
 // the devices: how they work, in the system prompt (DEVICES); those open
 // now, at the start of each call's message (Tools.devices), so one
@@ -215,7 +225,7 @@ const OWN: Spec[] = [
   spec("date", "The date and time of message id.", { id: INT }, ["id"]),
 ];
 const BOSS: Spec[] = [
-  spec("spawn", "Start one subagent per task, in parallel, and return their names at once. Each one's report reaches you as a message \"[Name] report\" when it finishes. A subagent sees the view and the user's instructions, but knows what you want only from its task.", { tasks: { type: "array", items: STR }, effort: { type: "string", enum: EFFORTS, description: "How hard they think; by default, as hard as you." }, model: { type: "string", enum: MODELS, description: "Their model; by default, the one they'd run on. Set it ONLY when the user asks for that model or vendor in this chat, since another vendor may come with additional costs." } }, ["tasks"]),
+  spec("spawn", "Start one subagent per task, in parallel, and return their names at once. Each one's report reaches you as a message \"[Name] report\" when it finishes. A subagent sees the view and the user's instructions, but knows what you want only from its task. Each task names its own model and effort, if any.", { tasks: { type: "array", items: TASK } }, ["tasks"]),
   spec("tell", "Send a message to a subagent, by name. One at work reads it between its tool calls, and its report answers it; an idle one goes on from its chat, and its reply reaches you as a message \"[Name] reply\".", { name: STR, message: STR }, ["name", "message"]),
   spec("schedule", "Schedule a message to yourself: at its time it reaches you as a message \"[Timer id]\" from the timer, not the user, starting a turn as a report does, whether or not the user is online. Give `at` to send it once, or `cron` to send it again and again, and the time zone both are read in (the user's). Write the message as the task to do then, whole: by then this turn is far back in the view.", {
     message : STR,
@@ -449,15 +459,8 @@ export namespace Tools {
         return { text: Memory.date(mem, Number(args.id)), fail: false };
       }
       case "spawn": {
-        const effort = args.effort === undefined ? null : String(args.effort);
-        if (effort !== null && !EFFORTS.includes(effort)) {
-          return { text: "No effort " + effort + "; one of " + EFFORTS.join(", ") + ".", fail: true };
-        }
-        const model = args.model === undefined ? null : String(args.model);
-        if (model !== null && !MODELS.includes(model)) {
-          return { text: "No model " + model + "; one of " + MODELS.join(", ") + ".", fail: true };
-        }
-        return { text: await Tools.spawn(tools, (args.tasks ?? []).map(String), effort, model), fail: false };
+        const tasks = Tools.spawns(args);
+        return typeof tasks === "string" ? { text: tasks, fail: true } : { text: await Tools.spawn(tools, tasks), fail: false };
       }
       case "tell": {
         return { text: await Tools.tell(tools, String(args.name), String(args.message)), fail: false };
@@ -740,12 +743,39 @@ export namespace Tools {
   // Agents
   // ------
 
-  export async function spawn(tools: Tools, tasks: string[], effort: string | null, model: string | null = null): Promise<string> {
+  // a spawn's tasks, each with its model and effort checked; one bad
+  // fails them all, naming it (a string: why), so none starts. A model or
+  // effort for the whole call (as spawn took them before) is refused, not
+  // ignored, so no task runs on one it wasn't meant to
+  export function spawns(args: any): Spawn[] | string {
+    if (args.model !== undefined || args.effort !== undefined) {
+      return "Give model and effort per task, in each of tasks: { task, model?, effort? }. Nothing started.";
+    }
+    const out: Spawn[] = [];
+    for (const [k, t] of (Array.isArray(args.tasks) ? args.tasks : []).entries()) {
+      const x = typeof t === "string" ? { task: t } : t ?? {};
+      const task = typeof x.task === "string" ? x.task : "";
+      const model = x.model === undefined ? null : String(x.model);
+      const effort = x.effort === undefined ? null : String(x.effort);
+      const bad = task === "" ? "no task text" : model !== null && !MODELS.includes(model) ? "no model " + model + "; one of " + MODELS.join(", ") : effort !== null && !EFFORTS.includes(effort) ? "no effort " + effort + "; one of " + EFFORTS.join(", ") : null;
+      if (bad !== null) {
+        return "Task " + (k + 1) + (task === "" ? "" : " (" + JSON.stringify(task.length > 60 ? task.slice(0, 60) + "…" : task) + ")") + ": " + bad + ". Nothing started.";
+      }
+      out.push({ task, role: { model, effort } });
+    }
+    return out;
+  }
+
+  // each agent named with its model and effort, if given
+  export async function spawn(tools: Tools, tasks: Spawn[]): Promise<string> {
     const view = tasks.length === 0 ? "No tasks." : await Tools.view(tools);
     if (typeof view === "string") {
       return view;
     }
-    const names = tasks.map((task) => Tools.start(tools, { effort, model }, task, view));
+    const names = tasks.map(({ task, role }) => {
+      const knobs = [role.model, role.effort === null ? null : "effort " + role.effort].filter((k) => k !== null);
+      return Tools.start(tools, role, task, view) + (knobs.length === 0 ? "" : " (" + knobs.join(", ") + ")");
+    });
     return "Started " + names.join(", ") + ". Each one's report will reach you as a message when it finishes.";
   }
 

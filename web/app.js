@@ -350,7 +350,7 @@ var READS = new Map([
   ["edit", (x) => Array.isArray(x.edits) ? { head: edits_files(x.edits), blocks: [] } : input_shown(x)],
   ["zoom", (x) => ({ head: msg_show(x.id, x.n) + (x.at === undefined ? "" : " from char " + x.at), blocks: [] })],
   ["date", (x) => ({ head: msg_show(x.id, 1), blocks: [] })],
-  ["spawn", (x) => ({ head: tasks_show(x.tasks, x.model, x.effort), blocks: (Array.isArray(x.tasks) ? x.tasks : []).flatMap(text_block) })],
+  ["spawn", (x) => ({ head: tasks_show(x.tasks, x.model, x.effort), blocks: (Array.isArray(x.tasks) ? x.tasks : []).flatMap(task_block) })],
   ["tell", (x) => ({ head: String(x.name ?? ""), blocks: text_block(x.message) })],
   ["computer", (x) => ({ head: "", blocks: text_block(x.task) })],
   ["schedule", (x) => ({ head: (x.cron === undefined ? String(x.at ?? "") : "cron " + x.cron) + " " + String(x.zone ?? ""), blocks: text_block(x.message) })]
@@ -409,9 +409,15 @@ function msg_show(id, n) {
   return typeof id === "number" ? "#" + id + many : String(id ?? "");
 }
 function tasks_show(tasks, model, effort) {
-  const n = Array.isArray(tasks) ? tasks.length : 0;
-  const knobs = [model, effort].filter((k) => typeof k === "string").map((k) => " · " + k).join("");
-  return n + (n === 1 ? " agent" : " agents") + knobs;
+  const list = Array.isArray(tasks) ? tasks : [];
+  const knobs = [knobs_show(model, effort), ...list.map((t) => knobs_show(t?.model, t?.effort))].filter((k) => k !== "").map((k) => " · " + k).join("");
+  return list.length + (list.length === 1 ? " agent" : " agents") + knobs;
+}
+function knobs_show(model, effort) {
+  return [model, effort].filter((k) => typeof k === "string").join(" ");
+}
+function task_block(t) {
+  return typeof t === "string" ? text_block(t) : text_block(t?.task).map((b) => ({ ...b, k: knobs_show(t.model, t.effort) }));
 }
 function lines_show(offset, limit) {
   const from = typeof offset === "number" ? offset : 1;
