@@ -1832,6 +1832,8 @@ function tree_hide() {
   S.run = null;
   $(".view").replaceChildren();
   $(".bracket").replaceChildren();
+  $(".view").classList.remove("on");
+  $(".bracket").classList.remove("on", "drag");
 }
 function $(sel) {
   return document.querySelector("#tree " + sel);
@@ -2209,8 +2211,13 @@ function start(meta) {
   }, { signal });
   addEventListener("click", (e) => tree.contains(e.target) || shut(), { signal });
   addEventListener("keydown", (e) => e.key === "Escape" && big && (big.focus({ preventScroll: true }), shut()), { signal });
+  let viewed = false;
   return {
-    show: (w) => (which = w, show()),
+    show: (w) => {
+      w === "VIEW" && !viewed && (viewed = true, $(".view").scrollTop = 0);
+      which = w;
+      show();
+    },
     stop: () => (moving = 0, clearTimeout(wait), ac.abort())
   };
 }

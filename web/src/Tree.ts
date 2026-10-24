@@ -110,12 +110,15 @@ export function tree_hide(): void {
   S.run = null;
   $(".view").replaceChildren();
   $(".bracket").replaceChildren();
+  $(".view").classList.remove("on");
+  $(".bracket").classList.remove("on", "drag");
 }
 
 function $(sel: string): HTMLElement {
   return document.querySelector("#tree " + sel) as HTMLElement;
 }
 
+// (the sections have tabindex -1: Firefox focuses no other)
 function focus(which: Which): void {
   $(which === "TREE" ? ".bracket" : ".view").focus({ preventScroll: true });
 }
@@ -532,8 +535,14 @@ tree.addEventListener("keydown", (e) => {
 // a click elsewhere, or Escape, shuts the card grown
 addEventListener("click", (e: MouseEvent) => tree.contains(e.target as Node) || shut(), { signal });
 addEventListener("keydown", (e: KeyboardEvent) => e.key === "Escape" && big && (big.focus({ preventScroll: true }), shut()), { signal });
+// VIEW, the first time it shows, at its top, as its cards are new
+let viewed = false;
 return {
-  show: (w: Which) => ((which = w), show()),
+  show: (w: Which) => {
+    w === "VIEW" && !viewed && ((viewed = true), ($(".view").scrollTop = 0));
+    which = w;
+    show();
+  },
   stop: () => ((moving = 0), clearTimeout(wait), ac.abort()),
 };
 }
