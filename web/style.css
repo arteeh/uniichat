@@ -70,9 +70,11 @@ svg { fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round
 ::selection { background: var(--ink); color: var(--paper); }
 a { color: inherit; text-underline-offset: 3px; }
 /* no word left alone on a line: all text balanced (every browser keeps
-   it), but the prose of messages (not notes), pretty */
+   it), but the prose of messages (not notes), pretty, and text being
+   typed filling each line */
 body { text-wrap: balance; }
 .msg:not(.note) { text-wrap: pretty; }
+textarea { text-wrap: wrap; }
 
 /* a guest's chat: only the log and the message box; a note alone (the
    terminal signed in) */
