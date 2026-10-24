@@ -76,7 +76,7 @@ export const SETTINGS: Setting[] = [
   { key: "vendors",   def: "claude-api",                        apply: "now",     web: true  },
   { key: "models",    def: LABELS.join(),                       apply: "now",     web: true  },
   { key: "pick",      def: "claude-api:sonnet-5.5:medium:slow", apply: "now",     web: true  },
-  { key: "compactor", def: "claude-api:haiku-5.5:high:slow",    apply: "now",     web: true  },
+  { key: "compactor", def: "claude-api:sonnet-5.5:medium:slow", apply: "now",     web: true  },
   { key: "compactor_context", def: "4",                         apply: "now",     web: true  },
   { key: "agents",    def: "",                                  apply: "now",     web: true  },
   { key: "site",      def: "http://127.0.0.1:8788",             apply: "restart", web: true  },
