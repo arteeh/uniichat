@@ -97,7 +97,7 @@ run while one does: stop it first, update, start it again.
    -d https://your-server`: it prints a link and a code to confirm in
    your browser, then runs in the background. Its work dir is
    `~/.unii/work`; its settings are in `~/.config/unii/device.json`.
-   MCP servers run on devices only, never in `unii serve`: a device's
+   MCP servers run on devices only, never in `unii serve`: each device's
    go in its own `~/.unii/config.json` as `mcp`, in Claude's
    `mcpServers` shape (programs, and URLs the device reaches; `${VAR}`s
    are read there). They come and go with it and an edit needs no
@@ -186,7 +186,8 @@ Yes, with [Docker Sandboxes](https://docs.docker.com/ai/sandboxes/). Run
 runs on the same PC). Then let the sandbox reach it:
 `sbx policy allow network localhost:8788`. The sandbox turns
 host.docker.internal into localhost, so the rule names localhost. MCP
-servers run on devices only, so they stay in the sandbox too.
+servers run on devices only, so the sandboxed device's run in the
+sandbox too.
 
 **How can I reach UniiChat from outside my home network?**
 
