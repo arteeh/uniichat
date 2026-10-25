@@ -1,18 +1,19 @@
 // Box
 // ===
 // The message box: the text typed, and the files pasted, dropped or
-// picked into it, each an item right where it was put (a picture, a
-// video's first frame, a sound's, a page's or any other file's tile, its
-// name and size), all one fixed size, deleted as one character
-// (Backspace after it, Delete before it). Behind it, markdown: the text
-// as typed, each item ![name](/media/…) (a file that isn't media a link,
-// [name](/media/…)) on a line of its own (box_text), which is what is
-// sent and kept as the draft; box_set draws such a text back, a line
-// that is one item as that item. An item uploading (main.ts) has no url
-// yet: it shows how far it is and is no part of the text; one refused
-// says so till deleted. The box holds only text, items and, at its end,
-// a <br> that shows an empty last line (tidy): pasted or dropped HTML
-// comes as its text and its media, never its formatting.
+// picked into it, each an item right where it was put (a picture or a
+// video's first frame in its own aspect ratio, 150 px at most; a sound's,
+// a page's or any other file's tile, its name and size, one fixed size),
+// deleted as one character (Backspace after it, Delete before it).
+// Behind it, markdown: the text as typed, each item ![name](/media/…) (a
+// file that isn't media a link, [name](/media/…)) on a line of its own
+// (box_text), which is what is sent and kept as the draft; box_set draws
+// such a text back, a line that is one item as that item. An item
+// uploading (main.ts) has no url yet: it shows how far it is and is no
+// part of the text; one refused says so till deleted. The box holds only
+// text, items and, at its end, a <br> that shows an empty last line
+// (tidy): pasted or dropped HTML comes as its text and its media, never
+// its formatting.
 
 import * as Md from "../../Md.ts";
 import * as View from "../../View.ts";
@@ -40,6 +41,12 @@ let HOOKS: Hooks = { input: () => {}, files: () => {} };
 // focus away, not where its file goes); whether an IME is composing
 let LAST: Range | null = null;
 let COMPOSING = false;
+
+// the longest side of a picture's or a video's item (item_fit); the least
+// an item's frame takes, so one a few pixels big can still be seen and
+// deleted (the picture stays its own size in it)
+const SIDE = 150;
+const LEAST = 24;
 
 // HTML's elements that start a line of their own (a pasted page's text)
 const BLOCKS = new Set(["P", "DIV", "LI", "TR", "H1", "H2", "H3", "H4", "H5", "H6", "PRE", "BLOCKQUOTE", "UL", "OL", "TABLE", "SECTION", "ARTICLE", "HEADER", "FOOTER"]);
@@ -241,6 +248,7 @@ export function item_new(name: string, url: string, state: State, kind = View.me
     img.src = url;
     img.alt = "";
     img.draggable = false;
+    img.addEventListener("load", () => item_fit(item, img.naturalWidth, img.naturalHeight), { once: true });
     item.append(img);
   } else if (kind === "video" && url !== "") {
     const video = document.createElement("video");
@@ -248,6 +256,7 @@ export function item_new(name: string, url: string, state: State, kind = View.me
     video.muted = true;
     video.preload = "metadata";
     video.playsInline = true;
+    video.addEventListener("loadedmetadata", () => item_fit(item, video.videoWidth, video.videoHeight), { once: true });
     item.append(video);
   } else {
     const tile = document.createElement("span");
@@ -269,6 +278,19 @@ export function item_new(name: string, url: string, state: State, kind = View.me
   item.append(note);
   item_state(item, state, "", state === "ok" && url.startsWith("/media/") ? url : "");
   return item;
+}
+
+// a picture's or a video's item, once its size is known (its preview
+// loaded; till then the tiles' size): its own aspect ratio, its longest
+// side SIDE px, or its own size if smaller, never cropped nor stretched
+// (style.css)
+function item_fit(item: HTMLElement, w: number, h: number): void {
+  if (!(w > 0 && h > 0)) {
+    return;
+  }
+  const k = Math.min(1, SIDE / Math.max(w, h));
+  item.style.width = Math.max(LEAST, Math.round(w * k)) + "px";
+  item.style.height = Math.max(LEAST, Math.round(h * k)) + "px";
 }
 
 // an item's state, the note on it (how far it is, why refused), and once

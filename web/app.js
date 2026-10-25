@@ -2510,6 +2510,8 @@ var BOX = document.createElement("div");
 var HOOKS = { input: () => {}, files: () => {} };
 var LAST = null;
 var COMPOSING = false;
+var SIDE = 150;
+var LEAST = 24;
 var BLOCKS = new Set(["P", "DIV", "LI", "TR", "H1", "H2", "H3", "H4", "H5", "H6", "PRE", "BLOCKQUOTE", "UL", "OL", "TABLE", "SECTION", "ARTICLE", "HEADER", "FOOTER"]);
 function box_new(el, hooks) {
   BOX = el;
@@ -2681,6 +2683,7 @@ function item_new(name, url, state, kind = media_kind(url) ?? "file", size = nul
     img.src = url;
     img.alt = "";
     img.draggable = false;
+    img.addEventListener("load", () => item_fit(item, img.naturalWidth, img.naturalHeight), { once: true });
     item.append(img);
   } else if (kind === "video" && url !== "") {
     const video = document.createElement("video");
@@ -2688,6 +2691,7 @@ function item_new(name, url, state, kind = media_kind(url) ?? "file", size = nul
     video.muted = true;
     video.preload = "metadata";
     video.playsInline = true;
+    video.addEventListener("loadedmetadata", () => item_fit(item, video.videoWidth, video.videoHeight), { once: true });
     item.append(video);
   } else {
     const tile = document.createElement("span");
@@ -2709,6 +2713,14 @@ function item_new(name, url, state, kind = media_kind(url) ?? "file", size = nul
   item.append(note);
   item_state(item, state, "", state === "ok" && url.startsWith("/media/") ? url : "");
   return item;
+}
+function item_fit(item, w, h) {
+  if (!(w > 0 && h > 0)) {
+    return;
+  }
+  const k = Math.min(1, SIDE / Math.max(w, h));
+  item.style.width = Math.max(LEAST, Math.round(w * k)) + "px";
+  item.style.height = Math.max(LEAST, Math.round(h * k)) + "px";
 }
 function item_state(item, state, note, url = "") {
   item.dataset.state = state;

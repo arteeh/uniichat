@@ -136,11 +136,15 @@ body:is(.account, .tree) footer > :not(#toast) { display: none; }
    the screen, then it scrolls; its placeholder while it holds nothing */
 .composer .field { position: relative; flex: 1; min-width: 0; outline: 0; color: var(--ink); font: 16px/1.5 var(--sans); padding: 7px 0; max-height: 40vh; overflow-y: auto; white-space: pre-wrap; overflow-wrap: anywhere; text-wrap: wrap; cursor: text; }
 .composer .field.blank::before { content: attr(data-placeholder); position: absolute; color: var(--soft); pointer-events: none; }
-/* an item in it: a picture, a video's first frame, a sound's or a
-   page's tile, all one size, like a character in the line; its note at
-   its foot while it uploads (a bar as far as it is) or was refused */
-.field .item { position: relative; display: inline-block; width: 96px; height: 72px; margin: 2px 2px; vertical-align: bottom; overflow: hidden; border: 1px solid var(--hair); border-radius: 8px; background: var(--block); }
-.field .item > :is(img, video) { display: block; width: 100%; height: 100%; object-fit: cover; pointer-events: none; }
+/* an item in it, like a character in the line: a sound's, a page's or a
+   file's tile, one size; a picture or a video's first frame that size
+   till its own is known, then its own aspect ratio, sized by Box.ts
+   (item_fit: 150 px at most), never cropped, stretched or blown up
+   (scale-down), never wider than the box; its note at its foot while it
+   uploads (a bar as far as it is) or was refused */
+.field .item { position: relative; display: inline-block; width: 96px; height: 72px; max-width: 100%; margin: 2px 2px; padding: 0; vertical-align: bottom; overflow: hidden; border: 1px solid var(--hair); border-radius: 8px; background: var(--block); }
+.field .item:has(> :is(img, video)) { box-sizing: content-box; }
+.field .item > :is(img, video) { display: block; width: 100%; height: 100%; object-fit: scale-down; pointer-events: none; }
 .field .item .tile { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; padding: 4px 6px; font: 12px/1.3 var(--sans); color: var(--mid); text-align: center; overflow: hidden; overflow-wrap: anywhere; }
 .field .item .tile small { font-size: 11px; color: var(--soft); }
 .field .item .state { position: absolute; inset: auto 0 0; padding: 1px 6px; font: 600 11px/1.5 var(--sans); color: #fff; background: linear-gradient(to right, rgb(0 0 0 / .75) var(--part, 0%), rgb(0 0 0 / .45) var(--part, 0%)); }
