@@ -25,6 +25,7 @@ import { clip_pages } from "./Clip.ts";
 import { Disk } from "./Disk.ts";
 import { Mcp } from "./Mcp.ts";
 import * as Import from "./Import.ts";
+import * as Md from "./Md.ts";
 import { JOBS, Memory, type Msg as Log, type Room, type Share } from "./Memory.ts";
 import { OpenAI } from "./OpenAI.ts";
 import { Owner } from "./Owner.ts";
@@ -367,7 +368,7 @@ export namespace Chat {
   // main.ts attach), as its images too, so models see them as they see
   // one sent with it (Memory.image_add names it as the store does)
   export async function pictured(chat: Chat, text: string, had: string[]): Promise<string[]> {
-    const names = [...text.matchAll(/!\[[^\]\n]*\]\(\/media\/([0-9a-f]{16}\.(?:png|jpeg|gif|webp))\)/g)].map((m) => m[1]);
+    const names = Md.md_pasted(text).map(([, , , url]) => url.slice("/media/".length)).filter((name) => /\.(?:png|jpeg|gif|webp)$/.test(name));
     const out: string[] = [];
     for (const name of [...new Set(names)].filter((n) => !had.includes(n)).slice(0, PICTURED)) {
       const file = Memory.media_file(chat.mem, name);

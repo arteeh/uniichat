@@ -132,8 +132,21 @@ body:is(.account, .tree) footer > :not(#toast) { display: none; }
 
 .composer { width: min(var(--col), 100%); margin: 0 auto; display: flex; align-items: flex-end; gap: 10px; border: 1px solid var(--frame); border-radius: 24px; padding: 7px 7px 7px 20px; background: var(--lift); box-shadow: var(--shadow); }
 .composer:focus-within { border-color: var(--soft); }
-.composer textarea { flex: 1; resize: none; border: 0; outline: 0; background: none; color: var(--ink); font: 16px/1.5 var(--sans); padding: 7px 0; max-height: 40vh; }
-.composer textarea::placeholder { color: var(--soft); }
+/* the message box (Box.ts): text as typed, as tall as it is up to 40% of
+   the screen, then it scrolls; its placeholder while it holds nothing */
+.composer .field { position: relative; flex: 1; min-width: 0; outline: 0; color: var(--ink); font: 16px/1.5 var(--sans); padding: 7px 0; max-height: 40vh; overflow-y: auto; white-space: pre-wrap; overflow-wrap: anywhere; text-wrap: wrap; cursor: text; }
+.composer .field.blank::before { content: attr(data-placeholder); position: absolute; color: var(--soft); pointer-events: none; }
+/* an item in it: a picture, a video's first frame, a sound's or a
+   page's tile, all one size, like a character in the line; its note at
+   its foot while it uploads (a bar as far as it is) or was refused */
+.field .item { position: relative; display: inline-block; width: 96px; height: 72px; margin: 2px 2px; vertical-align: bottom; overflow: hidden; border: 1px solid var(--hair); border-radius: 8px; background: var(--block); }
+.field .item > :is(img, video) { display: block; width: 100%; height: 100%; object-fit: cover; pointer-events: none; }
+.field .item .tile { display: flex; align-items: center; justify-content: center; height: 100%; padding: 4px 6px; font: 12px/1.3 var(--sans); color: var(--mid); text-align: center; overflow: hidden; overflow-wrap: anywhere; }
+.field .item .state { position: absolute; inset: auto 0 0; padding: 1px 6px; font: 600 11px/1.5 var(--sans); color: #fff; background: linear-gradient(to right, rgb(0 0 0 / .75) var(--part, 0%), rgb(0 0 0 / .45) var(--part, 0%)); }
+.field .item[data-state=ok] .state { display: none; }
+.field .item[data-state=up] > :is(img, video) { opacity: .6; }
+.field .item[data-state=bad] { border-color: var(--red); }
+.field .item[data-state=bad] .state { background: var(--red); }
 .send, .attach, .mic { flex: none; width: 38px; height: 38px; display: grid; place-items: center; border-radius: 50%; }
 .send svg, .attach svg, .mic svg { width: 20px; height: 20px; stroke-width: 2; }
 .send { background: var(--ink); color: var(--paper); }
@@ -152,7 +165,7 @@ body:is(.account, .tree) footer > :not(#toast) { display: none; }
    newest at the right, and the time so far */
 .composer .voice { display: none; flex: 1; align-items: center; gap: 12px; height: 38px; color: var(--ink); }
 .composer.rec .voice { display: flex; }
-.composer.rec textarea { display: none; }
+.composer.rec .field { display: none; }
 /* width 0, the row gives it the rest: else its drawn pixels (main.ts meter)
    set its width through their aspect, a little wider each frame where the
    screen's pixel ratio isn't whole, until it pushes the buttons off */
@@ -386,13 +399,9 @@ header > .imping { display: flex; flex-direction: column; justify-content: cente
    window, scrolling inside past that */
 .msg iframe.page { width: 100%; height: 0; max-height: 70vh; border: 1px solid var(--hair); border-radius: 8px; background: var(--paper); color-scheme: light dark; }
 
-/* images: under a message, each a link; over the box, the files
-   uploading (main.ts uploads) */
+/* images: under a message, each a link */
 .pics { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
 .pics img { display: block; height: 120px; max-width: 100%; object-fit: cover; border-radius: 8px; border: 1px solid var(--hair); }
-#pics { width: min(var(--col), 100%); margin: 0 auto 8px; }
-#pics:empty { display: none; }
-#pics .up { padding: 4px 10px; border-radius: 8px; background: var(--block); font: 13px var(--sans); color: var(--mid); }
 
 @media (max-width: 600px) {
   :root { --head: 51px; }

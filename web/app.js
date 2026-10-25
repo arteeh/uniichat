@@ -2449,6 +2449,420 @@ function entry_body(kind, text) {
   }
 }
 
+// web/src/Box.ts
+var BOX = document.createElement("div");
+var HOOKS = { input: () => {}, files: () => {} };
+var LAST = null;
+var COMPOSING = false;
+var BLOCKS = new Set(["P", "DIV", "LI", "TR", "H1", "H2", "H3", "H4", "H5", "H6", "PRE", "BLOCKQUOTE", "UL", "OL", "TABLE", "SECTION", "ARTICLE", "HEADER", "FOOTER"]);
+function box_new(el, hooks) {
+  BOX = el;
+  HOOKS = hooks;
+  try {
+    el.contentEditable = "plaintext-only";
+  } catch {
+    el.contentEditable = "true";
+  }
+  el.addEventListener("beforeinput", (ev) => {
+    const t = ev.inputType;
+    if (t.startsWith("format") || t.startsWith("insertFromPaste") || t === "insertFromDrop" || t === "insertLink" || t === "insertHorizontalRule" || t.endsWith("List")) {
+      ev.preventDefault();
+    } else if (t === "insertParagraph" || t === "insertLineBreak") {
+      ev.preventDefault();
+      box_insert(`
+`);
+    }
+  });
+  el.addEventListener("compositionstart", () => COMPOSING = true);
+  el.addEventListener("compositionend", () => {
+    COMPOSING = false;
+    changed();
+  });
+  el.addEventListener("input", () => COMPOSING ? HOOKS.input() : changed());
+  el.addEventListener("keydown", (ev) => {
+    if ((ev.key === "Backspace" || ev.key === "Delete") && !ev.isComposing && !ev.altKey && !ev.ctrlKey && !ev.metaKey) {
+      const item = beside(ev.key === "Backspace");
+      if (item !== null) {
+        ev.preventDefault();
+        item.remove();
+        changed();
+      }
+    }
+  });
+  el.addEventListener("paste", (ev) => {
+    ev.preventDefault();
+    const data = ev.clipboardData;
+    if (data === null) {
+      return;
+    }
+    const files = [...data.files];
+    const html = data.getData("text/html");
+    const pieces = html === "" ? null : html_pieces(html);
+    if (pieces !== null && pieces.some((p) => typeof p !== "string")) {
+      pieces.forEach((p) => typeof p === "string" ? box_insert(p) : box_put(item_new(p.name, p.url, "ok")));
+    } else if (files.length === 0 || data.getData("text/plain").trim() !== "") {
+      box_insert(data.getData("text/plain").replace(/\r\n?/g, `
+`));
+    }
+    if (files.length > 0) {
+      HOOKS.files(files);
+    }
+  });
+  const copy = (ev, cut) => {
+    const sel = getSelection();
+    if (sel === null || sel.rangeCount === 0 || sel.isCollapsed || ev.clipboardData === null) {
+      return;
+    }
+    const range = sel.getRangeAt(0);
+    const [a, b] = offsets([[range.startContainer, range.startOffset], [range.endContainer, range.endOffset]]).at;
+    const div = document.createElement("div");
+    div.append(range.cloneContents());
+    ev.preventDefault();
+    ev.clipboardData.setData("text/plain", box_text().slice(a, b));
+    ev.clipboardData.setData("text/html", div.innerHTML);
+    if (cut) {
+      range.deleteContents();
+      changed();
+    }
+  };
+  el.addEventListener("copy", (ev) => copy(ev, false));
+  el.addEventListener("cut", (ev) => copy(ev, true));
+  el.addEventListener("dragstart", (ev) => ev.preventDefault());
+  el.addEventListener("drop", (ev) => {
+    ev.preventDefault();
+    ev.stopPropagation();
+    caret_at(ev.clientX, ev.clientY);
+    const files = [...ev.dataTransfer?.files ?? []];
+    if (files.length > 0) {
+      HOOKS.files(files);
+    } else {
+      box_insert(ev.dataTransfer?.getData("text/plain") ?? "");
+    }
+  });
+  document.addEventListener("selectionchange", () => {
+    const sel = getSelection();
+    if (sel !== null && sel.rangeCount > 0 && BOX.contains(sel.getRangeAt(0).startContainer)) {
+      LAST = sel.getRangeAt(0).cloneRange();
+    }
+  });
+  tidy();
+}
+function box_text() {
+  return offsets([]).text;
+}
+function box_blank() {
+  return BOX.textContent === "" && BOX.querySelector(".item") === null;
+}
+function box_focused() {
+  return document.activeElement === BOX;
+}
+function box_focus() {
+  BOX.focus();
+}
+function box_set(text) {
+  BOX.replaceChildren();
+  let buf = "";
+  text.split(`
+`).forEach((line, k) => {
+    buf += k === 0 ? "" : `
+`;
+    const media = md_pasted(line);
+    if (media.length === 1 && media[0][0] === 0 && media[0][1] === line.length) {
+      BOX.append(...buf === "" ? [] : [buf], item_new(media[0][2], media[0][3], "ok"));
+      buf = "";
+    } else {
+      buf += line;
+    }
+  });
+  if (buf !== "") {
+    BOX.append(buf);
+  }
+  tidy();
+  LAST = null;
+  if (box_focused()) {
+    box_place(Infinity, Infinity);
+  }
+  HOOKS.input();
+}
+function box_caret() {
+  const sel = getSelection();
+  const range = sel !== null && sel.rangeCount > 0 && BOX.contains(sel.getRangeAt(0).startContainer) ? sel.getRangeAt(0) : null;
+  if (range === null) {
+    const n = box_text().length;
+    return [n, n];
+  }
+  const at = offsets([[range.startContainer, range.startOffset], [range.endContainer, range.endOffset]]).at;
+  return [at[0], at[1]];
+}
+function box_place(a, b) {
+  const range = document.createRange();
+  const [start, end] = [point(a), point(b)];
+  range.setStart(start[0], start[1]);
+  range.setEnd(end[0], end[1]);
+  const sel = getSelection();
+  sel?.removeAllRanges();
+  sel?.addRange(range);
+  LAST = range.cloneRange();
+}
+function box_insert(text) {
+  if (text !== "") {
+    put(document.createTextNode(text));
+  }
+}
+function box_put(item) {
+  put(item);
+}
+function item_new(name, url, state, kind = media_kind(url) ?? "") {
+  const item = document.createElement("span");
+  item.className = "item";
+  item.contentEditable = "false";
+  item.title = name;
+  item.dataset.name = name;
+  item.setAttribute("role", "img");
+  item.setAttribute("aria-label", name);
+  if (kind === "image" && url !== "") {
+    const img = document.createElement("img");
+    img.src = url;
+    img.alt = "";
+    img.draggable = false;
+    item.append(img);
+  } else if (kind === "video" && url !== "") {
+    const video = document.createElement("video");
+    video.src = url + "#t=0.1";
+    video.muted = true;
+    video.preload = "metadata";
+    video.playsInline = true;
+    item.append(video);
+  } else {
+    const tile = document.createElement("span");
+    tile.className = "tile";
+    tile.textContent = (kind === "audio" ? "♪ " : kind === "html" ? "\uD83D\uDCC4 " : "") + name;
+    item.append(tile);
+  }
+  const note = document.createElement("span");
+  note.className = "state";
+  item.append(note);
+  item_state(item, state, "", state === "ok" && url.startsWith("/media/") ? url : "");
+  return item;
+}
+function item_state(item, state, note, url = "") {
+  item.dataset.state = state;
+  item.querySelector(".state").textContent = note;
+  if (url !== "") {
+    item.dataset.md = "![" + (item.dataset.name ?? "").replace(/[[\]\\\n]/g, "") + "](" + url + ")";
+  }
+}
+function box_items() {
+  return [...BOX.querySelectorAll(".item")];
+}
+function put(node) {
+  const sel = getSelection();
+  const now = sel !== null && sel.rangeCount > 0 && BOX.contains(sel.getRangeAt(0).startContainer) ? sel.getRangeAt(0) : null;
+  const range = now ?? (LAST !== null && BOX.contains(LAST.startContainer) ? LAST : null) ?? end_range();
+  range.deleteContents();
+  range.insertNode(node);
+  range.setStartAfter(node);
+  range.collapse(true);
+  sel?.removeAllRanges();
+  sel?.addRange(range);
+  LAST = range.cloneRange();
+  changed();
+}
+function end_range() {
+  const range = document.createRange();
+  const last = BOX.lastChild;
+  range.setStart(BOX, last?.nodeName === "BR" ? BOX.childNodes.length - 1 : BOX.childNodes.length);
+  return range;
+}
+function changed() {
+  tidy();
+  HOOKS.input();
+}
+function tidy() {
+  for (const n of [...BOX.childNodes]) {
+    if (n.nodeType === Node.TEXT_NODE || n instanceof HTMLElement && n.classList.contains("item")) {
+      continue;
+    }
+    if (n.nodeName === "BR") {
+      if (n !== BOX.lastChild) {
+        n.replaceWith(`
+`);
+      }
+      continue;
+    }
+    const line = n instanceof HTMLElement && BLOCKS.has(n.nodeName) && n.previousSibling !== null ? `
+` : "";
+    const items = n instanceof HTMLElement ? [...n.querySelectorAll(".item")] : [];
+    n.replaceWith(line + (items.length > 0 ? "" : n.textContent ?? ""), ...items);
+  }
+  BOX.normalize();
+  const last = BOX.lastChild;
+  const before = last?.nodeName === "BR" ? last.previousSibling : last;
+  const ends = before?.nodeType === Node.TEXT_NODE && (before.textContent ?? "").endsWith(`
+`);
+  if (ends && last?.nodeName !== "BR") {
+    BOX.append(document.createElement("br"));
+  } else if (!ends && last?.nodeName === "BR") {
+    last.remove();
+  }
+  BOX.classList.toggle("blank", box_blank());
+}
+function offsets(points) {
+  const at = points.map(() => -1);
+  let [text, after] = ["", false];
+  const kids = [...BOX.childNodes];
+  kids.forEach((n, k) => {
+    points.forEach(([node, off], i) => {
+      if (at[i] < 0 && node === BOX && off === k) {
+        at[i] = text.length;
+      }
+    });
+    if (n.nodeType === Node.TEXT_NODE) {
+      const data = n.textContent ?? "";
+      const gap = after && data !== "" && !data.startsWith(`
+`) ? `
+` : "";
+      points.forEach(([node, off], i) => {
+        if (at[i] < 0 && node === n) {
+          at[i] = text.length + (off === 0 ? 0 : gap.length) + off;
+        }
+      });
+      text += gap + data;
+      after = after && data === "";
+    } else if (n instanceof HTMLElement && n.classList.contains("item")) {
+      points.forEach(([node], i) => {
+        if (at[i] < 0 && n.contains(node)) {
+          at[i] = text.length;
+        }
+      });
+      const md = n.dataset.md;
+      if (md !== undefined) {
+        text += (text === "" || text.endsWith(`
+`) ? "" : `
+`) + md;
+        after = true;
+      }
+    }
+  });
+  return { text, at: at.map((x) => x < 0 ? text.length : x) };
+}
+function point(n) {
+  const kids = [...BOX.childNodes];
+  let [text, after] = ["", false];
+  for (const [k, c] of kids.entries()) {
+    if (c.nodeType === Node.TEXT_NODE) {
+      const data = c.textContent ?? "";
+      const gap = after && data !== "" && !data.startsWith(`
+`) ? 1 : 0;
+      if (n <= text.length + gap + data.length) {
+        return [c, Math.max(0, n - text.length - gap)];
+      }
+      text += (gap ? `
+` : "") + data;
+      after = after && data === "";
+    } else if (c instanceof HTMLElement && c.classList.contains("item") && c.dataset.md !== undefined) {
+      text += (text === "" || text.endsWith(`
+`) ? "" : `
+`) + c.dataset.md;
+      after = true;
+      if (n <= text.length) {
+        return [BOX, k + 1];
+      }
+    }
+  }
+  return [BOX, BOX.lastChild?.nodeName === "BR" ? kids.length - 1 : kids.length];
+}
+function beside(back) {
+  const sel = getSelection();
+  if (sel === null || sel.rangeCount === 0 || !sel.isCollapsed || !BOX.contains(sel.anchorNode)) {
+    return null;
+  }
+  const [node, off] = [sel.anchorNode, sel.anchorOffset];
+  let next;
+  if (node.nodeType === Node.TEXT_NODE) {
+    if (back ? off > 0 : off < (node.textContent ?? "").length) {
+      return null;
+    }
+    next = back ? node.previousSibling : node.nextSibling;
+  } else {
+    next = node === BOX ? (back ? BOX.childNodes[off - 1] : BOX.childNodes[off]) ?? null : null;
+  }
+  while (next !== null && next.nodeType === Node.TEXT_NODE && next.textContent === "") {
+    next = back ? next.previousSibling : next.nextSibling;
+  }
+  return next instanceof HTMLElement && next.classList.contains("item") ? next : null;
+}
+function caret_at(x, y) {
+  const doc = document;
+  const pos = doc.caretPositionFromPoint?.(x, y) ?? null;
+  const range = pos !== null ? document.createRange() : document.caretRangeFromPoint?.(x, y) ?? null;
+  if (pos !== null && range !== null) {
+    range.setStart(pos.offsetNode, pos.offset);
+  }
+  if (range !== null && BOX.contains(range.startContainer)) {
+    range.collapse(true);
+    getSelection()?.removeAllRanges();
+    getSelection()?.addRange(range);
+    LAST = range.cloneRange();
+  }
+}
+function html_pieces(html) {
+  const doc = new DOMParser().parseFromString(html, "text/html");
+  const out = [];
+  let text = "";
+  const line = () => text += text === "" || text.endsWith(`
+`) ? "" : `
+`;
+  const walk = (n) => {
+    if (n.nodeType === Node.TEXT_NODE) {
+      text += (n.textContent ?? "").replace(/[ \t\r\n]+/g, n.parentElement?.closest("pre") ? "$&" : " ");
+      return;
+    }
+    if (!(n instanceof Element) || ["SCRIPT", "STYLE", "TEMPLATE", "HEAD"].includes(n.nodeName)) {
+      return;
+    }
+    const media = html_media(n);
+    if (media !== null) {
+      out.push(text, media);
+      text = "";
+      return;
+    }
+    if (n.nodeName === "BR") {
+      text += `
+`;
+      return;
+    }
+    const block = BLOCKS.has(n.nodeName);
+    if (block) {
+      line();
+    }
+    n.childNodes.forEach(walk);
+    if (block) {
+      line();
+    }
+  };
+  if (doc.body === null) {
+    return null;
+  }
+  doc.body.childNodes.forEach(walk);
+  out.push(text.replace(/^\n+|\n+$/g, ""));
+  return out.filter((p) => p !== "");
+}
+function html_media(el) {
+  const md = el instanceof HTMLElement ? el.dataset.md : undefined;
+  const got = md === undefined ? [] : md_pasted(md);
+  if (md !== undefined && got.length === 1 && got[0][1] === md.length) {
+    return { name: got[0][2], url: got[0][3] };
+  }
+  const src = ["IMG", "VIDEO", "AUDIO", "SOURCE", "IFRAME"].includes(el.nodeName) ? el.getAttribute("src") : null;
+  const url = src === null ? null : new URL(src, location.href);
+  if (url === null || url.origin !== location.origin || media_kind(url.pathname) === null) {
+    return null;
+  }
+  const name = el.getAttribute("alt") || el.getAttribute("title") || url.pathname.split("/").pop();
+  return { name, url: url.pathname };
+}
+
 // Timer.ts
 var AHEAD = 8 * 366;
 var DAYS = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
@@ -3295,7 +3709,8 @@ var SCENES = `
   <div class="scene"><p>Your entire life.</p><p>One single chat.</p></div>
   <div class="scene"><i class="mark"></i><h1>UniiChat</h1></div>`;
 var v = view_new();
-var BOX = $2("textarea");
+var BOX2 = $2(".composer .field");
+var UPS = new Map;
 var BACK = $2("#import [name=back]");
 var P = {
   rec: null,
@@ -3323,8 +3738,6 @@ var P = {
   saving: 0,
   gave: null,
   back: null,
-  ups: new Map,
-  upn: 0,
   after: false
 };
 function $2(sel) {
@@ -3388,35 +3801,18 @@ function solo(title, sub) {
 }
 function chat() {
   const file = $2("input[type=file]");
-  BOX.oninput = () => {
-    sessionStorage.setItem(kept("draft"), BOX.value);
-    if (BOX.offsetParent !== null) {
-      const foot = $2("footer");
-      foot.style.minHeight = foot.offsetHeight + "px";
-      BOX.style.height = "auto";
-      BOX.style.height = Math.min(BOX.scrollHeight, innerHeight * 0.4) + "px";
-      foot.style.minHeight = "";
-    }
-    draw(true);
-  };
-  BOX.onkeydown = (ev) => {
+  box_new(BOX2, { input: typed, files: attach });
+  BOX2.addEventListener("blur", () => draw(false));
+  BOX2.onkeydown = (ev) => {
     if (ev.key === "Enter" && !ev.shiftKey && !ev.isComposing && ev.keyCode !== 229 && DESK.matches) {
       ev.preventDefault();
       submit();
-    }
-  };
-  BOX.onpaste = (ev) => {
-    const files = [...ev.clipboardData?.files ?? []];
-    if (files.length > 0) {
-      ev.preventDefault();
-      attach(files);
     }
   };
   $2("form").onsubmit = (ev) => {
     ev.preventDefault();
     submit();
   };
-  BOX.addEventListener("blur", () => draw(false));
   $2(".attach").onclick = () => file.click();
   $2("#pick").onkeydown = roam;
   $2("#pick").addEventListener("focusout", left);
@@ -3431,14 +3827,14 @@ function chat() {
   document.ondragover = (ev) => ev.preventDefault();
   document.ondrop = (ev) => {
     ev.preventDefault();
-    if (view_typing(v)) {
+    if (view_typing(v) && (ev.dataTransfer?.files.length ?? 0) > 0) {
       attach([...ev.dataTransfer?.files ?? []]);
     }
   };
   document.onclick = click;
   visualViewport.onresize = () => {
-    if (document.activeElement === BOX && BOX.selectionStart === BOX.value.length) {
-      BOX.scrollTop = BOX.scrollHeight;
+    if (box_focused() && box_caret()[0] === box_text().length) {
+      BOX2.scrollTop = BOX2.scrollHeight;
     }
     draw(true);
   };
@@ -3475,89 +3871,95 @@ function chat() {
 }
 function signed() {
   document.body.className = "";
-  BOX.placeholder = HINT;
-  BOX.value = sessionStorage.getItem(kept("draft")) ?? "";
-  BOX.dispatchEvent(new Event("input"));
+  BOX2.dataset.placeholder = HINT;
+  box_set(sessionStorage.getItem(kept("draft")) ?? "");
   renewed();
 }
+function typed() {
+  sessionStorage.setItem(kept("draft"), box_text());
+  for (const [item, xhr] of UPS) {
+    if (!item.isConnected) {
+      UPS.delete(item);
+      xhr.abort();
+    }
+  }
+  draw(true);
+}
 function submit() {
-  if (P.ups.size > 0) {
+  if (box_items().some((item) => item.dataset.state === "bad")) {
+    P.after = false;
+    toast(FAILED);
+    return;
+  }
+  if (UPS.size > 0) {
     P.after = true;
     toast("Sends once uploaded.");
     return;
   }
-  const text = BOX.value.trim();
+  P.after = false;
+  const text = box_text().trim();
   act({ $: "Send", text });
-  BOX.value = "";
-  BOX.dispatchEvent(new Event("input"));
+  box_set("");
 }
 function back(sent, out) {
   if (out.error === undefined) {
     return;
   }
-  if (BOX.value.trim() === "") {
-    BOX.value = sent.text;
-    BOX.dispatchEvent(new Event("input"));
+  if (box_blank()) {
+    box_set(sent.text);
   }
   toast(out.error);
 }
+var FAILED = "A file in the message didn't upload: delete it (Backspace after it), then send.";
 function attach(files) {
   for (const file of files) {
-    const name = file.name.replace(/[[\]\n]/g, "") || "file";
-    const mark = "uploading:" + ++P.upn;
-    const line = "![" + name + "](" + mark + ")";
-    const [a, b] = [BOX.selectionStart, BOX.selectionEnd];
-    const before = a > 0 && BOX.value[a - 1] !== `
-` ? `
-` : "";
-    const after = b < BOX.value.length && BOX.value[b] !== `
-` ? `
-` : "";
-    BOX.setRangeText(before + line + after, a, b, "end");
-    BOX.dispatchEvent(new Event("input"));
-    P.ups.set(mark, { name, part: 0 });
-    const xhr = new XMLHttpRequest;
-    xhr.open("POST", "/api/media?name=" + encodeURIComponent(file.name));
-    xhr.upload.onprogress = (ev) => {
-      P.ups.set(mark, { name, part: ev.lengthComputable ? ev.loaded / ev.total : 0 });
-      uploads();
-    };
-    xhr.onloadend = () => {
-      let out = {};
-      try {
-        out = JSON.parse(xhr.responseText);
-      } catch {}
-      const found = BOX.value.indexOf(line);
-      if (found >= 0) {
-        const done = out.name === undefined ? "" : line.replace("(" + mark + ")", "(/media/" + out.name + ")");
-        const after = done === "" && BOX.value[found + line.length] === `
-`;
-        const at = found - (done === "" && !after && BOX.value[found - 1] === `
-` ? 1 : 0);
-        const end = found + line.length + (after ? 1 : 0);
-        const move = (x) => x <= at ? x : x >= end ? x + done.length - (end - at) : at + done.length;
-        const [a, b] = [move(BOX.selectionStart), move(BOX.selectionEnd)];
-        BOX.setRangeText(done, at, end);
-        BOX.setSelectionRange(a, b);
-        BOX.dispatchEvent(new Event("input"));
-      }
-      if (out.name === undefined) {
-        toast(out.error ?? "Could not upload " + name + ".");
-      }
-      P.ups.delete(mark);
-      uploads();
-      if (P.ups.size === 0 && P.after) {
-        P.after = false;
-        submit();
-      }
-    };
-    xhr.send(file);
+    const name = file.name.replace(/[[\]\\\n]/g, "") || "file";
+    const kind = file.type === "text/html" ? "html" : file.type.split("/")[0];
+    const item = item_new(name, kind === "image" || kind === "video" ? URL.createObjectURL(file) : "", "up", kind);
+    box_put(item);
+    upload(item, file);
   }
-  uploads();
 }
-function uploads() {
-  markup($2("#pics"), [...P.ups.values()].map((up) => `<span class="up">${esc(up.name)} · ${Math.round(up.part * 100)}%</span>`));
-  draw(true);
+function upload(item, file) {
+  const xhr = new XMLHttpRequest;
+  UPS.set(item, xhr);
+  item_state(item, "up", "0%");
+  item.style.setProperty("--part", "0%");
+  xhr.open("POST", "/api/media?name=" + encodeURIComponent(file.name));
+  xhr.upload.onprogress = (ev) => {
+    const part = Math.round((ev.lengthComputable ? ev.loaded / ev.total : 0) * 100) + "%";
+    item_state(item, "up", part);
+    item.style.setProperty("--part", part);
+  };
+  xhr.onloadend = () => {
+    const out = upload_answer(xhr);
+    if (UPS.get(item) !== xhr) {
+      return;
+    }
+    UPS.delete(item);
+    if ("name" in out) {
+      item_state(item, "ok", "", "/media/" + out.name);
+    } else {
+      item_state(item, "bad", "Failed");
+      toast(out.error);
+    }
+    typed();
+    if (P.after && UPS.size === 0) {
+      submit();
+    }
+  };
+  xhr.send(file);
+}
+function upload_answer(xhr) {
+  let out = null;
+  try {
+    out = JSON.parse(xhr.responseText);
+  } catch {}
+  if (typeof out === "object" && out !== null && "name" in out && typeof out.name === "string") {
+    return { name: out.name };
+  }
+  const why = typeof out === "object" && out !== null && "error" in out && typeof out.error === "string" ? out.error : xhr.status === 0 ? "Can't reach UniiChat." : "HTTP " + xhr.status;
+  return { error: "Could not upload: " + why };
 }
 function act(a) {
   const said = a.$ === "Send" ? a.text.trim() : "";
@@ -3758,10 +4160,9 @@ function heard(out) {
     toast(out.error ?? "No words heard.");
     return;
   }
-  const gap = /\S$/.test(BOX.value.slice(0, BOX.selectionStart)) ? " " : "";
-  BOX.setRangeText(gap + text, BOX.selectionStart, BOX.selectionEnd, "end");
-  BOX.dispatchEvent(new Event("input"));
-  BOX.focus();
+  const gap = /\S$/.test(box_text().slice(0, box_caret()[0])) ? " " : "";
+  box_insert(gap + text);
+  box_focus();
 }
 function connect() {
   link_open(v, {
@@ -4097,7 +4498,7 @@ function bars() {
     setTimeout(renew);
   }
   const on = view_typing(v);
-  const stop = on && v.busy && BOX.value.trim() === "" && P.ups.size === 0;
+  const stop = on && v.busy && box_blank();
   const tabs = view_tabs(v);
   const send = $2(".send");
   $2(".net").hidden = v.up;
@@ -4109,7 +4510,6 @@ function bars() {
   }
   send.classList.toggle("stop", stop);
   $2(".composer").hidden = !on;
-  $2("#pics").hidden = !on;
   $2(".mic").disabled = v.out.some((p) => p.msg.$ === "voice");
   $2(".mic").classList.toggle("rec", P.rec !== null);
   $2(".composer").classList.toggle("rec", P.rec !== null);
@@ -4576,8 +4976,8 @@ function renew_due(build) {
 }
 function renew_free(hidden = false) {
   const page = location.pathname !== "/" && location.pathname !== TREE;
-  const quiet = P.rec === null && P.ups.size === 0 && v.out.length === 0 && !$2("#import").matches(":popover-open");
-  const typing = !DESK.matches && document.activeElement === BOX && !hidden;
+  const quiet = P.rec === null && UPS.size === 0 && v.out.length === 0 && !$2("#import").matches(":popover-open");
+  const typing = !DESK.matches && box_focused() && !hidden;
   return quiet && !typing && (!page || P.since && P.dirty.size === 0 && P.saving === 0);
 }
 async function renew(hidden = false) {
@@ -4594,7 +4994,7 @@ async function renew(hidden = false) {
     return;
   }
   const chat = !$2("#log").hidden;
-  const back = { at: chat && !P.end ? anchor() : null, y: chat ? null : scrollY, away: P.away, caret: [BOX.selectionStart, BOX.selectionEnd], focus: document.activeElement === BOX, open: [...P.open] };
+  const back = { at: chat && !P.end ? anchor() : null, y: chat ? null : scrollY, away: P.away, caret: box_caret(), focus: box_focused(), open: [...P.open] };
   sessionStorage.setItem(kept("back"), JSON.stringify(back));
   sessionStorage.setItem(kept("build"), (v.build ?? "") + " " + (tries + 1));
   location.reload();
@@ -4606,10 +5006,10 @@ function renewed() {
   if (back === null) {
     return;
   }
-  BOX.setSelectionRange(back.caret[0], back.caret[1]);
   if (back.focus && DESK.matches) {
-    BOX.focus();
+    box_focus();
   }
+  box_place(back.caret[0], back.caret[1]);
   back.open.forEach((id) => P.open.add(id));
   P.back = back.at;
   P.away = back.away;
@@ -4640,7 +5040,7 @@ function intro_play() {
         gone();
       };
       if (DESK.matches) {
-        BOX.focus();
+        BOX2.focus();
       }
     }
     el.id = "intro";

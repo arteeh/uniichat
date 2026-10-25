@@ -17,6 +17,7 @@
 import * as Import from "../../Import.ts";
 import { theme_css } from "../../Theme.ts";
 import * as View from "../../View.ts";
+import * as Box from "./Box.ts";
 import * as Html from "./Html.ts";
 import * as Tree from "./Tree.ts";
 
@@ -49,8 +50,11 @@ const SCENES = `
 // the chat
 const v = View.view_new();
 
-// the message box
-const BOX = $<HTMLTextAreaElement>("textarea");
+// the message box (Box.ts)
+const BOX = $<HTMLElement>(".composer .field");
+
+// the files uploading into it, by their item (Uploads)
+const UPS = new Map<HTMLElement, XMLHttpRequest>();
 
 // the import's slider: the first day it takes, in days since 1970, from
 // the first new message's (its left end: all) to today's
@@ -61,9 +65,7 @@ const BACK = $<HTMLInputElement>("#import [name=back]");
 // unfolded, by id (folds); still: the page left where it is at the
 // log's next resize (unfold); build, due, going, since, dirty, saving,
 // gave, back: the web app's build and its reload into another (Renew);
-// ups, upn, after: the
-// files uploading, by the mark each holds in the box, the last mark's
-// number, and a message sent meanwhile (Uploads);
+// after: a message sent while files upload (Uploads);
 // frame: awaited (0: none); rows: the log's rows changed, to draw;
 // found: the sources read, by name; done: sessions imported before; off:
 // left out (Import.Want); step: the import's; away: the chat's scroll as
@@ -95,8 +97,6 @@ const P = {
   saving: 0,
   gave  : null as WebSocket | null,
   back  : null as { a: number; top: number } | null,
-  ups   : new Map<string, { name: string; part: number }>(),
-  upn   : 0,
   after : false,
 };
 
@@ -186,19 +186,9 @@ function solo(title: string, sub: string): void {
 
 function chat(): void {
   const file = $<HTMLInputElement>("input[type=file]");
-  BOX.oninput = () => {
-    sessionStorage.setItem(kept("draft"), BOX.value);
-    if (BOX.offsetParent !== null) {
-      // measured with the footer held at its height: the page never
-      // shrinks meanwhile, which would scroll it off its bottom
-      const foot = $("footer");
-      foot.style.minHeight = foot.offsetHeight + "px";
-      BOX.style.height = "auto";
-      BOX.style.height = Math.min(BOX.scrollHeight, innerHeight * 0.4) + "px";
-      foot.style.minHeight = "";
-    }
-    draw(true);
-  };
+  Box.box_new(BOX, { input: typed, files: attach });
+  // (a phone's keyboard down: a reload may be due, and was waiting for it)
+  BOX.addEventListener("blur", () => draw(false));
   // never the Enter that ends a composition (Japanese, Chinese: Safari
   // ends it first, so only its keyCode, 229, says so)
   BOX.onkeydown = (ev) => {
@@ -207,19 +197,10 @@ function chat(): void {
       submit();
     }
   };
-  BOX.onpaste = (ev) => {
-    const files = [...(ev.clipboardData?.files ?? [])];
-    if (files.length > 0) {
-      ev.preventDefault();
-      attach(files);
-    }
-  };
   $("form").onsubmit = (ev) => {
     ev.preventDefault();
     submit();
   };
-  // (a phone's keyboard down: a reload may be due, and was waiting for it)
-  BOX.addEventListener("blur", () => draw(false));
   $(".attach").onclick = () => file.click();
   $("#pick").onkeydown = roam;
   $("#pick").addEventListener("focusout", left);
@@ -235,7 +216,7 @@ function chat(): void {
   // on an agent's page (no box) a drop is let go: it would wait unseen
   document.ondrop = (ev) => {
     ev.preventDefault();
-    if (View.view_typing(v)) {
+    if (View.view_typing(v) && (ev.dataTransfer?.files.length ?? 0) > 0) {
       attach([...(ev.dataTransfer?.files ?? [])]);
     }
   };
@@ -243,7 +224,7 @@ function chat(): void {
   // a phone's keyboard up or down: the box's last line stays in sight, if
   // the caret is there; the page's bottom, if at it
   visualViewport!.onresize = () => {
-    if (document.activeElement === BOX && BOX.selectionStart === BOX.value.length) {
+    if (Box.box_focused() && Box.box_caret()[0] === Box.box_text().length) {
       BOX.scrollTop = BOX.scrollHeight;
     }
     draw(true);
@@ -287,22 +268,41 @@ function chat(): void {
 // the page signed in
 function signed(): void {
   document.body.className = "";
-  BOX.placeholder = View.HINT;
-  BOX.value = sessionStorage.getItem(kept("draft")) ?? "";
-  BOX.dispatchEvent(new Event("input"));
+  BOX.dataset.placeholder = View.HINT;
+  Box.box_set(sessionStorage.getItem(kept("draft")) ?? "");
   renewed();
 }
 
+// the box changed: its text kept as the draft; an upload whose item was
+// deleted ends
+function typed(): void {
+  sessionStorage.setItem(kept("draft"), Box.box_text());
+  for (const [item, xhr] of UPS) {
+    if (!item.isConnected) {
+      UPS.delete(item);
+      xhr.abort();
+    }
+  }
+  draw(true);
+}
+
+// a message sent: never with a file that didn't upload in it (deleted, it
+// may go); with files still uploading, once they are
 function submit(): void {
-  if (P.ups.size > 0) {
+  if (Box.box_items().some((item) => item.dataset.state === "bad")) {
+    P.after = false;
+    toast(FAILED);
+    return;
+  }
+  if (UPS.size > 0) {
     P.after = true;
     toast("Sends once uploaded.");
     return;
   }
-  const text = BOX.value.trim();
+  P.after = false;
+  const text = Box.box_text().trim();
   act({ $: "Send", text });
-  BOX.value = "";
-  BOX.dispatchEvent(new Event("input"));
+  Box.box_set("");
 }
 
 // a message refused goes back in the box, unless another is in it; the
@@ -311,77 +311,76 @@ function back(sent: View.Sent, out: View.Answer): void {
   if (out.error === undefined) {
     return;
   }
-  if (BOX.value.trim() === "") {
-    BOX.value = sent.text;
-    BOX.dispatchEvent(new Event("input"));
+  if (Box.box_blank()) {
+    Box.box_set(sent.text);
   }
   toast(out.error);
 }
 
 // Uploads
 // =======
-// A file pasted, dropped or picked (an image, a video, a sound) goes to
-// the media store at once (Server.ts /api/media); its line,
-// ![name](uploading:n), is put in the box at the caret, on a line of its
-// own, and its url is filled in as it ends (the line dropped, if it was
-// refused; left out, if deleted meanwhile). The uploads' progress shows
-// over the box; a message sent meanwhile goes as the last ends.
+// A file pasted, dropped or picked (an image, a video, a sound, a page)
+// goes to the media store at once (Server.ts /api/media), an item in the
+// box where the caret is (Box.ts) showing it and how far it is; once
+// uploaded, the item is its markdown, ![name](/media/…). One refused says
+// so on it and in a toast: the message can't be sent till it is deleted.
+// A message sent meanwhile goes as the last upload ends (not if one is
+// refused); an item deleted ends its upload.
+
+const FAILED = "A file in the message didn't upload: delete it (Backspace after it), then send.";
 
 function attach(files: File[]): void {
   for (const file of files) {
-    const name = file.name.replace(/[[\]\n]/g, "") || "file";
-    const mark = "uploading:" + ++P.upn;
-    const line = "![" + name + "](" + mark + ")";
-    const [a, b] = [BOX.selectionStart, BOX.selectionEnd];
-    const before = a > 0 && BOX.value[a - 1] !== "\n" ? "\n" : "";
-    const after = b < BOX.value.length && BOX.value[b] !== "\n" ? "\n" : "";
-    BOX.setRangeText(before + line + after, a, b, "end");
-    BOX.dispatchEvent(new Event("input"));
-    P.ups.set(mark, { name, part: 0 });
-    const xhr = new XMLHttpRequest();
-    xhr.open("POST", "/api/media?name=" + encodeURIComponent(file.name));
-    xhr.upload.onprogress = (ev) => {
-      P.ups.set(mark, { name, part: ev.lengthComputable ? ev.loaded / ev.total : 0 });
-      uploads();
-    };
-    xhr.onloadend = () => {
-      let out: any = {};
-      try {
-        out = JSON.parse(xhr.responseText);
-      } catch {}
-      const found = BOX.value.indexOf(line);
-      if (found >= 0) {
-        // the caret kept where it was, after the line if in it; a line
-        // refused goes with the line break put with it
-        const done = out.name === undefined ? "" : line.replace("(" + mark + ")", "(/media/" + out.name + ")");
-        const after = done === "" && BOX.value[found + line.length] === "\n";
-        const at = found - (done === "" && !after && BOX.value[found - 1] === "\n" ? 1 : 0);
-        const end = found + line.length + (after ? 1 : 0);
-        const move = (x: number) => (x <= at ? x : x >= end ? x + done.length - (end - at) : at + done.length);
-        const [a, b] = [move(BOX.selectionStart), move(BOX.selectionEnd)];
-        BOX.setRangeText(done, at, end);
-        BOX.setSelectionRange(a, b);
-        BOX.dispatchEvent(new Event("input"));
-      }
-      if (out.name === undefined) {
-        toast(out.error ?? "Could not upload " + name + ".");
-      }
-      P.ups.delete(mark);
-      uploads();
-      if (P.ups.size === 0 && P.after) {
-        P.after = false;
-        submit();
-      }
-    };
-    xhr.send(file);
+    const name = file.name.replace(/[[\]\\\n]/g, "") || "file";
+    const kind = file.type === "text/html" ? "html" : file.type.split("/")[0];
+    const item = Box.item_new(name, kind === "image" || kind === "video" ? URL.createObjectURL(file) : "", "up", kind);
+    Box.box_put(item);
+    upload(item, file);
   }
-  uploads();
 }
 
-// each upload's name and how far it is, over the box
-function uploads(): void {
-  markup($("#pics"), [...P.ups.values()].map((up) => `<span class="up">${Html.esc(up.name)} · ${Math.round(up.part * 100)}%</span>`));
-  draw(true);
+function upload(item: HTMLElement, file: File): void {
+  const xhr = new XMLHttpRequest();
+  UPS.set(item, xhr);
+  Box.item_state(item, "up", "0%");
+  item.style.setProperty("--part", "0%");
+  xhr.open("POST", "/api/media?name=" + encodeURIComponent(file.name));
+  xhr.upload.onprogress = (ev) => {
+    const part = Math.round((ev.lengthComputable ? ev.loaded / ev.total : 0) * 100) + "%";
+    Box.item_state(item, "up", part);
+    item.style.setProperty("--part", part);
+  };
+  xhr.onloadend = () => {
+    const out = upload_answer(xhr);
+    if (UPS.get(item) !== xhr) {
+      return;
+    }
+    UPS.delete(item);
+    if ("name" in out) {
+      Box.item_state(item, "ok", "", "/media/" + out.name);
+    } else {
+      Box.item_state(item, "bad", "Failed");
+      toast(out.error);
+    }
+    typed();
+    if (P.after && UPS.size === 0) {
+      submit();
+    }
+  };
+  xhr.send(file);
+}
+
+// an upload's answer: the file's name in the store, or why not
+function upload_answer(xhr: XMLHttpRequest): { name: string } | { error: string } {
+  let out: unknown = null;
+  try {
+    out = JSON.parse(xhr.responseText);
+  } catch {}
+  if (typeof out === "object" && out !== null && "name" in out && typeof out.name === "string") {
+    return { name: out.name };
+  }
+  const why = typeof out === "object" && out !== null && "error" in out && typeof out.error === "string" ? out.error : xhr.status === 0 ? "Can't reach UniiChat." : "HTTP " + xhr.status;
+  return { error: "Could not upload: " + why };
 }
 
 function act(a: View.Act): void {
@@ -635,10 +634,9 @@ function heard(out: View.Answer): void {
     toast(out.error ?? "No words heard.");
     return;
   }
-  const gap = /\S$/.test(BOX.value.slice(0, BOX.selectionStart)) ? " " : "";
-  BOX.setRangeText(gap + text, BOX.selectionStart, BOX.selectionEnd, "end");
-  BOX.dispatchEvent(new Event("input"));
-  BOX.focus();
+  const gap = /\S$/.test(Box.box_text().slice(0, Box.box_caret()[0])) ? " " : "";
+  Box.box_insert(gap + text);
+  Box.box_focus();
 }
 
 // Socket
@@ -1057,7 +1055,7 @@ function bars(): void {
     setTimeout(renew);
   }
   const on = View.view_typing(v);
-  const stop = on && v.busy && BOX.value.trim() === "" && P.ups.size === 0;
+  const stop = on && v.busy && Box.box_blank();
   const tabs = View.view_tabs(v);
   const send = $<HTMLButtonElement>(".send");
   $(".net").hidden = v.up;
@@ -1070,7 +1068,6 @@ function bars(): void {
   send.classList.toggle("stop", stop);
   // an agent's page has no box: messages go to UniiChat
   $(".composer").hidden = !on;
-  $("#pics").hidden = !on;
   $<HTMLButtonElement>(".mic").disabled = v.out.some((p) => p.msg.$ === "voice");
   $(".mic").classList.toggle("rec", P.rec !== null);
   $(".composer").classList.toggle("rec", P.rec !== null);
@@ -1639,8 +1636,8 @@ function renew_due(build: string | undefined): void {
 
 function renew_free(hidden = false): boolean {
   const page = location.pathname !== "/" && location.pathname !== TREE;
-  const quiet = P.rec === null && P.ups.size === 0 && v.out.length === 0 && !$("#import").matches(":popover-open");
-  const typing = !DESK.matches && document.activeElement === BOX && !hidden;
+  const quiet = P.rec === null && UPS.size === 0 && v.out.length === 0 && !$("#import").matches(":popover-open");
+  const typing = !DESK.matches && Box.box_focused() && !hidden;
   return quiet && !typing && (!page || (P.since && P.dirty.size === 0 && P.saving === 0));
 }
 
@@ -1659,7 +1656,7 @@ async function renew(hidden = false): Promise<void> {
     return;
   }
   const chat = !$("#log").hidden;
-  const back = { at: chat && !P.end ? anchor() : null, y: chat ? null : scrollY, away: P.away, caret: [BOX.selectionStart, BOX.selectionEnd], focus: document.activeElement === BOX, open: [...P.open] };
+  const back = { at: chat && !P.end ? anchor() : null, y: chat ? null : scrollY, away: P.away, caret: Box.box_caret(), focus: Box.box_focused(), open: [...P.open] };
   sessionStorage.setItem(kept("back"), JSON.stringify(back));
   sessionStorage.setItem(kept("build"), (v.build ?? "") + " " + (tries + 1));
   location.reload();
@@ -1673,10 +1670,10 @@ function renewed(): void {
   if (back === null) {
     return;
   }
-  BOX.setSelectionRange(back.caret[0], back.caret[1]);
   if (back.focus && DESK.matches) {
-    BOX.focus();
+    Box.box_focus();
   }
+  Box.box_place(back.caret[0], back.caret[1]);
   back.open.forEach((id: string) => P.open.add(id));
   P.back = back.at;
   P.away = back.away;
