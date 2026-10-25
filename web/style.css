@@ -379,6 +379,9 @@ header > .imping { display: flex; flex-direction: column; justify-content: cente
 .msg :is(img, video):is(.media, .media > *) { display: block; max-width: 100%; max-height: 70vh; width: auto; height: auto; border-radius: 8px; }
 .msg audio.media { width: min(100%, 480px); }
 .msg .media + br { display: none; }
+/* a page in a bubble as wide as a bubble may be (as wide as its text, a
+   frame would be a frame's default 300px) */
+.msg.user:has(iframe.page) { width: min(82%, 560px); }
 /* a page (main.ts frames sizes it): as tall as it is, up to 70% of the
    window, scrolling inside past that */
 .msg iframe.page { width: 100%; height: 0; max-height: 70vh; border: 1px solid var(--hair); border-radius: 8px; background: var(--paper); color-scheme: light dark; }
