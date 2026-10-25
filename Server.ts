@@ -169,6 +169,9 @@ const WAKE       = 60000;
 // the acts with a body (Chat.post)
 const BODIES     = ["say", "import", "voice"];
 
+// the longest call id or tool name an import keeps (Chat.imported)
+const PAIR       = 200;
+
 // an HTML page of the media store (Main.media), shown in a frame (Html.ts):
 // nothing runs, nothing outside the server loads, no form posts, nothing
 // frames it but the app; its links open in a new tab, sandboxed too. A
@@ -354,12 +357,15 @@ export namespace Chat {
   // a body's text from byte `at`, logged as the user's message, a read
   // at a time, the last with the images and the act's record
   export async function text(chat: Chat, body: Body, at: number, images: string[], act: string): Promise<Msg> {
-    const id = chat.mem.count;
+    // its first page's index, once written: the tool calls its push writes
+    // first (Chat.flush) are no part of it
+    let id = -1;
     let all = "";
     for await (const [pages, more] of Chat.pieces(body, at, clip_pages)) {
       all += pages.join("");
       const pics = more ? [] : [...images, ...await Chat.pictured(chat, all, images)];
-      Chat.push(chat, null, "user", pages.join(""), pics, more, more ? undefined : act);
+      const msg = Chat.push(chat, null, "user", pages.join(""), pics, more, more ? undefined : act);
+      id = id < 0 ? msg.id : id;
     }
     return { id, end: chat.mem.count };
   }
@@ -605,9 +611,10 @@ export namespace Chat {
   }
 
   // to the chat (in pages), or an agent's log, after the tool calls still
-  // waiting there (Chat.flush); each told to every view
+  // waiting there (Chat.flush; a result, those up to its own); each told
+  // to every view
   export function push(chat: Chat, agent: Agent | null, kind: Kind, text: string, images: string[] = [], more = false, act?: string, pair: Pair = {}): Msg {
-    Chat.flush(chat, agent);
+    Chat.flush(chat, agent, kind === "echo" ? pair.of : undefined);
     return Chat.put(chat, agent, { kind, text, images, more, act, ...pair });
   }
 
@@ -628,13 +635,17 @@ export namespace Chat {
   }
 
   // the tool calls still waiting in the chat (agent: null) or an agent's
-  // log, written in the order they started, before anything else is: so
-  // each sits above what came while it ran, and its result follows where
-  // it comes (one whose result comes before anything else goes right on
-  // top of it). None between the pages of a message being written
-  export function flush(chat: Chat, agent: Agent | null): void {
+  // log, started and not logged, written in the order they started,
+  // before anything else is: so each sits above what came while it ran,
+  // and its result follows where it comes (one whose result comes before
+  // anything else goes right on top of it). A result (upto: its call's
+  // id) writes only those up to its own: one started after it ran later.
+  // None between the pages of a message being written
+  export function flush(chat: Chat, agent: Agent | null, upto?: string): void {
     const at = agent ?? chat;
-    const left = [...at.calls].filter(([, call]) => !call.logged);
+    const ids = [...at.calls.keys()];
+    const end = upto === undefined ? ids.length : ids.indexOf(upto) + 1 || ids.length;
+    const left = [...at.calls].slice(0, end).filter(([, call]) => !call.logged && call.started);
     if (left.length === 0 || (agent === null && chat.mem.open > 0)) {
       return;
     }
@@ -705,13 +716,24 @@ export namespace Chat {
       Chat.all(chat, { $: "delta", agent: name, kind: ev.kind, text: ev.text, fresh: ev.fresh });
       return;
     }
+    if (ev.$ === "Start") {
+      const call = at.calls.get(ev.of);
+      if (call !== undefined) {
+        call.started = true;
+      }
+      return;
+    }
     if (ev.kind === "tool" && ev.of !== undefined) {
-      at.calls.set(ev.of, { text: ev.text, tool: ev.text.split(" ", 1)[0], logged: false });
+      at.calls.set(ev.of, { text: ev.text, tool: ev.text.split(" ", 1)[0], logged: false, started: ev.queued !== true });
     } else if (ev.kind === "mind") {
       Chat.all(chat, { $: "entry", agent: name, kind: ev.kind, text: ev.text });
     } else if (ev.kind !== "user") {
       // (a result: its call, if still waiting, goes first, written by push)
       const { kind, text, of } = ev;
+      const call = of === undefined ? undefined : at.calls.get(of);
+      if (call !== undefined) {
+        call.started = true;
+      }
       Chat.hold(chat, () => {
         Chat.push(chat, agent, kind, text, [], false, undefined, of === undefined ? {} : { of, tool: at.calls.get(of)?.tool });
         if (of !== undefined && at.calls.delete(of)) {
@@ -756,14 +778,15 @@ export namespace Chat {
   }
 
   // what streams once an entry came: the tool calls awaiting their
-  // results not logged yet, in the order the log will have them; what was
-  // drawn never vanishes before it is printed
+  // results not logged yet (those queued too), in the order the log will
+  // have them; what was drawn never vanishes before it is printed
   export function waiting(at: { calls: Map<string, Waiting> }): Live[] {
     return [...at.calls.values()].filter((call) => !call.logged).map((call) => ({ kind: "tool", text: call.text }));
   }
 
   // a call's tool calls left without a result (it was stopped), logged
-  // as they are (those not yet), once it ends
+  // as they are (those started and not yet), once it ends; one queued
+  // that never started is no call made
   export function unanswered(chat: Chat, agent: Agent | null): void {
     const at = agent ?? chat;
     const ids = [...at.calls.keys()];
@@ -974,7 +997,10 @@ export namespace Chat {
       throw new Error("An import has a " + x.kind + " message with no text.");
     }
     const date = Number.isNaN(Date.parse(x.date)) ? undefined : new Date(x.date).toISOString();
-    return { kind: x.kind, text: x.text, date, more: x.more === true };
+    // a tool call's pairing with its result, as exported (Memory.dump)
+    const of = typeof x.of === "string" && x.of.length <= PAIR ? x.of : undefined;
+    const tool = typeof x.tool === "string" && x.tool.length <= PAIR ? x.tool : undefined;
+    return { kind: x.kind, text: x.text, date, more: x.more === true, of, tool };
   }
 
   // a summary built (Memory's made): counted, if the import's; sent to

@@ -1237,8 +1237,8 @@ ${Memory.cut(line)}| ← LIMIT`;
     let sep = "\n";
     yield '{"messages": [';
     for (let i = 0; i < mem.count; i++) {
-      const { kind, text, date, images, more } = Memory.message(mem, i)!;
-      yield (i === 0 ? "\n" : ",\n") + JSON.stringify({ id: i, kind, text, date, images, more });
+      const { kind, text, date, images, more, of, tool } = Memory.message(mem, i)!;
+      yield (i === 0 ? "\n" : ",\n") + JSON.stringify({ id: i, kind, text, date, images, more, of, tool });
     }
     yield '],\n"summaries": [';
     for (const l of Memory.levels(mem)) {
@@ -1254,7 +1254,7 @@ ${Memory.cut(line)}| ← LIMIT`;
       if (log === null) {
         continue;
       }
-      const entries = log.map(({ i, kind, text, date }) => ({ id: i, kind, text, date }));
+      const entries = log.map(({ i, kind, text, date, of, tool }) => ({ id: i, kind, text, date, of, tool }));
       yield sep + JSON.stringify(name) + ": " + JSON.stringify(entries);
       sep = ",\n";
     }

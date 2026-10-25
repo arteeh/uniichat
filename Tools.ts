@@ -71,8 +71,9 @@ export type Link = { send: (msg: object) => void; live: () => boolean; work: str
 
 // a tool call awaiting its result (Server.ts Chat.on): its text as logged,
 // its tool's name, whether it is logged yet (something written while it
-// ran wrote it first: Chat.flush)
-export type Waiting = { text: string; tool: string; logged: boolean };
+// ran wrote it first: Chat.flush), whether it started (one queued behind
+// another of its step hasn't: AskAI.ts Start)
+export type Waiting = { text: string; tool: string; logged: boolean; started: boolean };
 
 // a task to spawn, with what it runs on
 export type Spawn = { task: string; role: Agent["role"] };

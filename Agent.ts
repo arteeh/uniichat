@@ -245,8 +245,11 @@ export namespace Agent {
     const items: Item[] = [{ $: "User", parts, imgs: ask.imgs ?? [] }];
     while (!signal.aborted) {
       const step = await Agent.step(wire, run, key, (max) => wire.body(ask, items, tools, max), items);
+      // our tools' calls run one by one below: each queued till it starts
+      // (its Start), so none is logged as begun before the ones ahead end
+      const ours = new Set(step.uses.map((use) => use.id));
       for (const entry of step.entries) {
-        on({ $: "Entry", ...entry });
+        on({ $: "Entry", ...entry, ...(entry.kind === "tool" && entry.of !== undefined && ours.has(entry.of) ? { queued: true } : {}) });
       }
       if (step.stop === "down" || step.stop === "lost" || step.stop === "fail") {
         end.text ||= step.stop === "down" ? step.refusal?.say ?? BUSY : step.why;
@@ -267,6 +270,7 @@ export namespace Agent {
           return;
         }
         end.acted = true;
+        on({ $: "Start", of: use.id });
         const out = await Agent.use(run, tools, use);
         on({ $: "Entry", kind: "echo", text: (out.fail ? "error: " : "") + out.text, of: use.id });
         backs.push({ id: use.id, out });

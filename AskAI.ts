@@ -98,7 +98,8 @@ export type Parked = { until: number; known: boolean };
 // having left `from` (null: none, its own pick) as it failed, saying why
 export type Event =
   | { $: "Delta"; kind: Kind; text: string; fresh?: boolean }
-  | { $: "Entry"; kind: Kind; text: string; of?: string } // of: the tool call it is or answers (a call is logged with its result)
+  | { $: "Entry"; kind: Kind; text: string; of?: string; queued?: boolean } // of: the tool call it is or answers; queued: a call that runs later, once its Start comes
+  | { $: "Start"; of: string }                            // a queued tool call begins (Agent.ts runs a step's calls one by one)
   | { $: "Limit"; limit: Parked | null }                  // waiting for a usage limit, or no longer
   | { $: "Run"; run: Pick; from: Pick | null; why: string };
 
