@@ -521,6 +521,7 @@ function span_html(s: Md.Span): string {
       return kind === "image" ? `<a class="media" href="${k}" target="_blank"><img src="${k}" alt="${esc(s.x)}"${title} loading="lazy"></a>`
         : kind === "video" ? `<video class="media" src="${k}"${title} controls preload="metadata"></video>`
         : kind === "audio" ? `<audio class="media" src="${k}"${title} controls preload="metadata"></audio>`
+        : kind === "html" ? `<iframe class="media page" src="${k}" title="${esc(s.t || s.x)}" sandbox="allow-same-origin allow-popups" loading="lazy"></iframe>`
         : `<a href="${k}"${title} target="_blank" rel="noopener">${esc(s.x || s.k)}</a>`;
     }
     case "Brk": {

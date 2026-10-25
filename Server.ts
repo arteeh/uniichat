@@ -168,6 +168,14 @@ const WAKE       = 60000;
 // the acts with a body (Chat.post)
 const BODIES     = ["say", "import", "voice"];
 
+// an HTML page of the media store (Main.media), shown in a frame (Html.ts):
+// nothing runs, nothing outside the server loads, no form posts, nothing
+// frames it but the app; its links open in a new tab, sandboxed too. A
+// base look first, the app's, so a bare page doesn't flash white; its own
+// CSS goes over it
+const PAGE_CSP   = "default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; media-src 'self'; font-src data:; form-action 'none'; base-uri 'none'; frame-ancestors 'self'; sandbox allow-same-origin allow-popups";
+const PAGE_BASE  = `<!doctype html><meta charset="utf-8"><base target="_blank"><style>:root { color-scheme: light dark; } body { margin: 10px 12px; font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, sans-serif; color: #111111; background: #ffffff; } a { color: inherit; } @media (prefers-color-scheme: dark) { body { color: #e3e3e6; background: #171719; } }</style>\n`;
+
 // the most images of the media store a message's text gives the models
 // (Chat.pictured)
 const PICTURED   = 20;
@@ -1618,6 +1626,10 @@ export namespace Main {
     const headers: Record<string, string> = { "content-type": type, "cache-control": "private, max-age=31536000, immutable", "accept-ranges": "bytes", "x-content-type-options": "nosniff" };
     if (type === "image/svg+xml") {
       headers["content-security-policy"] = "default-src 'none'; style-src 'unsafe-inline'; sandbox";
+    }
+    if (type === "text/html") {
+      headers["content-security-policy"] = PAGE_CSP;
+      return new Response(PAGE_BASE + fs.readFileSync(file, "utf8"), { headers });
     }
     const range = /^bytes=(\d*)-(\d*)$/.exec(req.headers.get("range") ?? "");
     if (range === null || range[1] + range[2] === "") {

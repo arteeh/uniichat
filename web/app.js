@@ -1221,11 +1221,12 @@ var MEDIA = {
   ogg: "audio/ogg",
   opus: "audio/ogg",
   wav: "audio/wav",
-  weba: "audio/webm"
+  weba: "audio/webm",
+  html: "text/html"
 };
 function media_kind(url) {
   const m = /^\/(?:media|image)\/[0-9a-f]{16}\.([a-z0-9]+)$/.exec(url);
-  return m === null ? null : MEDIA[m[1]]?.split("/")[0] ?? null;
+  return m === null || MEDIA[m[1]] === undefined ? null : m[1] === "html" ? "html" : MEDIA[m[1]].split("/")[0];
 }
 var IMAGE = 2 ** 20;
 var PIXELS = 2 ** 28;
@@ -2110,7 +2111,7 @@ function span_html(s) {
     }
     case "Pict": {
       const [k, title, kind] = [esc(s.k), s.t === "" ? "" : ` title="${esc(s.t)}"`, media_kind(s.k)];
-      return kind === "image" ? `<a class="media" href="${k}" target="_blank"><img src="${k}" alt="${esc(s.x)}"${title} loading="lazy"></a>` : kind === "video" ? `<video class="media" src="${k}"${title} controls preload="metadata"></video>` : kind === "audio" ? `<audio class="media" src="${k}"${title} controls preload="metadata"></audio>` : `<a href="${k}"${title} target="_blank" rel="noopener">${esc(s.x || s.k)}</a>`;
+      return kind === "image" ? `<a class="media" href="${k}" target="_blank"><img src="${k}" alt="${esc(s.x)}"${title} loading="lazy"></a>` : kind === "video" ? `<video class="media" src="${k}"${title} controls preload="metadata"></video>` : kind === "audio" ? `<audio class="media" src="${k}"${title} controls preload="metadata"></audio>` : kind === "html" ? `<iframe class="media page" src="${k}" title="${esc(s.t || s.x)}" sandbox="allow-same-origin allow-popups" loading="lazy"></iframe>` : `<a href="${k}"${title} target="_blank" rel="noopener">${esc(s.x || s.k)}</a>`;
     }
     case "Brk": {
       return "<br>";
@@ -2724,6 +2725,7 @@ function chat() {
       measured = new WeakSet;
       folds();
     }
+    frames(true);
   });
   draw(true);
 }
@@ -2930,6 +2932,23 @@ function unfold(msg) {
   fold_show(msg, open);
   scrollBy(0, msg.getBoundingClientRect().top - top);
   P.end = at_end();
+}
+var FRAMED = new WeakSet;
+function frames(all = false) {
+  for (const f of document.querySelectorAll("#log iframe.page")) {
+    const fit = () => {
+      const root = f.contentDocument?.documentElement;
+      if (root !== undefined && f.contentDocument?.URL !== "about:blank") {
+        f.style.height = Math.ceil(root.getBoundingClientRect().height) + 2 + "px";
+      }
+    };
+    if (!FRAMED.has(f)) {
+      FRAMED.add(f);
+      f.addEventListener("load", fit);
+    } else if (all) {
+      fit();
+    }
+  }
 }
 function copied(button) {
   button.innerHTML = CHECK;
@@ -3300,6 +3319,7 @@ function paint() {
   }
   markup($2("#log .tail"), view_tail(v).map(row_html));
   folds();
+  frames();
   const back = P.back === null ? null : document.querySelector(`#log [data-a="${P.back.a}"]`);
   if (back !== null && P.back !== null) {
     P.shown = shown;

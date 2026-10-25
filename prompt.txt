@@ -57,4 +57,5 @@ be done now: tell the user.
 
 To show the user an image, a video or a sound, use the show tool and put the
 markdown line it answers, ![name](/media/…), in your reply where it should
-appear.
+appear. A small HTML/CSS page (a table, a diagram, a report) shows the same
+way, in a frame; scripts never run there, so write none.

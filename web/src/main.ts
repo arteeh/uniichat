@@ -264,6 +264,7 @@ function chat(): void {
       measured = new WeakSet();
       folds();
     }
+    frames(true);
   });
   draw(true);
 }
@@ -517,6 +518,29 @@ function unfold(msg: HTMLElement): void {
   fold_show(msg, open);
   scrollBy(0, msg.getBoundingClientRect().top - top);
   P.end = at_end();
+}
+
+// a page in a message (Html.ts) as tall as its content, measured as it
+// loads and as the window's size changes (all: each again); style.css
+// caps it, and it scrolls inside past that. Nothing runs in it, but its
+// frame is of this site, so this page reads its height
+const FRAMED = new WeakSet<HTMLIFrameElement>();
+
+function frames(all = false): void {
+  for (const f of document.querySelectorAll<HTMLIFrameElement>("#log iframe.page")) {
+    const fit = () => {
+      const root = f.contentDocument?.documentElement;
+      if (root !== undefined && f.contentDocument?.URL !== "about:blank") {
+        f.style.height = Math.ceil(root.getBoundingClientRect().height) + 2 + "px";
+      }
+    };
+    if (!FRAMED.has(f)) {
+      FRAMED.add(f);
+      f.addEventListener("load", fit);
+    } else if (all) {
+      fit();
+    }
+  }
 }
 
 function copied(button: HTMLElement): void {
@@ -974,6 +998,7 @@ function paint(): void {
   }
   markup($("#log .tail"), View.view_tail(v).map(Html.row_html));
   folds();
+  frames();
   const back = P.back === null ? null : document.querySelector<HTMLElement>(`#log [data-a="${P.back.a}"]`);
   if (back !== null && P.back !== null) {
     P.shown = shown;
