@@ -506,7 +506,14 @@ var FENCE = /^\s*(`{3,}|~{3,})/;
 var TASK = /^\[([ xX])\](?=[ \t]|$)[ \t]?/;
 var PUNCT = /[\p{P}\p{S}]/u;
 var AUTO = /<((?:https?:\/\/|mailto:)[^\s<>]*)>/iy;
-var BARE = /https?:\/\//iy;
+var MAIL = /<([A-Za-z0-9.!#$%&'*+\/=?^_`{|}~-]+@[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*)>/y;
+var BARE = /https?:\/\/|www\./iy;
+var LOCAL = /[A-Za-z0-9._+-]/;
+var EMAIL = /[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)+/y;
+var ENTITY = /&(?:#[0-9]{1,7}|#[xX][0-9a-fA-F]{1,6}|[A-Za-z][A-Za-z0-9]{1,31});/y;
+var ENTITIES = new Map(`AElig:c6 Aacute:c1 Acirc:c2 Agrave:c0 Alpha:391 Aring:c5 Atilde:c3 Auml:c4 Beta:392 Ccedil:c7 Chi:3a7 Dagger:2021 Delta:394 ETH:d0 Eacute:c9 Ecirc:ca Egrave:c8 Epsilon:395 Eta:397 Euml:cb Gamma:393 Iacute:cd Icirc:ce Igrave:cc Iota:399 Iuml:cf Kappa:39a Lambda:39b Mu:39c Ntilde:d1 Nu:39d OElig:152 Oacute:d3 Ocirc:d4 Ograve:d2 Omega:3a9 Omicron:39f Oslash:d8 Otilde:d5 Ouml:d6 Phi:3a6 Pi:3a0 Prime:2033 Psi:3a8 Rho:3a1 Scaron:160 Sigma:3a3 THORN:de Tau:3a4 Theta:398 Uacute:da Ucirc:db Ugrave:d9 Upsilon:3a5 Uuml:dc Xi:39e Yacute:dd Yuml:178 Zeta:396 aacute:e1 acirc:e2 acute:b4 aelig:e6 agrave:e0 alefsym:2135 alpha:3b1 amp:26 and:2227 ang:2220 aring:e5 asymp:2248 atilde:e3 auml:e4 bdquo:201e beta:3b2 brvbar:a6 bull:2022 cap:2229 ccedil:e7 cedil:b8 cent:a2 chi:3c7 circ:2c6 clubs:2663 cong:2245 copy:a9 crarr:21b5 cup:222a curren:a4 dArr:21d3 dagger:2020 darr:2193 deg:b0 delta:3b4 diams:2666 divide:f7 eacute:e9 ecirc:ea egrave:e8 empty:2205 emsp:2003 ensp:2002 epsilon:3b5 equiv:2261 eta:3b7 eth:f0 euml:eb euro:20ac exist:2203 fnof:192 forall:2200 frac12:bd frac14:bc frac34:be frasl:2044 gamma:3b3 ge:2265 gt:3e hArr:21d4 harr:2194 hearts:2665 hellip:2026 iacute:ed icirc:ee iexcl:a1 igrave:ec image:2111 infin:221e int:222b iota:3b9 iquest:bf isin:2208 iuml:ef kappa:3ba lArr:21d0 lambda:3bb lang:2329 laquo:ab larr:2190 lceil:2308 ldquo:201c le:2264 lfloor:230a lowast:2217 loz:25ca lrm:200e lsaquo:2039 lsquo:2018 lt:3c macr:af mdash:2014 micro:b5 middot:b7 minus:2212 mu:3bc nabla:2207 nbsp:a0 ndash:2013 ne:2260 ni:220b not:ac notin:2209 nsub:2284 ntilde:f1 nu:3bd oacute:f3 ocirc:f4 oelig:153 ograve:f2 oline:203e omega:3c9 omicron:3bf oplus:2295 or:2228 ordf:aa ordm:ba oslash:f8 otilde:f5 otimes:2297 ouml:f6 para:b6 part:2202 permil:2030 perp:22a5 phi:3c6 pi:3c0 piv:3d6 plusmn:b1 pound:a3 prime:2032 prod:220f prop:221d psi:3c8 quot:22 rArr:21d2 radic:221a rang:232a raquo:bb rarr:2192 rceil:2309 rdquo:201d real:211c reg:ae rfloor:230b rho:3c1 rlm:200f rsaquo:203a rsquo:2019 sbquo:201a scaron:161 sdot:22c5 sect:a7 shy:ad sigma:3c3 sigmaf:3c2 sim:223c spades:2660 sub:2282 sube:2286 sum:2211 sup:2283 sup1:b9 sup2:b2 sup3:b3 supe:2287 szlig:df tau:3c4 there4:2234 theta:3b8 thetasym:3d1 thinsp:2009 thorn:fe tilde:2dc times:d7 trade:2122 uArr:21d1 uacute:fa uarr:2191 ucirc:fb ugrave:f9 uml:a8 upsih:3d2 upsilon:3c5 uuml:fc weierp:2118 xi:3be yacute:fd yen:a5 yuml:ff zeta:3b6 zwj:200d zwnj:200c`.split(" ").map((e) => [e.split(":")[0], parseInt(e.split(":")[1], 16)]));
+var DEF = /^ {0,3}\[((?:[^\[\]\\\n]|\\.){1,999})\]:[ \t]*(<[^<>\n]*>|\S+)(?:[ \t]+("(?:[^"\\\n]|\\.)*"|'(?:[^'\\\n]|\\.)*'|\((?:[^()\\\n]|\\.)*\)))?[ \t]*$/;
+var SETEXT = /^ {0,3}(=+|-+)[ \t]*$/;
 var HEAD = /^(#{1,6})\s+(.*)$/;
 var RULE = /^\s*([-*_])(\s*\1){2,}\s*$/;
 var QUOT = /^\s*>\s?/;
@@ -519,6 +526,7 @@ var HUNK = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/;
 var MARKS = /^(?:\s*(?:[-*+]|\d{1,9}[.)])(?:[ \t]+|$)|\s*>\s?)*/;
 var DEPTH = 32;
 var DEEP = 16;
+var DEFS = new Map;
 function Text(x) {
   return { $: "Text", x };
 }
@@ -542,33 +550,38 @@ function spans_by(s, re, mark) {
   return out;
 }
 function span_parse(s) {
-  const stack = [{ c: "", n: 0, len: 0, close: false, at: 0, on: false, x: [] }];
-  const floor = new Map;
+  const head = { x: Text(""), m: null, prev: null, next: null };
+  let tail = head;
+  let marks = null;
+  const brackets = [];
   const ticks = ticks_at(s);
   let [i, text] = [0, ""];
-  const put = (span) => {
-    flush();
-    spans_push(stack[stack.length - 1].x, span);
+  const add = (x, m = null) => {
+    const node = { x, m, prev: tail, next: null };
+    tail.next = node;
+    tail = node;
+    return node;
   };
   const flush = () => {
     if (text !== "") {
-      spans_push(stack[stack.length - 1].x, Text(text));
+      add(Text(text));
       text = "";
     }
   };
-  const fold = (j) => {
+  const put = (x) => {
     flush();
-    while (stack.length - 1 > j) {
-      const o = stack.pop();
-      const into = stack[stack.length - 1].x;
-      spans_push(into, Text(o.c === "[" || o.c === "![" ? o.c : o.c.repeat(o.n)));
-      o.x.forEach((x) => spans_push(into, x));
-    }
-    floor.forEach((f, key) => floor.set(key, Math.min(f, j)));
+    add(x);
   };
-  const drop = () => {
-    stack.pop();
-    fold(stack.length - 1);
+  const mark = (c, n, open, close) => {
+    flush();
+    const node = add(Text(c === "[" || c === "![" ? c : c.repeat(n)));
+    const m = { c, n, len: n, open, close, at: i, on: true, node, prev: marks, next: null };
+    node.m = m;
+    if (marks !== null) {
+      marks.next = m;
+    }
+    marks = m;
+    return m;
   };
   while (i < s.length) {
     const c = s[i];
@@ -588,6 +601,9 @@ function span_parse(s) {
       put({ $: "Brk" });
       for (i++;s[i] === " " || s[i] === "\t"; i++)
         ;
+    } else if (c === "&" && (ENTITY.lastIndex = i, ENTITY.test(s)) && entity(s.slice(i, ENTITY.lastIndex)) !== null) {
+      text += entity(s.slice(i, ENTITY.lastIndex));
+      i = ENTITY.lastIndex;
     } else if (c === "`") {
       const n = run_len(s, i, c);
       const end = ticks(i + n, n);
@@ -602,93 +618,194 @@ function span_parse(s) {
       const k = s.slice(i + 1, AUTO.lastIndex - 1);
       put(link_safe(k) ? { $: "Link", x: [Text(k)], k, t: "" } : Text(s.slice(i, AUTO.lastIndex)));
       i = AUTO.lastIndex;
+    } else if (c === "<" && (MAIL.lastIndex = i, MAIL.test(s))) {
+      const k = s.slice(i + 1, MAIL.lastIndex - 1);
+      put({ $: "Link", x: [Text(k)], k: "mailto:" + k, t: "" });
+      i = MAIL.lastIndex;
     } else if (c === "[" || c === "!" && s[i + 1] === "[") {
-      flush();
-      stack.push({ c: c === "[" ? "[" : "![", n: 1, len: 1, close: false, at: i, on: true, x: [] });
+      brackets.push(mark(c === "[" ? "[" : "![", 1, false, false));
       i += c === "[" ? 1 : 2;
-    } else if (c === "]") {
-      let j = stack.length - 1;
-      while (j > 0 && stack[j].c !== "[" && stack[j].c !== "![") {
-        j--;
-      }
-      if (j === 0) {
-        text += c;
-        i++;
-        continue;
-      }
-      const o = stack[j];
-      const tail = o.on ? link_tail(s, i + 1) : null;
-      fold(j);
-      drop();
-      if (tail !== null && link_safe(tail.k)) {
-        put(o.c === "![" ? { $: "Pict", x: spans_text(o.x), k: tail.k, t: tail.t } : { $: "Link", x: o.x, k: tail.k, t: tail.t });
-        stack.forEach((up) => up.on = up.on && up.c !== "[");
-        i = tail.end;
-      } else if (tail !== null) {
-        put(Text(s.slice(o.at, tail.end)));
-        i = tail.end;
-      } else if (o.c === "[" && o.x.length === 1 && o.x[0].$ === "Text" && ONLY.test(o.x[0].x)) {
-        put(Name(o.x[0].x));
-        i++;
+    } else if (c === "]" && brackets.length > 0) {
+      flush();
+      const o = brackets.pop();
+      const got = o.on ? link_tail(s, i + 1) ?? link_ref(s, i + 1, s.slice(o.at + o.c.length, i)) : null;
+      if (got !== null && link_safe(got.k)) {
+        emphasis(o);
+        const x = nodes_spans(o.node.next);
+        tail = o.node;
+        o.node.next = null;
+        o.node.x = o.c === "![" ? { $: "Pict", x: spans_text(x), k: got.k, t: got.t } : { $: "Link", x, k: got.k, t: got.t };
+        o.node.m = null;
+        marks = mark_drop(marks, o);
+        brackets.forEach((b) => b.on = b.on && (o.c === "![" || b.c !== "["));
+        i = got.end;
+      } else if (got !== null) {
+        emphasis(o);
+        tail = o.node;
+        o.node.next = null;
+        o.node.x = Text(s.slice(o.at, got.end));
+        o.node.m = null;
+        marks = mark_drop(marks, o);
+        i = got.end;
       } else {
-        put(Text(o.c));
-        o.x.forEach((x) => put(x));
-        text += c;
+        const name = o.c === "[" && o.node.next !== null && o.node.next === tail && tail.x.$ === "Text" && ONLY.test(tail.x.x) ? tail.x.x : null;
+        marks = mark_drop(marks, o);
+        o.node.m = null;
+        if (name !== null) {
+          tail = o.node;
+          o.node.next = null;
+          o.node.x = Name(name);
+        } else {
+          text += c;
+        }
         i++;
       }
     } else if (c === "*" || c === "_" || c === "~") {
       const n = run_len(s, i, c);
       const [open, close] = flanks(s, i, n, c);
-      const d = { c, n, len: n, close, at: i, on: false, x: [] };
-      const key = c + open + n % 3;
-      while (close && d.n > 0 && !(c === "~" && n > 2)) {
-        let j = stack.length - 1;
-        const low = floor.get(key) ?? 0;
-        for (;j > low; j--) {
-          const o = stack[j];
-          if (o.c === "[" || o.c === "![") {
-            j = 0;
-            break;
-          }
-          const three = c !== "~" && (o.close || open) && (o.len + n) % 3 === 0 && (o.len % 3 !== 0 || n % 3 !== 0);
-          if (o.c === c && !three && (c !== "~" || o.n === d.n)) {
-            break;
-          }
-        }
-        if (j <= low) {
-          floor.set(key, stack.length - 1);
-          break;
-        }
-        fold(j);
-        const o = stack[j];
-        const use = c === "~" ? d.n : o.n >= 2 && d.n >= 2 ? 2 : 1;
-        const span = c === "~" ? { $: "Strk", x: o.x } : use === 2 ? { $: "Bold", x: o.x } : { $: "Ital", x: o.x };
-        [o.n, d.n] = [o.n - use, d.n - use];
-        if (o.n === 0) {
-          drop();
-          put(span);
-        } else {
-          o.x = [span];
-        }
-      }
-      if (d.n > 0 && open && !(c === "~" && n > 2)) {
-        flush();
-        stack.push(d);
+      if (c === "~" && n > 2) {
+        text += s.slice(i, i + n);
       } else {
-        text += c.repeat(d.n);
+        mark(c, n, open, close);
       }
       i += n;
-    } else if ((c === "h" || c === "H") && (i === 0 || /[\s(*_~]/.test(s[i - 1])) && (BARE.lastIndex = i, BARE.test(s)) && !stack.some((o) => o.c === "[")) {
+    } else if ((c === "h" || c === "H" || c === "w" || c === "W") && (i === 0 || /[\s(*_~]/.test(s[i - 1])) && (BARE.lastIndex = i, BARE.test(s)) && !brackets.some((b) => b.c === "[")) {
       const k = url_bare(s, i);
-      put(k.length > BARE.lastIndex - i ? { $: "Link", x: [Text(k)], k, t: "" } : Text(k));
+      const url = /^www\./i.test(k) ? "http://" + k : k;
+      const ok = /^www\./i.test(k) ? /^www\.[A-Za-z0-9_-]/i.test(k) : k.length > BARE.lastIndex - i;
+      put(ok ? { $: "Link", x: [Text(k)], k: url, t: "" } : Text(k));
       i += k.length;
+    } else if (c === "@" && text !== "" && LOCAL.test(s[i - 1]) && !brackets.some((b) => b.c === "[") && (EMAIL.lastIndex = i + 1, EMAIL.test(s)) && !/[-_]$/.test(s.slice(i + 1, EMAIL.lastIndex))) {
+      let at = text.length;
+      while (at > 0 && LOCAL.test(text[at - 1])) {
+        at--;
+      }
+      const name = text.slice(at);
+      const domain = s.slice(i + 1, EMAIL.lastIndex);
+      text = text.slice(0, -name.length);
+      put({ $: "Link", x: [Text(name + "@" + domain)], k: "mailto:" + name + "@" + domain, t: "" });
+      i = EMAIL.lastIndex;
     } else {
       text += c;
       i++;
     }
   }
-  fold(0);
-  return stack[0].x;
+  flush();
+  emphasis(null);
+  return nodes_spans(head.next);
+  function emphasis(bottom) {
+    const floor = new Map;
+    let closer = bottom === null ? marks_first(marks) : bottom.next;
+    while (closer !== null) {
+      if (closer.c === "[" || closer.c === "![" || !closer.close) {
+        closer = closer.next;
+        continue;
+      }
+      const key = closer.c + closer.open + closer.len % 3;
+      let opener = closer.prev;
+      const low = floor.has(key) ? floor.get(key) : bottom;
+      while (opener !== null && opener !== bottom && opener !== low) {
+        const three = opener.c !== "~" && (opener.close || closer.open) && (opener.len + closer.len) % 3 === 0 && (opener.len % 3 !== 0 || closer.len % 3 !== 0);
+        if (opener.c === closer.c && opener.open && !three && (opener.c !== "~" || opener.n === closer.n)) {
+          break;
+        }
+        opener = opener.prev;
+      }
+      if (opener === null || opener === bottom || opener === low) {
+        floor.set(key, closer.prev);
+        const next = closer.next;
+        if (!closer.open) {
+          marks = mark_drop(marks, closer);
+        }
+        closer = next;
+        continue;
+      }
+      const c = closer.c;
+      const use = c === "~" ? closer.n : opener.n >= 2 && closer.n >= 2 ? 2 : 1;
+      [opener.n, closer.n] = [opener.n - use, closer.n - use];
+      opener.node.x = Text(c.repeat(opener.n));
+      closer.node.x = Text(c.repeat(closer.n));
+      const x = nodes_spans(opener.node.next === closer.node ? null : opener.node.next, closer.node);
+      const made = { x: c === "~" ? { $: "Strk", x } : use === 2 ? { $: "Bold", x } : { $: "Ital", x }, m: null, prev: opener.node, next: closer.node };
+      opener.node.next = made;
+      closer.node.prev = made;
+      for (let m = opener.next;m !== closer && m !== null; ) {
+        const next = m.next;
+        marks = mark_drop(marks, m);
+        m = next;
+      }
+      if (opener.n === 0) {
+        node_drop(opener.node);
+        marks = mark_drop(marks, opener);
+      }
+      if (closer.n === 0) {
+        const next = closer.next;
+        node_drop(closer.node);
+        marks = mark_drop(marks, closer);
+        closer = next;
+      }
+    }
+    while (marks !== null && marks !== bottom) {
+      marks.node.m = null;
+      marks = mark_drop(marks, marks);
+    }
+  }
+  function node_drop(node) {
+    node.prev.next = node.next;
+    if (node.next !== null) {
+      node.next.prev = node.prev;
+    } else {
+      tail = node.prev;
+    }
+  }
+}
+function mark_drop(marks, m) {
+  if (m.prev !== null) {
+    m.prev.next = m.next;
+  }
+  if (m.next !== null) {
+    m.next.prev = m.prev;
+  }
+  const last = marks === m ? m.prev : marks;
+  m.prev = m.next = null;
+  return last;
+}
+function marks_first(marks) {
+  let m = marks;
+  while (m?.prev) {
+    m = m.prev;
+  }
+  return m;
+}
+function nodes_spans(from, upto = null) {
+  const out = [];
+  for (let n = from;n !== null && n !== upto; n = n.next) {
+    spans_push(out, n.x);
+  }
+  return out;
+}
+function link_ref(s, i, label) {
+  if (DEFS.size === 0) {
+    return null;
+  }
+  const full = s[i] === "[" ? /^\[((?:[^\[\]\\]|\\.){0,999})\]/.exec(s.slice(i, i + 1002)) : null;
+  const def = DEFS.get(def_label(full === null || full[1] === "" ? label : full[1]));
+  return def === undefined ? null : { ...def, end: i + (full?.[0].length ?? 0) };
+}
+function def_label(s) {
+  return s.trim().replace(/\s+/g, " ").toLowerCase().toUpperCase();
+}
+function entity(s) {
+  const num = /^&#([xX]?)([0-9a-fA-F]+);$/.exec(s);
+  if (num !== null) {
+    const n = parseInt(num[2], num[1] === "" ? 10 : 16);
+    return String.fromCodePoint(n === 0 || n > 1114111 || n >= 55296 && n <= 57343 ? 65533 : n);
+  }
+  const code = ENTITIES.get(s.slice(1, -1));
+  return code === undefined ? null : String.fromCodePoint(code);
+}
+function text_unescape(s) {
+  return s.replace(/\\([!-/:-@[-`{-~])|&#?[0-9A-Za-z]{1,32};/g, (m, esc) => esc ?? entity(m) ?? m);
 }
 function spans_push(spans, span) {
   const last = spans[spans.length - 1];
@@ -790,7 +907,7 @@ function link_tail(s, i) {
   if (s[j] !== ")") {
     return null;
   }
-  return { k: k.replace(/\\([!-/:-@[-`{-~])/g, "$1"), t, end: j + 1 };
+  return { k: text_unescape(k), t: text_unescape(t), end: j + 1 };
 }
 function link_safe(k) {
   return /^(?:https?:\/\/|mailto:)[^\s\x00-\x1f]*$/i.test(k) || /^\/(?![\/\\])[^\s\x00-\x1f]*$/.test(k) || k === "/";
@@ -886,8 +1003,32 @@ function hunk_parse(lines, j, h) {
   return [out, j];
 }
 function md_parse(src) {
-  return blocks_parse(src.replace(/\r/g, "").split(`
-`), 0)[0];
+  const lines = src.replace(/\r/g, "").split(`
+`);
+  DEFS = defs_read(lines);
+  try {
+    return blocks_parse(lines, 0)[0];
+  } finally {
+    DEFS = new Map;
+  }
+}
+function defs_read(lines) {
+  const out = new Map;
+  let [fence, open] = [null, false];
+  for (const raw of lines) {
+    const l = raw.replace(MARKS, "").trimStart();
+    if (fence !== null) {
+      fence = fence_shuts(l, fence) ? null : fence;
+      continue;
+    }
+    fence = fence_open(l);
+    const def = fence === null && !open ? DEF.exec(l) : null;
+    if (def !== null && !out.has(def_label(def[1]))) {
+      out.set(def_label(def[1]), { k: text_unescape(def[2].replace(/^<(.*)>$/, "$1")), t: def[3] === undefined ? "" : text_unescape(def[3].slice(1, -1)) });
+    }
+    open = def === null && fence === null && l.trim() !== "" && !HEAD.test(l) && !RULE.test(l);
+  }
+  return out;
 }
 function blocks_parse(lines, d) {
   const out = [];
@@ -949,9 +1090,15 @@ function block_parse(lines, i, d) {
     return [{ $: "Code", k: "", x: body.join(`
 `) }, end];
   }
-  const end = runs((l, j) => l.trim() !== "" && !block_starts(lines, j));
-  return [{ $: "Para", x: span_parse(lines.slice(i, end).join(`
-`).trimStart()) }, end];
+  if (DEF.test(line)) {
+    const end = lines_run(lines, i, (l) => DEF.test(l));
+    return end < lines.length && lines[end].trim() !== "" ? block_parse(lines, end, d) : [null, end];
+  }
+  const end = runs((l, j) => l.trim() !== "" && !block_starts(lines, j) && !SETEXT.test(l));
+  const x = span_parse(lines.slice(i, end).join(`
+`).trimStart());
+  const under = SETEXT.exec(lines[end] ?? "");
+  return under === null ? [{ $: "Para", x }, end] : [{ $: "Head", k: under[1][0] === "=" ? 1 : 2, x }, end + 1];
 }
 function fence_open(line) {
   const m = FENCE.exec(line);

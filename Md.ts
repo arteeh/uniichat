@@ -65,7 +65,18 @@ const TASK  = /^\[([ xX])\](?=[ \t]|$)[ \t]?/;
 const PUNCT = /[\p{P}\p{S}]/u;
 // an autolink, <scheme:…>, at the scanner's point
 const AUTO  = /<((?:https?:\/\/|mailto:)[^\s<>]*)>/iy;
-const BARE  = /https?:\/\//iy;
+const MAIL  = /<([A-Za-z0-9.!#$%&'*+\/=?^_`{|}~-]+@[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*)>/y;
+const BARE  = /https?:\/\/|www\./iy;
+// a character of a bare email address's name, and its domain after its @
+const LOCAL = /[A-Za-z0-9._+-]/;
+const EMAIL = /[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)+/y;
+const ENTITY = /&(?:#[0-9]{1,7}|#[xX][0-9a-fA-F]{1,6}|[A-Za-z][A-Za-z0-9]{1,31});/y;
+// HTML's named entities (its 4.01 list), name:code point (hex)
+const ENTITIES = new Map(`AElig:c6 Aacute:c1 Acirc:c2 Agrave:c0 Alpha:391 Aring:c5 Atilde:c3 Auml:c4 Beta:392 Ccedil:c7 Chi:3a7 Dagger:2021 Delta:394 ETH:d0 Eacute:c9 Ecirc:ca Egrave:c8 Epsilon:395 Eta:397 Euml:cb Gamma:393 Iacute:cd Icirc:ce Igrave:cc Iota:399 Iuml:cf Kappa:39a Lambda:39b Mu:39c Ntilde:d1 Nu:39d OElig:152 Oacute:d3 Ocirc:d4 Ograve:d2 Omega:3a9 Omicron:39f Oslash:d8 Otilde:d5 Ouml:d6 Phi:3a6 Pi:3a0 Prime:2033 Psi:3a8 Rho:3a1 Scaron:160 Sigma:3a3 THORN:de Tau:3a4 Theta:398 Uacute:da Ucirc:db Ugrave:d9 Upsilon:3a5 Uuml:dc Xi:39e Yacute:dd Yuml:178 Zeta:396 aacute:e1 acirc:e2 acute:b4 aelig:e6 agrave:e0 alefsym:2135 alpha:3b1 amp:26 and:2227 ang:2220 aring:e5 asymp:2248 atilde:e3 auml:e4 bdquo:201e beta:3b2 brvbar:a6 bull:2022 cap:2229 ccedil:e7 cedil:b8 cent:a2 chi:3c7 circ:2c6 clubs:2663 cong:2245 copy:a9 crarr:21b5 cup:222a curren:a4 dArr:21d3 dagger:2020 darr:2193 deg:b0 delta:3b4 diams:2666 divide:f7 eacute:e9 ecirc:ea egrave:e8 empty:2205 emsp:2003 ensp:2002 epsilon:3b5 equiv:2261 eta:3b7 eth:f0 euml:eb euro:20ac exist:2203 fnof:192 forall:2200 frac12:bd frac14:bc frac34:be frasl:2044 gamma:3b3 ge:2265 gt:3e hArr:21d4 harr:2194 hearts:2665 hellip:2026 iacute:ed icirc:ee iexcl:a1 igrave:ec image:2111 infin:221e int:222b iota:3b9 iquest:bf isin:2208 iuml:ef kappa:3ba lArr:21d0 lambda:3bb lang:2329 laquo:ab larr:2190 lceil:2308 ldquo:201c le:2264 lfloor:230a lowast:2217 loz:25ca lrm:200e lsaquo:2039 lsquo:2018 lt:3c macr:af mdash:2014 micro:b5 middot:b7 minus:2212 mu:3bc nabla:2207 nbsp:a0 ndash:2013 ne:2260 ni:220b not:ac notin:2209 nsub:2284 ntilde:f1 nu:3bd oacute:f3 ocirc:f4 oelig:153 ograve:f2 oline:203e omega:3c9 omicron:3bf oplus:2295 or:2228 ordf:aa ordm:ba oslash:f8 otilde:f5 otimes:2297 ouml:f6 para:b6 part:2202 permil:2030 perp:22a5 phi:3c6 pi:3c0 piv:3d6 plusmn:b1 pound:a3 prime:2032 prod:220f prop:221d psi:3c8 quot:22 rArr:21d2 radic:221a rang:232a raquo:bb rarr:2192 rceil:2309 rdquo:201d real:211c reg:ae rfloor:230b rho:3c1 rlm:200f rsaquo:203a rsquo:2019 sbquo:201a scaron:161 sdot:22c5 sect:a7 shy:ad sigma:3c3 sigmaf:3c2 sim:223c spades:2660 sub:2282 sube:2286 sum:2211 sup:2283 sup1:b9 sup2:b2 sup3:b3 supe:2287 szlig:df tau:3c4 there4:2234 theta:3b8 thetasym:3d1 thinsp:2009 thorn:fe tilde:2dc times:d7 trade:2122 uArr:21d1 uacute:fa uarr:2191 ucirc:fb ugrave:f9 uml:a8 upsih:3d2 upsilon:3c5 uuml:fc weierp:2118 xi:3be yacute:fd yen:a5 yuml:ff zeta:3b6 zwj:200d zwnj:200c`.split(" ").map((e) => [e.split(":")[0], parseInt(e.split(":")[1], 16)]));
+// a link's reference definition, [label]: url "title", on a line
+const DEF   = /^ {0,3}\[((?:[^\[\]\\\n]|\\.){1,999})\]:[ \t]*(<[^<>\n]*>|\S+)(?:[ \t]+("(?:[^"\\\n]|\\.)*"|'(?:[^'\\\n]|\\.)*'|\((?:[^()\\\n]|\\.)*\)))?[ \t]*$/;
+// a setext heading's underline: = for a level 1, - for a level 2
+const SETEXT = /^ {0,3}(=+|-+)[ \t]*$/;
 const HEAD  = /^(#{1,6})\s+(.*)$/;
 const RULE  = /^\s*([-*_])(\s*\1){2,}\s*$/;
 const QUOT  = /^\s*>\s?/;
@@ -84,6 +95,13 @@ const DEPTH = 32;
 // how many lists and quotes deep a list is still read (past it, its
 // lines are text: a list in a list costs every line under it a copy)
 const DEEP  = 16;
+
+// Globals
+// =======
+
+// the reference definitions of the text md_parse reads (defs_read), by
+// label (def_label)
+let DEFS = new Map<string, { k: string; t: string }>();
 
 // Constructors
 // ============
@@ -117,51 +135,59 @@ function spans_by(s: string, re: RegExp, mark: (m: RegExpMatchArray) => Span): S
   return out;
 }
 
-// a mark the scanner holds open: a run of *, _ or ~ that may open
-// emphasis (n of its len left; close: it may close one too), or a [ or
-// ![ (at: where; on: it may still make a link, none in a link), and the
-// spans after it
-type Open = { c: string; n: number; len: number; close: boolean; at: number; on: boolean; x: Span[] };
+// the scanner's list: a node a span made (text, a mark's text, or a span
+// done), the nodes around it; a mark's node its mark (Mark)
+type Node = { x: Span; m: Mark | null; prev: Node | null; next: Node | null };
 
-// a text's spans, read left to right: a closing mark folds the spans
-// after its opener into a span (GFM's delimiter runs and brackets, its
-// rule of 3; a mark never closes across a [); marks left open are text.
-// Each step looks at most at a line, or moves past what it read
+// a mark the scanner holds: a run of *, _ or ~ (n of its len left; open,
+// close: whether it may open and close emphasis), or a [ or ![ (on: it
+// may still make a link: none in a link), at its node, from source
+// index at; the marks before and after it (GFM's delimiter stack)
+type Mark = { c: string; n: number; len: number; open: boolean; close: boolean; at: number; on: boolean; node: Node; prev: Mark | null; next: Mark | null };
+
+// a text's spans, read left to right as GFM's spec reads them: code
+// spans, autolinks, entities and escapes first; a ] makes a link (inline
+// or by a reference definition: DEFS) of its [, emphasis inside it
+// matched then; emphasis left is matched at the end, outermost last
+// (its delimiter runs, rule of 3); marks left are text. Every step moves
+// on past what it read, or looks at most to a line's end
 export function span_parse(s: string): Span[] {
-  const stack: Open[] = [{ c: "", n: 0, len: 0, close: false, at: 0, on: false, x: [] }];
-  // where no opener for a closer's key is (below it), so none is looked for again
-  const floor = new Map<string, number>();
+  const head: Node = { x: Text(""), m: null, prev: null, next: null };
+  let tail = head;
+  let marks: Mark | null = null;
+  const brackets: Mark[] = [];
   const ticks = ticks_at(s);
   let [i, text] = [0, ""];
-  const put = (span: Span) => {
-    flush();
-    spans_push(stack[stack.length - 1].x, span);
+  const add = (x: Span, m: Mark | null = null): Node => {
+    const node: Node = { x, m, prev: tail, next: null };
+    tail.next = node;
+    tail = node;
+    return node;
   };
   const flush = () => {
     if (text !== "") {
-      spans_push(stack[stack.length - 1].x, Text(text));
+      add(Text(text));
       text = "";
     }
   };
-  // the marks above j given up as text, into j
-  const fold = (j: number) => {
+  const put = (x: Span) => {
     flush();
-    while (stack.length - 1 > j) {
-      const o = stack.pop()!;
-      const into = stack[stack.length - 1].x;
-      spans_push(into, Text(o.c === "[" || o.c === "![" ? o.c : o.c.repeat(o.n)));
-      o.x.forEach((x) => spans_push(into, x));
-    }
-    floor.forEach((f, key) => floor.set(key, Math.min(f, j)));
+    add(x);
   };
-  // the top mark closed (its spans made a span)
-  const drop = () => {
-    stack.pop();
-    fold(stack.length - 1);
+  const mark = (c: string, n: number, open: boolean, close: boolean) => {
+    flush();
+    const node = add(Text(c === "[" || c === "![" ? c : c.repeat(n)));
+    const m: Mark = { c, n, len: n, open, close, at: i, on: true, node, prev: marks, next: null };
+    node.m = m;
+    if (marks !== null) {
+      marks.next = m;
+    }
+    marks = m;
+    return m;
   };
   while (i < s.length) {
     const c = s[i];
-    if (c === "\\" && i + 1 < s.length && (s[i + 1] === "\n" || PUNCT.test(s[i + 1]) && s.charCodeAt(i + 1) < 128)) {
+    if (c === "\\" && i + 1 < s.length && (s[i + 1] === "\n" || (PUNCT.test(s[i + 1]) && s.charCodeAt(i + 1) < 128))) {
       if (s[i + 1] === "\n") {
         text = text.trimEnd();
         put({ $: "Brk" });
@@ -173,6 +199,9 @@ export function span_parse(s: string): Span[] {
       text = text.trimEnd();
       put({ $: "Brk" });
       for (i++; s[i] === " " || s[i] === "\t"; i++);
+    } else if (c === "&" && (ENTITY.lastIndex = i, ENTITY.test(s)) && entity(s.slice(i, ENTITY.lastIndex)) !== null) {
+      text += entity(s.slice(i, ENTITY.lastIndex));
+      i = ENTITY.lastIndex;
     } else if (c === "`") {
       const n = run_len(s, i, c);
       const end = ticks(i + n, n);
@@ -187,93 +216,219 @@ export function span_parse(s: string): Span[] {
       const k = s.slice(i + 1, AUTO.lastIndex - 1);
       put(link_safe(k) ? { $: "Link", x: [Text(k)], k, t: "" } : Text(s.slice(i, AUTO.lastIndex)));
       i = AUTO.lastIndex;
+    } else if (c === "<" && (MAIL.lastIndex = i, MAIL.test(s))) {
+      const k = s.slice(i + 1, MAIL.lastIndex - 1);
+      put({ $: "Link", x: [Text(k)], k: "mailto:" + k, t: "" });
+      i = MAIL.lastIndex;
     } else if (c === "[" || (c === "!" && s[i + 1] === "[")) {
-      flush();
-      stack.push({ c: c === "[" ? "[" : "![", n: 1, len: 1, close: false, at: i, on: true, x: [] });
+      brackets.push(mark(c === "[" ? "[" : "![", 1, false, false));
       i += c === "[" ? 1 : 2;
-    } else if (c === "]") {
-      let j = stack.length - 1;
-      while (j > 0 && stack[j].c !== "[" && stack[j].c !== "![") {
-        j--;
-      }
-      if (j === 0) {
-        text += c;
-        i++;
-        continue;
-      }
-      const o = stack[j];
-      const tail = o.on ? link_tail(s, i + 1) : null;
-      fold(j);
-      drop();
-      if (tail !== null && link_safe(tail.k)) {
-        put(o.c === "![" ? { $: "Pict", x: spans_text(o.x), k: tail.k, t: tail.t } : { $: "Link", x: o.x, k: tail.k, t: tail.t });
-        stack.forEach((up) => (up.on = up.on && up.c !== "["));
-        i = tail.end;
-      } else if (tail !== null) {
-        put(Text(s.slice(o.at, tail.end)));
-        i = tail.end;
-      } else if (o.c === "[" && o.x.length === 1 && o.x[0].$ === "Text" && ONLY.test(o.x[0].x)) {
-        put(Name(o.x[0].x));
-        i++;
+    } else if (c === "]" && brackets.length > 0) {
+      flush();
+      const o = brackets.pop()!;
+      const got = o.on ? link_tail(s, i + 1) ?? link_ref(s, i + 1, s.slice(o.at + o.c.length, i)) : null;
+      if (got !== null && link_safe(got.k)) {
+        emphasis(o);
+        const x = nodes_spans(o.node.next);
+        tail = o.node;
+        o.node.next = null;
+        o.node.x = o.c === "![" ? { $: "Pict", x: spans_text(x), k: got.k, t: got.t } : { $: "Link", x, k: got.k, t: got.t };
+        o.node.m = null;
+        marks = mark_drop(marks, o);
+        brackets.forEach((b) => (b.on = b.on && (o.c === "![" || b.c !== "[")));
+        i = got.end;
+      } else if (got !== null) {
+        // a link where no link may go: its source, as text
+        emphasis(o);
+        tail = o.node;
+        o.node.next = null;
+        o.node.x = Text(s.slice(o.at, got.end));
+        o.node.m = null;
+        marks = mark_drop(marks, o);
+        i = got.end;
       } else {
-        put(Text(o.c));
-        o.x.forEach((x) => put(x));
-        text += c;
+        const name = o.c === "[" && o.node.next !== null && o.node.next === tail && tail.x.$ === "Text" && ONLY.test(tail.x.x) ? tail.x.x : null;
+        marks = mark_drop(marks, o);
+        o.node.m = null;
+        if (name !== null) {
+          tail = o.node;
+          o.node.next = null;
+          o.node.x = Name(name);
+        } else {
+          text += c;
+        }
         i++;
       }
     } else if (c === "*" || c === "_" || c === "~") {
       const n = run_len(s, i, c);
       const [open, close] = flanks(s, i, n, c);
-      const d = { c, n, len: n, close, at: i, on: false, x: [] };
-      const key = c + open + (n % 3);
-      while (close && d.n > 0 && !(c === "~" && n > 2)) {
-        let j = stack.length - 1;
-        const low = floor.get(key) ?? 0;
-        for (; j > low; j--) {
-          const o = stack[j];
-          if (o.c === "[" || o.c === "![") {
-            j = 0;
-            break;
-          }
-          const three = c !== "~" && (o.close || open) && (o.len + n) % 3 === 0 && (o.len % 3 !== 0 || n % 3 !== 0);
-          if (o.c === c && !three && (c !== "~" || o.n === d.n)) {
-            break;
-          }
-        }
-        if (j <= low) {
-          floor.set(key, stack.length - 1);
-          break;
-        }
-        fold(j);
-        const o = stack[j];
-        const use = c === "~" ? d.n : o.n >= 2 && d.n >= 2 ? 2 : 1;
-        const span: Span = c === "~" ? { $: "Strk", x: o.x } : use === 2 ? { $: "Bold", x: o.x } : { $: "Ital", x: o.x };
-        [o.n, d.n] = [o.n - use, d.n - use];
-        if (o.n === 0) {
-          drop();
-          put(span);
-        } else {
-          o.x = [span];
-        }
-      }
-      if (d.n > 0 && open && !(c === "~" && n > 2)) {
-        flush();
-        stack.push(d);
+      if (c === "~" && n > 2) {
+        text += s.slice(i, i + n);
       } else {
-        text += c.repeat(d.n);
+        mark(c, n, open, close);
       }
       i += n;
-    } else if ((c === "h" || c === "H") && (i === 0 || /[\s(*_~]/.test(s[i - 1])) && (BARE.lastIndex = i, BARE.test(s)) && !stack.some((o) => o.c === "[")) {
+    } else if ((c === "h" || c === "H" || c === "w" || c === "W") && (i === 0 || /[\s(*_~]/.test(s[i - 1])) && (BARE.lastIndex = i, BARE.test(s)) && !brackets.some((b) => b.c === "[")) {
       const k = url_bare(s, i);
-      put(k.length > BARE.lastIndex - i ? { $: "Link", x: [Text(k)], k, t: "" } : Text(k));
+      const url = /^www\./i.test(k) ? "http://" + k : k;
+      const ok = /^www\./i.test(k) ? /^www\.[A-Za-z0-9_-]/i.test(k) : k.length > BARE.lastIndex - i;
+      put(ok ? { $: "Link", x: [Text(k)], k: url, t: "" } : Text(k));
       i += k.length;
+    } else if (c === "@" && text !== "" && LOCAL.test(s[i - 1]) && !brackets.some((b) => b.c === "[") && (EMAIL.lastIndex = i + 1, EMAIL.test(s)) && !/[-_]$/.test(s.slice(i + 1, EMAIL.lastIndex))) {
+      // a bare email address: its name, read already, then its domain
+      let at = text.length;
+      while (at > 0 && LOCAL.test(text[at - 1])) {
+        at--;
+      }
+      const name = text.slice(at);
+      const domain = s.slice(i + 1, EMAIL.lastIndex);
+      text = text.slice(0, -name.length);
+      put({ $: "Link", x: [Text(name + "@" + domain)], k: "mailto:" + name + "@" + domain, t: "" });
+      i = EMAIL.lastIndex;
     } else {
       text += c;
       i++;
     }
   }
-  fold(0);
-  return stack[0].x;
+  flush();
+  emphasis(null);
+  return nodes_spans(head.next);
+
+  // emphasis matched over the marks after bottom (null: all), each
+  // closer with the nearest opener it may close (GFM's process emphasis);
+  // the marks after bottom then dropped, their nodes text
+  function emphasis(bottom: Mark | null): void {
+    const floor = new Map<string, Mark | null>();
+    let closer = bottom === null ? marks_first(marks) : bottom.next;
+    while (closer !== null) {
+      if (closer.c === "[" || closer.c === "![" || !closer.close) {
+        closer = closer.next;
+        continue;
+      }
+      const key = closer.c + closer.open + (closer.len % 3);
+      let opener = closer.prev;
+      const low = floor.has(key) ? floor.get(key)! : bottom;
+      while (opener !== null && opener !== bottom && opener !== low) {
+        const three = opener.c !== "~" && (opener.close || closer.open) && (opener.len + closer.len) % 3 === 0 && (opener.len % 3 !== 0 || closer.len % 3 !== 0);
+        if (opener.c === closer.c && opener.open && !three && (opener.c !== "~" || opener.n === closer.n)) {
+          break;
+        }
+        opener = opener.prev;
+      }
+      if (opener === null || opener === bottom || opener === low) {
+        floor.set(key, closer.prev);
+        const next = closer.next;
+        if (!closer.open) {
+          marks = mark_drop(marks, closer);
+        }
+        closer = next;
+        continue;
+      }
+      const c = closer.c;
+      const use = c === "~" ? closer.n : opener.n >= 2 && closer.n >= 2 ? 2 : 1;
+      [opener.n, closer.n] = [opener.n - use, closer.n - use];
+      opener.node.x = Text(c.repeat(opener.n));
+      closer.node.x = Text(c.repeat(closer.n));
+      const x = nodes_spans(opener.node.next === closer.node ? null : opener.node.next, closer.node);
+      const made: Node = { x: c === "~" ? { $: "Strk", x } : use === 2 ? { $: "Bold", x } : { $: "Ital", x }, m: null, prev: opener.node, next: closer.node };
+      opener.node.next = made;
+      closer.node.prev = made;
+      for (let m = opener.next; m !== closer && m !== null; ) {
+        const next: Mark | null = m.next;
+        marks = mark_drop(marks, m);
+        m = next;
+      }
+      if (opener.n === 0) {
+        node_drop(opener.node);
+        marks = mark_drop(marks, opener);
+      }
+      if (closer.n === 0) {
+        const next = closer.next;
+        node_drop(closer.node);
+        marks = mark_drop(marks, closer);
+        closer = next;
+      }
+    }
+    while (marks !== null && marks !== bottom) {
+      marks.node.m = null;
+      marks = mark_drop(marks, marks);
+    }
+  }
+
+  function node_drop(node: Node): void {
+    node.prev!.next = node.next;
+    if (node.next !== null) {
+      node.next.prev = node.prev;
+    } else {
+      tail = node.prev!;
+    }
+  }
+}
+
+// the marks' list (marks: its last) without m; its last after
+function mark_drop(marks: Mark | null, m: Mark): Mark | null {
+  if (m.prev !== null) {
+    m.prev.next = m.next;
+  }
+  if (m.next !== null) {
+    m.next.prev = m.prev;
+  }
+  const last = marks === m ? m.prev : marks;
+  m.prev = m.next = null;
+  return last;
+}
+
+function marks_first(marks: Mark | null): Mark | null {
+  let m = marks;
+  while (m?.prev) {
+    m = m.prev;
+  }
+  return m;
+}
+
+// the spans of the nodes from `from` up to `upto` (null: the end), text
+// joined
+function nodes_spans(from: Node | null, upto: Node | null = null): Span[] {
+  const out: Span[] = [];
+  for (let n = from; n !== null && n !== upto; n = n.next) {
+    spans_push(out, n.x);
+  }
+  return out;
+}
+
+// a reference link's target right after its ] at i: [ref] (or [] for
+// the link's own text, `label`), or none (a shortcut, [label] alone); its
+// definition's url and title (DEFS), and where it ends; null if none
+function link_ref(s: string, i: number, label: string): { k: string; t: string; end: number } | null {
+  if (DEFS.size === 0) {
+    return null;
+  }
+  const full = s[i] === "[" ? /^\[((?:[^\[\]\\]|\\.){0,999})\]/.exec(s.slice(i, i + 1002)) : null;
+  const def = DEFS.get(def_label(full === null || full[1] === "" ? label : full[1]));
+  return def === undefined ? null : { ...def, end: i + (full?.[0].length ?? 0) };
+}
+
+// a label as definitions match it: its case and its runs of blanks not
+// told apart
+function def_label(s: string): string {
+  return s.trim().replace(/\s+/g, " ").toLowerCase().toUpperCase();
+}
+
+// an entity (&amp;, &#35;, &#x23;) as the text it names; null: none
+function entity(s: string): string | null {
+  const num = /^&#([xX]?)([0-9a-fA-F]+);$/.exec(s);
+  if (num !== null) {
+    const n = parseInt(num[2], num[1] === "" ? 10 : 16);
+    return String.fromCodePoint(n === 0 || n > 0x10ffff || (n >= 0xd800 && n <= 0xdfff) ? 0xfffd : n);
+  }
+  const code = ENTITIES.get(s.slice(1, -1));
+  return code === undefined ? null : String.fromCodePoint(code);
+}
+
+// a text's entities and escapes as what they stand for (a link's url and
+// title)
+function text_unescape(s: string): string {
+  return s.replace(/\\([!-/:-@[-`{-~])|&#?[0-9A-Za-z]{1,32};/g, (m, esc) => esc ?? entity(m) ?? m);
 }
 
 // a span put after spans: text joins the text before it
@@ -385,7 +540,7 @@ function link_tail(s: string, i: number): { k: string; t: string; end: number } 
   if (s[j] !== ")") {
     return null;
   }
-  return { k: k.replace(/\\([!-/:-@[-`{-~])/g, "$1"), t, end: j + 1 };
+  return { k: text_unescape(k), t: text_unescape(t), end: j + 1 };
 }
 
 // whether a link may go to k: http, https or mailto, or a path on this
@@ -501,7 +656,35 @@ function hunk_parse(lines: string[], j: number, h: RegExpExecArray): [Line[] | n
 }
 
 export function md_parse(src: string): Block[] {
-  return blocks_parse(src.replace(/\r/g, "").split("\n"), 0)[0];
+  const lines = src.replace(/\r/g, "").split("\n");
+  DEFS = defs_read(lines);
+  try {
+    return blocks_parse(lines, 0)[0];
+  } finally {
+    DEFS = new Map();
+  }
+}
+
+// a text's reference definitions, read first (a link may come before
+// its definition): a definition line where a paragraph may start, in a
+// quote or a list too, never in code; the first of a label counts
+function defs_read(lines: string[]): Map<string, { k: string; t: string }> {
+  const out = new Map<string, { k: string; t: string }>();
+  let [fence, open] = [null as string | null, false];
+  for (const raw of lines) {
+    const l = raw.replace(MARKS, "").trimStart();
+    if (fence !== null) {
+      fence = fence_shuts(l, fence) ? null : fence;
+      continue;
+    }
+    fence = fence_open(l);
+    const def = fence === null && !open ? DEF.exec(l) : null;
+    if (def !== null && !out.has(def_label(def[1]))) {
+      out.set(def_label(def[1]), { k: text_unescape(def[2].replace(/^<(.*)>$/, "$1")), t: def[3] === undefined ? "" : text_unescape(def[3].slice(1, -1)) });
+    }
+    open = def === null && fence === null && l.trim() !== "" && !HEAD.test(l) && !RULE.test(l);
+  }
+  return out;
 }
 
 // the blocks of lines d lists or quotes deep, and whether a blank line
@@ -566,8 +749,16 @@ function block_parse(lines: string[], i: number, d: number): [Block | null, numb
     }
     return [{ $: "Code", k: "", x: body.join("\n") }, end];
   }
-  const end = runs((l, j) => l.trim() !== "" && !block_starts(lines, j));
-  return [{ $: "Para", x: span_parse(lines.slice(i, end).join("\n").trimStart()) }, end];
+  // definitions (defs_read) make no block
+  if (DEF.test(line)) {
+    const end = lines_run(lines, i, (l) => DEF.test(l));
+    return end < lines.length && lines[end].trim() !== "" ? block_parse(lines, end, d) : [null, end];
+  }
+  // a paragraph; with a line of = or - under it, a heading (setext)
+  const end = runs((l, j) => l.trim() !== "" && !block_starts(lines, j) && !SETEXT.test(l));
+  const x = span_parse(lines.slice(i, end).join("\n").trimStart());
+  const under = SETEXT.exec(lines[end] ?? "");
+  return under === null ? [{ $: "Para", x }, end] : [{ $: "Head", k: under[1][0] === "=" ? 1 : 2, x }, end + 1];
 }
 
 // a fence's mark (``` or ~~~, or longer) if line opens code; a ``` one

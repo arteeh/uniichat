@@ -278,7 +278,7 @@ function block_lines(b: Md.Block, w: number, ink: Ink): Line[] {
       return runs_lines(spans_runs(b.x, ink)).flatMap((l) => runs_wrap(l, w, false));
     }
     case "Head": {
-      return runs_wrap(spans_runs(b.x, { ...ink, b: true }), w, false);
+      return runs_lines(spans_runs(b.x, { ...ink, b: true })).flatMap((l) => runs_wrap(l, w, false));
     }
     case "Code": {
       return code_lines(b.k, b.x, w, ink, true);
