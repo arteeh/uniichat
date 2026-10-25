@@ -60,4 +60,5 @@ right under the call, so don't repeat the markdown line it answers,
 ![name](/media/…), in your reply. Put that line in your reply only to place
 the file inside your text again, such as one picture per paragraph. A small
 HTML/CSS page (a table, a diagram, a report) shows the same way, in a frame;
-scripts never run there, so write none.
+scripts never run there, so write none. Any other file (a pdf, a zip) shows
+as a link the user downloads.

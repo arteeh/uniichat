@@ -23,7 +23,7 @@ import * as path from "node:path";
 import * as Client from "./Client.ts";
 import { Machine, WIN, type Job } from "./Machine.ts";
 import { Mcp } from "./Mcp.ts";
-import { FRAME, PING, QUIT, RETRY, TICK, WIRE } from "./View.ts";
+import { FRAME, media_kind, PING, QUIT, RETRY, TICK, WIRE } from "./View.ts";
 
 // Constants
 // =========
@@ -136,7 +136,8 @@ export async function run(given: string | undefined): Promise<void> {
 }
 
 // show: each file streamed to the server's media store (Memory.media_add),
-// its markdown line answered; one it refuses, why
+// its markdown line answered (one that isn't media, a link: downloaded);
+// one it refuses, why
 async function show(job: Job, work: string, url: string, token: string, signal: AbortSignal): Promise<{ text: string; fail: boolean }> {
   const root = work.startsWith("~/") ? os.homedir() + work.slice(1) : work;
   const cwd = path.join(root, path.basename(job.cwd));
@@ -145,7 +146,8 @@ async function show(job: Job, work: string, url: string, token: string, signal: 
   for (const p of [job.input.paths ?? []].flat().map(String)) {
     const out = await show_one(path.resolve(cwd, p), p, url, token, signal);
     fail ||= "error" in out;
-    lines.push("error" in out ? out.error : "![" + path.basename(p).replace(/[[\]\\\n]/g, "") + "](/media/" + out.name + ")");
+    const stored = "error" in out ? "" : "/media/" + out.name;
+    lines.push("error" in out ? out.error : (media_kind(stored) === null ? "" : "!") + "[" + path.basename(p).replace(/[[\]\\\n]/g, "") + "](" + stored + ")");
   }
   return { text: lines.join("\n"), fail };
 }

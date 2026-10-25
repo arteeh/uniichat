@@ -495,6 +495,14 @@ function file_html(shown: string, from: number, lines: string[]): string {
   return `<pre class="diff" style="--nw:${nw}ch">${head}<code>${body}</code></pre>`;
 }
 
+// a file of the media store that isn't media (View.store_file): a chip,
+// its name and its size (main.ts sizes, once known), downloaded under
+// its name
+function chip_html(url: string, name: string): string {
+  const shown = name.trim() || url.split("/").pop()!;
+  return `<a class="file" href="${esc(url)}" download="${esc(shown)}" title="Download ${esc(shown)}"><span class="ic">📎</span><span class="fname">${esc(shown)}</span><small data-of="${esc(url)}"></small></a>`;
+}
+
 function spans_html(spans: Md.Span[]): string {
   return spans.map(span_html).join("");
 }
@@ -517,14 +525,18 @@ function span_html(s: Md.Span): string {
       return `<del>${spans_html(s.x)}</del>`;
     }
     case "Link": {
+      if (View.store_file(s.k)) {
+        return chip_html(s.k, Md.spans_text(s.x));
+      }
       return `<a href="${esc(s.k)}"${s.t === "" ? "" : ` title="${esc(s.t)}"`} target="_blank" rel="noopener">${spans_html(s.x)}</a>`;
     }
-    case "Pict": { // a file of the media store inline (an image opens whole), any other a link
+    case "Pict": { // a file of the media store inline (an image opens whole), a file that isn't media its chip, any other a link
       const [k, title, kind] = [esc(s.k), s.t === "" ? "" : ` title="${esc(s.t)}"`, View.media_kind(s.k)];
       return kind === "image" ? `<a class="media" href="${k}" target="_blank"><img src="${k}" alt="${esc(s.x)}"${title} loading="lazy"></a>`
         : kind === "video" ? `<video class="media" src="${k}"${title} controls preload="metadata"></video>`
         : kind === "audio" ? `<audio class="media" src="${k}"${title} controls preload="metadata"></audio>`
         : kind === "html" ? `<iframe class="media page" src="${k}" title="${esc(s.t || s.x)}" sandbox="allow-same-origin allow-popups" loading="lazy"></iframe>`
+        : View.store_file(s.k) ? chip_html(s.k, s.x)
         : `<a href="${k}"${title} target="_blank" rel="noopener">${esc(s.x || s.k)}</a>`;
     }
     case "Brk": {

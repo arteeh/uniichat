@@ -17,7 +17,7 @@
 
 import type { Kind } from "./AskAI.ts";
 import * as Call from "./Call.ts";
-import type * as Md from "./Md.ts";
+import * as Md from "./Md.ts";
 import * as Theme from "./Theme.ts";
 import * as View from "./View.ts";
 
@@ -408,12 +408,13 @@ function span_runs(s: Md.Span, ink: Ink): Run[] {
     case "Strk": {
       return spans_runs(s.x, { ...ink, t: true });
     }
-    case "Link": {
-      return spans_runs(s.x, { ...ink, u: true, k: text_clean(site_url(s.k)) });
+    case "Link": { // a file of the media store: as a file pasted is (Pict)
+      return View.store_file(s.k) ? spans_runs([{ $: "Pict", x: Md.spans_text(s.x), k: s.k, t: s.t }], ink) : spans_runs(s.x, { ...ink, u: true, k: text_clean(site_url(s.k)) });
     }
-    case "Pict": { // an image (a video, a sound, a page): its alt, then its full url
+    case "Pict": { // an image (a video, a sound, a page; any other file of the store): its alt, then its full url
       const url = text_clean(site_url(s.k));
-      return [Run("🖼 " + (text_clean(s.x) || "image") + " ", ink), Run(url, { ...ink, u: true, k: url })];
+      const file = View.store_file(s.k);
+      return [Run((file ? "📎 " : "🖼 ") + (text_clean(s.x) || (file ? "file" : "image")) + " ", ink), Run(url, { ...ink, u: true, k: url })];
     }
     case "Name": {
       return [Run("[" + text_clean(s.x) + "]", { ...ink, b: true, u: true })];

@@ -895,7 +895,7 @@ function name_word(word) {
 // Md.ts
 var NAME2 = new RegExp("\\[(" + NAME + ")\\]", "g");
 var ONLY = new RegExp("^(?:" + NAME + ")$");
-var MEDIA_URL = /\/media\/[0-9a-f]{16}\.[a-z0-9]{1,8}(?=\))/y;
+var MEDIA_URL = /\/media\/[0-9a-f]{16}\.[a-z0-9]{1,10}(?=\))/y;
 var LIST2 = /^ {0,3}([-*+]|\d{1,9}[.)])(?=[ \t]|$)/;
 var FENCE = /^ {0,3}(`{3,}|~{3,})/;
 var TASK = /^\[([ xX])\](?=[ \t]|$)[ \t]?/;
@@ -1393,8 +1393,8 @@ function md_pasted(s) {
 `) {
       a--;
     }
-    const from = a - 1;
-    if (url !== null && s[a] === "[" && s[from] === "!" && from >= (out.at(-1)?.[1] ?? 0)) {
+    const from = s[a - 1] === "!" ? a - 1 : a;
+    if (url !== null && s[a] === "[" && from >= (out.at(-1)?.[1] ?? 0)) {
       out.push([from, MEDIA_URL.lastIndex + 1, s.slice(a + 1, k), url[0]]);
     }
   }
@@ -1980,10 +1980,28 @@ var MEDIA = new Map([
   ["html", "text/html"]
 ]);
 var MEDIA_AS = new Map([["jpg", "jpeg"], ["m4v", "mp4"], ["oga", "ogg"], ["htm", "html"]]);
+var STORED = /^[0-9a-f]{16}\.([a-z0-9]{1,10})$/;
 function media_kind(url) {
-  const m = /^\/(?:media|image)\/[0-9a-f]{16}\.([a-z0-9]+)$/.exec(url);
-  const type = m === null ? undefined : MEDIA.get(m[1]);
+  const m = /^\/(?:media|image)\/[0-9a-f]{16}\.([a-z0-9]{1,10})$/.exec(url);
+  return m === null ? null : ext_kind(m[1]);
+}
+function ext_kind(ext) {
+  const type = MEDIA.get(ext);
   return type === undefined ? null : type === "text/html" ? "html" : type.split("/")[0];
+}
+function store_file(url) {
+  return url.startsWith("/media/") && STORED.test(url.slice("/media/".length)) && media_kind(url) === null;
+}
+function media_ext(file) {
+  const dot = file.lastIndexOf(".");
+  const ext = dot < 0 ? "" : file.slice(dot + 1).toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 10);
+  return MEDIA_AS.get(ext) ?? ext;
+}
+function size_show(bytes) {
+  const units = ["B", "KB", "MB", "GB"];
+  const k = Math.min(units.length - 1, Math.max(0, Math.floor(Math.log(Math.max(bytes, 1)) / Math.log(1024))));
+  const n = bytes / 1024 ** k;
+  return (k === 0 ? String(bytes) : n >= 100 ? n.toFixed(0) : n.toFixed(1)) + " " + units[k];
 }
 var IMAGE = 2 ** 20;
 var PIXELS = 2 ** 28;
@@ -2650,7 +2668,7 @@ function box_insert(text) {
 function box_put(item) {
   put(item);
 }
-function item_new(name, url, state, kind = media_kind(url) ?? "") {
+function item_new(name, url, state, kind = media_kind(url) ?? "file", size = null) {
   const item = document.createElement("span");
   item.className = "item";
   item.contentEditable = "false";
@@ -2674,7 +2692,16 @@ function item_new(name, url, state, kind = media_kind(url) ?? "") {
   } else {
     const tile = document.createElement("span");
     tile.className = "tile";
-    tile.textContent = (kind === "audio" ? "♪ " : kind === "html" ? "\uD83D\uDCC4 " : "") + name;
+    tile.textContent = (kind === "audio" ? "♪ " : kind === "html" ? "\uD83D\uDCC4 " : kind === "file" ? "\uD83D\uDCCE " : "") + name;
+    if (kind === "file") {
+      const small = document.createElement("small");
+      small.textContent = size === null ? "" : size_show(size);
+      if (size === null && url.startsWith("/media/")) {
+        small.dataset.of = url;
+      }
+      tile.append(small);
+      box_sizes(tile);
+    }
     item.append(tile);
   }
   const note = document.createElement("span");
@@ -2687,8 +2714,29 @@ function item_state(item, state, note, url = "") {
   item.dataset.state = state;
   item.querySelector(".state").textContent = note;
   if (url !== "") {
-    item.dataset.md = "![" + (item.dataset.name ?? "").replace(/[[\]\\\n]/g, "") + "](" + url + ")";
+    const bang = media_kind(url) === null ? "" : "!";
+    item.dataset.md = bang + "[" + (item.dataset.name ?? "").replace(/[[\]\\\n]/g, "") + "](" + url + ")";
   }
+}
+var SIZES = new Map;
+function box_sizes(el) {
+  for (const small of el.querySelectorAll("[data-of]:empty")) {
+    const url = small.dataset.of;
+    const got = SIZES.get(url) ?? size_ask(url);
+    SIZES.set(url, got);
+    got.then((text) => {
+      small.textContent ||= text;
+      if (text === "") {
+        SIZES.delete(url);
+      }
+    });
+  }
+}
+async function size_ask(url) {
+  const res = await fetch(url, { headers: { range: "bytes=0-0" } }).catch(() => null);
+  res?.body?.cancel().catch(() => {});
+  const total = /\/(\d+)$/.exec(res?.headers.get("content-range") ?? "")?.[1] ?? (res?.ok ? res.headers.get("content-length") : null);
+  return total == null ? "" : size_show(Number(total));
 }
 function box_items() {
   return [...BOX.querySelectorAll(".item")];
@@ -2892,12 +2940,13 @@ function html_media(el) {
   if (md !== undefined && got.length === 1 && got[0][1] === md.length) {
     return { name: got[0][2], url: got[0][3] };
   }
-  const src = ["IMG", "VIDEO", "AUDIO", "SOURCE", "IFRAME"].includes(el.nodeName) ? el.getAttribute("src") : null;
+  const src = ["IMG", "VIDEO", "AUDIO", "SOURCE", "IFRAME"].includes(el.nodeName) ? el.getAttribute("src") : el.nodeName === "A" ? el.getAttribute("href") : null;
   const url = src === null ? null : new URL(src, location.href);
-  if (url === null || url.origin !== location.origin || media_kind(url.pathname) === null) {
+  const ok = url !== null && (el.nodeName === "A" ? store_file(url.pathname) : media_kind(url.pathname) !== null);
+  if (url === null || url.origin !== location.origin || !ok) {
     return null;
   }
-  const name = el.getAttribute("alt") || el.getAttribute("title") || url.pathname.split("/").pop();
+  const name = el.getAttribute("download") || el.getAttribute("alt") || el.getAttribute("title") || url.pathname.split("/").pop();
   return { name, url: url.pathname };
 }
 
@@ -3271,6 +3320,10 @@ function file_html(shown, from, lines) {
   const body = lines.map((x, k) => `<span class="file"><i>${from + k}</i>${esc(x)}</span>`).join("");
   return `<pre class="diff" style="--nw:${nw}ch">${head}<code>${body}</code></pre>`;
 }
+function chip_html(url, name) {
+  const shown = name.trim() || url.split("/").pop();
+  return `<a class="file" href="${esc(url)}" download="${esc(shown)}" title="Download ${esc(shown)}"><span class="ic">\uD83D\uDCCE</span><span class="fname">${esc(shown)}</span><small data-of="${esc(url)}"></small></a>`;
+}
 function spans_html(spans) {
   return spans.map(span_html).join("");
 }
@@ -3292,11 +3345,14 @@ function span_html(s) {
       return `<del>${spans_html(s.x)}</del>`;
     }
     case "Link": {
+      if (store_file(s.k)) {
+        return chip_html(s.k, spans_text(s.x));
+      }
       return `<a href="${esc(s.k)}"${s.t === "" ? "" : ` title="${esc(s.t)}"`} target="_blank" rel="noopener">${spans_html(s.x)}</a>`;
     }
     case "Pict": {
       const [k, title, kind] = [esc(s.k), s.t === "" ? "" : ` title="${esc(s.t)}"`, media_kind(s.k)];
-      return kind === "image" ? `<a class="media" href="${k}" target="_blank"><img src="${k}" alt="${esc(s.x)}"${title} loading="lazy"></a>` : kind === "video" ? `<video class="media" src="${k}"${title} controls preload="metadata"></video>` : kind === "audio" ? `<audio class="media" src="${k}"${title} controls preload="metadata"></audio>` : kind === "html" ? `<iframe class="media page" src="${k}" title="${esc(s.t || s.x)}" sandbox="allow-same-origin allow-popups" loading="lazy"></iframe>` : `<a href="${k}"${title} target="_blank" rel="noopener">${esc(s.x || s.k)}</a>`;
+      return kind === "image" ? `<a class="media" href="${k}" target="_blank"><img src="${k}" alt="${esc(s.x)}"${title} loading="lazy"></a>` : kind === "video" ? `<video class="media" src="${k}"${title} controls preload="metadata"></video>` : kind === "audio" ? `<audio class="media" src="${k}"${title} controls preload="metadata"></audio>` : kind === "html" ? `<iframe class="media page" src="${k}" title="${esc(s.t || s.x)}" sandbox="allow-same-origin allow-popups" loading="lazy"></iframe>` : store_file(s.k) ? chip_html(s.k, s.x) : `<a href="${k}"${title} target="_blank" rel="noopener">${esc(s.x || s.k)}</a>`;
     }
     case "Brk": {
       return "<br>";
@@ -3953,8 +4009,9 @@ var FAILED2 = "A file in the message didn't upload: delete it (Backspace after i
 function attach(files) {
   for (const file of files) {
     const name = file.name.replace(/[[\]\\\n]/g, "") || "file";
-    const kind = file.type === "text/html" ? "html" : file.type.split("/")[0];
-    const item = item_new(name, kind === "image" || kind === "video" ? URL.createObjectURL(file) : "", "up", kind);
+    const ext = media_ext(file.name);
+    const kind = ext !== "" ? ext_kind(ext) ?? "file" : file.type.startsWith("image/") ? "image" : "file";
+    const item = item_new(name, kind === "image" || kind === "video" ? URL.createObjectURL(file) : "", "up", kind, file.size);
     box_put(item);
     upload(item, file);
   }
@@ -4493,6 +4550,7 @@ function paint() {
   }
   markup($2("#log .tail"), view_tail(v).map(row_html));
   folds();
+  box_sizes($2("#log"));
   frames();
   const back = P.back === null ? null : document.querySelector(`#log [data-a="${P.back.a}"]`);
   if (back !== null && P.back !== null) {

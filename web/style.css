@@ -141,7 +141,8 @@ body:is(.account, .tree) footer > :not(#toast) { display: none; }
    its foot while it uploads (a bar as far as it is) or was refused */
 .field .item { position: relative; display: inline-block; width: 96px; height: 72px; margin: 2px 2px; vertical-align: bottom; overflow: hidden; border: 1px solid var(--hair); border-radius: 8px; background: var(--block); }
 .field .item > :is(img, video) { display: block; width: 100%; height: 100%; object-fit: cover; pointer-events: none; }
-.field .item .tile { display: flex; align-items: center; justify-content: center; height: 100%; padding: 4px 6px; font: 12px/1.3 var(--sans); color: var(--mid); text-align: center; overflow: hidden; overflow-wrap: anywhere; }
+.field .item .tile { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; padding: 4px 6px; font: 12px/1.3 var(--sans); color: var(--mid); text-align: center; overflow: hidden; overflow-wrap: anywhere; }
+.field .item .tile small { font-size: 11px; color: var(--soft); }
 .field .item .state { position: absolute; inset: auto 0 0; padding: 1px 6px; font: 600 11px/1.5 var(--sans); color: #fff; background: linear-gradient(to right, rgb(0 0 0 / .75) var(--part, 0%), rgb(0 0 0 / .45) var(--part, 0%)); }
 .field .item[data-state=ok] .state { display: none; }
 .field .item[data-state=up] > :is(img, video) { opacity: .6; }
@@ -394,6 +395,13 @@ header > .imping { display: flex; flex-direction: column; justify-content: cente
 .msg .media { display: block; width: fit-content; max-width: 100%; margin: .4em 0; }
 .msg :is(img, video):is(.media, .media > *) { display: block; max-width: 100%; max-height: 70vh; width: auto; height: auto; border-radius: 8px; }
 .msg audio.media { width: min(100%, 480px); }
+/* a file of the store that isn't media (Html.ts file_html): a chip, its
+   name and size, downloaded on a click */
+.msg a.file { display: inline-flex; align-items: center; gap: 8px; max-width: 100%; margin: .2em 0; padding: 6px 12px; border: 1px solid var(--frame); border-radius: 10px; background: var(--lift); color: var(--ink); font: 14px/1.4 var(--sans); font-style: normal; text-decoration: none; vertical-align: middle; }
+.msg a.file:hover { background: var(--hover); }
+.msg a.file .fname { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.msg a.file small { flex: none; color: var(--mid); font-size: 12px; }
+.msg a.file small:empty { display: none; }
 .msg .media + br { display: none; }
 /* a page in a bubble as wide as a bubble may be (as wide as its text, a
    frame would be a frame's default 300px) */

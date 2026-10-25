@@ -1743,16 +1743,22 @@ export namespace Main {
     };
   }
 
-  // a media file (Memory.media_add), or the bytes a Range asks of it (a
-  // video or a sound seeking); never sniffed as another type, and an SVG
-  // never runs a script, opened as a page too
+  // a file of the media store (Memory.media_add), or the bytes a Range
+  // asks of it (a video or a sound seeking); never sniffed as another
+  // type, and an SVG never runs a script, opened as a page too. A file of
+  // no kind the chat shows (View.MEDIA) is only ever downloaded: nothing
+  // uploaded runs on the app's origin
   export function media(file: string | null, req: Request): Response {
     if (file === null) {
       return new Response("not found", { status: 404 });
     }
-    const type = MEDIA.get(file.split(".").pop()!) ?? "application/octet-stream";
+    const type = MEDIA.get(file.split(".").pop()!);
     const size = fs.statSync(file).size;
-    const headers: Record<string, string> = { "content-type": type, "cache-control": "private, max-age=31536000, immutable", "accept-ranges": "bytes", "x-content-type-options": "nosniff" };
+    const headers: Record<string, string> = { "content-type": type ?? "application/octet-stream", "cache-control": "private, max-age=31536000, immutable", "accept-ranges": "bytes", "x-content-type-options": "nosniff" };
+    if (type === undefined) {
+      headers["content-disposition"] = "attachment";
+      headers["content-security-policy"] = "default-src 'none'; sandbox";
+    }
     if (type === "image/svg+xml") {
       headers["content-security-policy"] = "default-src 'none'; style-src 'unsafe-inline'; sandbox";
     }

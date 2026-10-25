@@ -10,7 +10,7 @@
 // by a scanner (span_parse), and every line by checks that look at each
 // character a bounded number of times, as a message can be long (100 KB
 // and more, read again as it streams). `md_plain` reads text as it is:
-// paragraphs, lines, names and media pasted only. `md_output` reads a tool's result
+// paragraphs, lines, names and the media store's files pasted only. `md_output` reads a tool's result
 // as a file's lines: a read's as its lines, a unified diff (Machine.ts
 // writes them, git too) as its file and hunks, any other text as lines
 // named "result", so every result looks as a read does. Tokens hold
@@ -59,7 +59,7 @@ export type Block =
 const NAME  = new RegExp("\\[(" + Names.NAME + ")\\]", "g");
 const ONLY  = new RegExp("^(?:" + Names.NAME + ")$");
 // a media store's file, right after a pasted file's ](: its url
-const MEDIA_URL = /\/media\/[0-9a-f]{16}\.[a-z0-9]{1,8}(?=\))/y;
+const MEDIA_URL = /\/media\/[0-9a-f]{16}\.[a-z0-9]{1,10}(?=\))/y;
 const LIST  = /^ {0,3}([-*+]|\d{1,9}[.)])(?=[ \t]|$)/;
 const FENCE = /^ {0,3}(`{3,}|~{3,})/;
 const TASK  = /^\[([ xX])\](?=[ \t]|$)[ \t]?/;
@@ -658,10 +658,12 @@ function plain_line(s: string): Span[] {
   return [...out, ...spans_by(s.slice(at), NAME, (m) => Name(m[1]))];
 }
 
-// the media store's files pasted in a text, ![name](/media/…), each its
-// start and end, its name and its url: each found from its "](/media/",
-// its ![ looked for back to the bracket before (so each character is
-// looked at once or twice), on its line, its name 999 characters at most
+// the media store's files pasted in a text, ![name](/media/…) (a file
+// that isn't media is sent as a link, [name](/media/…), main.ts), each
+// its start and end, its name and its url: each found from its
+// "](/media/", its [ looked for back to the bracket before (so each
+// character is looked at once or twice), on its line, its name 999
+// characters at most
 export function md_pasted(s: string): Array<[number, number, string, string]> {
   const out: Array<[number, number, string, string]> = [];
   for (let k = s.indexOf("](/media/"); k >= 0; k = s.indexOf("](/media/", k + 1)) {
@@ -671,8 +673,8 @@ export function md_pasted(s: string): Array<[number, number, string, string]> {
     while (a >= 0 && k - a <= 1000 && s[a] !== "[" && s[a] !== "]" && s[a] !== "\n") {
       a--;
     }
-    const from = a - 1;
-    if (url !== null && s[a] === "[" && s[from] === "!" && from >= (out.at(-1)?.[1] ?? 0)) {
+    const from = s[a - 1] === "!" ? a - 1 : a;
+    if (url !== null && s[a] === "[" && from >= (out.at(-1)?.[1] ?? 0)) {
       out.push([from, MEDIA_URL.lastIndex + 1, s.slice(a + 1, k), url[0]]);
     }
   }
@@ -703,7 +705,8 @@ export function md_output(s: string, name = "result"): Block[] {
 }
 
 // a show tool's result (Machine.ts): each line that is a file of the
-// media store, ![name](/media/…), drawn as a message draws it, a
+// media store, ![name](/media/…) (or a file's [name](/media/…): Device.ts
+// show), drawn as a message draws it, a
 // paragraph of its own; the lines between (a file refused, saying why) as
 // md_output's. One refused marks the whole result failed ("error: "
 // before its first line): dropped, its own line says it

@@ -211,7 +211,7 @@ while its device runs, and leaves the list when it stops: a task that needs
 one not listed can't be done now, so tell the user it isn't available.`;
 const DEVICES_NONE = "(None is open now.)";
 // where a file of the chat's (/media/<name>, pasted or shown) is
-const MEDIA_AT = "Media in the chat, /media/<name>, are the files {dir}<name> on the server's computer.";
+const MEDIA_AT = "Media and files in the chat, /media/<name>, are the files {dir}<name> on the server's computer.";
 
 const SKILLS = "Skills on the devices open now, by device: when a task matches one's description, load it with the skill tool first, then follow it.";
 

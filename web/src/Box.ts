@@ -1,17 +1,18 @@
 // Box
 // ===
-// The message box: the text typed, and the media pasted, dropped or
+// The message box: the text typed, and the files pasted, dropped or
 // picked into it, each an item right where it was put (a picture, a
-// video's first frame, a sound's or a page's tile), all one fixed size,
-// deleted as one character (Backspace after it, Delete before it).
-// Behind it, markdown: the text as typed, each item ![name](/media/…) on
-// a line of its own (box_text), which is what is sent and kept as the
-// draft; box_set draws such a text back, a line that is one item as that
-// item. An item uploading (main.ts) has no url yet: it shows how far it
-// is and is no part of the text; one refused says so till deleted. The
-// box holds only text, items and, at its end, a <br> that shows an empty
-// last line (tidy): pasted or dropped HTML comes as its text and its
-// media, never its formatting.
+// video's first frame, a sound's, a page's or any other file's tile, its
+// name and size), all one fixed size, deleted as one character
+// (Backspace after it, Delete before it). Behind it, markdown: the text
+// as typed, each item ![name](/media/…) (a file that isn't media a link,
+// [name](/media/…)) on a line of its own (box_text), which is what is
+// sent and kept as the draft; box_set draws such a text back, a line
+// that is one item as that item. An item uploading (main.ts) has no url
+// yet: it shows how far it is and is no part of the text; one refused
+// says so till deleted. The box holds only text, items and, at its end,
+// a <br> that shows an empty last line (tidy): pasted or dropped HTML
+// comes as its text and its media, never its formatting.
 
 import * as Md from "../../Md.ts";
 import * as View from "../../View.ts";
@@ -225,8 +226,9 @@ export function box_put(item: HTMLElement): void {
 
 // a new item: its name; its url (/media/…, or a picked file's blob: url
 // while it uploads; "": none to show) and its kind (image, video, audio,
-// html: by its url, else as given)
-export function item_new(name: string, url: string, state: State, kind = View.media_kind(url) ?? ""): HTMLElement {
+// html, file: by its url, else as given); a file's size, if known (else
+// asked of the server: box_sizes)
+export function item_new(name: string, url: string, state: State, kind = View.media_kind(url) ?? "file", size: number | null = null): HTMLElement {
   const item = document.createElement("span");
   item.className = "item";
   item.contentEditable = "false";
@@ -250,7 +252,16 @@ export function item_new(name: string, url: string, state: State, kind = View.me
   } else {
     const tile = document.createElement("span");
     tile.className = "tile";
-    tile.textContent = (kind === "audio" ? "♪ " : kind === "html" ? "📄 " : "") + name;
+    tile.textContent = (kind === "audio" ? "♪ " : kind === "html" ? "📄 " : kind === "file" ? "📎 " : "") + name;
+    if (kind === "file") {
+      const small = document.createElement("small");
+      small.textContent = size === null ? "" : View.size_show(size);
+      if (size === null && url.startsWith("/media/")) {
+        small.dataset.of = url;
+      }
+      tile.append(small);
+      box_sizes(tile);
+    }
     item.append(tile);
   }
   const note = document.createElement("span");
@@ -261,13 +272,41 @@ export function item_new(name: string, url: string, state: State, kind = View.me
 }
 
 // an item's state, the note on it (how far it is, why refused), and once
-// uploaded its url (its markdown, then)
+// uploaded its url (its markdown, then: a link if it isn't media)
 export function item_state(item: HTMLElement, state: State, note: string, url = ""): void {
   item.dataset.state = state;
   item.querySelector<HTMLElement>(".state")!.textContent = note;
   if (url !== "") {
-    item.dataset.md = "![" + (item.dataset.name ?? "").replace(/[[\]\\\n]/g, "") + "](" + url + ")";
+    const bang = View.media_kind(url) === null ? "" : "!";
+    item.dataset.md = bang + "[" + (item.dataset.name ?? "").replace(/[[\]\\\n]/g, "") + "](" + url + ")";
   }
+}
+
+// the sizes of the store's files shown in el not known yet (a file's tile
+// here, a file's chip in a message: Html.ts chip_html, `data-of` its
+// url), each asked of the server once: the total its Range of one byte
+// says
+const SIZES = new Map<string, Promise<string>>();
+
+export function box_sizes(el: ParentNode): void {
+  for (const small of el.querySelectorAll<HTMLElement>("[data-of]:empty")) {
+    const url = small.dataset.of!;
+    const got = SIZES.get(url) ?? size_ask(url);
+    SIZES.set(url, got);
+    got.then((text) => {
+      small.textContent ||= text;
+      if (text === "") {
+        SIZES.delete(url);
+      }
+    });
+  }
+}
+
+async function size_ask(url: string): Promise<string> {
+  const res = await fetch(url, { headers: { range: "bytes=0-0" } }).catch(() => null);
+  res?.body?.cancel().catch(() => {});
+  const total = /\/(\d+)$/.exec(res?.headers.get("content-range") ?? "")?.[1] ?? (res?.ok ? res.headers.get("content-length") : null);
+  return total == null ? "" : View.size_show(Number(total));
 }
 
 // the items in the box now
@@ -488,19 +527,20 @@ function html_pieces(html: string): Piece[] | null {
 }
 
 // a pasted element that is a file of the media store (an item of this
-// box; an image, video, audio or page of this site's /media/), as a piece;
-// else null
+// box; an image, video, audio or page of this site's /media/, or a file's
+// chip: Html.ts chip_html), as a piece; else null
 function html_media(el: Element): Piece | null {
   const md = el instanceof HTMLElement ? el.dataset.md : undefined;
   const got = md === undefined ? [] : Md.md_pasted(md);
   if (md !== undefined && got.length === 1 && got[0][1] === md.length) {
     return { name: got[0][2], url: got[0][3] };
   }
-  const src = ["IMG", "VIDEO", "AUDIO", "SOURCE", "IFRAME"].includes(el.nodeName) ? el.getAttribute("src") : null;
+  const src = ["IMG", "VIDEO", "AUDIO", "SOURCE", "IFRAME"].includes(el.nodeName) ? el.getAttribute("src") : el.nodeName === "A" ? el.getAttribute("href") : null;
   const url = src === null ? null : new URL(src, location.href);
-  if (url === null || url.origin !== location.origin || View.media_kind(url.pathname) === null) {
+  const ok = url !== null && (el.nodeName === "A" ? View.store_file(url.pathname) : View.media_kind(url.pathname) !== null);
+  if (url === null || url.origin !== location.origin || !ok) {
     return null;
   }
-  const name = el.getAttribute("alt") || el.getAttribute("title") || url.pathname.split("/").pop()!;
+  const name = el.getAttribute("download") || el.getAttribute("alt") || el.getAttribute("title") || url.pathname.split("/").pop()!;
   return { name, url: url.pathname };
 }

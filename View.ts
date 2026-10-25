@@ -264,9 +264,10 @@ const MARKS: Array<[string, number, string]> = [
 export const HEAD   = 12;
 export const IMAGES = "Images are png, jpeg, gif or webp.";
 
-// the media store's kinds (Memory.media_add), by a file's extension (some
-// named two ways, as the first): its content type. Maps, so a name an
-// object has (constructor) is none
+// the kinds of the media store the chat shows (Memory.media_add), by a
+// file's extension (some named two ways, as the first): its content type;
+// the store keeps any other file too, downloaded only (Server.ts
+// Main.media). Maps, so a name an object has (constructor) is none
 export const MEDIA: ReadonlyMap<string, string> = new Map([
   ["png", "image/png"], ["jpeg", "image/jpeg"], ["gif", "image/gif"], ["webp", "image/webp"], ["svg", "image/svg+xml"],
   ["mp4", "video/mp4"], ["webm", "video/webm"], ["mov", "video/quicktime"],
@@ -275,12 +276,45 @@ export const MEDIA: ReadonlyMap<string, string> = new Map([
 ]);
 export const MEDIA_AS: ReadonlyMap<string, string> = new Map([["jpg", "jpeg"], ["m4v", "mp4"], ["oga", "ogg"], ["htm", "html"]]);
 
+// a file in the media store, by its name: its hash's head, then its
+// extension (media_ext)
+export const STORED = /^[0-9a-f]{16}\.([a-z0-9]{1,10})$/;
+
 // a media file in the store, by its url (/media/<name>, or an older
 // image's /image/<name>): image, video, audio or html (a page); null: none
+// (any other file of the store is a file: store_file)
 export function media_kind(url: string): string | null {
-  const m = /^\/(?:media|image)\/[0-9a-f]{16}\.([a-z0-9]+)$/.exec(url);
-  const type = m === null ? undefined : MEDIA.get(m[1]);
+  const m = /^\/(?:media|image)\/[0-9a-f]{16}\.([a-z0-9]{1,10})$/.exec(url);
+  return m === null ? null : ext_kind(m[1]);
+}
+
+// the kind of a file of the media store by its extension (media_kind)
+export function ext_kind(ext: string): string | null {
+  const type = MEDIA.get(ext);
   return type === undefined ? null : type === "text/html" ? "html" : type.split("/")[0];
+}
+
+// whether a url is a file of the media store that isn't media: one to
+// download (a pdf, a zip, a file with no extension: .bin)
+export function store_file(url: string): boolean {
+  return url.startsWith("/media/") && STORED.test(url.slice("/media/".length)) && media_kind(url) === null;
+}
+
+// the media store's extension for a file's name: its own, lowercased, its
+// letters and digits only, at most 10 (a kind named two ways, as the
+// first: jpg, jpeg); "": none
+export function media_ext(file: string): string {
+  const dot = file.lastIndexOf(".");
+  const ext = dot < 0 ? "" : file.slice(dot + 1).toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 10);
+  return MEDIA_AS.get(ext) ?? ext;
+}
+
+// a file's size as people read it: 834 B, 12.3 KB, 1.2 MB, 3.4 GB
+export function size_show(bytes: number): string {
+  const units = ["B", "KB", "MB", "GB"];
+  const k = Math.min(units.length - 1, Math.max(0, Math.floor(Math.log(Math.max(bytes, 1)) / Math.log(1024))));
+  const n = bytes / 1024 ** k;
+  return (k === 0 ? String(bytes) : n >= 100 ? n.toFixed(0) : n.toFixed(1)) + " " + units[k];
 }
 
 // what models get of an image: scaled to FIT px at most, or as is if no

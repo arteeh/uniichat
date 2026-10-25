@@ -319,10 +319,11 @@ function back(sent: View.Sent, out: View.Answer): void {
 
 // Uploads
 // =======
-// A file pasted, dropped or picked (an image, a video, a sound, a page)
-// goes to the media store at once (Server.ts /api/media), an item in the
-// box where the caret is (Box.ts) showing it and how far it is; once
-// uploaded, the item is its markdown, ![name](/media/…). One refused says
+// A file pasted, dropped or picked (an image, a video, a sound, a page,
+// any other file) goes to the media store at once (Server.ts /api/media),
+// an item in the box where the caret is (Box.ts) showing it and how far
+// it is; once uploaded, the item is its markdown, ![name](/media/…), or
+// a file that isn't media its link, [name](/media/…). One refused says
 // so on it and in a toast: the message can't be sent till it is deleted.
 // A message sent meanwhile goes as the last upload ends (not if one is
 // refused); an item deleted ends its upload.
@@ -332,8 +333,11 @@ const FAILED = "A file in the message didn't upload: delete it (Backspace after 
 function attach(files: File[]): void {
   for (const file of files) {
     const name = file.name.replace(/[[\]\\\n]/g, "") || "file";
-    const kind = file.type === "text/html" ? "html" : file.type.split("/")[0];
-    const item = Box.item_new(name, kind === "image" || kind === "video" ? URL.createObjectURL(file) : "", "up", kind);
+    // its kind as the store will name it (Memory.media_add): by its
+    // extension; with none, a picture if it says so (its bytes decide)
+    const ext = View.media_ext(file.name);
+    const kind = ext !== "" ? View.ext_kind(ext) ?? "file" : file.type.startsWith("image/") ? "image" : "file";
+    const item = Box.item_new(name, kind === "image" || kind === "video" ? URL.createObjectURL(file) : "", "up", kind, file.size);
     Box.box_put(item);
     upload(item, file);
   }
@@ -1001,6 +1005,7 @@ function paint(): void {
   }
   markup($("#log .tail"), View.view_tail(v).map(Html.row_html));
   folds();
+  Box.box_sizes($("#log"));
   frames();
   const back = P.back === null ? null : document.querySelector<HTMLElement>(`#log [data-a="${P.back.a}"]`);
   if (back !== null && P.back !== null) {

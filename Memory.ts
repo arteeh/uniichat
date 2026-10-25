@@ -53,7 +53,7 @@ import { Disk } from "./Disk.ts";
 import { Pick } from "./Pick.ts";
 import * as names from "./Names.ts";
 import type { Timer } from "./Timer.ts";
-import { FIT, HEAD, IMAGE, image_kind, MEDIA, MEDIA_AS, PIXELS, TOKEN } from "./View.ts";
+import { FIT, HEAD, IMAGE, image_kind, MEDIA, media_ext, PIXELS, STORED, TOKEN } from "./View.ts";
 import { move_over } from "./Write.ts";
 
 // Types
@@ -541,15 +541,15 @@ export namespace Memory {
     return name;
   }
 
-  // a file for the media store (View.MEDIA), streamed to disk as it
-  // comes, each piece written once its room is taken (room: why not),
-  // hashed meanwhile, then named by its hash and its kind: by `file`'s
-  // extension (an image's by its first bytes, so it is named as
-  // image_add names it), else its first bytes as an image; its name, or
-  // why not. A page (html) is PAGE_MAX at most: it is sent whole
+  // a file for the media store, any kind (View.MEDIA the chat shows),
+  // streamed to disk as it comes, each piece written once its room is
+  // taken (room: why not), hashed meanwhile, then named by its hash and
+  // its kind: by `file`'s extension (View.media_ext; an image's by its
+  // first bytes, so it is named as image_add names it), else its first
+  // bytes as an image, else bin; its name, or why not. A page (html) is
+  // PAGE_MAX at most: it is sent whole
   export async function media_add(mem: Memory, body: ReadableStream<Uint8Array>, file: string, room: Room): Promise<{ name: string } | { error: string }> {
-    const dot = file.toLowerCase().split(".").pop() ?? "";
-    const named = file.includes(".") ? MEDIA_AS.get(dot) ?? dot : "";
+    const named = media_ext(file);
     fs.mkdirSync(mem.dir + MEDIA_DIR, { recursive: true });
     const tmp = mem.dir + MEDIA_DIR + ".up-" + crypto.randomUUID();
     const out = await fs.promises.open(tmp, "wx");
@@ -575,10 +575,7 @@ export namespace Memory {
       if (picture && sniffed === null) {
         return { error: file + " isn't the image its name says." };
       }
-      const ext = picture || named === "" ? sniffed ?? "" : named;
-      if (!MEDIA.has(ext)) {
-        return { error: file + " isn't a kind the chat shows: " + [...MEDIA.keys()].join(", ") + "." };
-      }
+      const ext = picture || named === "" ? sniffed ?? "bin" : named;
       await out.close();
       const name = hash.digest("hex").slice(0, 16) + "." + ext;
       fs.renameSync(tmp, mem.dir + MEDIA_DIR + name);
@@ -594,11 +591,10 @@ export namespace Memory {
     }
   }
 
-  // a stored media file by its name (an older image's too)
+  // a stored file by its name (an older image's too)
   export function media_file(mem: Memory, name: string): string | null {
-    const m = /^[0-9a-f]{16}\.([a-z0-9]+)$/.exec(name);
     const file = mem.dir + MEDIA_DIR + name;
-    return m !== null && MEDIA.has(m[1]) && fs.existsSync(file) ? file : Memory.image_file(mem, name);
+    return STORED.test(name) && fs.existsSync(file) ? file : Memory.image_file(mem, name);
   }
 
   export function image_file(mem: Memory, name: string): string | null {
