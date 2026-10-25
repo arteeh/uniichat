@@ -20,19 +20,21 @@ function clip_pages(str) {
   return pages;
 }
 async function* stream_lines(stream) {
-  const reader = stream.pipeThrough(new TextDecoderStream).getReader();
+  const reader = stream.getReader();
+  const utf8 = new TextDecoder;
   let rest = "";
   for (let got = await reader.read();!got.done; got = await reader.read()) {
-    const nl = got.value.lastIndexOf(`
+    const text = utf8.decode(got.value, { stream: true });
+    const nl = text.lastIndexOf(`
 `);
     if (nl >= 0) {
-      yield (rest + got.value.slice(0, nl)).split(`
+      yield (rest + text.slice(0, nl)).split(`
 `);
       rest = "";
     }
-    rest += got.value.slice(nl + 1);
+    rest += text.slice(nl + 1);
   }
-  yield [rest];
+  yield [rest + utf8.decode()];
 }
 
 // Import.ts

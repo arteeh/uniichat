@@ -816,7 +816,7 @@ function import_sent(out: View.Answer): void {
 
 // the import the box wants
 function import_plan(): Import.Plan {
-  const form = new FormData($("#import form"));
+  const form = new FormData($<HTMLFormElement>("#import form"));
   const want = { off: [...P.off], since: import_since(), tools: form.has("tools") };
   const found = [...P.found.values()].flatMap((read) => read.sessions);
   return Import.import_plan(found, want, P.done);

@@ -197,10 +197,14 @@ const OWN        = ["/ws", "/export"];
 const HELLO      = hello_md.trim().replace("{install}", config.SITE + "/install.sh");
 const HELLO_LINE = "unii: hello: UniiChat, one endless chat kept in a memory tree, recent days in more detail; build anything for years; recalls the past (ad2cat.py); a chatbot with a memory system; the user's terminal install.";
 
+// the site's page, index.html: imported as a file, a path (Bun's types
+// take any .html for an HTML bundle)
+const PAGE       = file_path(index_html);
+
 // the site's files, by path (a new one is imported above)
 const WEB: Record<string, string> = {
-  "/"               : index_html,
-  "/account"        : index_html,
+  "/"               : PAGE,
+  "/account"        : PAGE,
   "/app.js"         : app_js,
   "/apple-touch-icon.png": icon_apple,
   "/favicon.svg"    : mark_svg,
@@ -225,10 +229,17 @@ WEB["/tree"]     = WEB["/"];
 // an open page on another build reloads into this one (main.ts renew).
 // They are revalidated on each load, never taken from the browser's
 // cache unasked
-const PAGE       = WEB["/"];
 const SHELL      = [app_js, style_css, PAGE, sw_js, manifest];
 const BUILD      = Bun.hash(SHELL.map((f) => fs.readFileSync(f, "utf8")).join("\0")).toString(36);
 const INDEX      = fs.readFileSync(PAGE, "utf8").replace("<html ", `<html data-build="${BUILD}" `);
+
+// an imported file's path, as Bun gives it
+function file_path(x: unknown): string {
+  if (typeof x !== "string") {
+    throw new Error("an imported file is no path: " + String(x));
+  }
+  return x;
+}
 
 // Chat
 // ====
@@ -307,7 +318,7 @@ export namespace Chat {
   }
 
   // up to n bytes of a body, from byte `at`
-  export async function read(body: Body, at: number, n: number): Promise<Buffer> {
+  export async function read(body: Body, at: number, n: number): Promise<Buffer<ArrayBuffer>> {
     const buf = Buffer.alloc(n);
     const got = await body.fh.read(buf, 0, n, at);
     return buf.subarray(0, got.bytesRead);
@@ -1547,19 +1558,30 @@ export namespace Main {
     return file === PAGE ? new Response(INDEX, { headers: { ...headers, "content-type": "text/html;charset=utf-8" } }) : new Response(Bun.file(file), { headers });
   }
 
-  // a long answer, sent as made, a PIECE at a time, the event loop
+  // a long answer, sent as read, a PIECE at a time, the event loop
   // running between
-  export async function* stream(lines: Iterable<string>): AsyncGenerator<string> {
-    let piece = "";
-    for (const line of lines) {
-      piece += line;
-      if (piece.length >= PIECE) {
-        yield piece;
-        piece = "";
+  export function stream(lines: Iterable<string>): ReadableStream<Uint8Array> {
+    const it = lines[Symbol.iterator]();
+    const utf8 = new TextEncoder();
+    return new ReadableStream({
+      async pull(out) {
+        let piece = "";
+        for (let next = it.next(); ; next = it.next()) {
+          piece += next.done ? "" : next.value;
+          if (next.done || piece.length >= PIECE) {
+            out.enqueue(utf8.encode(piece));
+            if (next.done) {
+              out.close();
+            }
+            break;
+          }
+        }
         await new Promise((ok) => setImmediate(ok));
-      }
-    }
-    yield piece;
+      },
+      cancel() {
+        it.return?.();
+      },
+    });
   }
 
   // a page or post of the chat (/api/act: an act with a body, its fields

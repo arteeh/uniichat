@@ -75,15 +75,18 @@ export function clip_page(str: string, at: number): string {
 // a byte stream's lines, those of each read whole (one cut short waits
 // for the next read; the stream's last comes last, "" if it ends one)
 export async function* stream_lines(stream: ReadableStream<Uint8Array>): AsyncGenerator<string[]> {
-  const reader = stream.pipeThrough(new TextDecoderStream()).getReader();
+  const reader = stream.getReader();
+  const utf8 = new TextDecoder();
   let rest = "";
   for (let got = await reader.read(); !got.done; got = await reader.read()) {
-    const nl = got.value.lastIndexOf("\n");
+    // (a character cut between two reads waits for the next)
+    const text = utf8.decode(got.value, { stream: true });
+    const nl = text.lastIndexOf("\n");
     if (nl >= 0) {
-      yield (rest + got.value.slice(0, nl)).split("\n");
+      yield (rest + text.slice(0, nl)).split("\n");
       rest = "";
     }
-    rest += got.value.slice(nl + 1);
+    rest += text.slice(nl + 1);
   }
-  yield [rest];
+  yield [rest + utf8.decode()];
 }
