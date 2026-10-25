@@ -58,7 +58,8 @@ const BACK = $<HTMLInputElement>("#import [name=back]");
 
 // the page's: end: at its bottom; stick: the next draw may keep it;
 // y: its scroll when last scrolled; open: the tool calls and results
-// unfolded, by id (folds); build, renew, saved, gave, back: the web
+// unfolded, by id (folds); still: the page left where it is at the
+// log's next resize (unfold); build, renew, saved, gave, back: the web
 // app's build and its reload into another (Renew); ups, upn, after: the
 // files uploading, by the mark each holds in the box, the last mark's
 // number, and a message sent meanwhile (Uploads);
@@ -85,6 +86,7 @@ const P = {
   used  : { ws: null as WebSocket | null, on: false, at: 0 },
   open  : new Set<string>(),
   build : document.documentElement.dataset.build ?? "",
+  still : false,
   renew : false,
   saved : false,
   gave  : null as WebSocket | null,
@@ -250,7 +252,9 @@ function chat(): void {
   $(".mine").onclick = mine;
   $(".down").onclick = down;
   const keep = new ResizeObserver(() => {
-    if (P.end && !$("#log").hidden && !at_end()) {
+    if (P.still) {
+      P.still = false;
+    } else if (P.end && !$("#log").hidden && !at_end()) {
       scrollTo(0, document.documentElement.scrollHeight);
     }
   });
@@ -499,11 +503,14 @@ function unfold(msg: HTMLElement): void {
   const open = !msg.classList.contains("shown");
   const id = msg.dataset.a ?? "";
   open ? P.open.add(id) : P.open.delete(id);
-  const top = msg.getBoundingClientRect().top;
+  const [top, follow] = [msg.getBoundingClientRect().top, P.end];
   P.end = false;
   fold_show(msg, open);
   scrollBy(0, msg.getBoundingClientRect().top - top);
-  P.end = at_end();
+  // (following the chat's end, it still is: the next message pulls the
+  // page down again; this resize leaves it)
+  P.end = follow || at_end();
+  P.still = follow;
 }
 
 // a page in a message (Html.ts) as tall as its content, measured as it

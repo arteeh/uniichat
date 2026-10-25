@@ -3311,6 +3311,7 @@ var P = {
   used: { ws: null, on: false, at: 0 },
   open: new Set,
   build: document.documentElement.dataset.build ?? "",
+  still: false,
   renew: false,
   saved: false,
   gave: null,
@@ -3439,7 +3440,9 @@ function chat() {
   $2(".mine").onclick = mine;
   $2(".down").onclick = down;
   const keep = new ResizeObserver(() => {
-    if (P.end && !$2("#log").hidden && !at_end()) {
+    if (P.still) {
+      P.still = false;
+    } else if (P.end && !$2("#log").hidden && !at_end()) {
       scrollTo(0, document.documentElement.scrollHeight);
     }
   });
@@ -3643,11 +3646,12 @@ function unfold(msg) {
   const open = !msg.classList.contains("shown");
   const id = msg.dataset.a ?? "";
   open ? P.open.add(id) : P.open.delete(id);
-  const top = msg.getBoundingClientRect().top;
+  const [top, follow] = [msg.getBoundingClientRect().top, P.end];
   P.end = false;
   fold_show(msg, open);
   scrollBy(0, msg.getBoundingClientRect().top - top);
-  P.end = at_end();
+  P.end = follow || at_end();
+  P.still = follow;
 }
 var FRAMED = new WeakSet;
 function frames(all = false) {
