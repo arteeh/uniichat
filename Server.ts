@@ -1103,7 +1103,7 @@ export namespace Chat {
     const room = Chat.room(chat);
     const size = chat.mem.talk === null ? 0 : Memory.talk_size(chat.mem);
     const talk = chat.mem.talk === null ? null : { from: chat.mem.talk, used: Math.min(1, size / room), size, room };
-    return { $: "state", busy: chat.busy, wait: Chat.waits(chat), agents, runs, pick: chat.pick, ...config.OFFER, importing, limits: chat.limits, timers, mcp, talk, build: BUILD };
+    return { $: "state", busy: chat.busy, wait: Chat.waits(chat), agents, runs, pick: chat.pick, ...config.OFFER, importing, limits: chat.limits, timers, mcp, talk, build: BUILD, site: config.SITE };
   }
 
   export function waits(chat: Chat): Wait {

@@ -48,7 +48,8 @@ const GUTTER = 7;
 
 const GRAPHEMES = new Intl.Segmenter("en", { granularity: "grapheme" });
 
-// the server's address (paint_site): a link to a path here, an image's
+// the server's address (paint_site: its config site, as its state says,
+// else the one the terminal opened): a link to a path there, an image's
 // too, goes to it
 let SITE = "";
 

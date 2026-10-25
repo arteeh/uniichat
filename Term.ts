@@ -214,6 +214,9 @@ function term_hear(t: Term, msg: View.Server): void {
   for (const out of View.view_hear(t.v, msg)) {
     term_send(t, out);
   }
+  if (msg.$ === "state" && msg.site) {
+    Paint.paint_site(msg.site);
+  }
   term_went(t, was);
   term_print(t, msg);
   if (first) {

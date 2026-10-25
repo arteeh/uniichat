@@ -56,7 +56,8 @@ export type Wait = string;
 // limits: the calls waiting for a usage
 // limit, by TURN or agent name; timers: the chat's schedules, each
 // message's head; talk: conversation mode (null: standard); build: the
-// web app's (main.ts renew) (Server.ts
+// web app's (main.ts renew); site: the server's address (config site:
+// the terminal's links to its media) (Server.ts
 // Chat.state)
 export type State = {
   busy      : boolean;
@@ -73,6 +74,7 @@ export type State = {
   mcp       : Plug[];
   talk      : Talk | null;
   build?    : string;
+  site?     : string;
 };
 
 // conversation mode (Memory.ts): its first message whole, the share of
