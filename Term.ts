@@ -667,7 +667,9 @@ function term_print(t: Term, msg: View.Server): void {
       t.last = main && msg.id !== undefined ? msg.id : t.last;
       const due  = main && msg.id !== undefined && View.part_due(v, [msg.id, 1], v.parts[v.parts.length - 2]);
       const head = due ? [View.Cap(View.AI)] : [];
-      term_rows(t, [...head, ...View.entry_rows(msg.id ?? null, msg.kind, text, msg.images)], false);
+      // (the message before it, which a result's head depends on: View.entry_of)
+      const before = main ? v.whole.get((msg.id ?? 0) - 1) : v.page?.log?.[n - 2];
+      term_rows(t, [...head, ...View.entry_rows(msg.id ?? null, msg.kind, text, msg.images, View.entry_of(msg, before))], false);
       return;
     }
     case "root": {

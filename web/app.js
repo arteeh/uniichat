@@ -344,6 +344,7 @@ function look_css(kind, look) {
 var SHORT = 60;
 var CALL = /^(\S+) (\{[\s\S]*)$/;
 var MCP = /^mcp__.+?__/;
+var THEIRS = /^(?:([A-Za-z0-9-]+)_)?([A-Za-z0-9-]+(?:_[A-Za-z0-9-]+)*)__(.+)$/;
 var READS = new Map([
   ["shell", (x) => ({ head: String(x.command ?? ""), blocks: [] })],
   ["read", (x) => ({ head: String(x.path ?? "") + lines_show(x.offset, x.limit), blocks: [] })],
@@ -368,13 +369,18 @@ function call_parse(text) {
     return { name: "", head: text, device: "", blocks: [] };
   }
   const name = m[1].replace(MCP, "");
-  const theirs = /^(?:([A-Za-z0-9-]+)_)?([A-Za-z0-9-]+(?:_[A-Za-z0-9-]+)*)__(.+)$/.exec(name);
+  const theirs = THEIRS.exec(name);
   if (theirs !== null) {
-    return { name: theirs[2] + ": " + theirs[3], device: theirs[1] ?? "", ...input_shown(input) };
+    return { name: tool_name(name), device: theirs[1] ?? "", ...input_shown(input) };
   }
   const { device, ...rest } = input;
   const shown = (READS.get(name) ?? input_shown)(rest);
   return { name, device: typeof device === "string" ? device : "", ...shown };
+}
+function tool_name(logged) {
+  const name = logged.replace(MCP, "");
+  const theirs = THEIRS.exec(name);
+  return theirs === null ? name : theirs[2] + ": " + theirs[3];
 }
 function call_line(c) {
   const blocks = c.blocks.map((b) => (b.k === "" ? "" : b.k + ": ") + b.x);
@@ -1393,29 +1399,29 @@ function md_pasted(s) {
   }
   return out;
 }
-function md_output(s) {
+function md_output(s, name = "result") {
   const lines = s.replace(/\r/g, "").split(`
 `);
   const read = READ.exec(lines[lines.length - 1]);
   if (read !== null) {
-    return [{ $: "File", k: read[1], n: Number(read[2]), x: lines.slice(0, -1) }];
+    return [{ $: "File", k: name === "result" ? read[1] : name + " · " + read[1], n: Number(read[2]), x: lines.slice(0, -1) }];
   }
   const out = [];
   let [i, at] = [0, 0];
   while (i < lines.length) {
     const [diff, next] = diff_parse(lines, i);
     if (diff !== null) {
-      out.push(...output_lines(lines.slice(at, i)), diff);
+      out.push(...output_lines(lines.slice(at, i), name), diff);
       at = next;
     }
     i = next;
   }
-  return [...out, ...output_lines(lines.slice(at))];
+  return [...out, ...output_lines(lines.slice(at), name)];
 }
-function output_lines(lines) {
+function output_lines(lines, name) {
   const from = lines.findIndex((l) => l.trim() !== "");
   const upto = lines.findLastIndex((l) => l.trim() !== "");
-  return from < 0 ? [] : [{ $: "File", k: "result", n: 1, x: lines.slice(from, upto + 1) }];
+  return from < 0 ? [] : [{ $: "File", k: name, n: 1, x: lines.slice(from, upto + 1) }];
 }
 function diff_parse(lines, i) {
   const file = NEW.exec(lines[i + 1] ?? "");
@@ -2379,7 +2385,7 @@ function part_rows(v, id, n, t, talk) {
   if (n === 1 && id >= t && entry !== undefined) {
     const minds = v.minds.get(id) ?? [];
     const after = minds.flatMap((x) => entry_rows(null, "mind", x));
-    return [...whole_rows(id, entry), ...after];
+    return [...whole_rows(id, entry, v.whole.get(id - 1)), ...after];
   }
   const open = talk && n === 1 && ["user", "unii"].includes(entry?.kind ?? "");
   if (!(v.open.get(key) ?? open)) {
@@ -2390,13 +2396,16 @@ function part_rows(v, id, n, t, talk) {
     const rows = [...part_rows(v, id, half, t, talk), ...part_rows(v, id + half, half, t, talk)];
     return [{ $: "Box", id, n, text, rows }];
   }
-  const rows = entry === undefined ? [] : whole_rows(id, entry);
+  const rows = entry === undefined ? [] : whole_rows(id, entry, v.whole.get(id - 1));
   return [{ $: "Box", id, n, text, rows }];
 }
 var ROWS = new WeakMap;
-function whole_rows(id, entry) {
-  const rows = ROWS.get(entry) ?? entry_rows(id, entry.kind, entry.text, entry.images);
-  ROWS.set(entry, rows);
+var APART = new WeakMap;
+function whole_rows(id, entry, before) {
+  const of = entry_of(entry, before);
+  const made = of.apart ? APART : ROWS;
+  const rows = made.get(entry) ?? entry_rows(id, entry.kind, entry.text, entry.images, of);
+  made.set(entry, rows);
   return rows;
 }
 function sum_rows(id, n, node = { text: WAIT, to: "" }) {
@@ -2406,7 +2415,8 @@ function sum_rows(id, n, node = { text: WAIT, to: "" }) {
 }
 function page_rows(v, page, from = 0) {
   const head = Cap(page.name + (v.agents.includes(page.name) ? " · at work" : " · done"));
-  return [head, ...(page.log ?? []).slice(from).flatMap((e) => whole_rows(null, e))];
+  const log = page.log ?? [];
+  return [head, ...log.slice(from).flatMap((e, k) => whole_rows(null, e, log[from + k - 1]))];
 }
 function live_push(live, kind, text, fresh = false) {
   const top = live[live.length - 1];
@@ -2426,22 +2436,27 @@ function sum_call(n, text) {
   const call = n === 1 && text.startsWith(TOOL2) ? call_parse(text.slice(TOOL2.length)) : null;
   return call === null || call.name === "" ? null : call;
 }
-function entry_rows(id, kind, text, images = []) {
+function entry_of(entry, before) {
+  return { tool: entry.tool ?? "", apart: entry.kind === "echo" && entry.of !== undefined && before?.of !== entry.of };
+}
+function entry_rows(id, kind, text, images = [], of = { tool: "", apart: false }) {
   const call = kind === "tool" ? call_parse(text) : null;
   const report = kind === "work" ? report_read(text) : null;
-  const body = call === null ? entry_body(kind, report?.text ?? text) : [];
-  const who = report?.name ?? WHO[kind] ?? "";
+  const label = of.apart ? "↳ " + (of.tool === "" ? "" : tool_name(of.tool) + " ") + "result" : "result";
+  const body = call === null ? entry_body(kind, report?.text ?? text, label) : [];
+  const named = body.some((b) => b.$ === "File" && b.k.startsWith(label));
+  const who = report?.name ?? WHO[kind] ?? (kind === "echo" && of.apart && !named ? label : "");
   const pics = images.filter((name) => !text.includes("/media/" + name));
   return call === null && body.length === 0 && pics.length === 0 ? [] : [{ $: "Msg", id, kind, who, text, body, call, images: pics }];
 }
-function entry_body(kind, text) {
+function entry_body(kind, text, label) {
   switch (kind) {
     case "user":
     case "work": {
       return md_plain(text);
     }
     case "echo": {
-      return md_output(text);
+      return md_output(text, label);
     }
     default: {
       return md_parse(text);

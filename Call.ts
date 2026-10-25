@@ -49,6 +49,9 @@ const CALL = /^(\S+) (\{[\s\S]*)$/;
 
 const MCP = /^mcp__.+?__/;
 
+// a user's MCP server's tool: its device, its server, its tool
+const THEIRS = /^(?:([A-Za-z0-9-]+)_)?([A-Za-z0-9-]+(?:_[A-Za-z0-9-]+)*)__(.+)$/;
+
 const READS = new Map<string, (x: Input) => Shown>([
   ["shell",    (x) => ({ head: String(x.command ?? ""), blocks: [] })],
   ["read",     (x) => ({ head: String(x.path ?? "") + lines_show(x.offset, x.limit), blocks: [] })],
@@ -87,13 +90,21 @@ export function call_parse(text: string): Call {
     return { name: "", head: text, device: "", blocks: [] };
   }
   const name = m[1].replace(MCP, "");
-  const theirs = /^(?:([A-Za-z0-9-]+)_)?([A-Za-z0-9-]+(?:_[A-Za-z0-9-]+)*)__(.+)$/.exec(name);
+  const theirs = THEIRS.exec(name);
   if (theirs !== null) {
-    return { name: theirs[2] + ": " + theirs[3], device: theirs[1] ?? "", ...input_shown(input) };
+    return { name: tool_name(name), device: theirs[1] ?? "", ...input_shown(input) };
   }
   const { device, ...rest } = input;
   const shown = (READS.get(name) ?? input_shown)(rest);
   return { name, device: typeof device === "string" ? device : "", ...shown };
+}
+
+// a tool's name as logged (`shell`, `mcp__unii__show`,
+// `ceres_cua-driver__click`) as a call shows it (`show`, `cua-driver: click`)
+export function tool_name(logged: string): string {
+  const name = logged.replace(MCP, "");
+  const theirs = THEIRS.exec(name);
+  return theirs === null ? name : theirs[2] + ": " + theirs[3];
 }
 
 // the call on one line, after its name: its head, then each block,

@@ -26,7 +26,7 @@ import { Disk } from "./Disk.ts";
 import { Mcp } from "./Mcp.ts";
 import * as Import from "./Import.ts";
 import * as Md from "./Md.ts";
-import { JOBS, Memory, type Msg as Log, type Room, type Share } from "./Memory.ts";
+import { JOBS, Memory, type Msg as Log, type Pair, type Room, type Share } from "./Memory.ts";
 import { OpenAI } from "./OpenAI.ts";
 import { Owner } from "./Owner.ts";
 import { Pick } from "./Pick.ts";
@@ -36,7 +36,7 @@ import { Settings } from "./Settings.ts";
 import { INSTALL, INSTALL_PS1 } from "./Update.ts";
 import { move_over, write_whole } from "./Write.ts";
 import * as Timer from "./Timer.ts";
-import { PROMPTS, SEARCHES, Tools, type Agent, type Live } from "./Tools.ts";
+import { PROMPTS, SEARCHES, Tools, type Agent, type Live, type Waiting } from "./Tools.ts";
 import { ACTIVE, FRAME, IDLE, IMAGES, live_push, MEDIA, PING, QUIT, SUMMARIES, TICK, TURN, WIRE, type Answer, type Part, type Server as Out, type Wait } from "./View.ts";
 import * as config from "./Config.ts";
 import hello_md from "./hello.md" with { type: "text" };
@@ -108,7 +108,7 @@ type Chat = {
   wait  : Msg[];
   halt  : AbortController;
   live  : Live[];
-  calls : Record<string, string>; // its tool calls awaiting their results, by id (Chat.on)
+  calls : Map<string, Waiting>; // its tool calls awaiting their results, by id, in the order they started (Chat.on)
   eye   : Eye;
   after : Promise<void>;
   batch : Batch | null;
@@ -293,7 +293,7 @@ export namespace Chat {
     const pick = Pick.load(mem.pick, config.OFFER, config.PICK);
     const chat: Chat = {
       mem, tools, pick, socks: new Set(), acts: new Map(), busy: false, call: null, model: "", check: null, asked: false, open: 0, sent: [], wait: [],
-      halt: new AbortController(), live: [], calls: {}, eye: { parts: [], from: 0 }, after: Promise.resolve(), batch: null,
+      halt: new AbortController(), live: [], calls: new Map(), eye: { parts: [], from: 0 }, after: Promise.resolve(), batch: null,
       writes: Promise.resolve(), held: null, limits: {}, fell: new Map(), back: -1,
     };
     // a saved pick (a profile, by name) not offered gave way: told once
@@ -604,19 +604,45 @@ export namespace Chat {
     Chat.hold(chat, () => Chat.push(chat, null, "note", text));
   }
 
-  // to the chat (in pages), or an agent's log; each told to every view
-  export function push(chat: Chat, agent: Agent | null, kind: Kind, text: string, images: string[] = [], more = false, act?: string): Msg {
+  // to the chat (in pages), or an agent's log, after the tool calls still
+  // waiting there (Chat.flush); each told to every view
+  export function push(chat: Chat, agent: Agent | null, kind: Kind, text: string, images: string[] = [], more = false, act?: string, pair: Pair = {}): Msg {
+    Chat.flush(chat, agent);
+    return Chat.put(chat, agent, { kind, text, images, more, act, ...pair });
+  }
+
+  // a message written where it goes, as it is (Chat.push)
+  export function put(chat: Chat, agent: Agent | null, msg: Log): Msg {
     if (agent !== null) {
-      const id = Memory.agent_push(chat.mem, agent.name, kind, text);
-      Chat.all(chat, { $: "entry", agent: agent.name, id, kind, text });
+      const { kind, text, of, tool } = msg;
+      const id = Memory.agent_push(chat.mem, agent.name, kind, text, { of, tool });
+      Chat.all(chat, { $: "entry", agent: agent.name, id, kind, text, of, tool });
       return { id, end: id + 1 };
     }
-    const roots = Memory.push(chat.mem, [{ kind, text, images, more, act }]);
-    for (const { i, kind, text, date, images } of roots) {
-      Chat.all(chat, { $: "entry", id: i, kind, text, date, images });
+    const roots = Memory.push(chat.mem, [msg]);
+    for (const { i, kind, text, date, images, of, tool } of roots) {
+      Chat.all(chat, { $: "entry", id: i, kind, text, date, images, of, tool });
     }
     Chat.talked(chat);
     return { id: roots[0].i, end: chat.mem.count };
+  }
+
+  // the tool calls still waiting in the chat (agent: null) or an agent's
+  // log, written in the order they started, before anything else is: so
+  // each sits above what came while it ran, and its result follows where
+  // it comes (one whose result comes before anything else goes right on
+  // top of it). None between the pages of a message being written
+  export function flush(chat: Chat, agent: Agent | null): void {
+    const at = agent ?? chat;
+    const left = [...at.calls].filter(([, call]) => !call.logged);
+    if (left.length === 0 || (agent === null && chat.mem.open > 0)) {
+      return;
+    }
+    for (const [of, call] of left) {
+      call.logged = true;
+      Chat.put(chat, agent, { kind: "tool", text: call.text, of });
+    }
+    Chat.live(chat, agent, Chat.waiting(at));
   }
 
   // a message logged in conversation mode (or a model picked): the views
@@ -680,17 +706,17 @@ export namespace Chat {
       return;
     }
     if (ev.kind === "tool" && ev.of !== undefined) {
-      at.calls[ev.of] = ev.text;
+      at.calls.set(ev.of, { text: ev.text, tool: ev.text.split(" ", 1)[0], logged: false });
     } else if (ev.kind === "mind") {
       Chat.all(chat, { $: "entry", agent: name, kind: ev.kind, text: ev.text });
     } else if (ev.kind !== "user") {
-      const call = ev.of === undefined ? undefined : at.calls[ev.of];
-      delete at.calls[ev.of ?? ""];
+      // (a result: its call, if still waiting, goes first, written by push)
+      const { kind, text, of } = ev;
       Chat.hold(chat, () => {
-        if (call !== undefined) {
-          Chat.push(chat, agent, "tool", call);
+        Chat.push(chat, agent, kind, text, [], false, undefined, of === undefined ? {} : { of, tool: at.calls.get(of)?.tool });
+        if (of !== undefined && at.calls.delete(of)) {
+          Chat.live(chat, agent, Chat.waiting(at));
         }
-        Chat.push(chat, agent, ev.kind, ev.text);
       });
     }
     Chat.live(chat, agent, Chat.waiting(at));
@@ -730,19 +756,21 @@ export namespace Chat {
   }
 
   // what streams once an entry came: the tool calls awaiting their
-  // results, as they will be logged; what was drawn never vanishes
-  // before it is printed
-  export function waiting(at: { calls: Record<string, string> }): Live[] {
-    return Object.values(at.calls).map((text) => ({ kind: "tool", text }));
+  // results not logged yet, in the order the log will have them; what was
+  // drawn never vanishes before it is printed
+  export function waiting(at: { calls: Map<string, Waiting> }): Live[] {
+    return [...at.calls.values()].filter((call) => !call.logged).map((call) => ({ kind: "tool", text: call.text }));
   }
 
   // a call's tool calls left without a result (it was stopped), logged
-  // as they are, once it ends
+  // as they are (those not yet), once it ends
   export function unanswered(chat: Chat, agent: Agent | null): void {
     const at = agent ?? chat;
-    const calls = Object.values(at.calls);
-    at.calls = {};
-    Chat.hold(chat, () => calls.forEach((call) => Chat.push(chat, agent, "tool", call)));
+    const ids = [...at.calls.keys()];
+    Chat.hold(chat, () => {
+      Chat.flush(chat, agent);
+      ids.forEach((id) => at.calls.delete(id));
+    });
     Chat.live(chat, agent, []);
   }
 
@@ -1250,7 +1278,7 @@ export namespace Chat {
         const agent = log === null ? null : chat.tools.agents.get(name) ?? Tools.logged(chat.tools, name);
         const pick = agent === null ? null : Tools.shown(chat.tools, agent);
         Chat.send(sock, { $: "agent", name, found: log !== null, pick });
-        log?.forEach(({ kind, text, date }) => Chat.send(sock, { $: "entry", agent: name, kind, text, date }));
+        log?.forEach(({ kind, text, date, of, tool }) => Chat.send(sock, { $: "entry", agent: name, kind, text, date, of, tool }));
         Chat.send(sock, { $: "live", agent: name, live: chat.tools.agents.get(name)?.live ?? [] });
         return {};
       }
@@ -1480,7 +1508,7 @@ export namespace Chat {
       sock.data.seen.add(id + "+" + n);
       if (n === 1) {
         const m = Memory.message(chat.mem, id)!;
-        Chat.send(sock, { $: "know", whole: { [id]: { kind: m.kind, text: m.text, date: m.date, images: m.images } } });
+        Chat.send(sock, { $: "know", whole: { [id]: { kind: m.kind, text: m.text, date: m.date, images: m.images, of: m.of, tool: m.tool } } });
       }
       Chat.know(chat, sock, id, n);
     }

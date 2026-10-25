@@ -335,6 +335,9 @@ header > .imping { display: flex; flex-direction: column; justify-content: cente
    (Md.md_output). Thinking bare and unnamed */
 .msg.tool { padding: 9px 14px; background: var(--block); border-radius: 10px; }
 .msg.note[data-who]::before { content: attr(data-who); display: block; font: 700 12px/1.5 var(--sans); font-style: normal; color: var(--soft); }
+/* a result apart from its call that no frame of its own names (a diff
+   alone): its tool, over it, as a frame's name reads (pre .lang) */
+.msg.echo[data-who]::before { content: attr(data-who); display: block; margin: 6px 0 -2px; font: 600 11px var(--sans); color: var(--mid); }
 .msg.mind { color: var(--mid); }
 .msg.tool p, .msg.echo p { margin: 0; }
 /* a tool call's head: its tool's icon, then the call (a command's

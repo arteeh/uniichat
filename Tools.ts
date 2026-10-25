@@ -69,6 +69,11 @@ type Running = { term: string; job: Job; out: Promise<Out>; end: (out: Out) => v
 // work dir, its shell if not a POSIX one
 export type Link = { send: (msg: object) => void; live: () => boolean; work: string; shell: string | null };
 
+// a tool call awaiting its result (Server.ts Chat.on): its text as logged,
+// its tool's name, whether it is logged yet (something written while it
+// ran wrote it first: Chat.flush)
+export type Waiting = { text: string; tool: string; logged: boolean };
+
 // a task to spawn, with what it runs on
 export type Spawn = { task: string; role: Agent["role"] };
 
@@ -78,7 +83,7 @@ export type Agent = {
   role    : { effort: string | null; model: string | null };
   call    : Call | null;
   live    : Live[];
-  calls   : Record<string, string>; // its tool calls awaiting their results, by id (Chat.on)
+  calls   : Map<string, Waiting>; // its tool calls awaiting their results, by id, in the order they started (Chat.on)
   stop    : boolean; // its call was stopped: the report stays unanswered
   why     : string | null; // its report, if stopped by the stop tool
   view    : Block[];
@@ -813,7 +818,7 @@ export namespace Tools {
 
   export function start(tools: Tools, role: Agent["role"], task: string, view: Block[]): string {
     const name = Memory.agent_new(tools.mem);
-    const agent = { name, role, call: null, live: [], calls: {}, stop: false, why: null, view, replies: [] };
+    const agent = { name, role, call: null, live: [], calls: new Map(), stop: false, why: null, view, replies: [] };
     tools.agents.set(name, agent);
     tools.hooks.push(agent, "note", SUB_NOTE + (role.model === null ? "" : SUB_ON + role.model) + (role.effort === null ? "" : SUB_AT + role.effort));
     tools.hooks.push(agent, "user", task);
@@ -835,7 +840,7 @@ export namespace Tools {
     const log = Memory.agent(tools.mem, name);
     const note = log !== null && log.length > 0 && log[0].kind === "note" ? log[0].text : "";
     const sub = SUB_ROLE.exec(note);
-    return sub === null ? null : { name, role: { effort: sub[2] ?? null, model: sub[1] ?? null }, call: null, live: [], calls: {}, stop: false, why: null, view: [], replies: [] };
+    return sub === null ? null : { name, role: { effort: sub[2] ?? null, model: sub[1] ?? null }, call: null, live: [], calls: new Map(), stop: false, why: null, view: [], replies: [] };
   }
 
   // calls while a message waits in its log (told too late for the call
@@ -918,7 +923,7 @@ export namespace Tools {
     let ended = true;
     if (call !== null) {
       const live = agent.live.at(-1);
-      const last = Object.values(agent.calls).at(-1) ?? (live && live.kind + ": " + live.text);
+      const last = [...agent.calls.values()].at(-1)?.text ?? (live && live.kind + ": " + live.text);
       const doing = last === undefined ? "" : " It was last at " + last.replace(/\s+/g, " ").slice(0, 300);
       agent.why = "Stopped by Unii" + (why.trim() === "" ? "." : ": " + why.trim().replace(/\.?$/, ".")) + doing;
       Tools.stop(tools, name);

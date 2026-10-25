@@ -22,8 +22,15 @@ import type { Timer } from "./Timer.ts";
 // the n messages from id on (n a power of two)
 export type Part = [number, number];
 
-// a message logged: its kind, its text, its date (ISO), its images
-export type Entry = { kind: Kind; text: string; date?: string; images?: string[] };
+// a message logged: its kind, its text, its date (ISO), its images; a
+// tool call's id on it and its result, the call's tool on the result
+// (Memory.ts Pair)
+export type Entry = { kind: Kind; text: string; date?: string; images?: string[]; of?: string; tool?: string };
+
+// what a result is of: its call's tool as logged ("": not known), and
+// whether it stands apart from its call (something came between them:
+// Server.ts Chat.flush), so it names its tool ("↳ shell result")
+export type Of = { tool: string; apart: boolean };
 
 // a summary: its text, its last message's date
 export type Node = { text: string; to: string };
@@ -184,7 +191,7 @@ export type Act =
 export type Row =
   | { $: "Sum"; id: number; n: number; text: string; call: Call.Call | null }                     // a block: nx, its summary (call: a tool call's, word for word)
   | { $: "Box"; id: number; n: number; text: string; rows: Row[] }                              // a block open: its bar
-  | { $: "Msg"; id: number | null; kind: Kind; who: string; text: string; body: Md.Block[]; call: Call.Call | null; images: string[] } // a message whole: 0x (who: its speaker or "↳ result", named on its block; call: a tool call's, drawn as Call.ts reads it)
+  | { $: "Msg"; id: number | null; kind: Kind; who: string; text: string; body: Md.Block[]; call: Call.Call | null; images: string[] } // a message whole: 0x (who: its speaker, or a result apart from its call that no block names, "↳ shell result"; call: a tool call's, drawn as Call.ts reads it)
   | { $: "Cap"; text: string }                                                                  // a line about the page
 
 export type Tab = { name: string | null; here: boolean; text: string };
@@ -818,7 +825,7 @@ function part_rows(v: View, id: number, n: number, t: number, talk: boolean): Ro
   if (n === 1 && id >= t && entry !== undefined) {
     const minds = v.minds.get(id) ?? [];
     const after = minds.flatMap((x) => entry_rows(null, "mind", x));
-    return [...whole_rows(id, entry), ...after];
+    return [...whole_rows(id, entry, v.whole.get(id - 1)), ...after];
   }
   const open  = talk && n === 1 && ["user", "unii"].includes(entry?.kind ?? "");
   if (!(v.open.get(key) ?? open)) {
@@ -829,17 +836,22 @@ function part_rows(v: View, id: number, n: number, t: number, talk: boolean): Ro
     const rows = [...part_rows(v, id, half, t, talk), ...part_rows(v, id + half, half, t, talk)];
     return [{ $: "Box", id, n, text, rows }];
   }
-  const rows = entry === undefined ? [] : whole_rows(id, entry);
+  const rows = entry === undefined ? [] : whole_rows(id, entry, v.whole.get(id - 1));
   return [{ $: "Box", id, n, text, rows }];
 }
 
 // a message's rows, or a summary's block, made once: neither changes once
-// known, so a redraw remakes only the rows that changed
-const ROWS = new WeakMap<Entry | Node, Row[]>();
+// known, so a redraw remakes only the rows that changed. A result's
+// depend on the message before it too (entry_of), not known yet or known
+// later (a block opened): made once each way
+const ROWS  = new WeakMap<Entry | Node, Row[]>();
+const APART = new WeakMap<Entry, Row[]>();
 
-function whole_rows(id: number | null, entry: Entry): Row[] {
-  const rows = ROWS.get(entry) ?? entry_rows(id, entry.kind, entry.text, entry.images);
-  ROWS.set(entry, rows);
+function whole_rows(id: number | null, entry: Entry, before: Entry | undefined): Row[] {
+  const of = entry_of(entry, before);
+  const made = of.apart ? APART : ROWS;
+  const rows = made.get(entry) ?? entry_rows(id, entry.kind, entry.text, entry.images, of);
+  made.set(entry, rows);
   return rows;
 }
 
@@ -856,7 +868,8 @@ function sum_rows(id: number, n: number, node: Node = { text: WAIT, to: "" }): R
 // an agent's page, its log (once it comes) from message `from` on
 export function page_rows(v: View, page: Page, from = 0): Row[] {
   const head = Cap(page.name + (v.agents.includes(page.name) ? " · at work" : " · done"));
-  return [head, ...(page.log ?? []).slice(from).flatMap((e) => whole_rows(null, e))];
+  const log = page.log ?? [];
+  return [head, ...log.slice(from).flatMap((e, k) => whole_rows(null, e, log[from + k - 1]))];
 }
 
 // Live
@@ -904,11 +917,23 @@ export function image_kind(head: Uint8Array): string | null {
 // Entry
 // =====
 
-export function entry_rows(id: number | null, kind: Kind, text: string, images: string[] = []): Row[] {
+// what a result is of, by its entry and the message before it (none: not
+// known, as when a block holds it): apart unless that is its call (or a
+// page of the result before it). A result logged before calls had ids
+// (none) is never apart
+export function entry_of(entry: Entry, before: Entry | undefined): Of {
+  return { tool: entry.tool ?? "", apart: entry.kind === "echo" && entry.of !== undefined && before?.of !== entry.of };
+}
+
+// a result apart from its call is named by its tool on its first block
+// (Md.md_output), or above it if none (a diff alone)
+export function entry_rows(id: number | null, kind: Kind, text: string, images: string[] = [], of: Of = { tool: "", apart: false }): Row[] {
   const call = kind === "tool" ? Call.call_parse(text) : null;
   const report = kind === "work" ? Call.report_read(text) : null;
-  const body = call === null ? entry_body(kind, report?.text ?? text) : [];
-  const who = report?.name ?? WHO[kind] ?? "";
+  const label = of.apart ? "↳ " + (of.tool === "" ? "" : Call.tool_name(of.tool) + " ") + "result" : "result";
+  const body = call === null ? entry_body(kind, report?.text ?? text, label) : [];
+  const named = body.some((b) => b.$ === "File" && b.k.startsWith(label));
+  const who = report?.name ?? WHO[kind] ?? (kind === "echo" && of.apart && !named ? label : "");
   // (an image pasted in the text shows there: Server.ts Chat.pictured)
   const pics = images.filter((name) => !text.includes("/media/" + name));
   return call === null && body.length === 0 && pics.length === 0 ? [] : [{ $: "Msg", id, kind, who, text, body, call, images: pics }];
@@ -921,14 +946,14 @@ export function entry_settled(kind: Kind, text: string, ended: boolean): number 
   return ["user", "work", "echo", "tool"].includes(kind) || !ended ? 0 : text.length;
 }
 
-function entry_body(kind: Kind, text: string): Md.Block[] {
+function entry_body(kind: Kind, text: string, label: string): Md.Block[] {
   switch (kind) {
     case "user":
     case "work": {
       return Md.md_plain(text);
     }
     case "echo": {
-      return Md.md_output(text);
+      return Md.md_output(text, label);
     }
     default: {
       return Md.md_parse(text);

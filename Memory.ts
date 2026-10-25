@@ -61,11 +61,17 @@ import { move_over } from "./Write.ts";
 
 // a message (a page): its index, kind, text, size, date, images, whether
 // imported, its node (if written with it), whether it is logged as one
-// with the next, the act it records
+// with the next, the act it records; a tool call and its result, the
+// call's id (of) and the result its tool (Pair)
 type Root = Msg & { i: number; size: number; date: string };
 
 // a message to log: a Root but its index and size; no date: now
-export type Msg = { kind: Kind; text: string; date?: string; images?: string[]; imported?: boolean; line?: string; more?: boolean; act?: string };
+export type Msg = { kind: Kind; text: string; date?: string; images?: string[]; imported?: boolean; line?: string; more?: boolean; act?: string } & Pair;
+
+// what pairs a tool call and its result (Server.ts Chat.on): the call's
+// id, on both; the call's tool, as logged (`shell`, `mcp__unii__show`), on
+// the result
+export type Pair = { of?: string; tool?: string };
 
 // node (l,i), as a line of a view
 type Part = { l: number; i: number };
@@ -1324,9 +1330,9 @@ ${Memory.cut(line)}| ← LIMIT`;
   }
 
   // its length read once, then counted (mem.agents)
-  export function agent_push(mem: Memory, name: string, kind: Kind, text: string): number {
+  export function agent_push(mem: Memory, name: string, kind: Kind, text: string, pair: Pair = {}): number {
     const n = mem.agents.get(name) ?? Memory.agent(mem, name)?.length ?? 0;
-    const root = Memory.root(n, { kind, text });
+    const root = Memory.root(n, { kind, text, ...pair });
     Memory.append(mem.dir + AGENTS + name + ".jsonl", [JSON.stringify(root)]);
     mem.agents.set(name, n + 1);
     return root.i;

@@ -678,32 +678,34 @@ export function md_pasted(s: string): Array<[number, number, string, string]> {
 }
 
 // a tool's result: a read's lines a File, each unified diff in it a
-// Diff, the text around them a File named "result" (none if blank)
-export function md_output(s: string): Block[] {
+// Diff, the text around them a File named "result" (none if blank); or
+// named `name` (a result apart from its call: "↳ shell result"), a
+// read's too, before its lines
+export function md_output(s: string, name = "result"): Block[] {
   const lines = s.replace(/\r/g, "").split("\n");
   const read  = READ.exec(lines[lines.length - 1]);
   if (read !== null) {
-    return [{ $: "File", k: read[1], n: Number(read[2]), x: lines.slice(0, -1) }];
+    return [{ $: "File", k: name === "result" ? read[1] : name + " · " + read[1], n: Number(read[2]), x: lines.slice(0, -1) }];
   }
   const out: Block[] = [];
   let [i, at] = [0, 0];
   while (i < lines.length) {
     const [diff, next] = diff_parse(lines, i);
     if (diff !== null) {
-      out.push(...output_lines(lines.slice(at, i)), diff);
+      out.push(...output_lines(lines.slice(at, i), name), diff);
       at = next;
     }
     i = next;
   }
-  return [...out, ...output_lines(lines.slice(at))];
+  return [...out, ...output_lines(lines.slice(at), name)];
 }
 
-// a result's text as a File named "result", its blank lines at either
-// end dropped; none if all blank
-function output_lines(lines: string[]): Block[] {
+// a result's text as a File named so, its blank lines at either end
+// dropped; none if all blank
+function output_lines(lines: string[], name: string): Block[] {
   const from = lines.findIndex((l) => l.trim() !== "");
   const upto = lines.findLastIndex((l) => l.trim() !== "");
-  return from < 0 ? [] : [{ $: "File", k: "result", n: 1, x: lines.slice(from, upto + 1) }];
+  return from < 0 ? [] : [{ $: "File", k: name, n: 1, x: lines.slice(from, upto + 1) }];
 }
 
 // null: no diff starts at line i (its "---" and "+++" lines, then hunks,
