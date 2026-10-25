@@ -137,6 +137,7 @@ function term_commands(v: View.View): Cmd[] {
 // ====
 
 function term_new(url: string, token: string): Term {
+  Paint.paint_site(url);
   const t: Term = {
     v       : View.view_new(),
     scr     : Screen.screen_new((key) => term_press(t, key)),

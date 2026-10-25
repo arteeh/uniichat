@@ -24,10 +24,10 @@ import * as View from "./View.ts";
 // Types
 // =====
 
-// an ink: dim, bold, italic, underlined, a link's url ("": none), its
-// color and its fill (an ANSI palette index "0"-"15", or "": the
-// terminal's own)
-type Ink = { d: boolean; b: boolean; i: boolean; u: boolean; k: string; c: string; g: string };
+// an ink: dim, bold, italic, underlined, struck through, a link's url
+// ("": none), its color and its fill (an ANSI palette index "0"-"15", or
+// "": the terminal's own)
+type Ink = { d: boolean; b: boolean; i: boolean; u: boolean; t: boolean; k: string; c: string; g: string };
 
 // text in an ink
 export type Run = { x: string; s: Ink };
@@ -37,7 +37,7 @@ export type Line = Run[];
 // Constants
 // =========
 
-export const INK: Ink = { d: false, b: false, i: false, u: false, k: "", c: "", g: "" };
+export const INK: Ink = { d: false, b: false, i: false, u: false, t: false, k: "", c: "", g: "" };
 export const DIM: Ink = { ...INK, d: true };
 
 // a diff line's ink, by its mark
@@ -47,6 +47,10 @@ const MARK: Record<Md.Line["s"], Ink> = { " ": DIM, "-": { ...INK, c: Theme.ANSI
 const GUTTER = 7;
 
 const GRAPHEMES = new Intl.Segmenter("en", { granularity: "grapheme" });
+
+// the server's address (paint_site): a link to a path here, an image's
+// too, goes to it
+let SITE = "";
 
 // Constructors
 // ============
@@ -70,6 +74,10 @@ export function text_clean(s: string): string {
 
 export function text_graphemes(s: string): string[] {
   return [...GRAPHEMES.segment(s)].map((g) => g.segment);
+}
+
+export function paint_site(url: string): void {
+  SITE = url.replace(/\/+$/, "");
 }
 
 // Line
@@ -120,11 +128,11 @@ export function line_ansi(l: Line): string {
 
 // the codes that change ink was (null: a line's start) to s
 function ink_ansi(was: Ink | null, s: Ink): string {
-  if (was !== null && was.d === s.d && was.b === s.b && was.i === s.i && was.u === s.u && was.k === s.k && was.c === s.c && was.g === s.g) {
+  if (was !== null && was.d === s.d && was.b === s.b && was.i === s.i && was.u === s.u && was.t === s.t && was.k === s.k && was.c === s.c && was.g === s.g) {
     return "";
   }
   const end  = was !== null && was.k !== "" ? "\x1b]8;;\x1b\\" : "";
-  const sgr  = "\x1b[0" + (s.b ? ";1" : "") + (s.i ? ";3" : "") + (s.u ? ";4" : "") + (s.d ? ";2" : "") + color_sgr(38, s.c) + color_sgr(48, s.g) + "m";
+  const sgr  = "\x1b[0" + (s.b ? ";1" : "") + (s.i ? ";3" : "") + (s.u ? ";4" : "") + (s.t ? ";9" : "") + (s.d ? ";2" : "") + color_sgr(38, s.c) + color_sgr(48, s.g) + "m";
   const link = s.k === "" ? "" : "\x1b]8;;" + s.k + "\x1b\\";
   return end + sgr + link;
 }
@@ -267,7 +275,7 @@ function blocks_lines(blocks: Md.Block[], w: number, ink: Ink): Line[] {
 function block_lines(b: Md.Block, w: number, ink: Ink): Line[] {
   switch (b.$) {
     case "Para": {
-      return b.x.flatMap((spans) => runs_wrap(spans_runs(spans, ink), w, false));
+      return runs_lines(spans_runs(b.x, ink)).flatMap((l) => runs_wrap(l, w, false));
     }
     case "Head": {
       return runs_wrap(spans_runs(b.x, { ...ink, b: true }), w, false);
@@ -282,11 +290,12 @@ function block_lines(b: Md.Block, w: number, ink: Ink): Line[] {
       return blocks_lines(b.x, w - 2, { ...ink, d: true }).map((l) => [Run("│ ", DIM), ...l]);
     }
     case "List": {
-      const items = b.x.map((item, k) => item_lines(item, b.k ? b.n + k + ". " : "• ", b.t, w, ink));
+      const mark = (k: number) => (b.c[k] == null ? (b.k ? b.n + k + ". " : "• ") : b.c[k] ? "[x] " : "[ ] ");
+      const items = b.x.map((item, k) => item_lines(item, mark(k), b.t, w, ink));
       return b.t ? items.flat() : lines_join(items, (x) => x);
     }
     case "Tabl": {
-      return table_lines(b.x, w, ink);
+      return table_lines(b.x, b.a, w, ink);
     }
     case "Diff": {
       return diff_lines(b.k, b.x, w);
@@ -340,9 +349,10 @@ function file_lines(shown: string, from: number, lines: string[], w: number): Li
 }
 
 // a table: columns as wide as their widest cell, the head bold, a rule
-// between rows (as the web's). Too wide, the columns share the width
-// (table_fit) and each cell wraps in its column.
-function table_lines(rows: Md.Span[][][], w: number, ink: Ink): Line[] {
+// between rows (as the web's), each cell aligned as its column (align).
+// Too wide, the columns share the width (table_fit) and each cell wraps
+// in its column.
+function table_lines(rows: Md.Span[][][], align: string[], w: number, ink: Ink): Line[] {
   const cells  = rows.map((row, k) => row.map((c) => spans_runs(c, { ...ink, b: k === 0 })));
   const cols   = cells.reduce((n, row) => Math.max(n, row.length), 0);
   const want   = Array.from({ length: cols }, (_, c) => cells.reduce((n, row) => Math.max(n, line_width(row[c] ?? [])), 0));
@@ -352,10 +362,12 @@ function table_lines(rows: Md.Span[][][], w: number, ink: Ink): Line[] {
   function row_lines(row: Line[]): Line[] {
     const wrap = widths.map((cw, c) => runs_wrap(row[c] ?? [], cw, false));
     const tall = wrap.reduce((n, x) => Math.max(n, x.length), 0);
-    return Array.from({ length: tall }, (_, k) => wrap.flatMap((x, c) => cell_line(x[k] ?? [], widths[c])));
+    return Array.from({ length: tall }, (_, k) => wrap.flatMap((x, c) => cell_line(x[k] ?? [], widths[c], align[c] ?? "")));
   }
-  function cell_line(l: Line, cw: number): Line {
-    return [...l, Run(" ".repeat(Math.max(0, cw - line_width(l)) + 2))];
+  function cell_line(l: Line, cw: number, a: string): Line {
+    const pad = Math.max(0, cw - line_width(l));
+    const before = a === "right" ? pad : a === "center" ? Math.floor(pad / 2) : 0;
+    return [Run(" ".repeat(before)), ...l, Run(" ".repeat(pad - before + 2))];
   }
 }
 
@@ -375,30 +387,52 @@ function table_fit(want: number[], w: number): number[] {
 // Span
 // ====
 
+// spans as runs, a line's end (Brk) a run "\n" (runs_lines)
 function spans_runs(spans: Md.Span[], ink: Ink): Line {
-  return spans.map((s) => span_run(s, ink));
+  return spans.flatMap((s) => span_runs(s, ink));
 }
 
-function span_run(s: Md.Span, ink: Ink): Run {
-  const x = text_clean(s.x);
+function span_runs(s: Md.Span, ink: Ink): Run[] {
   switch (s.$) {
     case "Text":
     case "Code": {
-      return Run(x, ink);
+      return [Run(text_clean(s.x), ink)];
     }
     case "Bold": {
-      return Run(x, { ...ink, b: true });
+      return spans_runs(s.x, { ...ink, b: true });
     }
     case "Ital": {
-      return Run(x, { ...ink, i: true });
+      return spans_runs(s.x, { ...ink, i: true });
+    }
+    case "Strk": {
+      return spans_runs(s.x, { ...ink, t: true });
     }
     case "Link": {
-      return Run(x, { ...ink, u: true, k: text_clean(s.k) });
+      return spans_runs(s.x, { ...ink, u: true, k: text_clean(site_url(s.k)) });
+    }
+    case "Pict": { // an image (a video, a sound, a page): its alt, then its full url
+      const url = text_clean(site_url(s.k));
+      return [Run("🖼 " + (text_clean(s.x) || "image") + " ", ink), Run(url, { ...ink, u: true, k: url })];
     }
     case "Name": {
-      return Run("[" + x + "]", { ...ink, b: true, u: true });
+      return [Run("[" + text_clean(s.x) + "]", { ...ink, b: true, u: true })];
+    }
+    case "Brk": {
+      return [Run("\n", ink)];
     }
   }
+}
+
+// runs split into lines at each "\n" run
+function runs_lines(runs: Line): Line[] {
+  const out: Line[] = [[]];
+  runs.forEach((r) => (r.x === "\n" ? out.push([]) : out[out.length - 1].push(r)));
+  return out;
+}
+
+// a link's url, a path here as the server's
+function site_url(k: string): string {
+  return k.startsWith("/") ? SITE + k : k;
 }
 
 // Bars

@@ -423,7 +423,7 @@ function section_html(title: string, body: string): string {
 export function block_html(b: Md.Block): string {
   switch (b.$) {
     case "Para": {
-      return `<p>${b.x.map(spans_html).join("<br>")}</p>`;
+      return `<p>${spans_html(b.x)}</p>`;
     }
     case "Head": {
       const tag = "h" + Math.min(4, b.k + 1);
@@ -442,13 +442,14 @@ export function block_html(b: Md.Block): string {
     case "List": {
       const tag = b.k ? "ol" : "ul";
       const start = b.k && b.n !== 1 ? ` start="${b.n}"` : "";
-      const items = b.x.map((item) => `<li>${item_html(item, b.t)}</li>`);
+      const box = (c: boolean | null) => (c === null ? "" : `<input type="checkbox" disabled${c ? " checked" : ""}> `);
+      const items = b.x.map((item, k) => `<li${b.c[k] == null ? "" : ` class="task"`}>${box(b.c[k] ?? null)}${item_html(item, b.t)}</li>`);
       return `<${tag}${start}>${items.join("")}</${tag}>`;
     }
     case "Tabl": {
       const rows = b.x.map((row, i) => {
         const tag = i === 0 ? "th" : "td";
-        const cells = row.map((cell) => `<${tag}>${spans_html(cell)}</${tag}>`);
+        const cells = row.map((cell, c) => `<${tag}${b.a[c] ? ` style="text-align:${b.a[c]}"` : ""}>${spans_html(cell)}</${tag}>`);
         return `<tr>${cells.join("")}</tr>`;
       });
       return `<table>${rows.join("")}</table>`;
@@ -465,7 +466,7 @@ export function block_html(b: Md.Block): string {
 // a list item's blocks; in a tight list its paragraphs bare (lines, not
 // paragraphs spaced apart)
 function item_html(blocks: Md.Block[], tight: boolean): string {
-  return blocks.map((b) => (tight && b.$ === "Para" ? b.x.map(spans_html).join("<br>") : block_html(b))).join("");
+  return blocks.map((b) => (tight && b.$ === "Para" ? spans_html(b.x) : block_html(b))).join("");
 }
 
 // a diff: its file and its lines added and dropped over its lines, each
@@ -504,13 +505,22 @@ function span_html(s: Md.Span): string {
       return `<code>${esc(s.x)}</code>`;
     }
     case "Bold": {
-      return `<strong>${esc(s.x)}</strong>`;
+      return `<strong>${spans_html(s.x)}</strong>`;
     }
     case "Ital": {
-      return `<em>${esc(s.x)}</em>`;
+      return `<em>${spans_html(s.x)}</em>`;
+    }
+    case "Strk": {
+      return `<del>${spans_html(s.x)}</del>`;
     }
     case "Link": {
-      return `<a href="${esc(s.k)}" target="_blank" rel="noopener">${esc(s.x)}</a>`;
+      return `<a href="${esc(s.k)}"${s.t === "" ? "" : ` title="${esc(s.t)}"`} target="_blank" rel="noopener">${spans_html(s.x)}</a>`;
+    }
+    case "Pict": {
+      return `<a href="${esc(s.k)}"${s.t === "" ? "" : ` title="${esc(s.t)}"`} target="_blank" rel="noopener">${esc(s.x || s.k)}</a>`;
+    }
+    case "Brk": {
+      return "<br>";
     }
     case "Name": {
       return `<button class="name"${act_html({ $: "Goto", name: s.x })}>[${esc(s.x)}]</button>`;

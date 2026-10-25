@@ -36,6 +36,7 @@ What this fork adds:
 - **Image and video viewing tools** to let it see images and video files.
 - **Settings page** where you can customize the system prompt and compaction prompt.
 - **Improved memory tree viewer** to browse what your agent knows.
+- **Full markdown** as GitHub draws it, in the web app and the terminal.
 - **Conversation mode** for when you want a short continuous
   back-and-forth without the agent forgetting anything you said.
 - **An installable web app (PWA)** on phones and desktops: icons, an

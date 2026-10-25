@@ -499,25 +499,24 @@ function name_word(word) {
 
 // Md.ts
 var NAME2 = new RegExp("\\[(" + NAME + ")\\]", "g");
-var SPAN = new RegExp([
-  /`([^`\n]+)`/.source,
-  /\[([^\]\n]+)\]\((https?:\/\/[^\s)]+|\/(?!\/)[^\s)]*)\)/.source,
-  NAME2.source,
-  /\*\*([^*\n]+)\*\*/.source,
-  /(?<![*\w])\*([^*\s][^*\n]*?)\*(?![\w*])/.source,
-  /(?<![^\s(])(https?:\/\/[^\s<)]+[^\s<).,;:!?])/.source
-].join("|"), "g");
+var ONLY = new RegExp("^(?:" + NAME + ")$");
 var LIST = /^ {0,3}([-*+]|\d{1,9}[.)])(?=[ \t]|$)/;
-var FENCE = /^\s*```/;
+var FENCE = /^\s*(`{3,}|~{3,})/;
+var TASK = /^\[([ xX])\](?=[ \t]|$)[ \t]?/;
+var PUNCT = /[\p{P}\p{S}]/u;
+var AUTO = /<((?:https?:\/\/|mailto:)[^\s<>]*)>/iy;
+var BARE = /https?:\/\//iy;
 var HEAD = /^(#{1,6})\s+(.*)$/;
 var RULE = /^\s*([-*_])(\s*\1){2,}\s*$/;
 var QUOT = /^\s*>\s?/;
 var ROW = /^\s*\|.*\|\s*$/;
+var PIPE = /(?<!\\)\|/;
 var BAR = /^\s*\|?[\s:|-]*-[\s:|-]*\|?\s*$/;
 var NEW = /^\+\+\+ (.*)$/;
 var READ = /^\[(lines (\d+)-\d+ of \d+[^\]]*)\]$/;
 var HUNK = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/;
 var MARKS = /^(?:\s*(?:[-*+]|\d{1,9}[.)])(?:[ \t]+|$)|\s*>\s?)*/;
+var DEPTH = 32;
 var DEEP = 16;
 function Text(x) {
   return { $: "Text", x };
@@ -542,34 +541,282 @@ function spans_by(s, re, mark) {
   return out;
 }
 function span_parse(s) {
-  return spans_by(s, SPAN, span_mark);
+  const stack = [{ c: "", n: 0, len: 0, close: false, at: 0, on: false, x: [] }];
+  const floor = new Map;
+  const ticks = ticks_at(s);
+  let [i, text] = [0, ""];
+  const put = (span) => {
+    flush();
+    spans_push(stack[stack.length - 1].x, span);
+  };
+  const flush = () => {
+    if (text !== "") {
+      spans_push(stack[stack.length - 1].x, Text(text));
+      text = "";
+    }
+  };
+  const fold = (j) => {
+    flush();
+    while (stack.length - 1 > j) {
+      const o = stack.pop();
+      const into = stack[stack.length - 1].x;
+      spans_push(into, Text(o.c === "[" || o.c === "![" ? o.c : o.c.repeat(o.n)));
+      o.x.forEach((x) => spans_push(into, x));
+    }
+    floor.forEach((f, key) => floor.set(key, Math.min(f, j)));
+  };
+  const drop = () => {
+    stack.pop();
+    fold(stack.length - 1);
+  };
+  while (i < s.length) {
+    const c = s[i];
+    if (c === "\\" && i + 1 < s.length && (s[i + 1] === `
+` || PUNCT.test(s[i + 1]) && s.charCodeAt(i + 1) < 128)) {
+      if (s[i + 1] === `
+`) {
+        text = text.trimEnd();
+        put({ $: "Brk" });
+      } else {
+        text += s[i + 1];
+      }
+      i += 2;
+    } else if (c === `
+`) {
+      text = text.trimEnd();
+      put({ $: "Brk" });
+      for (i++;s[i] === " " || s[i] === "\t"; i++)
+        ;
+    } else if (c === "`") {
+      const n = run_len(s, i, c);
+      const end = ticks(i + n, n);
+      if (end < 0) {
+        text += s.slice(i, i + n);
+      } else {
+        const x = s.slice(i + n, end).replace(/\n/g, " ");
+        put({ $: "Code", x: x.length > 2 && x[0] === " " && x.endsWith(" ") && x.trim() !== "" ? x.slice(1, -1) : x });
+      }
+      i = end < 0 ? i + n : end + n;
+    } else if (c === "<" && (AUTO.lastIndex = i, AUTO.test(s))) {
+      const k = s.slice(i + 1, AUTO.lastIndex - 1);
+      put(link_safe(k) ? { $: "Link", x: [Text(k)], k, t: "" } : Text(s.slice(i, AUTO.lastIndex)));
+      i = AUTO.lastIndex;
+    } else if (c === "[" || c === "!" && s[i + 1] === "[") {
+      flush();
+      stack.push({ c: c === "[" ? "[" : "![", n: 1, len: 1, close: false, at: i, on: true, x: [] });
+      i += c === "[" ? 1 : 2;
+    } else if (c === "]") {
+      let j = stack.length - 1;
+      while (j > 0 && stack[j].c !== "[" && stack[j].c !== "![") {
+        j--;
+      }
+      if (j === 0) {
+        text += c;
+        i++;
+        continue;
+      }
+      const o = stack[j];
+      const tail = o.on ? link_tail(s, i + 1) : null;
+      fold(j);
+      drop();
+      if (tail !== null && link_safe(tail.k)) {
+        put(o.c === "![" ? { $: "Pict", x: spans_text(o.x), k: tail.k, t: tail.t } : { $: "Link", x: o.x, k: tail.k, t: tail.t });
+        stack.forEach((up) => up.on = up.on && up.c !== "[");
+        i = tail.end;
+      } else if (tail !== null) {
+        put(Text(s.slice(o.at, tail.end)));
+        i = tail.end;
+      } else if (o.c === "[" && o.x.length === 1 && o.x[0].$ === "Text" && ONLY.test(o.x[0].x)) {
+        put(Name(o.x[0].x));
+        i++;
+      } else {
+        put(Text(o.c));
+        o.x.forEach((x) => put(x));
+        text += c;
+        i++;
+      }
+    } else if (c === "*" || c === "_" || c === "~") {
+      const n = run_len(s, i, c);
+      const [open, close] = flanks(s, i, n, c);
+      const d = { c, n, len: n, close, at: i, on: false, x: [] };
+      const key = c + open + n % 3;
+      while (close && d.n > 0 && !(c === "~" && n > 2)) {
+        let j = stack.length - 1;
+        const low = floor.get(key) ?? 0;
+        for (;j > low; j--) {
+          const o = stack[j];
+          if (o.c === "[" || o.c === "![") {
+            j = 0;
+            break;
+          }
+          const three = c !== "~" && (o.close || open) && (o.len + n) % 3 === 0 && (o.len % 3 !== 0 || n % 3 !== 0);
+          if (o.c === c && !three && (c !== "~" || o.n === d.n)) {
+            break;
+          }
+        }
+        if (j <= low) {
+          floor.set(key, stack.length - 1);
+          break;
+        }
+        fold(j);
+        const o = stack[j];
+        const use = c === "~" ? d.n : o.n >= 2 && d.n >= 2 ? 2 : 1;
+        const span = c === "~" ? { $: "Strk", x: o.x } : use === 2 ? { $: "Bold", x: o.x } : { $: "Ital", x: o.x };
+        [o.n, d.n] = [o.n - use, d.n - use];
+        if (o.n === 0) {
+          drop();
+          put(span);
+        } else {
+          o.x = [span];
+        }
+      }
+      if (d.n > 0 && open && !(c === "~" && n > 2)) {
+        flush();
+        stack.push(d);
+      } else {
+        text += c.repeat(d.n);
+      }
+      i += n;
+    } else if ((c === "h" || c === "H") && (i === 0 || /[\s(*_~]/.test(s[i - 1])) && (BARE.lastIndex = i, BARE.test(s)) && !stack.some((o) => o.c === "[")) {
+      const k = url_bare(s, i);
+      put(k.length > BARE.lastIndex - i ? { $: "Link", x: [Text(k)], k, t: "" } : Text(k));
+      i += k.length;
+    } else {
+      text += c;
+      i++;
+    }
+  }
+  fold(0);
+  return stack[0].x;
 }
-function span_mark(m) {
-  if (m[1] !== undefined) {
-    return { $: "Code", x: m[1] };
+function spans_push(spans, span) {
+  const last = spans[spans.length - 1];
+  if (span.$ === "Text" && last?.$ === "Text") {
+    spans[spans.length - 1] = Text(last.x + span.x);
+  } else if (span.$ !== "Text" || span.x !== "") {
+    spans.push(span);
   }
-  if (m[2] !== undefined) {
-    return { $: "Link", x: m[2], k: m[3] };
+}
+function spans_text(spans) {
+  return spans.map((x) => x.$ === "Brk" ? " " : x.$ === "Name" ? "[" + x.x + "]" : typeof x.x === "string" ? x.x : spans_text(x.x)).join("");
+}
+function run_len(s, i, c) {
+  let j = i;
+  while (s[j] === c) {
+    j++;
   }
-  if (m[4] !== undefined) {
-    return Name(m[4]);
+  return j - i;
+}
+function ticks_at(s) {
+  const runs = new Map;
+  for (let i = s.indexOf("`");i >= 0; i = s.indexOf("`", i)) {
+    const n = run_len(s, i, "`");
+    runs.set(n, runs.get(n) ?? []);
+    runs.get(n).push(i);
+    i += n;
   }
-  if (m[5] !== undefined) {
-    return { $: "Bold", x: m[5] };
+  const seen = new Map;
+  return (from, n) => {
+    const list = runs.get(n) ?? [];
+    let k = seen.get(n) ?? 0;
+    while (k < list.length && list[k] < from) {
+      k++;
+    }
+    seen.set(n, k);
+    return k < list.length ? list[k] : -1;
+  };
+}
+function flanks(s, i, n, c) {
+  const before = s[i - 1] ?? " ";
+  const after = s[i + n] ?? " ";
+  const space = (x) => /\s/.test(x);
+  const left = !space(after) && (!PUNCT.test(after) || space(before) || PUNCT.test(before));
+  const right = !space(before) && (!PUNCT.test(before) || space(after) || PUNCT.test(after));
+  return c === "_" ? [left && (!right || PUNCT.test(before)), right && (!left || PUNCT.test(after))] : [left, right];
+}
+function link_tail(s, i) {
+  if (s[i] !== "(") {
+    return null;
   }
-  if (m[6] !== undefined) {
-    return { $: "Ital", x: m[6] };
+  let j = i + 1;
+  const skip = () => {
+    while (s[j] === " " || s[j] === "\t" || s[j] === `
+`) {
+      j++;
+    }
+  };
+  skip();
+  let k = "";
+  if (s[j] === "<") {
+    const end = s.slice(j, s.indexOf(`
+`, j) < 0 ? undefined : s.indexOf(`
+`, j)).search(/(?<!\\)>/);
+    if (end < 0 || s.slice(j + 1, j + end).includes("<")) {
+      return null;
+    }
+    [k, j] = [s.slice(j + 1, j + end), j + end + 1];
+  } else {
+    let depth = 0;
+    const from = j;
+    for (;j < s.length && !/[\s\x00-\x1f]/.test(s[j]); j++) {
+      if (s[j] === "\\" && j + 1 < s.length) {
+        j++;
+      } else if (s[j] === "(" && ++depth > DEPTH) {
+        return null;
+      } else if (s[j] === ")" && depth-- === 0) {
+        break;
+      }
+    }
+    if (depth > 0) {
+      return null;
+    }
+    k = s.slice(from, j);
   }
-  return { $: "Link", x: m[7], k: m[7] };
+  const gap = j;
+  skip();
+  let t = "";
+  const q = s[j] === '"' || s[j] === "'" ? s[j] : s[j] === "(" ? ")" : null;
+  if (q !== null && j > gap) {
+    const line = s.indexOf(`
+`, j + 1);
+    const end = s.slice(j + 1, line < 0 ? undefined : line).indexOf(q);
+    if (end < 0) {
+      return null;
+    }
+    [t, j] = [s.slice(j + 1, j + 1 + end), j + end + 2];
+    skip();
+  }
+  if (s[j] !== ")") {
+    return null;
+  }
+  return { k: k.replace(/\\([!-/:-@[-`{-~])/g, "$1"), t, end: j + 1 };
+}
+function link_safe(k) {
+  return /^(?:https?:\/\/|mailto:)[^\s\x00-\x1f]*$/i.test(k) || /^\/(?![\/\\])[^\s\x00-\x1f]*$/.test(k) || k === "/";
+}
+function url_bare(s, i) {
+  let j = i;
+  while (j < s.length && !/[\s<\x00-\x1f\x7f]/.test(s[j])) {
+    j++;
+  }
+  let k = s.slice(i, j);
+  for (let was = "";was !== k; ) {
+    was = k;
+    k = k.replace(/[?!.,:*_~'";]+$/, "");
+    if (k.endsWith(")") && k.split(")").length > k.split("(").length) {
+      k = k.slice(0, -1);
+    }
+  }
+  return k;
 }
 function md_flat(s) {
-  return span_parse(s).map((span) => span.x).join("");
+  return spans_text(span_parse(s));
 }
 function md_plain(s) {
   const paras = s.replace(/\r/g, "").split(/\n(?:[ \t]*\n)+/);
   const kept = paras.filter((p) => p.trim() !== "");
   return kept.map((p) => ({ $: "Para", x: p.split(`
-`).map(plain_line) }));
+`).flatMap((l, k) => [...k === 0 ? [] : [{ $: "Brk" }], ...plain_line(l)]) }));
 }
 function plain_line(s) {
   return spans_by(s, NAME2, (m) => Name(m[1]));
@@ -663,15 +910,16 @@ function block_parse(lines, i, d) {
   if (line.trim() === "") {
     return [null, i + 1];
   }
-  if (FENCE.test(line)) {
-    const end = runs((l) => !FENCE.test(l));
-    const k = line.trim().slice(3).trim();
+  const fence = fence_open(line);
+  if (fence !== null) {
+    const end = runs((l) => !fence_shuts(l, fence));
+    const k = line.trim().slice(fence.length).trim();
     const x = lines.slice(i + 1, end).join(`
 `);
     return [{ $: "Code", k, x }, end + 1];
   }
   if (head !== null) {
-    const x = span_parse(head[2]);
+    const x = span_parse(head[2].replace(/(^|\s+)#+\s*$/, ""));
     return [{ $: "Head", k: head[1].length, x }, i + 1];
   }
   if (RULE.test(line)) {
@@ -685,18 +933,46 @@ function block_parse(lines, i, d) {
   if (list_kind(line) !== null && d < DEEP) {
     return list_parse(lines, i, d);
   }
-  if (ROW.test(line) && BAR.test(lines[i + 1] ?? "")) {
-    const end = lines_run(lines, i + 1, (l) => ROW.test(l));
-    const rows = [line, ...lines.slice(i + 2, end)];
-    return [{ $: "Tabl", x: rows.map(row_cells) }, end];
+  const a = table_head(lines, i);
+  if (a !== null) {
+    const end = lines_run(lines, i + 1, (l, j) => PIPE.test(l) && l.trim() !== "" && !block_starts(lines, j));
+    const rows = [line, ...lines.slice(i + 2, end)].map((l) => row_cells(l, a.length));
+    return [{ $: "Tabl", x: rows, a }, end];
+  }
+  if (indent(untab(line)) >= 4) {
+    const end = runs((l) => l.trim() === "" || indent(untab(l)) >= 4);
+    const body = lines.slice(i, end).map((l) => untab(l).slice(4));
+    while (body[body.length - 1].trim() === "") {
+      body.pop();
+    }
+    return [{ $: "Code", k: "", x: body.join(`
+`) }, end];
   }
   const end = runs((l, j) => l.trim() !== "" && !block_starts(lines, j));
-  const x = lines.slice(i, end).map(span_parse);
-  return [{ $: "Para", x }, end];
+  return [{ $: "Para", x: span_parse(lines.slice(i, end).join(`
+`).trimStart()) }, end];
+}
+function fence_open(line) {
+  const m = FENCE.exec(line);
+  return m === null || m[1][0] === "`" && line.slice(line.indexOf(m[1]) + m[1].length).includes("`") ? null : m[1];
+}
+function fence_shuts(line, fence) {
+  const m = /^\s*(`{3,}|~{3,})\s*$/.exec(line);
+  return m !== null && m[1][0] === fence[0] && m[1].length >= fence.length;
+}
+function table_head(lines, i) {
+  const [head, bar] = [lines[i], lines[i + 1] ?? ""];
+  const cells = bar.trim().replace(/^\||\|$/g, "").split("|");
+  const ok = BAR.test(bar) && (ROW.test(head) || PIPE.test(head) && bar.includes("|") && cells.length === row_cells(head, 0).length);
+  return !ok ? null : cells.map((c) => {
+    const [l, r] = [c.trim().startsWith(":"), c.trim().endsWith(":")];
+    return l && r ? "center" : r ? "right" : l ? "left" : "";
+  });
 }
 function list_parse(lines, i, d) {
   const kind = list_kind(lines[i]);
   const items = [];
+  const boxes = [];
   let [end, w, blank, open, para, fenced, loose] = [i, 0, 0, true, false, false, false];
   for (let j = i;j < lines.length; j++) {
     const l = untab(lines[j]);
@@ -712,7 +988,9 @@ function list_parse(lines, i, d) {
       w = mark.length + (rest.trim() === "" || pad > 4 ? 1 : pad);
       open = rest.trim() !== "" || (lines[j + 1] ?? "").trim() !== "";
       loose = loose || blank > 0 && items.length > 0;
-      items.push([l.slice(w)]);
+      const task = TASK.exec(l.slice(w));
+      boxes.push(task === null ? null : task[1] !== " ");
+      items.push([l.slice(w + (task?.[0].length ?? 0))]);
       [para, fenced] = item_line(l.slice(w), false);
     } else if (open && at >= w) {
       for (;blank > 0; blank--) {
@@ -731,7 +1009,7 @@ function list_parse(lines, i, d) {
   const k = /\d/.test(first);
   const parts = items.map((x) => blocks_parse(x, d + 1));
   const t = !loose && !parts.some((p) => p[1]);
-  return [{ $: "List", k, n: k ? Number(first.slice(0, -1)) : 1, t, x: parts.map((p) => p[0]) }, end];
+  return [{ $: "List", k, n: k ? Number(first.slice(0, -1)) : 1, t, x: parts.map((p) => p[0]), c: boxes }, end];
 }
 function item_line(s, fenced) {
   const x = RULE.test(s) ? "" : s.replace(MARKS, "");
@@ -757,15 +1035,16 @@ function block_starts(lines, j) {
   const l = lines[j];
   const m = LIST.exec(l);
   const item = m !== null && l.slice(m[0].length).trim() !== "" && (!/\d/.test(m[1]) || Number(m[1].slice(0, -1)) === 1);
-  return FENCE.test(l) || HEAD.test(l) || RULE.test(l) || QUOT.test(l) || item || ROW.test(l) && BAR.test(lines[j + 1] ?? "");
+  return fence_open(l) !== null || HEAD.test(l) || RULE.test(l) || QUOT.test(l) || item || table_head(lines, j) !== null;
 }
 function list_kind(l) {
   const m = LIST.exec(l);
   return m === null || RULE.test(l) ? null : m[1].slice(-1);
 }
-function row_cells(line) {
+function row_cells(line, n) {
   const cells = line.trim().replace(/^\||(?<!\\)\|$/g, "").split(/(?<!\\)\|/);
-  return cells.map((c) => span_parse(c.trim().replace(/\\\|/g, "|")));
+  const all = n === 0 ? cells : Array.from({ length: n }, (_, k) => cells[k] ?? "");
+  return all.map((c) => span_parse(c.trim().replace(/\\\|/g, "|")));
 }
 
 // Pick.ts
@@ -1725,7 +2004,7 @@ function section_html(title, body) {
 function block_html(b) {
   switch (b.$) {
     case "Para": {
-      return `<p>${b.x.map(spans_html).join("<br>")}</p>`;
+      return `<p>${spans_html(b.x)}</p>`;
     }
     case "Head": {
       const tag = "h" + Math.min(4, b.k + 1);
@@ -1744,13 +2023,14 @@ function block_html(b) {
     case "List": {
       const tag = b.k ? "ol" : "ul";
       const start = b.k && b.n !== 1 ? ` start="${b.n}"` : "";
-      const items = b.x.map((item) => `<li>${item_html(item, b.t)}</li>`);
+      const box = (c) => c === null ? "" : `<input type="checkbox" disabled${c ? " checked" : ""}> `;
+      const items = b.x.map((item, k) => `<li${b.c[k] == null ? "" : ` class="task"`}>${box(b.c[k] ?? null)}${item_html(item, b.t)}</li>`);
       return `<${tag}${start}>${items.join("")}</${tag}>`;
     }
     case "Tabl": {
       const rows = b.x.map((row, i) => {
         const tag = i === 0 ? "th" : "td";
-        const cells = row.map((cell) => `<${tag}>${spans_html(cell)}</${tag}>`);
+        const cells = row.map((cell, c) => `<${tag}${b.a[c] ? ` style="text-align:${b.a[c]}"` : ""}>${spans_html(cell)}</${tag}>`);
         return `<tr>${cells.join("")}</tr>`;
       });
       return `<table>${rows.join("")}</table>`;
@@ -1764,7 +2044,7 @@ function block_html(b) {
   }
 }
 function item_html(blocks, tight) {
-  return blocks.map((b) => tight && b.$ === "Para" ? b.x.map(spans_html).join("<br>") : block_html(b)).join("");
+  return blocks.map((b) => tight && b.$ === "Para" ? spans_html(b.x) : block_html(b)).join("");
 }
 function diff_html(file, hunks) {
   const all = hunks.flat();
@@ -1794,13 +2074,22 @@ function span_html(s) {
       return `<code>${esc(s.x)}</code>`;
     }
     case "Bold": {
-      return `<strong>${esc(s.x)}</strong>`;
+      return `<strong>${spans_html(s.x)}</strong>`;
     }
     case "Ital": {
-      return `<em>${esc(s.x)}</em>`;
+      return `<em>${spans_html(s.x)}</em>`;
+    }
+    case "Strk": {
+      return `<del>${spans_html(s.x)}</del>`;
     }
     case "Link": {
-      return `<a href="${esc(s.k)}" target="_blank" rel="noopener">${esc(s.x)}</a>`;
+      return `<a href="${esc(s.k)}"${s.t === "" ? "" : ` title="${esc(s.t)}"`} target="_blank" rel="noopener">${spans_html(s.x)}</a>`;
+    }
+    case "Pict": {
+      return `<a href="${esc(s.k)}"${s.t === "" ? "" : ` title="${esc(s.t)}"`} target="_blank" rel="noopener">${esc(s.x || s.k)}</a>`;
+    }
+    case "Brk": {
+      return "<br>";
     }
     case "Name": {
       return `<button class="name"${act_html({ $: "Goto", name: s.x })}>[${esc(s.x)}]</button>`;
