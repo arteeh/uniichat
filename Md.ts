@@ -9,7 +9,7 @@
 // goes only to http(s), mailto or a path here (link_safe). Spans are read
 // by a scanner (span_parse), never a regex that backtracks, as a message
 // can be long. `md_plain` reads text as it is:
-// paragraphs, lines and names only. `md_output` reads a tool's result
+// paragraphs, lines, names and media pasted only. `md_output` reads a tool's result
 // as a file's lines: a read's as its lines, a unified diff (Machine.ts
 // writes them, git too) as its file and hunks, any other text as lines
 // named "result", so every result looks as a read does. Tokens hold
@@ -56,6 +56,9 @@ export type Block =
 
 const NAME  = new RegExp("\\[(" + Names.NAME + ")\\]", "g");
 const ONLY  = new RegExp("^(?:" + Names.NAME + ")$");
+// what a text read as it is (md_plain) marks: names, and the media store's
+// files pasted in it (![name](/media/…))
+const PLAIN = new RegExp(NAME.source + /|!\[([^\]\n]*)\]\((\/media\/[0-9a-f]{16}\.[a-z0-9]+)\)/.source, "g");
 const LIST  = /^ {0,3}([-*+]|\d{1,9}[.)])(?=[ \t]|$)/;
 const FENCE = /^\s*(`{3,}|~{3,})/;
 const TASK  = /^\[([ xX])\](?=[ \t]|$)[ \t]?/;
@@ -421,7 +424,7 @@ export function md_plain(s: string): Block[] {
 }
 
 function plain_line(s: string): Span[] {
-  return spans_by(s, NAME, (m) => Name(m[1]));
+  return spans_by(s, PLAIN, (m) => (m[1] !== undefined ? Name(m[1]) : { $: "Pict", x: m[2], k: m[3], t: "" }));
 }
 
 // a tool's result: a read's lines a File, each unified diff in it a

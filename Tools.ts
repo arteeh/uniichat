@@ -205,6 +205,8 @@ show tools run on the one their \`device\` field names. A computer is listed onl
 while its device runs, and leaves the list when it stops: a task that needs
 one not listed can't be done now, so tell the user it isn't available.`;
 const DEVICES_NONE = "(None is open now.)";
+// where a file of the chat's (/media/<name>, pasted or shown) is
+const MEDIA_AT = "Media in the chat, /media/<name>, are the files {dir}<name> on the server's computer.";
 
 const SKILLS = "Skills on the devices open now, by device: when a task matches one's description, load it with the skill tool first, then follow it.";
 
@@ -288,7 +290,7 @@ export namespace Tools {
     const shell = (d: Device) => [...d.terms.values()][0]?.shell;
     const line  = ([name, d]: [string, Device]) => "- " + name + ", work dir " + work(d) + (shell(d) ? ", shell " + shell(d) + " (stopping the device does not kill a process a call left running after its shell ended)" : "");
     const lines = Tools.opened(tools).map(line);
-    return { text: "Devices open now:\n" + (lines.length === 0 ? DEVICES_NONE : lines.join("\n")) + "\n\n", mark: false };
+    return { text: "Devices open now:\n" + (lines.length === 0 ? DEVICES_NONE : lines.join("\n")) + "\n" + MEDIA_AT.replace("{dir}", tools.mem.dir + "/docs/media/") + "\n\n", mark: false };
   }
 
   // after the devices, so a change hits a call's tail, not its cached

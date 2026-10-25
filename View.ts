@@ -897,7 +897,9 @@ export function entry_rows(id: number | null, kind: Kind, text: string, images: 
   const report = kind === "work" ? Call.report_read(text) : null;
   const body = call === null ? entry_body(kind, report?.text ?? text) : [];
   const who = report?.name ?? WHO[kind] ?? "";
-  return call === null && body.length === 0 && images.length === 0 ? [] : [{ $: "Msg", id, kind, who, text, body, call, images }];
+  // (an image pasted in the text shows there: Server.ts Chat.pictured)
+  const pics = images.filter((name) => !text.includes("/media/" + name));
+  return call === null && body.length === 0 && pics.length === 0 ? [] : [{ $: "Msg", id, kind, who, text, body, call, images: pics }];
 }
 
 // the length of a streaming message's head printed now: all of it once

@@ -387,6 +387,7 @@ header > .imping { display: flex; flex-direction: column; justify-content: cente
 #pics { width: min(var(--col), 100%); margin: 0 auto 8px; }
 #pics:empty { display: none; }
 #pics img { height: 64px; cursor: pointer; }
+#pics .up { padding: 4px 10px; border-radius: 8px; background: var(--block); font: 13px var(--sans); color: var(--mid); }
 
 @media (max-width: 600px) {
   :root { --head: 51px; }

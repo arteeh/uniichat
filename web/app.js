@@ -500,6 +500,7 @@ function name_word(word) {
 // Md.ts
 var NAME2 = new RegExp("\\[(" + NAME + ")\\]", "g");
 var ONLY = new RegExp("^(?:" + NAME + ")$");
+var PLAIN = new RegExp(NAME2.source + /|!\[([^\]\n]*)\]\((\/media\/[0-9a-f]{16}\.[a-z0-9]+)\)/.source, "g");
 var LIST = /^ {0,3}([-*+]|\d{1,9}[.)])(?=[ \t]|$)/;
 var FENCE = /^\s*(`{3,}|~{3,})/;
 var TASK = /^\[([ xX])\](?=[ \t]|$)[ \t]?/;
@@ -819,7 +820,7 @@ function md_plain(s) {
 `).flatMap((l, k) => [...k === 0 ? [] : [{ $: "Brk" }], ...plain_line(l)]) }));
 }
 function plain_line(s) {
-  return spans_by(s, NAME2, (m) => Name(m[1]));
+  return spans_by(s, PLAIN, (m) => m[1] !== undefined ? Name(m[1]) : { $: "Pict", x: m[2], k: m[3], t: "" });
 }
 function md_output(s) {
   const lines = s.replace(/\r/g, "").split(`
@@ -1697,7 +1698,8 @@ function entry_rows(id, kind, text, images = []) {
   const report = kind === "work" ? report_read(text) : null;
   const body = call === null ? entry_body(kind, report?.text ?? text) : [];
   const who = report?.name ?? WHO[kind] ?? "";
-  return call === null && body.length === 0 && images.length === 0 ? [] : [{ $: "Msg", id, kind, who, text, body, call, images }];
+  const pics = images.filter((name) => !text.includes("/media/" + name));
+  return call === null && body.length === 0 && pics.length === 0 ? [] : [{ $: "Msg", id, kind, who, text, body, call, images: pics }];
 }
 function entry_body(kind, text) {
   switch (kind) {
@@ -2584,7 +2586,10 @@ var P = {
   renew: false,
   saved: false,
   gave: null,
-  back: null
+  back: null,
+  ups: new Map,
+  upn: 0,
+  after: false
 };
 function $2(sel) {
   return document.querySelector(sel);
@@ -2658,7 +2663,13 @@ function chat() {
       submit();
     }
   };
-  BOX.onpaste = (ev) => attach([...ev.clipboardData?.files ?? []]);
+  BOX.onpaste = (ev) => {
+    const files = [...ev.clipboardData?.files ?? []];
+    if (files.length > 0) {
+      ev.preventDefault();
+      attach(files);
+    }
+  };
   $2("form").onsubmit = (ev) => {
     ev.preventDefault();
     submit();
@@ -2724,6 +2735,11 @@ function signed() {
   renewed();
 }
 function submit() {
+  if (P.ups.size > 0) {
+    P.after = true;
+    toast("Sends once uploaded.");
+    return;
+  }
   const text = BOX.value.trim();
   act({ $: "Send", text, images: P.imgs });
   pics([]);
@@ -2742,9 +2758,59 @@ function back(sent, out) {
   toast(out.error);
 }
 function attach(files) {
-  if (files.length > 0) {
-    pics([...P.imgs, ...files]);
+  for (const file of files) {
+    const name = file.name.replace(/[[\]\n]/g, "") || "file";
+    const mark = "uploading:" + ++P.upn;
+    const line = "![" + name + "](" + mark + ")";
+    const [a, b] = [BOX.selectionStart, BOX.selectionEnd];
+    const before = a > 0 && BOX.value[a - 1] !== `
+` ? `
+` : "";
+    const after = b < BOX.value.length && BOX.value[b] !== `
+` ? `
+` : "";
+    BOX.setRangeText(before + line + after, a, b, "end");
+    BOX.dispatchEvent(new Event("input"));
+    P.ups.set(mark, { name, part: 0 });
+    const xhr = new XMLHttpRequest;
+    xhr.open("POST", "/api/media?name=" + encodeURIComponent(file.name));
+    xhr.upload.onprogress = (ev) => {
+      P.ups.set(mark, { name, part: ev.lengthComputable ? ev.loaded / ev.total : 0 });
+      uploads();
+    };
+    xhr.onloadend = () => {
+      let out = {};
+      try {
+        out = JSON.parse(xhr.responseText);
+      } catch {}
+      const at = BOX.value.indexOf(line);
+      if (at >= 0) {
+        const done = out.name === undefined ? "" : line.replace("(" + mark + ")", "(/media/" + out.name + ")");
+        const end = at + line.length + (done === "" && BOX.value[at + line.length] === `
+` ? 1 : 0);
+        const move = (x) => x <= at ? x : x >= end ? x + done.length - (end - at) : at + done.length;
+        const [a, b] = [move(BOX.selectionStart), move(BOX.selectionEnd)];
+        BOX.setRangeText(done, at, end);
+        BOX.setSelectionRange(a, b);
+        BOX.dispatchEvent(new Event("input"));
+      }
+      if (out.name === undefined) {
+        toast(out.error ?? "Could not upload " + name + ".");
+      }
+      P.ups.delete(mark);
+      uploads();
+      if (P.ups.size === 0 && P.after) {
+        P.after = false;
+        submit();
+      }
+    };
+    xhr.send(file);
   }
+  uploads();
+}
+function uploads() {
+  markup($2("#pics"), [...P.ups.values()].map((up) => `<span class="up">${esc(up.name)} · ${Math.round(up.part * 100)}%</span>`));
+  draw(true);
 }
 function pics(imgs) {
   const els = imgs.map((img) => {
@@ -3738,7 +3804,7 @@ function renew_due(build) {
 }
 function renew_free() {
   const page = location.pathname !== "/" && location.pathname !== TREE;
-  return P.rec === null && P.imgs.length === 0 && v.out.length === 0 && !$2("#import").matches(":popover-open") && (!page || P.saved);
+  return P.rec === null && P.imgs.length === 0 && P.ups.size === 0 && v.out.length === 0 && !$2("#import").matches(":popover-open") && (!page || P.saved);
 }
 async function renew() {
   P.renew = false;

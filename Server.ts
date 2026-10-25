@@ -168,6 +168,10 @@ const WAKE       = 60000;
 // the acts with a body (Chat.post)
 const BODIES     = ["say", "import", "voice"];
 
+// the most images of the media store a message's text gives the models
+// (Chat.pictured)
+const PICTURED   = 20;
+
 // a read of a body: a buffer, no limit
 const READ       = 2 ** 20;
 
@@ -304,10 +308,27 @@ export namespace Chat {
   // at a time, the last with the images and the act's record
   export async function text(chat: Chat, body: Body, at: number, images: string[], act: string): Promise<Msg> {
     const id = chat.mem.count;
+    let all = "";
     for await (const [pages, more] of Chat.pieces(body, at, clip_pages)) {
-      Chat.push(chat, null, "user", pages.join(""), more ? [] : images, more, more ? undefined : act);
+      all += pages.join("");
+      const pics = more ? [] : [...images, ...await Chat.pictured(chat, all, images)];
+      Chat.push(chat, null, "user", pages.join(""), pics, more, more ? undefined : act);
     }
     return { id, end: chat.mem.count };
+  }
+
+  // the images of the media store a message's text shows (pasted:
+  // main.ts attach), as its images too, so models see them as they see
+  // one sent with it (Memory.image_add names it as the store does)
+  export async function pictured(chat: Chat, text: string, had: string[]): Promise<string[]> {
+    const names = [...text.matchAll(/!\[[^\]\n]*\]\(\/media\/([0-9a-f]{16}\.(?:png|jpeg|gif|webp))\)/g)].map((m) => m[1]);
+    const out: string[] = [];
+    for (const name of [...new Set(names)].filter((n) => !had.includes(n)).slice(0, PICTURED)) {
+      const file = Memory.media_file(chat.mem, name);
+      const added = file === null ? null : await Memory.image_add(chat.mem, fs.readFileSync(file));
+      out.push(...(added === null ? [] : [added]));
+    }
+    return out;
   }
 
   // a post's logging, after the chat's earlier ones, holding its other

@@ -59,7 +59,9 @@ const BACK = $<HTMLInputElement>("#import [name=back]");
 // the page's: end: at its bottom; stick: the next draw may keep it;
 // y: its scroll when last scrolled; open: the tool calls and results
 // unfolded, by id (folds); build, renew, saved, gave, back: the web
-// app's build and its reload into another (Renew);
+// app's build and its reload into another (Renew); ups, upn, after: the
+// files uploading, by the mark each holds in the box, the last mark's
+// number, and a message sent meanwhile (Uploads);
 // frame: awaited (0: none); rows: the log's rows changed, to draw;
 // found: the sources read, by name; done: sessions imported before; off:
 // left out (Import.Want); step: the import's; away: the chat's scroll as
@@ -88,6 +90,9 @@ const P = {
   saved : false,
   gave  : null as WebSocket | null,
   back  : null as { a: number; top: number } | null,
+  ups   : new Map<string, { name: string; part: number }>(),
+  upn   : 0,
+  after : false,
 };
 
 function $<T extends HTMLElement>(sel: string): T {
@@ -191,7 +196,13 @@ function chat(): void {
       submit();
     }
   };
-  BOX.onpaste = (ev) => attach([...(ev.clipboardData?.files ?? [])]);
+  BOX.onpaste = (ev) => {
+    const files = [...(ev.clipboardData?.files ?? [])];
+    if (files.length > 0) {
+      ev.preventDefault();
+      attach(files);
+    }
+  };
   $("form").onsubmit = (ev) => {
     ev.preventDefault();
     submit();
@@ -267,6 +278,11 @@ function signed(): void {
 }
 
 function submit(): void {
+  if (P.ups.size > 0) {
+    P.after = true;
+    toast("Sends once uploaded.");
+    return;
+  }
   const text = BOX.value.trim();
   act({ $: "Send", text, images: P.imgs });
   pics([]);
@@ -288,11 +304,67 @@ function back(sent: View.Sent, out: View.Answer): void {
   toast(out.error);
 }
 
-// files to send with the next message, posted
+// Uploads
+// =======
+// A file pasted, dropped or picked (an image, a video, a sound) goes to
+// the media store at once (Server.ts /api/media); its line,
+// ![name](uploading:n), is put in the box at the caret, on a line of its
+// own, and its url is filled in as it ends (the line dropped, if it was
+// refused; left out, if deleted meanwhile). The uploads' progress shows
+// over the box; a message sent meanwhile goes as the last ends.
+
 function attach(files: File[]): void {
-  if (files.length > 0) {
-    pics([...P.imgs, ...files]);
+  for (const file of files) {
+    const name = file.name.replace(/[[\]\n]/g, "") || "file";
+    const mark = "uploading:" + ++P.upn;
+    const line = "![" + name + "](" + mark + ")";
+    const [a, b] = [BOX.selectionStart, BOX.selectionEnd];
+    const before = a > 0 && BOX.value[a - 1] !== "\n" ? "\n" : "";
+    const after = b < BOX.value.length && BOX.value[b] !== "\n" ? "\n" : "";
+    BOX.setRangeText(before + line + after, a, b, "end");
+    BOX.dispatchEvent(new Event("input"));
+    P.ups.set(mark, { name, part: 0 });
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", "/api/media?name=" + encodeURIComponent(file.name));
+    xhr.upload.onprogress = (ev) => {
+      P.ups.set(mark, { name, part: ev.lengthComputable ? ev.loaded / ev.total : 0 });
+      uploads();
+    };
+    xhr.onloadend = () => {
+      let out: any = {};
+      try {
+        out = JSON.parse(xhr.responseText);
+      } catch {}
+      const at = BOX.value.indexOf(line);
+      if (at >= 0) {
+        // the caret kept where it was, after the line if in it
+        const done = out.name === undefined ? "" : line.replace("(" + mark + ")", "(/media/" + out.name + ")");
+        const end = at + line.length + (done === "" && BOX.value[at + line.length] === "\n" ? 1 : 0);
+        const move = (x: number) => (x <= at ? x : x >= end ? x + done.length - (end - at) : at + done.length);
+        const [a, b] = [move(BOX.selectionStart), move(BOX.selectionEnd)];
+        BOX.setRangeText(done, at, end);
+        BOX.setSelectionRange(a, b);
+        BOX.dispatchEvent(new Event("input"));
+      }
+      if (out.name === undefined) {
+        toast(out.error ?? "Could not upload " + name + ".");
+      }
+      P.ups.delete(mark);
+      uploads();
+      if (P.ups.size === 0 && P.after) {
+        P.after = false;
+        submit();
+      }
+    };
+    xhr.send(file);
   }
+  uploads();
+}
+
+// each upload's name and how far it is, over the box
+function uploads(): void {
+  markup($("#pics"), [...P.ups.values()].map((up) => `<span class="up">${Html.esc(up.name)} · ${Math.round(up.part * 100)}%</span>`));
+  draw(true);
 }
 
 // the images waiting, shown over the box; a click drops one
@@ -1512,7 +1584,7 @@ function renew_due(build: string | undefined): void {
 
 function renew_free(): boolean {
   const page = location.pathname !== "/" && location.pathname !== TREE;
-  return P.rec === null && P.imgs.length === 0 && v.out.length === 0 && !$("#import").matches(":popover-open") && (!page || P.saved);
+  return P.rec === null && P.imgs.length === 0 && P.ups.size === 0 && v.out.length === 0 && !$("#import").matches(":popover-open") && (!page || P.saved);
 }
 
 async function renew(): Promise<void> {
