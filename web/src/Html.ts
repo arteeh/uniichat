@@ -81,7 +81,9 @@ function row_make(row: View.Row): string {
       const body = row.call === null ? row.body.map(block_html).join("") : call_html(row.call);
       const pics = images_html(row.images);
       const tall = ["user", "work"].includes(row.kind) && row.text.length + 80 * row.text.split("\n").length > TALL;
-      const fold = tall ? `<div class="clip">${body}</div><details class="more"><summary></summary></details>` : body;
+      // a tool call or result folds by its height (main.ts folds)
+      const cut = row.kind === "tool" || row.kind === "echo";
+      const fold = tall ? `<div class="clip">${body}</div><details class="more"><summary></summary></details>` : cut ? `<div class="cut">${body}</div><button class="unfold" aria-expanded="false">Show all</button>` : body;
       const who = row.who === "" ? "" : ` data-who="${esc(row.who)}"`;
       return `<div class="msg ${row.kind}"${at}${who}>${copy}${fold}${pics}</div>`;
     }

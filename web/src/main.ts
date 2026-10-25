@@ -57,7 +57,8 @@ const BOX = $<HTMLTextAreaElement>("textarea");
 const BACK = $<HTMLInputElement>("#import [name=back]");
 
 // the page's: end: at its bottom; stick: the next draw may keep it;
-// y: its scroll when last scrolled;
+// y: its scroll when last scrolled; open: the tool calls and results
+// unfolded, by id (folds);
 // frame: awaited (0: none); rows: the log's rows changed, to draw;
 // found: the sources read, by name; done: sessions imported before; off:
 // left out (Import.Want); step: the import's; away: the chat's scroll as
@@ -80,6 +81,7 @@ const P = {
   push  : null as { reg: ServiceWorkerRegistration; key: string } | null,
   away  : null as { y: number; end: boolean } | null,
   used  : { ws: null as WebSocket | null, on: false, at: 0 },
+  open  : new Set<string>(),
 };
 
 function $<T extends HTMLElement>(sel: string): T {
@@ -238,6 +240,14 @@ function chat(): void {
   });
   keep.observe($("#log"));
   keep.observe($("footer"));
+  let width = innerWidth;
+  addEventListener("resize", () => {
+    if (innerWidth !== width) {
+      width = innerWidth;
+      measured = new WeakSet();
+      folds();
+    }
+  });
   draw(true);
 }
 
@@ -305,8 +315,14 @@ function act(a: View.Act): void {
 // a click on a View.Act, a Copy button, a page (go), a knob or its
 // menu's row (Html.ts), unless it ends a selection dragged in its element
 function click(ev: MouseEvent): void {
-  const el = (ev.target as HTMLElement).closest<HTMLElement>("[data-act], [data-copy], [data-go], [data-knob], .choices > button");
+  const target = ev.target as HTMLElement;
+  const el = target.closest<HTMLElement>("[data-act], [data-copy], [data-go], [data-knob], .choices > button");
   const sel = getSelection();
+  const cut = target.closest(".unfold") ?? (el === null && target.closest("a") === null ? target.closest(".msg.long:not(.shown) > .cut") : null);
+  if (cut !== null && (sel === null || sel.isCollapsed)) {
+    unfold(cut.parentElement!);
+    return;
+  }
   if (el === null || (sel !== null && !sel.isCollapsed && el.contains(sel.focusNode))) {
     return;
   }
@@ -380,6 +396,48 @@ function left(ev: FocusEvent): void {
   if (menu !== null && to !== null && !menu.contains(to) && to !== menu.previousElementSibling) {
     menu.hidePopover();
   }
+}
+
+// Folds
+// =====
+// A tool call or result taller than FOLD of its own lines is long: it
+// shows 8 (style.css), its button and a tap on it unfold it, the button
+// folds it again; unfolded by id (P.open), so a row drawn anew keeps it.
+// Each is measured once as drawn, all again as the width changes.
+
+const FOLD = 10;
+
+let measured = new WeakSet<Element>();
+
+function folds(): void {
+  for (const cut of document.querySelectorAll<HTMLElement>("#log .msg > .cut")) {
+    const msg = cut.parentElement!;
+    if (!measured.has(msg)) {
+      measured.add(msg);
+      msg.classList.toggle("long", cut.scrollHeight > FOLD * parseFloat(getComputedStyle(cut).lineHeight));
+    }
+    fold_show(msg, P.open.has(msg.dataset.a ?? ""));
+  }
+}
+
+function fold_show(msg: HTMLElement, open: boolean): void {
+  msg.classList.toggle("shown", open);
+  const button = msg.querySelector(":scope > .unfold")!;
+  button.setAttribute("aria-expanded", String(open));
+  button.textContent = open ? "Show less" : "Show all";
+}
+
+// its top stays where it is: the page follows its bottom again only if
+// still at it
+function unfold(msg: HTMLElement): void {
+  const open = !msg.classList.contains("shown");
+  const id = msg.dataset.a ?? "";
+  open ? P.open.add(id) : P.open.delete(id);
+  const top = msg.getBoundingClientRect().top;
+  P.end = false;
+  fold_show(msg, open);
+  scrollBy(0, msg.getBoundingClientRect().top - top);
+  P.end = at_end();
 }
 
 function copied(button: HTMLElement): void {
@@ -833,6 +891,7 @@ function paint(): void {
     P.rows = false;
   }
   markup($("#log .tail"), View.view_tail(v).map(Html.row_html));
+  folds();
   if (shown !== P.shown) {
     P.shown = shown;
     P.end = v.fold === null;

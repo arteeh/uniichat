@@ -1484,7 +1484,8 @@ function row_make(row) {
       const pics = images_html(row.images);
       const tall = ["user", "work"].includes(row.kind) && row.text.length + 80 * row.text.split(`
 `).length > TALL;
-      const fold = tall ? `<div class="clip">${body}</div><details class="more"><summary></summary></details>` : body;
+      const cut = row.kind === "tool" || row.kind === "echo";
+      const fold = tall ? `<div class="clip">${body}</div><details class="more"><summary></summary></details>` : cut ? `<div class="cut">${body}</div><button class="unfold" aria-expanded="false">Show all</button>` : body;
       const who = row.who === "" ? "" : ` data-who="${esc(row.who)}"`;
       return `<div class="msg ${row.kind}"${at}${who}>${copy}${fold}${pics}</div>`;
     }
@@ -2266,7 +2267,8 @@ var P = {
   step: "",
   push: null,
   away: null,
-  used: { ws: null, on: false, at: 0 }
+  used: { ws: null, on: false, at: 0 },
+  open: new Set
 };
 function $2(sel) {
   return document.querySelector(sel);
@@ -2388,6 +2390,14 @@ function chat() {
   });
   keep.observe($2("#log"));
   keep.observe($2("footer"));
+  let width = innerWidth;
+  addEventListener("resize", () => {
+    if (innerWidth !== width) {
+      width = innerWidth;
+      measured = new WeakSet;
+      folds();
+    }
+  });
   draw(true);
 }
 function signed() {
@@ -2441,8 +2451,14 @@ function act(a) {
   draw(a.$ === "Send");
 }
 function click(ev) {
-  const el = ev.target.closest("[data-act], [data-copy], [data-go], [data-knob], .choices > button");
+  const target = ev.target;
+  const el = target.closest("[data-act], [data-copy], [data-go], [data-knob], .choices > button");
   const sel = getSelection();
+  const cut = target.closest(".unfold") ?? (el === null && target.closest("a") === null ? target.closest(".msg.long:not(.shown) > .cut") : null);
+  if (cut !== null && (sel === null || sel.isCollapsed)) {
+    unfold(cut.parentElement);
+    return;
+  }
   if (el === null || sel !== null && !sel.isCollapsed && el.contains(sel.focusNode)) {
     return;
   }
@@ -2503,6 +2519,34 @@ function left(ev) {
   if (menu !== null && to !== null && !menu.contains(to) && to !== menu.previousElementSibling) {
     menu.hidePopover();
   }
+}
+var FOLD2 = 10;
+var measured = new WeakSet;
+function folds() {
+  for (const cut of document.querySelectorAll("#log .msg > .cut")) {
+    const msg = cut.parentElement;
+    if (!measured.has(msg)) {
+      measured.add(msg);
+      msg.classList.toggle("long", cut.scrollHeight > FOLD2 * parseFloat(getComputedStyle(cut).lineHeight));
+    }
+    fold_show(msg, P.open.has(msg.dataset.a ?? ""));
+  }
+}
+function fold_show(msg, open) {
+  msg.classList.toggle("shown", open);
+  const button = msg.querySelector(":scope > .unfold");
+  button.setAttribute("aria-expanded", String(open));
+  button.textContent = open ? "Show less" : "Show all";
+}
+function unfold(msg) {
+  const open = !msg.classList.contains("shown");
+  const id = msg.dataset.a ?? "";
+  open ? P.open.add(id) : P.open.delete(id);
+  const top = msg.getBoundingClientRect().top;
+  P.end = false;
+  fold_show(msg, open);
+  scrollBy(0, msg.getBoundingClientRect().top - top);
+  P.end = at_end();
 }
 function copied(button) {
   button.innerHTML = CHECK;
@@ -2869,6 +2913,7 @@ function paint() {
     P.rows = false;
   }
   markup($2("#log .tail"), view_tail(v).map(row_html));
+  folds();
   if (shown !== P.shown) {
     P.shown = shown;
     P.end = v.fold === null;

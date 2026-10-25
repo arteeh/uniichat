@@ -278,6 +278,12 @@ header > .imping { display: flex; flex-direction: column; justify-content: cente
 .more > summary::after { content: "Show all"; }
 .more[open] > summary::after { content: "Fold"; }
 .more > summary:hover { color: var(--ink); }
+/* a tool call or result taller than about 10 of its lines (main.ts
+   folds: long) shows 8, fading out; a tap on it or Show all unfolds it */
+.msg > .unfold { display: none; }
+.msg.long > .unfold { display: block; margin-top: 4px; font: 13px var(--sans); color: var(--mid); }
+.msg.long > .unfold:hover { color: var(--ink); }
+.msg.long:not(.shown) > .cut { max-height: 8lh; overflow: hidden; cursor: pointer; -webkit-mask-image: linear-gradient(#000 calc(100% - 3lh), transparent); mask-image: linear-gradient(#000 calc(100% - 3lh), transparent); }
 
 /* a message, by kind */
 .msg { position: relative; overflow-wrap: anywhere; font: 17.5px/1.68 var(--serif); color: var(--fg); font-style: var(--it); }
