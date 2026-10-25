@@ -82,6 +82,8 @@ const PIPE  = /(?<!\\)\|/;
 const CELL  = /^[ \t]*:?-+:?[ \t]*$/;
 const NEW   = /^\+\+\+ (.*)$/;
 const READ  = /^\[(lines (\d+)-\d+ of \d+[^\]]*)\]$/;
+// before a failed tool's result (Agent.ts, ClaudeSub.ts)
+const FAILED = "error: ";
 const HUNK  = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/;
 const MARKS = /^(?:\s*(?:[-*+]|\d{1,9}[.)])(?:[ \t]+|$)|\s*>\s?)*/;
 
@@ -698,6 +700,32 @@ export function md_output(s: string, name = "result"): Block[] {
     i = next;
   }
   return [...out, ...output_lines(lines.slice(at), name)];
+}
+
+// a show tool's result (Machine.ts): each line that is a file of the
+// media store, ![name](/media/…), drawn as a message draws it, a
+// paragraph of its own; the lines between (a file refused, saying why) as
+// md_output's. One refused marks the whole result failed ("error: "
+// before its first line): dropped, its own line says it
+export function md_shown(s: string, name = "result"): Block[] {
+  const out: Block[] = [];
+  const failed = s.startsWith(FAILED);
+  let rest: string[] = [];
+  const said = () => {
+    out.push(...md_output(rest.join("\n"), name));
+    rest = [];
+  };
+  for (const line of s.slice(failed ? FAILED.length : 0).replace(/\r/g, "").split("\n")) {
+    const media = md_pasted(line);
+    if (media.length === 1 && media[0][0] === 0 && media[0][1] === line.length) {
+      said();
+      out.push({ $: "Para", x: [{ $: "Pict", x: media[0][2], k: media[0][3], t: "" }] });
+    } else {
+      rest.push(line);
+    }
+  }
+  said();
+  return out;
 }
 
 // a result's text as a File named so, its blank lines at either end

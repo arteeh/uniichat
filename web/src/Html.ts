@@ -82,8 +82,10 @@ function row_make(row: View.Row): string {
       const pics = images_html(row.images);
       // (never one with media in it: media is never folded away)
       const tall = ["user", "work"].includes(row.kind) && row.text.length + 80 * row.text.split("\n").length > TALL && !row.text.includes("](/media/");
-      // a tool call or result folds by its height (main.ts folds)
-      const cut = row.kind === "tool" || row.kind === "echo";
+      // a tool call or result folds by its height (main.ts folds), but a
+      // result drawing media (a show call's)
+      const media = row.body.some((b) => b.$ === "Para" && b.x.some((s) => s.$ === "Pict"));
+      const cut = row.kind === "tool" || (row.kind === "echo" && !media);
       const fold = tall ? `<div class="clip">${body}</div><details class="more"><summary></summary></details>` : cut ? `<div class="cut">${body}</div><button class="unfold" aria-expanded="false">Show all</button>` : body;
       const who = row.who === "" ? "" : ` data-who="${esc(row.who)}"`;
       return `<div class="msg ${row.kind}"${at}${who}>${copy}${fold}${pics}</div>`;

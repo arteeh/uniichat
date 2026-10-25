@@ -931,7 +931,7 @@ export function entry_rows(id: number | null, kind: Kind, text: string, images: 
   const call = kind === "tool" ? Call.call_parse(text) : null;
   const report = kind === "work" ? Call.report_read(text) : null;
   const label = of.apart ? "↳ " + (of.tool === "" ? "" : Call.tool_name(of.tool) + " ") + "result" : "result";
-  const body = call === null ? entry_body(kind, report?.text ?? text, label) : [];
+  const body = call === null ? entry_body(kind, report?.text ?? text, label, of.tool) : [];
   const named = body.some((b) => b.$ === "File" && b.k.startsWith(label));
   const who = report?.name ?? WHO[kind] ?? (kind === "echo" && of.apart && !named ? label : "");
   // (an image pasted in the text shows there: Server.ts Chat.pictured)
@@ -946,14 +946,15 @@ export function entry_settled(kind: Kind, text: string, ended: boolean): number 
   return ["user", "work", "echo", "tool"].includes(kind) || !ended ? 0 : text.length;
 }
 
-function entry_body(kind: Kind, text: string, label: string): Md.Block[] {
+// a result named by `label`; a show call's draws its media (Md.md_shown)
+function entry_body(kind: Kind, text: string, label: string, tool: string): Md.Block[] {
   switch (kind) {
     case "user":
     case "work": {
       return Md.md_plain(text);
     }
     case "echo": {
-      return Md.md_output(text, label);
+      return Call.tool_name(tool) === "show" ? Md.md_shown(text, label) : Md.md_output(text, label);
     }
     default: {
       return Md.md_parse(text);

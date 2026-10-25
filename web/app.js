@@ -914,6 +914,7 @@ var PIPE = /(?<!\\)\|/;
 var CELL = /^[ \t]*:?-+:?[ \t]*$/;
 var NEW = /^\+\+\+ (.*)$/;
 var READ = /^\[(lines (\d+)-\d+ of \d+[^\]]*)\]$/;
+var FAILED = "error: ";
 var HUNK = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/;
 var MARKS = /^(?:\s*(?:[-*+]|\d{1,9}[.)])(?:[ \t]+|$)|\s*>\s?)*/;
 var DEPTH = 32;
@@ -1417,6 +1418,28 @@ function md_output(s, name = "result") {
     i = next;
   }
   return [...out, ...output_lines(lines.slice(at), name)];
+}
+function md_shown(s, name = "result") {
+  const out = [];
+  const failed = s.startsWith(FAILED);
+  let rest = [];
+  const said = () => {
+    out.push(...md_output(rest.join(`
+`), name));
+    rest = [];
+  };
+  for (const line of s.slice(failed ? FAILED.length : 0).replace(/\r/g, "").split(`
+`)) {
+    const media = md_pasted(line);
+    if (media.length === 1 && media[0][0] === 0 && media[0][1] === line.length) {
+      said();
+      out.push({ $: "Para", x: [{ $: "Pict", x: media[0][2], k: media[0][3], t: "" }] });
+    } else {
+      rest.push(line);
+    }
+  }
+  said();
+  return out;
 }
 function output_lines(lines, name) {
   const from = lines.findIndex((l) => l.trim() !== "");
@@ -2443,20 +2466,20 @@ function entry_rows(id, kind, text, images = [], of = { tool: "", apart: false }
   const call = kind === "tool" ? call_parse(text) : null;
   const report = kind === "work" ? report_read(text) : null;
   const label = of.apart ? "↳ " + (of.tool === "" ? "" : tool_name(of.tool) + " ") + "result" : "result";
-  const body = call === null ? entry_body(kind, report?.text ?? text, label) : [];
+  const body = call === null ? entry_body(kind, report?.text ?? text, label, of.tool) : [];
   const named = body.some((b) => b.$ === "File" && b.k.startsWith(label));
   const who = report?.name ?? WHO[kind] ?? (kind === "echo" && of.apart && !named ? label : "");
   const pics = images.filter((name) => !text.includes("/media/" + name));
   return call === null && body.length === 0 && pics.length === 0 ? [] : [{ $: "Msg", id, kind, who, text, body, call, images: pics }];
 }
-function entry_body(kind, text, label) {
+function entry_body(kind, text, label, tool) {
   switch (kind) {
     case "user":
     case "work": {
       return md_plain(text);
     }
     case "echo": {
-      return md_output(text, label);
+      return tool_name(tool) === "show" ? md_shown(text, label) : md_output(text, label);
     }
     default: {
       return md_parse(text);
@@ -2948,7 +2971,8 @@ function row_make(row) {
       const pics = images_html(row.images);
       const tall = ["user", "work"].includes(row.kind) && row.text.length + 80 * row.text.split(`
 `).length > TALL && !row.text.includes("](/media/");
-      const cut = row.kind === "tool" || row.kind === "echo";
+      const media = row.body.some((b) => b.$ === "Para" && b.x.some((s) => s.$ === "Pict"));
+      const cut = row.kind === "tool" || row.kind === "echo" && !media;
       const fold = tall ? `<div class="clip">${body}</div><details class="more"><summary></summary></details>` : cut ? `<div class="cut">${body}</div><button class="unfold" aria-expanded="false">Show all</button>` : body;
       const who = row.who === "" ? "" : ` data-who="${esc(row.who)}"`;
       return `<div class="msg ${row.kind}"${at}${who}>${copy}${fold}${pics}</div>`;
@@ -3903,7 +3927,7 @@ function typed() {
 function submit() {
   if (box_items().some((item) => item.dataset.state === "bad")) {
     P.after = false;
-    toast(FAILED);
+    toast(FAILED2);
     return;
   }
   if (UPS.size > 0) {
@@ -3925,7 +3949,7 @@ function back(sent, out) {
   }
   toast(out.error);
 }
-var FAILED = "A file in the message didn't upload: delete it (Backspace after it), then send.";
+var FAILED2 = "A file in the message didn't upload: delete it (Backspace after it), then send.";
 function attach(files) {
   for (const file of files) {
     const name = file.name.replace(/[[\]\\\n]/g, "") || "file";
