@@ -207,6 +207,16 @@ const WEB: Record<string, string> = {
 WEB["/settings"] = WEB["/"];
 WEB["/tree"]     = WEB["/"];
 
+// the web app's build: its shell's files hashed (never the manifest, so
+// an installed app is left as it is), in the chat's state and on the
+// page (data-build): an open page on another build reloads into this
+// one (main.ts renew). The shell is revalidated on each load, never
+// taken from the browser's cache unasked
+const PAGE       = WEB["/"];
+const SHELL      = [app_js, style_css, PAGE, sw_js];
+const BUILD      = Bun.hash(SHELL.map((f) => fs.readFileSync(f, "utf8")).join("\0")).toString(36);
+const INDEX      = fs.readFileSync(PAGE, "utf8").replace("<html ", `<html data-build="${BUILD}" `);
+
 // Chat
 // ====
 
@@ -1052,7 +1062,7 @@ export namespace Chat {
     const room = Chat.room(chat);
     const size = chat.mem.talk === null ? 0 : Memory.talk_size(chat.mem);
     const talk = chat.mem.talk === null ? null : { from: chat.mem.talk, used: Math.min(1, size / room), size, room };
-    return { $: "state", busy: chat.busy, wait: Chat.waits(chat), agents, runs, pick: chat.pick, ...config.OFFER, importing, limits: chat.limits, timers, mcp, talk };
+    return { $: "state", busy: chat.busy, wait: Chat.waits(chat), agents, runs, pick: chat.pick, ...config.OFFER, importing, limits: chat.limits, timers, mcp, talk, build: BUILD };
   }
 
   export function waits(chat: Chat): Wait {
@@ -1492,9 +1502,19 @@ export namespace Main {
   }
 
   // a site's file
-  export function file(pathname: string): Response {
+  export function file(pathname: string, req: Request): Response {
     const file = WEB[pathname];
-    return file === undefined ? new Response("not found", { status: 404 }) : new Response(Bun.file(file));
+    if (file === undefined) {
+      return new Response("not found", { status: 404 });
+    }
+    if (!SHELL.includes(file)) {
+      return new Response(Bun.file(file));
+    }
+    const headers = { "cache-control": "no-cache", etag: `"${BUILD}"` };
+    if (req.headers.get("if-none-match") === headers.etag) {
+      return new Response(null, { status: 304, headers });
+    }
+    return file === PAGE ? new Response(INDEX, { headers: { ...headers, "content-type": "text/html;charset=utf-8" } }) : new Response(Bun.file(file), { headers });
   }
 
   // a long answer, sent as made, a PIECE at a time, the event loop
@@ -1593,7 +1613,7 @@ export namespace Main {
         return own;
       }
       if (!OWN.includes(p) && !p.startsWith("/image/") && !p.startsWith("/api/")) {
-        return Main.file(p);
+        return Main.file(p, req);
       }
       if (!Owner.is(req)) {
         return new Response("sign in first", { status: 401 });

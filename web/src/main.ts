@@ -58,7 +58,8 @@ const BACK = $<HTMLInputElement>("#import [name=back]");
 
 // the page's: end: at its bottom; stick: the next draw may keep it;
 // y: its scroll when last scrolled; open: the tool calls and results
-// unfolded, by id (folds);
+// unfolded, by id (folds); build, renew, saved, gave, back: the web
+// app's build and its reload into another (Renew);
 // frame: awaited (0: none); rows: the log's rows changed, to draw;
 // found: the sources read, by name; done: sessions imported before; off:
 // left out (Import.Want); step: the import's; away: the chat's scroll as
@@ -82,6 +83,11 @@ const P = {
   away  : null as { y: number; end: boolean } | null,
   used  : { ws: null as WebSocket | null, on: false, at: 0 },
   open  : new Set<string>(),
+  build : document.documentElement.dataset.build ?? "",
+  renew : false,
+  saved : false,
+  gave  : null as WebSocket | null,
+  back  : null as { a: number; top: number } | null,
 };
 
 function $<T extends HTMLElement>(sel: string): T {
@@ -257,6 +263,7 @@ function signed(): void {
   BOX.placeholder = View.HINT;
   BOX.value = sessionStorage.getItem(kept("draft")) ?? "";
   BOX.dispatchEvent(new Event("input"));
+  renewed();
 }
 
 function submit(): void {
@@ -587,6 +594,9 @@ function hear(msg: View.Server): void {
     toast("Now " + now.map((k) => k.hint).join("; ") + ".");
   }
   P.rows ||= msg.$ === "state" ? v.agents.join() !== agents : msg.$ !== "delta" && msg.$ !== "live";
+  if (msg.$ === "state") {
+    renew_due(msg.build);
+  }
   import_welcome();
   draw(true);
 }
@@ -892,6 +902,14 @@ function paint(): void {
   }
   markup($("#log .tail"), View.view_tail(v).map(Html.row_html));
   folds();
+  const back = P.back === null ? null : document.querySelector<HTMLElement>(`#log [data-a="${P.back.a}"]`);
+  if (back !== null && P.back !== null) {
+    P.shown = shown;
+    scrollBy(0, back.getBoundingClientRect().top - P.back.top);
+    P.back = null;
+    P.end = at_end();
+    return;
+  }
   if (shown !== P.shown) {
     P.shown = shown;
     P.end = v.fold === null;
@@ -930,6 +948,9 @@ function at_end(): boolean {
 function bars(): void {
   for (const note of v.notes.splice(0)) {
     toast(note);
+  }
+  if (P.renew && renew_free()) {
+    renew();
   }
   const on = View.view_typing(v);
   const stop = on && v.busy && BOX.value.trim() === "" && P.imgs.length === 0;
@@ -1122,6 +1143,8 @@ async function account_prompt(form: HTMLFormElement): Promise<void> {
   }
   why.textContent = out.error ?? (area.value === out[area.name]?.text ? "Saved." : "Not saved yet: Save again.");
   form.classList.toggle("bad", out.error !== undefined);
+  P.saved = out.error === undefined;
+  draw(false);
 }
 
 // Notifications
@@ -1455,7 +1478,75 @@ async function settings_save(form: HTMLFormElement, page: any, unset: Set<string
   }
   const later = (out.saved as string[]).filter((key) => page.settings.find((r: any) => r.key === key)?.apply === "restart");
   settings_draw(out);
+  P.saved = true;
   toast(later.length === 0 ? "Saved." : "Saved. " + later.join(", ") + " " + (later.length === 1 ? "applies" : "apply") + " once the server restarts.");
+}
+
+// Renew
+// =====
+// The server's web app has another build than this page (after an
+// update): the page reloads into it by itself, once nothing would be
+// lost, keeping what it showed: the box's text and caret, the folds
+// opened, where the chat or the page was scrolled. Never while the mic
+// records, an image waits to be sent, an act awaits its answer, or
+// Import History is open; on the settings page only once a change is
+// saved, or as it is left. Once per build: a second try drops the
+// cached shell first, then it waits for the next socket.
+
+function renew_due(build: string | undefined): void {
+  if (build === undefined || P.build === "" || build === P.build) {
+    P.build ||= build ?? "";
+    P.renew = false;
+    return;
+  }
+  const [was, n] = (sessionStorage.getItem(kept("build")) ?? "").split(" ");
+  const tries = was === build ? Number(n) : 0;
+  if (tries >= 2 && (P.gave === null || P.gave === v.ws)) {
+    P.gave = v.ws;
+    return;
+  }
+  sessionStorage.setItem(kept("build"), build + " " + (tries + 1));
+  P.renew = true;
+  draw(false);
+}
+
+function renew_free(): boolean {
+  const page = location.pathname !== "/" && location.pathname !== TREE;
+  return P.rec === null && P.imgs.length === 0 && v.out.length === 0 && !$("#import").matches(":popover-open") && (!page || P.saved);
+}
+
+async function renew(): Promise<void> {
+  P.renew = false;
+  const tries = Number((sessionStorage.getItem(kept("build")) ?? "").split(" ")[1]);
+  const chat = !$("#log").hidden;
+  const back = { at: chat && !P.end ? anchor() : null, y: chat ? null : scrollY, caret: [BOX.selectionStart, BOX.selectionEnd], focus: document.activeElement === BOX, open: [...P.open] };
+  sessionStorage.setItem(kept("back"), JSON.stringify(back));
+  const keys = await caches?.keys().catch(() => []) ?? [];
+  await Promise.all(keys.filter((k) => k.startsWith("unii-shell")).map((k) => caches.delete(k)));
+  if (tries > 1) {
+    await Promise.all(["/", "/app.js", "/style.css", "/sw.js"].map((path) => fetch(path, { cache: "reload" }).catch(() => null)));
+  }
+  location.reload();
+}
+
+// after a renew, what the page showed before
+function renewed(): void {
+  const text = sessionStorage.getItem(kept("back"));
+  sessionStorage.removeItem(kept("back"));
+  const back = text === null ? null : JSON.parse(text);
+  if (back === null) {
+    return;
+  }
+  BOX.setSelectionRange(back.caret[0], back.caret[1]);
+  if (back.focus && DESK.matches) {
+    BOX.focus();
+  }
+  back.open.forEach((id: string) => P.open.add(id));
+  P.back = back.at;
+  // a page (the settings, the tree) back where it was, once drawn that long
+  const end = Date.now() + 3000;
+  const y = () => back.y !== null && (document.documentElement.scrollHeight >= back.y + innerHeight || Date.now() > end ? scrollTo(0, back.y) : setTimeout(y, 100));
+  y();
 }
 
 // Notes

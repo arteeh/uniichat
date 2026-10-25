@@ -39,12 +39,13 @@ self.addEventListener("fetch", (ev) => {
   ev.respondWith(fresh(req, page ? "/" : url.pathname));
 });
 
-// the server's answer, kept; none, or the server down behind a proxy
-// (5xx), the one kept
+// the server's answer (never the browser's cache unchecked: a new build
+// shows at once), kept; none, or the server down behind a proxy (5xx),
+// the one kept
 async function fresh(req, key) {
   const cache = await caches.open(CACHE);
   try {
-    const res = await fetch(req);
+    const res = await fetch(req.mode === "navigate" ? req.url : req, { cache: "no-cache" });
     if (res.ok) {
       await cache.put(key, res.clone());
     }

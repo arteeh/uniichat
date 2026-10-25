@@ -2268,7 +2268,12 @@ var P = {
   push: null,
   away: null,
   used: { ws: null, on: false, at: 0 },
-  open: new Set
+  open: new Set,
+  build: document.documentElement.dataset.build ?? "",
+  renew: false,
+  saved: false,
+  gave: null,
+  back: null
 };
 function $2(sel) {
   return document.querySelector(sel);
@@ -2405,6 +2410,7 @@ function signed() {
   BOX.placeholder = HINT;
   BOX.value = sessionStorage.getItem(kept("draft")) ?? "";
   BOX.dispatchEvent(new Event("input"));
+  renewed();
 }
 function submit() {
   const text = BOX.value.trim();
@@ -2667,6 +2673,9 @@ function hear(msg) {
     toast("Now " + now.map((k) => k.hint).join("; ") + ".");
   }
   P.rows ||= msg.$ === "state" ? v.agents.join() !== agents : msg.$ !== "delta" && msg.$ !== "live";
+  if (msg.$ === "state") {
+    renew_due(msg.build);
+  }
   import_welcome();
   draw(true);
 }
@@ -2914,6 +2923,14 @@ function paint() {
   }
   markup($2("#log .tail"), view_tail(v).map(row_html));
   folds();
+  const back = P.back === null ? null : document.querySelector(`#log [data-a="${P.back.a}"]`);
+  if (back !== null && P.back !== null) {
+    P.shown = shown;
+    scrollBy(0, back.getBoundingClientRect().top - P.back.top);
+    P.back = null;
+    P.end = at_end();
+    return;
+  }
   if (shown !== P.shown) {
     P.shown = shown;
     P.end = v.fold === null;
@@ -2943,6 +2960,9 @@ function at_end() {
 function bars() {
   for (const note of v.notes.splice(0)) {
     toast(note);
+  }
+  if (P.renew && renew_free()) {
+    renew();
   }
   const on = view_typing(v);
   const stop = on && v.busy && BOX.value.trim() === "" && P.imgs.length === 0;
@@ -3089,6 +3109,8 @@ async function account_prompt(form) {
   }
   why.textContent = out.error ?? (area.value === out[area.name]?.text ? "Saved." : "Not saved yet: Save again.");
   form.classList.toggle("bad", out.error !== undefined);
+  P.saved = out.error === undefined;
+  draw(false);
 }
 async function notify_state() {
   P.push = null;
@@ -3384,7 +3406,58 @@ async function settings_save(form, page, unset, listed, profs) {
   }
   const later = out.saved.filter((key) => page.settings.find((r) => r.key === key)?.apply === "restart");
   settings_draw(out);
+  P.saved = true;
   toast(later.length === 0 ? "Saved." : "Saved. " + later.join(", ") + " " + (later.length === 1 ? "applies" : "apply") + " once the server restarts.");
+}
+function renew_due(build) {
+  if (build === undefined || P.build === "" || build === P.build) {
+    P.build ||= build ?? "";
+    P.renew = false;
+    return;
+  }
+  const [was, n] = (sessionStorage.getItem(kept("build")) ?? "").split(" ");
+  const tries = was === build ? Number(n) : 0;
+  if (tries >= 2 && (P.gave === null || P.gave === v.ws)) {
+    P.gave = v.ws;
+    return;
+  }
+  sessionStorage.setItem(kept("build"), build + " " + (tries + 1));
+  P.renew = true;
+  draw(false);
+}
+function renew_free() {
+  const page = location.pathname !== "/" && location.pathname !== TREE;
+  return P.rec === null && P.imgs.length === 0 && v.out.length === 0 && !$2("#import").matches(":popover-open") && (!page || P.saved);
+}
+async function renew() {
+  P.renew = false;
+  const tries = Number((sessionStorage.getItem(kept("build")) ?? "").split(" ")[1]);
+  const chat = !$2("#log").hidden;
+  const back = { at: chat && !P.end ? anchor() : null, y: chat ? null : scrollY, caret: [BOX.selectionStart, BOX.selectionEnd], focus: document.activeElement === BOX, open: [...P.open] };
+  sessionStorage.setItem(kept("back"), JSON.stringify(back));
+  const keys = await caches?.keys().catch(() => []) ?? [];
+  await Promise.all(keys.filter((k) => k.startsWith("unii-shell")).map((k) => caches.delete(k)));
+  if (tries > 1) {
+    await Promise.all(["/", "/app.js", "/style.css", "/sw.js"].map((path) => fetch(path, { cache: "reload" }).catch(() => null)));
+  }
+  location.reload();
+}
+function renewed() {
+  const text = sessionStorage.getItem(kept("back"));
+  sessionStorage.removeItem(kept("back"));
+  const back = text === null ? null : JSON.parse(text);
+  if (back === null) {
+    return;
+  }
+  BOX.setSelectionRange(back.caret[0], back.caret[1]);
+  if (back.focus && DESK.matches) {
+    BOX.focus();
+  }
+  back.open.forEach((id) => P.open.add(id));
+  P.back = back.at;
+  const end = Date.now() + 3000;
+  const y = () => back.y !== null && (document.documentElement.scrollHeight >= back.y + innerHeight || Date.now() > end ? scrollTo(0, back.y) : setTimeout(y, 100));
+  y();
 }
 function toast(text, stay = false) {
   const el = $2("#toast");
