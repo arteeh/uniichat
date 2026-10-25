@@ -25,7 +25,7 @@ import { clip_pages } from "./Clip.ts";
 import { Disk } from "./Disk.ts";
 import { Mcp } from "./Mcp.ts";
 import * as Import from "./Import.ts";
-import { JOBS, Memory, type Msg as Log, type Share } from "./Memory.ts";
+import { JOBS, Memory, type Msg as Log, type Room, type Share } from "./Memory.ts";
 import { OpenAI } from "./OpenAI.ts";
 import { Owner } from "./Owner.ts";
 import { Pick } from "./Pick.ts";
@@ -232,6 +232,29 @@ WEB["/tree"]     = WEB["/"];
 const SHELL      = [app_js, style_css, PAGE, sw_js, manifest];
 const BUILD      = Bun.hash(SHELL.map((f) => fs.readFileSync(f, "utf8")).join("\0")).toString(36);
 const INDEX      = fs.readFileSync(PAGE, "utf8").replace("<html ", `<html data-build="${BUILD}" `);
+
+// the bytes the uploads to the media store hold, not yet written: room
+// the disk's free space doesn't count yet (Main.room)
+let held = 0;
+
+// a stream with head before it
+function stream_after(head: Uint8Array, tail: ReadableStream<Uint8Array>): ReadableStream<Uint8Array> {
+  const reader = tail.getReader();
+  let first = true;
+  return new ReadableStream({
+    async pull(out) {
+      if (first) {
+        first = false;
+        return out.enqueue(head);
+      }
+      const got = await reader.read();
+      return got.done ? out.close() : out.enqueue(got.value);
+    },
+    cancel() {
+      return reader.cancel();
+    },
+  });
+}
 
 // an imported file's path, as Bun gives it
 function file_path(x: unknown): string {
@@ -1625,12 +1648,10 @@ export namespace Main {
         if (req.method !== "POST" || req.body === null) {
           return new Response("a file is posted", { status: 405 });
         }
-        // at most media_mb, and never past SPARE free on the disk
         const file = new URL(req.url).searchParams.get("name") ?? "";
-        const disk = fs.statfsSync(config.DIR);
-        const room = disk.bavail * disk.bsize - SPARE;
-        const over = room < config.MEDIA_MAX ? FULL : file + " is over the media store's " + Math.round(config.MEDIA_MAX / 2 ** 20) + " MB (config media_mb).";
-        const out = room <= 0 ? { error: FULL } : await Memory.media_add(mem, req.body, file, Math.min(room, config.MEDIA_MAX), over);
+        const size = req.headers.get("content-length");
+        const room = Main.room(file, size === null ? null : Number(size));
+        const out = typeof room === "string" ? { error: room } : await Memory.media_add(mem, req.body, file, room);
         return Response.json(out, { status: "error" in out ? 400 : 200 });
       }
     }
@@ -1642,6 +1663,52 @@ export namespace Main {
     return file === null ? new Response("not found", { status: 404 }) : new Response(Bun.file(file), { headers: keep });
   }
 
+  // an upload's room on the disk (Memory.Room): media_mb at most, never
+  // past SPARE free, shared by the uploads at once: all one says it has
+  // (its content-length) held at its start, else each piece as it comes,
+  // till written (the free space counts it then); why not, at once
+  export function room(file: string, size: number | null): Room | string {
+    const free = () => {
+      const disk = fs.statfsSync(config.DIR);
+      return disk.bavail * disk.bsize - SPARE - held;
+    };
+    const cap = file + " is over the media store's " + Math.round(config.MEDIA_MAX / 2 ** 20) + " MB (config media_mb).";
+    if (size !== null && !(size >= 0)) {
+      return "An upload says no size it can have.";
+    }
+    if (size !== null && size > config.MEDIA_MAX) {
+      return cap;
+    }
+    if (size !== null && size > free()) {
+      return FULL;
+    }
+    // its bytes held, not yet written; its bytes so far
+    let [mine, got] = [size ?? 0, 0];
+    held += mine;
+    return {
+      take(n) {
+        if (got + n > (size ?? config.MEDIA_MAX)) {
+          return size === null ? cap : file + " is longer than its upload said.";
+        }
+        if (size === null && n > free()) {
+          return FULL;
+        }
+        held += size === null ? n : 0;
+        mine += size === null ? n : 0;
+        got += n;
+        return null;
+      },
+      wrote(n) {
+        held -= n;
+        mine -= n;
+      },
+      end() {
+        held -= mine;
+        mine = 0;
+      },
+    };
+  }
+
   // a media file (Memory.media_add), or the bytes a Range asks of it (a
   // video or a sound seeking); never sniffed as another type, and an SVG
   // never runs a script, opened as a page too
@@ -1649,7 +1716,7 @@ export namespace Main {
     if (file === null) {
       return new Response("not found", { status: 404 });
     }
-    const type = MEDIA[file.split(".").pop()!] ?? "application/octet-stream";
+    const type = MEDIA.get(file.split(".").pop()!) ?? "application/octet-stream";
     const size = fs.statSync(file).size;
     const headers: Record<string, string> = { "content-type": type, "cache-control": "private, max-age=31536000, immutable", "accept-ranges": "bytes", "x-content-type-options": "nosniff" };
     if (type === "image/svg+xml") {
@@ -1657,7 +1724,7 @@ export namespace Main {
     }
     if (type === "text/html") {
       headers["content-security-policy"] = PAGE_CSP;
-      return new Response(PAGE_BASE + fs.readFileSync(file, "utf8"), { headers });
+      return new Response(stream_after(new TextEncoder().encode(PAGE_BASE), Bun.file(file).stream()), { headers });
     }
     const range = /^bytes=(\d*)-(\d*)$/.exec(req.headers.get("range") ?? "");
     if (range === null || range[1] + range[2] === "") {

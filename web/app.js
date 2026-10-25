@@ -1932,27 +1932,29 @@ var NOTICE = 3 * 60 * 60 * 1000;
 var WAIT = "compressing…";
 var SUMS = "compressing earlier messages…";
 var UNSENT = "Sends once connected.";
-var MEDIA = {
-  png: "image/png",
-  jpeg: "image/jpeg",
-  gif: "image/gif",
-  webp: "image/webp",
-  svg: "image/svg+xml",
-  mp4: "video/mp4",
-  webm: "video/webm",
-  mov: "video/quicktime",
-  mp3: "audio/mpeg",
-  m4a: "audio/mp4",
-  aac: "audio/aac",
-  ogg: "audio/ogg",
-  opus: "audio/ogg",
-  wav: "audio/wav",
-  weba: "audio/webm",
-  html: "text/html"
-};
+var MEDIA = new Map([
+  ["png", "image/png"],
+  ["jpeg", "image/jpeg"],
+  ["gif", "image/gif"],
+  ["webp", "image/webp"],
+  ["svg", "image/svg+xml"],
+  ["mp4", "video/mp4"],
+  ["webm", "video/webm"],
+  ["mov", "video/quicktime"],
+  ["mp3", "audio/mpeg"],
+  ["m4a", "audio/mp4"],
+  ["aac", "audio/aac"],
+  ["ogg", "audio/ogg"],
+  ["opus", "audio/ogg"],
+  ["wav", "audio/wav"],
+  ["weba", "audio/webm"],
+  ["html", "text/html"]
+]);
+var MEDIA_AS = new Map([["jpg", "jpeg"], ["m4v", "mp4"], ["oga", "ogg"], ["htm", "html"]]);
 function media_kind(url) {
   const m = /^\/(?:media|image)\/[0-9a-f]{16}\.([a-z0-9]+)$/.exec(url);
-  return m === null || MEDIA[m[1]] === undefined ? null : m[1] === "html" ? "html" : MEDIA[m[1]].split("/")[0];
+  const type = m === null ? undefined : MEDIA.get(m[1]);
+  return type === undefined ? null : type === "text/html" ? "html" : type.split("/")[0];
 }
 var IMAGE = 2 ** 20;
 var PIXELS = 2 ** 28;
@@ -2512,7 +2514,7 @@ function row_make(row) {
       const body = row.call === null ? row.body.map(block_html).join("") : call_html(row.call);
       const pics = images_html(row.images);
       const tall = ["user", "work"].includes(row.kind) && row.text.length + 80 * row.text.split(`
-`).length > TALL;
+`).length > TALL && !row.text.includes("](/media/");
       const cut = row.kind === "tool" || row.kind === "echo";
       const fold = tall ? `<div class="clip">${body}</div><details class="more"><summary></summary></details>` : cut ? `<div class="cut">${body}</div><button class="unfold" aria-expanded="false">Show all</button>` : body;
       const who = row.who === "" ? "" : ` data-who="${esc(row.who)}"`;

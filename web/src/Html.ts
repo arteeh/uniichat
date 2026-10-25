@@ -27,7 +27,7 @@ export type Notify = "off" | "on" | "blocked" | "home";
 const ESC: Record<string, string> = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" };
 
 // a user's message past TALL chars (a line counts 80 or more: a paste)
-// shows its head; its `details` unfolds it (style.css)
+// shows its head, but one with media; its `details` unfolds it (style.css)
 const TALL = 4000;
 
 // the Copy button's icons: two sheets, and a check once copied
@@ -80,7 +80,8 @@ function row_make(row: View.Row): string {
       const copy = copy_html(row.call === null ? row.text : Call.call_text(row.call));
       const body = row.call === null ? row.body.map(block_html).join("") : call_html(row.call);
       const pics = images_html(row.images);
-      const tall = ["user", "work"].includes(row.kind) && row.text.length + 80 * row.text.split("\n").length > TALL;
+      // (never one with media in it: media is never folded away)
+      const tall = ["user", "work"].includes(row.kind) && row.text.length + 80 * row.text.split("\n").length > TALL && !row.text.includes("](/media/");
       // a tool call or result folds by its height (main.ts folds)
       const cut = row.kind === "tool" || row.kind === "echo";
       const fold = tall ? `<div class="clip">${body}</div><details class="more"><summary></summary></details>` : cut ? `<div class="cut">${body}</div><button class="unfold" aria-expanded="false">Show all</button>` : body;

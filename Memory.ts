@@ -81,6 +81,11 @@ type Served = "compactor" | "import";
 // what a compaction's call takes but its blocks (Server.ts share)
 export type Share = Omit<Ask, "blocks">;
 
+// what an upload to the media store may write (Memory.media_add; Server.ts
+// Main.room): before each piece, why not (null: it may, its bytes held
+// for it), wrote once it is on the disk, end as it ends however it ends
+export type Room = { take: (n: number) => string | null; wrote: (n: number) => void; end: () => void };
+
 // a log: of messages (main) or of nodes (tree)
 type Stream = "main" | "tree";
 
@@ -175,6 +180,10 @@ const TALKING = "Conversation mode is on from message {id}: from there on, the u
 const IMAGES = "/docs/images/";
 
 const MEDIA_DIR = "/docs/media/";
+
+// the most a page of the media store may be (Memory.media_add): the
+// server sends it whole, its look before it
+const PAGE_MAX = 4 * 2 ** 20;
 
 const AGENTS = "/docs/agent/";
 
@@ -527,45 +536,55 @@ export namespace Memory {
   }
 
   // a file for the media store (View.MEDIA), streamed to disk as it
-  // comes, hashed meanwhile, then named by its hash and its kind: by
-  // `file`'s extension, else its first bytes as an image; its name, or
-  // why not (over `most` bytes: `over`, dropped as soon as it is)
-  export async function media_add(mem: Memory, body: ReadableStream<Uint8Array>, file: string, most: number, over: string): Promise<{ name: string } | { error: string }> {
+  // comes, each piece written once its room is taken (room: why not),
+  // hashed meanwhile, then named by its hash and its kind: by `file`'s
+  // extension (an image's by its first bytes, so it is named as
+  // image_add names it), else its first bytes as an image; its name, or
+  // why not. A page (html) is PAGE_MAX at most: it is sent whole
+  export async function media_add(mem: Memory, body: ReadableStream<Uint8Array>, file: string, room: Room): Promise<{ name: string } | { error: string }> {
     const dot = file.toLowerCase().split(".").pop() ?? "";
-    let ext = file.includes(".") ? MEDIA_AS[dot] ?? dot : "";
+    const named = file.includes(".") ? MEDIA_AS.get(dot) ?? dot : "";
     fs.mkdirSync(mem.dir + MEDIA_DIR, { recursive: true });
     const tmp = mem.dir + MEDIA_DIR + ".up-" + crypto.randomUUID();
-    const out = Bun.file(tmp).writer();
+    const out = await fs.promises.open(tmp, "wx");
     const hash = new Bun.CryptoHasher("sha256");
-    let [size, head, open] = [0, Buffer.alloc(0), true];
+    const reader = body.getReader();
+    let [size, head, done] = [0, Buffer.alloc(0), false];
     try {
-      const reader = body.getReader();
       for (let got = await reader.read(); !got.done; got = await reader.read()) {
         const piece = got.value;
         size += piece.length;
-        if (size > most) {
-          reader.cancel().catch(() => {});
-          return { error: over };
+        const why = named === "html" && size > PAGE_MAX ? file + " is over the " + PAGE_MAX / 2 ** 20 + " MB a page may be." : room.take(piece.length);
+        if (why !== null) {
+          return { error: why };
         }
         head = head.length < HEAD ? Buffer.concat([head, piece]).subarray(0, HEAD) : head;
         hash.update(piece);
-        out.write(piece);
+        await out.write(piece);
+        room.wrote(piece.length);
       }
-      await out.end();
-      open = false;
-      ext ||= image_kind(head)?.split("/")[1] ?? "";
-      if (MEDIA[ext] === undefined) {
-        return { error: file + " isn't a kind the chat shows: " + Object.keys(MEDIA).join(", ") + "." };
+      done = true;
+      const sniffed = image_kind(head)?.split("/")[1] ?? null;
+      const picture = (MEDIA.get(named) ?? "").startsWith("image/") && named !== "svg";
+      if (picture && sniffed === null) {
+        return { error: file + " isn't the image its name says." };
       }
+      const ext = picture || named === "" ? sniffed ?? "" : named;
+      if (!MEDIA.has(ext)) {
+        return { error: file + " isn't a kind the chat shows: " + [...MEDIA.keys()].join(", ") + "." };
+      }
+      await out.close();
       const name = hash.digest("hex").slice(0, 16) + "." + ext;
       fs.renameSync(tmp, mem.dir + MEDIA_DIR + name);
       await Disk.wrote(mem.dir + MEDIA_DIR + name);
       return { name };
     } finally {
-      if (open) {
-        await out.end();
+      if (!done) {
+        reader.cancel().catch(() => {});
       }
+      await out.close().catch(() => {});
       fs.rmSync(tmp, { force: true });
+      room.end();
     }
   }
 
@@ -573,7 +592,7 @@ export namespace Memory {
   export function media_file(mem: Memory, name: string): string | null {
     const m = /^[0-9a-f]{16}\.([a-z0-9]+)$/.exec(name);
     const file = mem.dir + MEDIA_DIR + name;
-    return m !== null && MEDIA[m[1]] !== undefined && fs.existsSync(file) ? file : Memory.image_file(mem, name);
+    return m !== null && MEDIA.has(m[1]) && fs.existsSync(file) ? file : Memory.image_file(mem, name);
   }
 
   export function image_file(mem: Memory, name: string): string | null {

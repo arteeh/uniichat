@@ -116,7 +116,7 @@ export async function run(given: string | undefined): Promise<void> {
   const job = async (id: string, job: Job) => {
     const abort = new AbortController();
     jobs.set(id, abort);
-    const out  = job.name === "show" ? await show(job, work, url, token) : await Machine.run(job, work, abort.signal);
+    const out  = job.name === "show" ? await show(job, work, url, token, abort.signal) : await Machine.run(job, work, abort.signal);
     const size = Buffer.byteLength(JSON.stringify(out));
     const most = FRAME - 1024;
     const big  = { text: "The output, " + size + " bytes, is over the " + most + " a tool may send.", fail: true };
@@ -137,20 +137,39 @@ export async function run(given: string | undefined): Promise<void> {
 
 // show: each file streamed to the server's media store (Memory.media_add),
 // its markdown line answered; one it refuses, why
-async function show(job: Job, work: string, url: string, token: string): Promise<{ text: string; fail: boolean }> {
+async function show(job: Job, work: string, url: string, token: string, signal: AbortSignal): Promise<{ text: string; fail: boolean }> {
   const root = work.startsWith("~/") ? os.homedir() + work.slice(1) : work;
   const cwd = path.join(root, path.basename(job.cwd));
   const lines: string[] = [];
   let fail = false;
   for (const p of [job.input.paths ?? []].flat().map(String)) {
-    const file = path.resolve(cwd, p);
-    const name = path.basename(file);
-    const res = fs.existsSync(file) ? await fetch(url + "/api/media?name=" + encodeURIComponent(name), { method: "POST", headers: Client.auth(token), body: Bun.file(file) }).catch((err) => err as Error) : null;
-    const out = res instanceof Response ? await res.json().catch(() => ({ error: "HTTP " + res.status })) : { error: res === null ? "No file " + p + "." : "Can't reach the server: " + res.message };
-    fail ||= out.name === undefined;
-    lines.push(out.name === undefined ? out.error : "![" + name.replace(/[[\]\\]/g, "") + "](/media/" + out.name + ")");
+    const out = await show_one(path.resolve(cwd, p), p, url, token, signal);
+    fail ||= "error" in out;
+    lines.push("error" in out ? out.error : "![" + path.basename(p).replace(/[[\]\\\n]/g, "") + "](/media/" + out.name + ")");
   }
   return { text: lines.join("\n"), fail };
+}
+
+// a file posted to the media store: its name there, or why not (a stop
+// cancels it: the server drops what it got)
+async function show_one(file: string, shown: string, url: string, token: string, signal: AbortSignal): Promise<{ name: string } | { error: string }> {
+  if (signal.aborted) {
+    return { error: "Stopped." };
+  }
+  const stat = fs.statSync(file, { throwIfNoEntry: false });
+  if (stat === undefined || !stat.isFile()) {
+    return { error: stat === undefined ? "No file " + shown + "." : shown + " is not a file." };
+  }
+  try {
+    const res = await fetch(url + "/api/media?name=" + encodeURIComponent(path.basename(file)), { method: "POST", headers: Client.auth(token), body: Bun.file(file), signal });
+    const out: unknown = await res.json().catch(() => null);
+    if (typeof out === "object" && out !== null && "name" in out && typeof out.name === "string") {
+      return { name: out.name };
+    }
+    return { error: typeof out === "object" && out !== null && "error" in out && typeof out.error === "string" ? out.error : "HTTP " + res.status };
+  } catch (err) {
+    return { error: signal.aborted ? "Stopped." : "Can't reach the server: " + (err instanceof Error ? err.message : String(err)) };
+  }
 }
 
 // the `mcp` of config.json (the object, or the file it names), as JSON:
