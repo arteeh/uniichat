@@ -219,13 +219,14 @@ const WEB: Record<string, string> = {
 WEB["/settings"] = WEB["/"];
 WEB["/tree"]     = WEB["/"];
 
-// the web app's build: its shell's files hashed (never the manifest, so
-// an installed app is left as it is), in the chat's state and on the
-// page (data-build): an open page on another build reloads into this
-// one (main.ts renew). The shell is revalidated on each load, never
-// taken from the browser's cache unasked
+// the web app's build: its files hashed (the manifest too, never changed
+// for it: a manifest that changes each release makes Android mint its
+// installed app anew), in the chat's state and on the page (data-build):
+// an open page on another build reloads into this one (main.ts renew).
+// They are revalidated on each load, never taken from the browser's
+// cache unasked
 const PAGE       = WEB["/"];
-const SHELL      = [app_js, style_css, PAGE, sw_js];
+const SHELL      = [app_js, style_css, PAGE, sw_js, manifest];
 const BUILD      = Bun.hash(SHELL.map((f) => fs.readFileSync(f, "utf8")).join("\0")).toString(36);
 const INDEX      = fs.readFileSync(PAGE, "utf8").replace("<html ", `<html data-build="${BUILD}" `);
 

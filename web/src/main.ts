@@ -1046,8 +1046,10 @@ function bars(): void {
   for (const note of v.notes.splice(0)) {
     toast(note);
   }
+  // (after this draw: a page shown is drawn and placed first)
   if (P.renew && renew_free()) {
-    renew();
+    P.renew = false;
+    setTimeout(renew);
   }
   const on = View.view_typing(v);
   const stop = on && v.busy && BOX.value.trim() === "" && P.imgs.length === 0;
@@ -1153,7 +1155,7 @@ function route(): void {
   const page = PAGES.includes(location.pathname);
   const tree = location.pathname === TREE;
   const chat = !page && !tree;
-  if (!chat && !$("#log").hidden) {
+  if (!chat && !$("#log").hidden && P.away === null) {
     P.away = { y: scrollY, end: P.end };
   }
   $("#log").hidden = !chat;
@@ -1164,6 +1166,9 @@ function route(): void {
   P.shown = chat && P.away !== null ? shown_key() : location.pathname;
   if (chat && P.away !== null) {
     P.end = P.away.end;
+    // its rows drawn first (none yet, if the page was reloaded away from it)
+    P.rows = true;
+    paint();
     scrollTo(0, P.end ? document.documentElement.scrollHeight : P.away.y);
     P.y = scrollY;
     P.away = null;
@@ -1587,8 +1592,9 @@ async function settings_save(form: HTMLFormElement, page: any, unset: Set<string
 // opened, where the chat or the page was scrolled. Never while the mic
 // records, an image waits to be sent, an act awaits its answer, or
 // Import History is open; on the settings page only once a change is
-// saved, or as it is left. Once per build: a second try drops the
-// cached shell first, then it waits for the next socket.
+// saved, or as it is left. The cached shell is dropped first; at most
+// twice per build, the second past the browser's cache too, then once
+// more on each new socket.
 
 function renew_due(build: string | undefined): void {
   if (build === undefined || P.build === "" || build === P.build) {
@@ -1613,10 +1619,9 @@ function renew_free(): boolean {
 }
 
 async function renew(): Promise<void> {
-  P.renew = false;
   const tries = Number((sessionStorage.getItem(kept("build")) ?? "").split(" ")[1]);
   const chat = !$("#log").hidden;
-  const back = { at: chat && !P.end ? anchor() : null, y: chat ? null : scrollY, caret: [BOX.selectionStart, BOX.selectionEnd], focus: document.activeElement === BOX, open: [...P.open] };
+  const back = { at: chat && !P.end ? anchor() : null, y: chat ? null : scrollY, away: P.away, caret: [BOX.selectionStart, BOX.selectionEnd], focus: document.activeElement === BOX, open: [...P.open] };
   sessionStorage.setItem(kept("back"), JSON.stringify(back));
   const keys = await caches?.keys().catch(() => []) ?? [];
   await Promise.all(keys.filter((k) => k.startsWith("unii-shell")).map((k) => caches.delete(k)));
@@ -1640,6 +1645,7 @@ function renewed(): void {
   }
   back.open.forEach((id: string) => P.open.add(id));
   P.back = back.at;
+  P.away = back.away;
   // a page (the settings, the tree) back where it was, once drawn that long
   const end = Date.now() + 3000;
   const y = () => back.y !== null && (document.documentElement.scrollHeight >= back.y + innerHeight || Date.now() > end ? scrollTo(0, back.y) : setTimeout(y, 100));

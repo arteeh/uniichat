@@ -3359,7 +3359,8 @@ function bars() {
     toast(note);
   }
   if (P.renew && renew_free()) {
-    renew();
+    P.renew = false;
+    setTimeout(renew);
   }
   const on = view_typing(v);
   const stop = on && v.busy && BOX.value.trim() === "" && P.imgs.length === 0;
@@ -3429,7 +3430,7 @@ function route() {
   const page = PAGES.includes(location.pathname);
   const tree = location.pathname === TREE;
   const chat = !page && !tree;
-  if (!chat && !$2("#log").hidden) {
+  if (!chat && !$2("#log").hidden && P.away === null) {
     P.away = { y: scrollY, end: P.end };
   }
   $2("#log").hidden = !chat;
@@ -3440,6 +3441,8 @@ function route() {
   P.shown = chat && P.away !== null ? shown_key() : location.pathname;
   if (chat && P.away !== null) {
     P.end = P.away.end;
+    P.rows = true;
+    paint();
     scrollTo(0, P.end ? document.documentElement.scrollHeight : P.away.y);
     P.y = scrollY;
     P.away = null;
@@ -3827,10 +3830,9 @@ function renew_free() {
   return P.rec === null && P.imgs.length === 0 && P.ups.size === 0 && v.out.length === 0 && !$2("#import").matches(":popover-open") && (!page || P.saved);
 }
 async function renew() {
-  P.renew = false;
   const tries = Number((sessionStorage.getItem(kept("build")) ?? "").split(" ")[1]);
   const chat = !$2("#log").hidden;
-  const back = { at: chat && !P.end ? anchor() : null, y: chat ? null : scrollY, caret: [BOX.selectionStart, BOX.selectionEnd], focus: document.activeElement === BOX, open: [...P.open] };
+  const back = { at: chat && !P.end ? anchor() : null, y: chat ? null : scrollY, away: P.away, caret: [BOX.selectionStart, BOX.selectionEnd], focus: document.activeElement === BOX, open: [...P.open] };
   sessionStorage.setItem(kept("back"), JSON.stringify(back));
   const keys = await caches?.keys().catch(() => []) ?? [];
   await Promise.all(keys.filter((k) => k.startsWith("unii-shell")).map((k) => caches.delete(k)));
@@ -3852,6 +3854,7 @@ function renewed() {
   }
   back.open.forEach((id) => P.open.add(id));
   P.back = back.at;
+  P.away = back.away;
   const end = Date.now() + 3000;
   const y = () => back.y !== null && (document.documentElement.scrollHeight >= back.y + innerHeight || Date.now() > end ? scrollTo(0, back.y) : setTimeout(y, 100));
   y();
