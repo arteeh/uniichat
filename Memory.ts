@@ -53,7 +53,7 @@ import { Disk } from "./Disk.ts";
 import { Pick } from "./Pick.ts";
 import * as names from "./Names.ts";
 import type { Timer } from "./Timer.ts";
-import { FIT, IMAGE, image_kind, PIXELS, TOKEN } from "./View.ts";
+import { FIT, HEAD, IMAGE, image_kind, MEDIA, MEDIA_AS, PIXELS, TOKEN } from "./View.ts";
 import { move_over } from "./Write.ts";
 
 // Types
@@ -173,6 +173,8 @@ const WAIT = "(not summarized yet: zoom it)";
 const TALKING = "Conversation mode is on from message {id}: from there on, the user's and Unii's messages are whole, word for word (zoom on one only to see an image it names); tool calls, their output, notes and reports stay summary lines.";
 
 const IMAGES = "/docs/images/";
+
+const MEDIA_DIR = "/docs/media/";
 
 const AGENTS = "/docs/agent/";
 
@@ -522,6 +524,56 @@ export namespace Memory {
     await Bun.write(mem.dir + IMAGES + name, bytes);
     Disk.wrote(mem.dir + IMAGES + name);
     return name;
+  }
+
+  // a file for the media store (View.MEDIA), streamed to disk as it
+  // comes, hashed meanwhile, then named by its hash and its kind: by
+  // `file`'s extension, else its first bytes as an image; its name, or
+  // why not (over `most` bytes: dropped as soon as it is)
+  export async function media_add(mem: Memory, body: ReadableStream<Uint8Array>, file: string, most: number): Promise<{ name: string } | { error: string }> {
+    const dot = file.toLowerCase().split(".").pop() ?? "";
+    let ext = file.includes(".") ? MEDIA_AS[dot] ?? dot : "";
+    fs.mkdirSync(mem.dir + MEDIA_DIR, { recursive: true });
+    const tmp = mem.dir + MEDIA_DIR + ".up-" + crypto.randomUUID();
+    const out = Bun.file(tmp).writer();
+    const hash = new Bun.CryptoHasher("sha256");
+    let [size, head, open] = [0, Buffer.alloc(0), true];
+    try {
+      const reader = body.getReader();
+      for (let got = await reader.read(); !got.done; got = await reader.read()) {
+        const piece = got.value;
+        size += piece.length;
+        if (size > most) {
+          reader.cancel().catch(() => {});
+          return { error: file + " is over the media store's " + Math.round(most / 2 ** 20) + " MB (config media_mb)." };
+        }
+        head = head.length < HEAD ? Buffer.concat([head, piece]).subarray(0, HEAD) : head;
+        hash.update(piece);
+        out.write(piece);
+      }
+      await out.end();
+      open = false;
+      ext ||= image_kind(head)?.split("/")[1] ?? "";
+      if (MEDIA[ext] === undefined) {
+        return { error: file + " isn't a kind the chat shows: " + Object.keys(MEDIA).join(", ") + "." };
+      }
+      const name = hash.digest("hex").slice(0, 16) + "." + ext;
+      fs.renameSync(tmp, mem.dir + MEDIA_DIR + name);
+      await Disk.wrote(mem.dir + MEDIA_DIR + name);
+      return { name };
+    } finally {
+      if (open) {
+        await out.end();
+      }
+      fs.rmSync(tmp, { force: true });
+    }
+  }
+
+  // a stored media file by its name (an older image's too)
+  export function media_file(mem: Memory, name: string): string | null {
+    const m = /^[0-9a-f]{16}\.([a-z0-9]+)$/.exec(name);
+    const file = mem.dir + MEDIA_DIR + name;
+    return m !== null && MEDIA[m[1]] !== undefined && fs.existsSync(file) ? file : Memory.image_file(mem, name);
   }
 
   export function image_file(mem: Memory, name: string): string | null {

@@ -516,8 +516,12 @@ function span_html(s: Md.Span): string {
     case "Link": {
       return `<a href="${esc(s.k)}"${s.t === "" ? "" : ` title="${esc(s.t)}"`} target="_blank" rel="noopener">${spans_html(s.x)}</a>`;
     }
-    case "Pict": {
-      return `<a href="${esc(s.k)}"${s.t === "" ? "" : ` title="${esc(s.t)}"`} target="_blank" rel="noopener">${esc(s.x || s.k)}</a>`;
+    case "Pict": { // a file of the media store inline (an image opens whole), any other a link
+      const [k, title, kind] = [esc(s.k), s.t === "" ? "" : ` title="${esc(s.t)}"`, View.media_kind(s.k)];
+      return kind === "image" ? `<a class="media" href="${k}" target="_blank"><img src="${k}" alt="${esc(s.x)}"${title} loading="lazy"></a>`
+        : kind === "video" ? `<video class="media" src="${k}"${title} controls preload="metadata"></video>`
+        : kind === "audio" ? `<audio class="media" src="${k}"${title} controls preload="metadata"></audio>`
+        : `<a href="${k}"${title} target="_blank" rel="noopener">${esc(s.x || s.k)}</a>`;
     }
     case "Brk": {
       return "<br>";

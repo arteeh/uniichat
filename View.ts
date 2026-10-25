@@ -255,6 +255,22 @@ const MARKS: Array<[string, number, string]> = [
 export const HEAD   = 12;
 export const IMAGES = "Images are png, jpeg, gif or webp.";
 
+// the media store's kinds (Memory.media_add), by a file's extension (some
+// named two ways, as the first): its content type
+export const MEDIA: Record<string, string> = {
+  png: "image/png", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp", svg: "image/svg+xml",
+  mp4: "video/mp4", webm: "video/webm", mov: "video/quicktime",
+  mp3: "audio/mpeg", m4a: "audio/mp4", aac: "audio/aac", ogg: "audio/ogg", opus: "audio/ogg", wav: "audio/wav", weba: "audio/webm",
+};
+export const MEDIA_AS: Record<string, string> = { jpg: "jpeg", m4v: "mp4", oga: "ogg" };
+
+// a media file in the store, by its url (/media/<name>, or an older
+// image's /image/<name>): image, video or audio; null: none
+export function media_kind(url: string): string | null {
+  const m = /^\/(?:media|image)\/[0-9a-f]{16}\.([a-z0-9]+)$/.exec(url);
+  return m === null ? null : MEDIA[m[1]]?.split("/")[0] ?? null;
+}
+
 // what models get of an image: scaled to FIT px at most, or as is if no
 // larger and of IMAGE bytes at most; PIXELS, the most decoded (Memory.ts
 // sends a larger one as is)

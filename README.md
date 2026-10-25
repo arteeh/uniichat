@@ -37,6 +37,8 @@ What this fork adds:
 - **Settings page** where you can customize the system prompt and compaction prompt.
 - **Improved memory tree viewer** to browse what your agent knows.
 - **Full markdown** as GitHub draws it, in the web app and the terminal.
+- **Images, video and audio in the chat**: the agent's `show` tool puts a
+  file from any device in the chat's media store (`media_mb`, default 1024).
 - **Conversation mode** for when you want a short continuous
   back-and-forth without the agent forgetting anything you said.
 - **An installable web app (PWA)** on phones and desktops: icons, an

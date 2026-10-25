@@ -36,7 +36,7 @@ import { INSTALL, INSTALL_PS1 } from "./Update.ts";
 import { move_over, write_whole } from "./Write.ts";
 import * as Timer from "./Timer.ts";
 import { PROMPTS, SEARCHES, Tools, type Agent, type Live } from "./Tools.ts";
-import { ACTIVE, FRAME, IDLE, IMAGES, live_push, PING, QUIT, SUMMARIES, TICK, TURN, WIRE, type Answer, type Part, type Server as Out, type Wait } from "./View.ts";
+import { ACTIVE, FRAME, IDLE, IMAGES, live_push, MEDIA, PING, QUIT, SUMMARIES, TICK, TURN, WIRE, type Answer, type Part, type Server as Out, type Wait } from "./View.ts";
 import * as config from "./Config.ts";
 import hello_md from "./hello.md" with { type: "text" };
 import app_js from "./web/app.js" with { type: "file" };
@@ -1569,10 +1569,44 @@ export namespace Main {
       case "/api/settings": {
         return await Main.settings(req);
       }
+      case "/api/media": {
+        if (req.method !== "POST" || req.body === null) {
+          return new Response("a file is posted", { status: 405 });
+        }
+        const out = await Memory.media_add(mem, req.body, new URL(req.url).searchParams.get("name") ?? "", config.MEDIA_MAX);
+        return Response.json(out, { status: "error" in out ? 400 : 200 });
+      }
+    }
+    if (p.startsWith("/media/")) {
+      return Main.media(Memory.media_file(mem, p.slice("/media/".length)), req);
     }
     const file = Memory.image_file(mem, p.slice("/image/".length));
     const keep = { "cache-control": "private, max-age=31536000, immutable" };
     return file === null ? new Response("not found", { status: 404 }) : new Response(Bun.file(file), { headers: keep });
+  }
+
+  // a media file (Memory.media_add), or the bytes a Range asks of it (a
+  // video or a sound seeking); never sniffed as another type, and an SVG
+  // never runs a script, opened as a page too
+  export function media(file: string | null, req: Request): Response {
+    if (file === null) {
+      return new Response("not found", { status: 404 });
+    }
+    const type = MEDIA[file.split(".").pop()!] ?? "application/octet-stream";
+    const size = fs.statSync(file).size;
+    const headers: Record<string, string> = { "content-type": type, "cache-control": "private, max-age=31536000, immutable", "accept-ranges": "bytes", "x-content-type-options": "nosniff" };
+    if (type === "image/svg+xml") {
+      headers["content-security-policy"] = "default-src 'none'; style-src 'unsafe-inline'; sandbox";
+    }
+    const range = /^bytes=(\d*)-(\d*)$/.exec(req.headers.get("range") ?? "");
+    if (range === null || range[1] + range[2] === "") {
+      return new Response(Bun.file(file), { headers });
+    }
+    const [a, b] = range[1] === "" ? [Math.max(0, size - Number(range[2])), size - 1] : [Number(range[1]), Math.min(size - 1, range[2] === "" ? Infinity : Number(range[2]))];
+    if (a > b) {
+      return new Response(null, { status: 416, headers: { ...headers, "content-range": "bytes */" + size } });
+    }
+    return new Response(Bun.file(file).slice(a, b + 1), { status: 206, headers: { ...headers, "content-range": "bytes " + a + "-" + b + "/" + size } });
   }
 
   // the two prompts (Tools.PROMPTS): a GET reads them, as used and as
@@ -1612,7 +1646,7 @@ export namespace Main {
       if (own !== null) {
         return own;
       }
-      if (!OWN.includes(p) && !p.startsWith("/image/") && !p.startsWith("/api/")) {
+      if (!OWN.includes(p) && !p.startsWith("/image/") && !p.startsWith("/media/") && !p.startsWith("/api/")) {
         return Main.file(p, req);
       }
       if (!Owner.is(req)) {

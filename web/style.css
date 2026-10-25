@@ -373,6 +373,13 @@ header > .imping { display: flex; flex-direction: column; justify-content: cente
   [popover] > a { padding: 11px 4px; }
 }
 
+/* media in a message (Md's ![](/media/…)): at most about 70% of the
+   window's height, never wider than the message; a sound one row */
+.msg .media { display: block; width: fit-content; max-width: 100%; margin: .4em 0; }
+.msg :is(img, video):is(.media, .media > *) { display: block; max-width: 100%; max-height: 70vh; width: auto; height: auto; border-radius: 8px; }
+.msg audio.media { width: min(100%, 480px); }
+.msg .media + br { display: none; }
+
 /* images: under a message, each a link; over the box, those waiting to
    be sent (a click drops one) */
 .pics { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }

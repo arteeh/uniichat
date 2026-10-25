@@ -1205,6 +1205,27 @@ var NOTICE = 3 * 60 * 60 * 1000;
 var WAIT = "compressing…";
 var SUMS = "compressing earlier messages…";
 var UNSENT = "Sends once connected.";
+var MEDIA = {
+  png: "image/png",
+  jpeg: "image/jpeg",
+  gif: "image/gif",
+  webp: "image/webp",
+  svg: "image/svg+xml",
+  mp4: "video/mp4",
+  webm: "video/webm",
+  mov: "video/quicktime",
+  mp3: "audio/mpeg",
+  m4a: "audio/mp4",
+  aac: "audio/aac",
+  ogg: "audio/ogg",
+  opus: "audio/ogg",
+  wav: "audio/wav",
+  weba: "audio/webm"
+};
+function media_kind(url) {
+  const m = /^\/(?:media|image)\/[0-9a-f]{16}\.([a-z0-9]+)$/.exec(url);
+  return m === null ? null : MEDIA[m[1]]?.split("/")[0] ?? null;
+}
 var IMAGE = 2 ** 20;
 var PIXELS = 2 ** 28;
 var TOOL2 = "tool: ";
@@ -2086,7 +2107,8 @@ function span_html(s) {
       return `<a href="${esc(s.k)}"${s.t === "" ? "" : ` title="${esc(s.t)}"`} target="_blank" rel="noopener">${spans_html(s.x)}</a>`;
     }
     case "Pict": {
-      return `<a href="${esc(s.k)}"${s.t === "" ? "" : ` title="${esc(s.t)}"`} target="_blank" rel="noopener">${esc(s.x || s.k)}</a>`;
+      const [k, title, kind] = [esc(s.k), s.t === "" ? "" : ` title="${esc(s.t)}"`, media_kind(s.k)];
+      return kind === "image" ? `<a class="media" href="${k}" target="_blank"><img src="${k}" alt="${esc(s.x)}"${title} loading="lazy"></a>` : kind === "video" ? `<video class="media" src="${k}"${title} controls preload="metadata"></video>` : kind === "audio" ? `<audio class="media" src="${k}"${title} controls preload="metadata"></audio>` : `<a href="${k}"${title} target="_blank" rel="noopener">${esc(s.x || s.k)}</a>`;
     }
     case "Brk": {
       return "<br>";

@@ -1,7 +1,7 @@
 // Machine
 // =======
-// The tools that touch a device: shell, read, write, edit, view_video
-// (TOOLS), run by a device (Device.ts) as Jobs, each in its agent's dir
+// The tools that touch a device: shell, read, write, edit, view_video,
+// show (TOOLS; show is the device's own, as it posts to the server), run by a device (Device.ts) as Jobs, each in its agent's dir
 // under the device's work dir. A stop kills the job's shell and its
 // process group. The stop tool's halt job kills all an agent's shells
 // left (UNII_AGENT); as the device quits, end() kills every
@@ -101,6 +101,7 @@ export const TOOLS: Spec[] = [
   spec("read", "Read a text file. offset: the first line to show (from 1); limit: how many lines; at: the character of the first line to start from. It ends saying the lines shown, as [lines 4-7 of 15]; output past " + CAP + " characters comes in pages, saying where to go on. An image file (png, jpeg, gif, webp) comes as the picture, scaled to fit " + FIT + " px, or max_side px if given (a GIF shows its first frame; view_video plays it).", { path: STR, offset: INT, limit: INT, at: INT, max_side: INT }, ["path"]),
   spec("write", "Write a whole file, making its directories. Answers a unified diff of what changed (a new file: all its lines added).", { path: STR, content: STR }, ["path", "content"]),
   spec("view_video", "See part of a video (any file ffmpeg opens: mp4, mkv, webm, mov, avi, gif...) as ONE image: a grid of its frames, row by row, each stamped with its frame number (top) and time (bottom), fitting " + FIT + " px, or max_side px. It also answers a line on the whole video (duration, fps, frames, size). start and end: the range, ends included, in frames from 0 (or seconds, with unit \"second\"); by default the whole video. step: take every step-th frame; by default the one that gives at most 16. Each frame gets smaller as more share the sheet: past about 25 they get hard to read, and " + SHEET + " is the most. For a long stretch, raise step, narrow the range, or call again on the next range. Needs ffmpeg and ffprobe on the device.", { path: STR, start: { type: "number" }, end: { type: "number" }, unit: { type: "string", enum: ["frame", "second"] }, step: INT, max_side: INT }, ["path"]),
+  spec("show", "Show the user files of this device in the chat: images (png, jpeg, gif, webp, svg), video (mp4, webm, mov) and audio (mp3, m4a, aac, ogg, opus, wav). Each is copied to the chat's media store; the answer is a markdown line per file, ![name](/media/…), to put in your reply where it should show.", { paths: { type: "array", items: STR, minItems: 1 } }, ["paths"]),
   spec("edit", "Replace text in files: the edits in order, each on its file as the edits before it left it. old must match exactly, whitespace included, and only once, unless all is true, which replaces every match. If any edit fails, no file is changed. Answers a unified diff of each file.", { edits: { type: "array", items: EDIT, minItems: 1 } }, ["edits"]),
 ];
 

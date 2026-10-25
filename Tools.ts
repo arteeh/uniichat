@@ -3,7 +3,7 @@
 // Unii's prompts, tools and agents. Calls get the tools as MCP over one
 // local port, at a URL with the chat's secret and the caller ("main", an
 // agent; a compaction has none).
-// shell, read, write, edit and view_video run on the device their
+// shell, read, write, edit, view_video and show run on the device their
 // `device` field names: a computer running `unii device` (Device.ts), one
 // per sign-in (host, host-2...), listed in each call's message. A name
 // stays its sign-in's while the server runs, so a call meant for one
@@ -200,8 +200,8 @@ const TASK = { type: "object", properties: {
 // now, at the start of each call's message (Tools.devices), so one
 // joining or leaving changes a call's tail, never its cached prefix
 const DEVICES = `Devices: the user's computers that run unii's device now, by name, listed
-at the start of each message. Your shell, read, write, edit and view_video
-tools run on the one their \`device\` field names. A computer is listed only
+at the start of each message. Your shell, read, write, edit, view_video and
+show tools run on the one their \`device\` field names. A computer is listed only
 while its device runs, and leaves the list when it stops: a task that needs
 one not listed can't be done now, so tell the user it isn't available.`;
 const DEVICES_NONE = "(None is open now.)";

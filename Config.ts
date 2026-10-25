@@ -130,6 +130,9 @@ export const CHATGPT    = config_path(config_get("chatgpt", DIR + "/chatgpt.json
 export const CLAUDE_SUB = config_path(config_get("claude_sub", DIR + "/claude-sub"));
 export const CLAUDE     = config_path(config_get("claude", ""));
 
+// the most a file put in the media store may be (config media_mb, in MB)
+export const MEDIA_MAX  = (Number(config_get("media_mb", "")) || 1024) * 2 ** 20;
+
 // the keys the environment gave (removed from it), and every key as used:
 // the environment's, else keys.json's
 const ENV_KEYS: Record<string, string> = Object.fromEntries(Object.entries(VARS).map(([name, v]) => [name, config_key(v)]));
