@@ -1603,7 +1603,12 @@ export namespace Main {
         if (req.method !== "POST" || req.body === null) {
           return new Response("a file is posted", { status: 405 });
         }
-        const out = await Memory.media_add(mem, req.body, new URL(req.url).searchParams.get("name") ?? "", config.MEDIA_MAX);
+        // at most media_mb, and never past SPARE free on the disk
+        const file = new URL(req.url).searchParams.get("name") ?? "";
+        const disk = fs.statfsSync(config.DIR);
+        const room = disk.bavail * disk.bsize - SPARE;
+        const over = room < config.MEDIA_MAX ? FULL : file + " is over the media store's " + Math.round(config.MEDIA_MAX / 2 ** 20) + " MB (config media_mb).";
+        const out = room <= 0 ? { error: FULL } : await Memory.media_add(mem, req.body, file, Math.min(room, config.MEDIA_MAX), over);
         return Response.json(out, { status: "error" in out ? 400 : 200 });
       }
     }

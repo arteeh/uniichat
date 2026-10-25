@@ -529,8 +529,8 @@ export namespace Memory {
   // a file for the media store (View.MEDIA), streamed to disk as it
   // comes, hashed meanwhile, then named by its hash and its kind: by
   // `file`'s extension, else its first bytes as an image; its name, or
-  // why not (over `most` bytes: dropped as soon as it is)
-  export async function media_add(mem: Memory, body: ReadableStream<Uint8Array>, file: string, most: number): Promise<{ name: string } | { error: string }> {
+  // why not (over `most` bytes: `over`, dropped as soon as it is)
+  export async function media_add(mem: Memory, body: ReadableStream<Uint8Array>, file: string, most: number, over: string): Promise<{ name: string } | { error: string }> {
     const dot = file.toLowerCase().split(".").pop() ?? "";
     let ext = file.includes(".") ? MEDIA_AS[dot] ?? dot : "";
     fs.mkdirSync(mem.dir + MEDIA_DIR, { recursive: true });
@@ -545,7 +545,7 @@ export namespace Memory {
         size += piece.length;
         if (size > most) {
           reader.cancel().catch(() => {});
-          return { error: file + " is over the media store's " + Math.round(most / 2 ** 20) + " MB (config media_mb)." };
+          return { error: over };
         }
         head = head.length < HEAD ? Buffer.concat([head, piece]).subarray(0, HEAD) : head;
         hash.update(piece);
