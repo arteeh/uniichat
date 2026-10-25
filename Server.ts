@@ -36,7 +36,7 @@ import { INSTALL, INSTALL_PS1 } from "./Update.ts";
 import { move_over, write_whole } from "./Write.ts";
 import * as Timer from "./Timer.ts";
 import { PROMPTS, SEARCHES, Tools, type Agent, type Live } from "./Tools.ts";
-import { ACTIVE, FRAME, IDLE, IMAGES, live_push, PING, QUIT, SUMMARIES, TICK, TOKEN, TURN, WIRE, type Answer, type Part, type Server as Out, type Wait } from "./View.ts";
+import { ACTIVE, FRAME, IDLE, IMAGES, live_push, PING, QUIT, SUMMARIES, TICK, TURN, WIRE, type Answer, type Part, type Server as Out, type Wait } from "./View.ts";
 import * as config from "./Config.ts";
 import hello_md from "./hello.md" with { type: "text" };
 import app_js from "./web/app.js" with { type: "file" };
@@ -142,16 +142,15 @@ const HEAD       = "Turn: the user's new message:\n\n";
 const GOAL       = "You check a goal. Below is a chat between a user and Unii, an AI agent: its older messages as summary lines (id+n|text), then its latest messages whole, then the goal the user set with /goal. Answer yes if the chat shows the goal fully satisfied now, else no. Write that one word, nothing else.";
 const GOAL_ASK   = "\nThe goal:\n\n";
 const GOAL_NO    = "The goal isn't satisfied yet: keep working.";
-// conversation mode (Memory.ts) full: switched off, as the chat says;
-// switched on with its first messages over its space already: refused.
-// On: what it holds, and costs. Off as a model is picked with less room
-// than its messages take, or as the model refuses a turn as too long
-const TALK_FULL  = "Conversation mode switched itself off: the messages it kept word for word, from message {id} on, filled their space in Unii's view. They show as summaries again; switch it on to keep the next ones whole.";
-const TALK_ON    = "Conversation mode is on from message {id}: the user's and Unii's messages stay word for word in Unii's view, up to about {k}K tokens on {model}. Every turn sends all of them again, so a long conversation uses up plan limits or API credit fast.";
-const TALK_SMALL = "Conversation mode switched itself off: the messages it kept word for word, from message {id} on, take more room than {model} has in Unii's view. They show as summaries again; switch it on to keep the next ones whole.";
-const TALK_LONG  = "Conversation mode switched itself off: {model} refused the turn as too long for it, with the messages it kept word for word from message {id} on. They show as summaries again; send a message to try again.";
+// conversation mode (Memory.ts) switched itself off, said in one short
+// note: full; a model picked with less room than its messages take; a
+// turn refused as too long; an import filling it. Switched on with its
+// first messages over its space already: refused
+const TALK_FULL  = "Conversation mode switched itself off: it was full.";
+const TALK_SMALL = "Conversation mode switched itself off: too long for {model}.";
+const TALK_LONG  = "Conversation mode switched itself off: {model} refused the turn as too long.";
 const TALK_BIG   = "Conversation mode can't start: the messages since message {id} already fill its space in Unii's view.";
-const TALK_IMP   = "Conversation mode switched itself off: the messages imported filled its space in Unii's view (from message {id} on). Switch it on to keep the next ones whole.";
+const TALK_IMP   = "Conversation mode switched itself off: the import filled it.";
 const FULL       = "UniiChat's disk is full; try again soon.";
 // an import running: its batch's file in the chat's dir (Chat.keep)
 const BATCH      = "/import.json";
@@ -1286,10 +1285,6 @@ export namespace Chat {
           return { error: TALK_BIG.replace("{id}", String(from)) };
         }
         Chat.talk(chat, from);
-        if (from !== null) {
-          const k = String(Math.round(Chat.room(chat) / TOKEN / 1000));
-          Chat.note(chat, TALK_ON.replace("{id}", String(from)).replace("{k}", k).replace("{model}", Chat.model_name(chat)));
-        }
         return {};
       }
       case "mcp": {
