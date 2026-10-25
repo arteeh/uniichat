@@ -59,8 +59,9 @@ const BACK = $<HTMLInputElement>("#import [name=back]");
 // the page's: end: at its bottom; stick: the next draw may keep it;
 // y: its scroll when last scrolled; open: the tool calls and results
 // unfolded, by id (folds); still: the page left where it is at the
-// log's next resize (unfold); build, renew, saved, gave, back: the web
-// app's build and its reload into another (Renew); ups, upn, after: the
+// log's next resize (unfold); build, due, going, since, dirty, saving,
+// gave, back: the web app's build and its reload into another (Renew);
+// ups, upn, after: the
 // files uploading, by the mark each holds in the box, the last mark's
 // number, and a message sent meanwhile (Uploads);
 // frame: awaited (0: none); rows: the log's rows changed, to draw;
@@ -87,8 +88,11 @@ const P = {
   open  : new Set<string>(),
   build : document.documentElement.dataset.build ?? "",
   still : false,
-  renew : false,
-  saved : false,
+  due   : false,
+  going : false,
+  since : false,
+  dirty : new Set<HTMLFormElement>(),
+  saving: 0,
   gave  : null as WebSocket | null,
   back  : null as { a: number; top: number } | null,
   ups   : new Map<string, { name: string; part: number }>(),
@@ -129,7 +133,13 @@ async function boot(): Promise<void> {
     addEventListener(ev, () => in_use(), { capture: true, passive: true });
   }
   addEventListener("focus", () => in_use());
-  document.addEventListener("visibilitychange", () => in_use());
+  document.addEventListener("visibilitychange", () => {
+    in_use();
+    if (document.hidden && P.due && !P.going && renew_free(true)) {
+      P.going = true;
+      renew(true);
+    }
+  });
   addEventListener("blur", () => in_use(true));
   addEventListener("pagehide", () => in_use(true));
 }
@@ -208,6 +218,8 @@ function chat(): void {
     ev.preventDefault();
     submit();
   };
+  // (a phone's keyboard down: a reload may be due, and was waiting for it)
+  BOX.addEventListener("blur", () => draw(false));
   $(".attach").onclick = () => file.click();
   $("#pick").onkeydown = roam;
   $("#pick").addEventListener("focusout", left);
@@ -1040,8 +1052,8 @@ function bars(): void {
     toast(note);
   }
   // (after this draw: a page shown is drawn and placed first)
-  if (P.renew && renew_free()) {
-    P.renew = false;
+  if (P.due && !P.going && renew_free()) {
+    P.going = true;
     setTimeout(renew);
   }
   const on = View.view_typing(v);
@@ -1183,6 +1195,14 @@ async function account(): Promise<void> {
   const prompts: View.Prompts | null = got !== null && got.ok ? await got.json().catch(() => null) : null;
   const push = await notify_state().catch(() => null);
   el.innerHTML = Html.account_html(prompts, push);
+  // (drawn anew: nothing on it edited yet)
+  P.dirty.clear();
+  el.oninput = (ev) => {
+    const form = (ev.target as Element).closest("form");
+    if (form !== null) {
+      P.dirty.add(form);
+    }
+  };
   el.querySelectorAll<HTMLFormElement>("form.prompt").forEach((form) => (form.onsubmit = (ev) => {
     ev.preventDefault();
     account_prompt(form);
@@ -1231,14 +1251,19 @@ async function account_prompt(form: HTMLFormElement): Promise<void> {
   const save = form.querySelector("button")!;
   const sent = area.value;
   save.disabled = true;
+  P.saving++;
   const out = await View.post("/api/prompts", { [area.name]: sent });
+  P.saving--;
   save.disabled = false;
   if (out.error === undefined && area.value === sent) {
     area.value = out[area.name]?.text ?? sent;
   }
   why.textContent = out.error ?? (area.value === out[area.name]?.text ? "Saved." : "Not saved yet: Save again.");
   form.classList.toggle("bad", out.error !== undefined);
-  P.saved = out.error === undefined;
+  if (out.error === undefined && area.value === sent) {
+    P.dirty.delete(form);
+    P.since = true;
+  }
   draw(false);
 }
 
@@ -1563,7 +1588,9 @@ async function settings_save(form: HTMLFormElement, page: any, unset: Set<string
   const go = form.querySelector<HTMLButtonElement>(".go")!;
   go.disabled = true;
   why.textContent = "";
+  P.saving++;
   const out = await View.post("/api/settings", { version: page.version, set, keys, ...(profiles === undefined ? {} : { profiles }) });
+  P.saving--;
   go.disabled = false;
   if (!out.ok) {
     const at = out.key === undefined ? null : form.querySelector<HTMLElement>(`.set[data-key="${out.key}"]`);
@@ -1572,8 +1599,11 @@ async function settings_save(form: HTMLFormElement, page: any, unset: Set<string
     return;
   }
   const later = (out.saved as string[]).filter((key) => page.settings.find((r: any) => r.key === key)?.apply === "restart");
+  // (drawn anew from what was saved: nothing edited on it now)
   settings_draw(out);
-  P.saved = true;
+  P.dirty.delete(form);
+  P.since = true;
+  draw(false);
   toast(later.length === 0 ? "Saved." : "Saved. " + later.join(", ") + " " + (later.length === 1 ? "applies" : "apply") + " once the server restarts.");
 }
 
@@ -1583,44 +1613,55 @@ async function settings_save(form: HTMLFormElement, page: any, unset: Set<string
 // update): the page reloads into it by itself, once nothing would be
 // lost, keeping what it showed: the box's text and caret, the folds
 // opened, where the chat or the page was scrolled. Never while the mic
-// records, a file uploads, an act awaits its answer, or
-// Import History is open; on the settings page only once a change is
-// saved, or as it is left. The cached shell is dropped first; at most
-// twice per build, the second past the browser's cache too, then once
-// more on each new socket.
+// records, a file uploads, an act awaits its answer, or Import History
+// is open; on a phone, not while its keyboard is up (the box focused),
+// but as the page is hidden. On the settings page only once a change is
+// saved after the new build came, with nothing else edited and unsaved,
+// or as it is left. Checked again right before reloading. The cached
+// shell is dropped first; at most two reloads per build (the second
+// past the browser's cache too), then one more on each new socket.
 
 function renew_due(build: string | undefined): void {
   if (build === undefined || P.build === "" || build === P.build) {
     P.build ||= build ?? "";
-    P.renew = false;
+    P.due = false;
     return;
   }
   const [was, n] = (sessionStorage.getItem(kept("build")) ?? "").split(" ");
-  const tries = was === build ? Number(n) : 0;
-  if (tries >= 2 && (P.gave === null || P.gave === v.ws)) {
+  if (was === build && Number(n) >= 2 && (P.gave === null || P.gave === v.ws)) {
     P.gave = v.ws;
     return;
   }
-  sessionStorage.setItem(kept("build"), build + " " + (tries + 1));
-  P.renew = true;
+  P.since = P.due && P.since;
+  P.due = true;
   draw(false);
 }
 
-function renew_free(): boolean {
+function renew_free(hidden = false): boolean {
   const page = location.pathname !== "/" && location.pathname !== TREE;
-  return P.rec === null && P.ups.size === 0 && v.out.length === 0 && !$("#import").matches(":popover-open") && (!page || P.saved);
+  const quiet = P.rec === null && P.ups.size === 0 && v.out.length === 0 && !$("#import").matches(":popover-open");
+  const typing = !DESK.matches && document.activeElement === BOX && !hidden;
+  return quiet && !typing && (!page || (P.since && P.dirty.size === 0 && P.saving === 0));
 }
 
-async function renew(): Promise<void> {
-  const tries = Number((sessionStorage.getItem(kept("build")) ?? "").split(" ")[1]);
+async function renew(hidden = false): Promise<void> {
+  const [was, n] = (sessionStorage.getItem(kept("build")) ?? "").split(" ");
+  const tries = was === v.build ? Number(n) : 0;
+  const store = isSecureContext && "caches" in window ? window.caches : null;
+  const keys = (await store?.keys().catch(() => [])) ?? [];
+  await Promise.all(keys.filter((k) => k.startsWith("unii-shell")).map((k) => store?.delete(k)));
+  if (tries > 0) {
+    await Promise.all(["/", "/app.js", "/style.css", "/sw.js"].map((path) => fetch(path, { cache: "reload" }).catch(() => null)));
+  }
+  // (the page may have changed meanwhile)
+  if (!P.due || !renew_free(hidden)) {
+    P.going = false;
+    return;
+  }
   const chat = !$("#log").hidden;
   const back = { at: chat && !P.end ? anchor() : null, y: chat ? null : scrollY, away: P.away, caret: [BOX.selectionStart, BOX.selectionEnd], focus: document.activeElement === BOX, open: [...P.open] };
   sessionStorage.setItem(kept("back"), JSON.stringify(back));
-  const keys = await caches?.keys().catch(() => []) ?? [];
-  await Promise.all(keys.filter((k) => k.startsWith("unii-shell")).map((k) => caches.delete(k)));
-  if (tries > 1) {
-    await Promise.all(["/", "/app.js", "/style.css", "/sw.js"].map((path) => fetch(path, { cache: "reload" }).catch(() => null)));
-  }
+  sessionStorage.setItem(kept("build"), (v.build ?? "") + " " + (tries + 1));
   location.reload();
 }
 

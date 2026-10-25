@@ -1993,7 +1993,7 @@ function view_new() {
     pages: new Map,
     page: null,
     notes: [],
-    tab: crypto.randomUUID(),
+    tab: uuid(),
     out: [],
     ws: null,
     up: false,
@@ -2346,8 +2346,12 @@ function link_open(v, link) {
   ws.onclose = () => drop();
 }
 function link_send(v, msg, done = (a) => link_note(v, a), said = "") {
-  v.out.push({ msg: { id: crypto.randomUUID(), ...msg }, ws: null, done, said });
+  v.out.push({ msg: { id: uuid(), ...msg }, ws: null, done, said });
   v.flush();
+}
+function uuid() {
+  const hex = [...crypto.getRandomValues(new Uint8Array(16))].map((b, k) => (k === 6 ? b & 15 | 64 : k === 8 ? b & 63 | 128 : b).toString(16).padStart(2, "0")).join("");
+  return [hex.slice(0, 8), hex.slice(8, 12), hex.slice(12, 16), hex.slice(16, 20), hex.slice(20)].join("-");
 }
 function link_note(v, a) {
   if (a.error !== undefined) {
@@ -3312,8 +3316,11 @@ var P = {
   open: new Set,
   build: document.documentElement.dataset.build ?? "",
   still: false,
-  renew: false,
-  saved: false,
+  due: false,
+  going: false,
+  since: false,
+  dirty: new Set,
+  saving: 0,
   gave: null,
   back: null,
   ups: new Map,
@@ -3345,7 +3352,13 @@ async function boot() {
     addEventListener(ev, () => in_use(), { capture: true, passive: true });
   }
   addEventListener("focus", () => in_use());
-  document.addEventListener("visibilitychange", () => in_use());
+  document.addEventListener("visibilitychange", () => {
+    in_use();
+    if (document.hidden && P.due && !P.going && renew_free(true)) {
+      P.going = true;
+      renew(true);
+    }
+  });
   addEventListener("blur", () => in_use(true));
   addEventListener("pagehide", () => in_use(true));
 }
@@ -3403,6 +3416,7 @@ function chat() {
     ev.preventDefault();
     submit();
   };
+  BOX.addEventListener("blur", () => draw(false));
   $2(".attach").onclick = () => file.click();
   $2("#pick").onkeydown = roam;
   $2("#pick").addEventListener("focusout", left);
@@ -4078,8 +4092,8 @@ function bars() {
   for (const note of v.notes.splice(0)) {
     toast(note);
   }
-  if (P.renew && renew_free()) {
-    P.renew = false;
+  if (P.due && !P.going && renew_free()) {
+    P.going = true;
     setTimeout(renew);
   }
   const on = view_typing(v);
@@ -4183,6 +4197,13 @@ async function account() {
   const prompts = got !== null && got.ok ? await got.json().catch(() => null) : null;
   const push = await notify_state().catch(() => null);
   el.innerHTML = account_html(prompts, push);
+  P.dirty.clear();
+  el.oninput = (ev) => {
+    const form = ev.target.closest("form");
+    if (form !== null) {
+      P.dirty.add(form);
+    }
+  };
   el.querySelectorAll("form.prompt").forEach((form) => form.onsubmit = (ev) => {
     ev.preventDefault();
     account_prompt(form);
@@ -4222,14 +4243,19 @@ async function account_prompt(form) {
   const save = form.querySelector("button");
   const sent = area.value;
   save.disabled = true;
+  P.saving++;
   const out = await post("/api/prompts", { [area.name]: sent });
+  P.saving--;
   save.disabled = false;
   if (out.error === undefined && area.value === sent) {
     area.value = out[area.name]?.text ?? sent;
   }
   why.textContent = out.error ?? (area.value === out[area.name]?.text ? "Saved." : "Not saved yet: Save again.");
   form.classList.toggle("bad", out.error !== undefined);
-  P.saved = out.error === undefined;
+  if (out.error === undefined && area.value === sent) {
+    P.dirty.delete(form);
+    P.since = true;
+  }
   draw(false);
 }
 async function notify_state() {
@@ -4516,7 +4542,9 @@ async function settings_save(form, page, unset, listed, profs) {
   const go = form.querySelector(".go");
   go.disabled = true;
   why.textContent = "";
+  P.saving++;
   const out = await post("/api/settings", { version: page.version, set, keys, ...profiles === undefined ? {} : { profiles } });
+  P.saving--;
   go.disabled = false;
   if (!out.ok) {
     const at = out.key === undefined ? null : form.querySelector(`.set[data-key="${out.key}"]`);
@@ -4526,39 +4554,49 @@ async function settings_save(form, page, unset, listed, profs) {
   }
   const later = out.saved.filter((key) => page.settings.find((r) => r.key === key)?.apply === "restart");
   settings_draw(out);
-  P.saved = true;
+  P.dirty.delete(form);
+  P.since = true;
+  draw(false);
   toast(later.length === 0 ? "Saved." : "Saved. " + later.join(", ") + " " + (later.length === 1 ? "applies" : "apply") + " once the server restarts.");
 }
 function renew_due(build) {
   if (build === undefined || P.build === "" || build === P.build) {
     P.build ||= build ?? "";
-    P.renew = false;
+    P.due = false;
     return;
   }
   const [was, n] = (sessionStorage.getItem(kept("build")) ?? "").split(" ");
-  const tries = was === build ? Number(n) : 0;
-  if (tries >= 2 && (P.gave === null || P.gave === v.ws)) {
+  if (was === build && Number(n) >= 2 && (P.gave === null || P.gave === v.ws)) {
     P.gave = v.ws;
     return;
   }
-  sessionStorage.setItem(kept("build"), build + " " + (tries + 1));
-  P.renew = true;
+  P.since = P.due && P.since;
+  P.due = true;
   draw(false);
 }
-function renew_free() {
+function renew_free(hidden = false) {
   const page = location.pathname !== "/" && location.pathname !== TREE;
-  return P.rec === null && P.ups.size === 0 && v.out.length === 0 && !$2("#import").matches(":popover-open") && (!page || P.saved);
+  const quiet = P.rec === null && P.ups.size === 0 && v.out.length === 0 && !$2("#import").matches(":popover-open");
+  const typing = !DESK.matches && document.activeElement === BOX && !hidden;
+  return quiet && !typing && (!page || P.since && P.dirty.size === 0 && P.saving === 0);
 }
-async function renew() {
-  const tries = Number((sessionStorage.getItem(kept("build")) ?? "").split(" ")[1]);
+async function renew(hidden = false) {
+  const [was, n] = (sessionStorage.getItem(kept("build")) ?? "").split(" ");
+  const tries = was === v.build ? Number(n) : 0;
+  const store = isSecureContext && "caches" in window ? window.caches : null;
+  const keys = await store?.keys().catch(() => []) ?? [];
+  await Promise.all(keys.filter((k) => k.startsWith("unii-shell")).map((k) => store?.delete(k)));
+  if (tries > 0) {
+    await Promise.all(["/", "/app.js", "/style.css", "/sw.js"].map((path) => fetch(path, { cache: "reload" }).catch(() => null)));
+  }
+  if (!P.due || !renew_free(hidden)) {
+    P.going = false;
+    return;
+  }
   const chat = !$2("#log").hidden;
   const back = { at: chat && !P.end ? anchor() : null, y: chat ? null : scrollY, away: P.away, caret: [BOX.selectionStart, BOX.selectionEnd], focus: document.activeElement === BOX, open: [...P.open] };
   sessionStorage.setItem(kept("back"), JSON.stringify(back));
-  const keys = await caches?.keys().catch(() => []) ?? [];
-  await Promise.all(keys.filter((k) => k.startsWith("unii-shell")).map((k) => caches.delete(k)));
-  if (tries > 1) {
-    await Promise.all(["/", "/app.js", "/style.css", "/sw.js"].map((path) => fetch(path, { cache: "reload" }).catch(() => null)));
-  }
+  sessionStorage.setItem(kept("build"), (v.build ?? "") + " " + (tries + 1));
   location.reload();
 }
 function renewed() {

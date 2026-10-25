@@ -9,9 +9,9 @@
 // tab of the chat is in front, in place of the one before; a tap opens
 // the chat.
 
-// (a new name, for files a client should not be shown old: the shell's
-// before it is dropped as this one starts)
-const CACHE = "unii-shell-3";
+// (named by the web app's build, which the server writes in: a new
+// build's drops the old one's as it starts)
+const CACHE = "unii-shell-{build}";
 const SHELL = ["/", "/app.js", "/style.css", "/favicon.svg", "/mark.svg", "/manifest.webmanifest", "/icon-192.png"];
 const PAGES = ["/", "/settings", "/account", "/tree"];
 

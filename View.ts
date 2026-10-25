@@ -334,7 +334,7 @@ export function view_new(): View {
     pages     : new Map(),
     page      : null,
     notes     : [],
-    tab       : crypto.randomUUID(),
+    tab       : uuid(),
     out       : [],
     ws        : null,
     up        : false,
@@ -761,8 +761,15 @@ export function link_open(v: View, link: Link): void {
 // an act, kept until answered; by default a refusal is a note; said: a
 // message's text
 export function link_send(v: View, msg: Client, done = (a: Answer) => link_note(v, a), said = ""): void {
-  v.out.push({ msg: { id: crypto.randomUUID(), ...msg }, ws: null, done, said });
+  v.out.push({ msg: { id: uuid(), ...msg }, ws: null, done, said });
   v.flush();
+}
+
+// a random id, as crypto.randomUUID makes one: that is only in a secure
+// context, and a page on a LAN's plain http is none
+export function uuid(): string {
+  const hex = [...crypto.getRandomValues(new Uint8Array(16))].map((b, k) => (k === 6 ? (b & 15) | 64 : k === 8 ? (b & 63) | 128 : b).toString(16).padStart(2, "0")).join("");
+  return [hex.slice(0, 8), hex.slice(8, 12), hex.slice(12, 16), hex.slice(16, 20), hex.slice(20)].join("-");
 }
 
 export function link_note(v: View, a: Answer): void {

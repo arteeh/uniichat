@@ -232,6 +232,9 @@ WEB["/tree"]     = WEB["/"];
 const SHELL      = [app_js, style_css, PAGE, sw_js, manifest];
 const BUILD      = Bun.hash(SHELL.map((f) => fs.readFileSync(f, "utf8")).join("\0")).toString(36);
 const INDEX      = fs.readFileSync(PAGE, "utf8").replace("<html ", `<html data-build="${BUILD}" `);
+// the service worker, its cache named by the build (a new build's drops
+// the old one's: sw.js)
+const WORKER     = fs.readFileSync(sw_js, "utf8").replace("{build}", BUILD);
 
 // the bytes the uploads to the media store hold, not yet written: room
 // the disk's free space doesn't count yet (Main.room)
@@ -1578,7 +1581,9 @@ export namespace Main {
     if (req.headers.get("if-none-match") === headers.etag) {
       return new Response(null, { status: 304, headers });
     }
-    return file === PAGE ? new Response(INDEX, { headers: { ...headers, "content-type": "text/html;charset=utf-8" } }) : new Response(Bun.file(file), { headers });
+    const made = file === PAGE ? INDEX : file === sw_js ? WORKER : null;
+    const type = file === PAGE ? "text/html;charset=utf-8" : "text/javascript;charset=utf-8";
+    return made === null ? new Response(Bun.file(file), { headers }) : new Response(made, { headers: { ...headers, "content-type": type } });
   }
 
   // a long answer, sent as read, a PIECE at a time, the event loop
