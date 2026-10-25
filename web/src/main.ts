@@ -68,7 +68,6 @@ const BACK = $<HTMLInputElement>("#import [name=back]");
 // a page (the settings, the tree) was opened over it, kept for its return;
 // used: what the server was last told of this page's use (in_use)
 const P = {
-  imgs  : [] as Blob[],
   rec   : null as MediaRecorder | null,
   shown : "",
   end   : true,
@@ -285,8 +284,7 @@ function submit(): void {
     return;
   }
   const text = BOX.value.trim();
-  act({ $: "Send", text, images: P.imgs });
-  pics([]);
+  act({ $: "Send", text });
   BOX.value = "";
   BOX.dispatchEvent(new Event("input"));
 }
@@ -297,10 +295,9 @@ function back(sent: View.Sent, out: View.Answer): void {
   if (out.error === undefined) {
     return;
   }
-  if (BOX.value.trim() === "" && P.imgs.length === 0) {
+  if (BOX.value.trim() === "") {
     BOX.value = sent.text;
     BOX.dispatchEvent(new Event("input"));
-    pics(sent.images ?? []);
   }
   toast(out.error);
 }
@@ -336,11 +333,14 @@ function attach(files: File[]): void {
       try {
         out = JSON.parse(xhr.responseText);
       } catch {}
-      const at = BOX.value.indexOf(line);
-      if (at >= 0) {
-        // the caret kept where it was, after the line if in it
+      const found = BOX.value.indexOf(line);
+      if (found >= 0) {
+        // the caret kept where it was, after the line if in it; a line
+        // refused goes with the line break put with it
         const done = out.name === undefined ? "" : line.replace("(" + mark + ")", "(/media/" + out.name + ")");
-        const end = at + line.length + (done === "" && BOX.value[at + line.length] === "\n" ? 1 : 0);
+        const after = done === "" && BOX.value[found + line.length] === "\n";
+        const at = found - (done === "" && !after && BOX.value[found - 1] === "\n" ? 1 : 0);
+        const end = found + line.length + (after ? 1 : 0);
         const move = (x: number) => (x <= at ? x : x >= end ? x + done.length - (end - at) : at + done.length);
         const [a, b] = [move(BOX.selectionStart), move(BOX.selectionEnd)];
         BOX.setRangeText(done, at, end);
@@ -365,20 +365,6 @@ function attach(files: File[]): void {
 // each upload's name and how far it is, over the box
 function uploads(): void {
   markup($("#pics"), [...P.ups.values()].map((up) => `<span class="up">${Html.esc(up.name)} · ${Math.round(up.part * 100)}%</span>`));
-  draw(true);
-}
-
-// the images waiting, shown over the box; a click drops one
-function pics(imgs: Blob[]): void {
-  const els = imgs.map((img) => {
-    const el = new Image();
-    el.src = URL.createObjectURL(img);
-    el.title = "Remove";
-    el.onclick = () => pics(imgs.filter((x) => x !== img));
-    return el;
-  });
-  P.imgs = imgs;
-  $("#pics").replaceChildren(...els);
   draw(true);
 }
 
@@ -1052,7 +1038,7 @@ function bars(): void {
     setTimeout(renew);
   }
   const on = View.view_typing(v);
-  const stop = on && v.busy && BOX.value.trim() === "" && P.imgs.length === 0;
+  const stop = on && v.busy && BOX.value.trim() === "" && P.ups.size === 0;
   const tabs = View.view_tabs(v);
   const send = $<HTMLButtonElement>(".send");
   $(".net").hidden = v.up;
@@ -1590,7 +1576,7 @@ async function settings_save(form: HTMLFormElement, page: any, unset: Set<string
 // update): the page reloads into it by itself, once nothing would be
 // lost, keeping what it showed: the box's text and caret, the folds
 // opened, where the chat or the page was scrolled. Never while the mic
-// records, an image waits to be sent, an act awaits its answer, or
+// records, a file uploads, an act awaits its answer, or
 // Import History is open; on the settings page only once a change is
 // saved, or as it is left. The cached shell is dropped first; at most
 // twice per build, the second past the browser's cache too, then once
@@ -1615,7 +1601,7 @@ function renew_due(build: string | undefined): void {
 
 function renew_free(): boolean {
   const page = location.pathname !== "/" && location.pathname !== TREE;
-  return P.rec === null && P.imgs.length === 0 && P.ups.size === 0 && v.out.length === 0 && !$("#import").matches(":popover-open") && (!page || P.saved);
+  return P.rec === null && P.ups.size === 0 && v.out.length === 0 && !$("#import").matches(":popover-open") && (!page || P.saved);
 }
 
 async function renew(): Promise<void> {

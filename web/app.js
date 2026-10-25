@@ -2713,7 +2713,6 @@ var v = view_new();
 var BOX = $2("textarea");
 var BACK = $2("#import [name=back]");
 var P = {
-  imgs: [],
   rec: null,
   shown: "",
   end: true,
@@ -2890,8 +2889,7 @@ function submit() {
     return;
   }
   const text = BOX.value.trim();
-  act({ $: "Send", text, images: P.imgs });
-  pics([]);
+  act({ $: "Send", text });
   BOX.value = "";
   BOX.dispatchEvent(new Event("input"));
 }
@@ -2899,10 +2897,9 @@ function back(sent, out) {
   if (out.error === undefined) {
     return;
   }
-  if (BOX.value.trim() === "" && P.imgs.length === 0) {
+  if (BOX.value.trim() === "") {
     BOX.value = sent.text;
     BOX.dispatchEvent(new Event("input"));
-    pics(sent.images ?? []);
   }
   toast(out.error);
 }
@@ -2932,11 +2929,14 @@ function attach(files) {
       try {
         out = JSON.parse(xhr.responseText);
       } catch {}
-      const at = BOX.value.indexOf(line);
-      if (at >= 0) {
+      const found = BOX.value.indexOf(line);
+      if (found >= 0) {
         const done = out.name === undefined ? "" : line.replace("(" + mark + ")", "(/media/" + out.name + ")");
-        const end = at + line.length + (done === "" && BOX.value[at + line.length] === `
+        const after = done === "" && BOX.value[found + line.length] === `
+`;
+        const at = found - (done === "" && !after && BOX.value[found - 1] === `
 ` ? 1 : 0);
+        const end = found + line.length + (after ? 1 : 0);
         const move = (x) => x <= at ? x : x >= end ? x + done.length - (end - at) : at + done.length;
         const [a, b] = [move(BOX.selectionStart), move(BOX.selectionEnd)];
         BOX.setRangeText(done, at, end);
@@ -2959,18 +2959,6 @@ function attach(files) {
 }
 function uploads() {
   markup($2("#pics"), [...P.ups.values()].map((up) => `<span class="up">${esc(up.name)} · ${Math.round(up.part * 100)}%</span>`));
-  draw(true);
-}
-function pics(imgs) {
-  const els = imgs.map((img) => {
-    const el = new Image;
-    el.src = URL.createObjectURL(img);
-    el.title = "Remove";
-    el.onclick = () => pics(imgs.filter((x) => x !== img));
-    return el;
-  });
-  P.imgs = imgs;
-  $2("#pics").replaceChildren(...els);
   draw(true);
 }
 function act(a) {
@@ -3510,7 +3498,7 @@ function bars() {
     setTimeout(renew);
   }
   const on = view_typing(v);
-  const stop = on && v.busy && BOX.value.trim() === "" && P.imgs.length === 0;
+  const stop = on && v.busy && BOX.value.trim() === "" && P.ups.size === 0;
   const tabs = view_tabs(v);
   const send = $2(".send");
   $2(".net").hidden = v.up;
@@ -3974,7 +3962,7 @@ function renew_due(build) {
 }
 function renew_free() {
   const page = location.pathname !== "/" && location.pathname !== TREE;
-  return P.rec === null && P.imgs.length === 0 && P.ups.size === 0 && v.out.length === 0 && !$2("#import").matches(":popover-open") && (!page || P.saved);
+  return P.rec === null && P.ups.size === 0 && v.out.length === 0 && !$2("#import").matches(":popover-open") && (!page || P.saved);
 }
 async function renew() {
   const tries = Number((sessionStorage.getItem(kept("build")) ?? "").split(" ")[1]);
