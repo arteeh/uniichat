@@ -306,8 +306,9 @@ export function item_state(item: HTMLElement, state: State, note: string, url = 
 
 // the sizes of the store's files shown in el not known yet (a file's tile
 // here, a file's chip in a message: Html.ts chip_html, `data-of` its
-// url), each asked of the server once: the total its Range of one byte
-// says
+// url), each asked of the server once a page (one it can't tell stays
+// unsized, not asked again at each draw): the total its Range of one
+// byte says
 const SIZES = new Map<string, Promise<string>>();
 
 export function box_sizes(el: ParentNode): void {
@@ -317,9 +318,6 @@ export function box_sizes(el: ParentNode): void {
     SIZES.set(url, got);
     got.then((text) => {
       small.textContent ||= text;
-      if (text === "") {
-        SIZES.delete(url);
-      }
     });
   }
 }

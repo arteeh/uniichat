@@ -58,6 +58,17 @@ export type Block =
 
 const NAME  = new RegExp("\\[(" + Names.NAME + ")\\]", "g");
 const ONLY  = new RegExp("^(?:" + Names.NAME + ")$");
+// the kinds of the media store the chat shows (Memory.media_add), by a
+// file's extension (some named two ways, as the first): its content type;
+// the store keeps any other file too, downloaded only (Server.ts
+// Main.media). Maps, so a name an object has (constructor) is none
+export const MEDIA: ReadonlyMap<string, string> = new Map([
+  ["png", "image/png"], ["jpeg", "image/jpeg"], ["gif", "image/gif"], ["webp", "image/webp"], ["svg", "image/svg+xml"],
+  ["mp4", "video/mp4"], ["webm", "video/webm"], ["mov", "video/quicktime"],
+  ["mp3", "audio/mpeg"], ["m4a", "audio/mp4"], ["aac", "audio/aac"], ["ogg", "audio/ogg"], ["opus", "audio/ogg"], ["wav", "audio/wav"], ["weba", "audio/webm"],
+  ["html", "text/html"],
+]);
+export const MEDIA_AS: ReadonlyMap<string, string> = new Map([["jpg", "jpeg"], ["m4v", "mp4"], ["oga", "ogg"], ["htm", "html"]]);
 // a media store's file, right after a pasted file's ](: its url
 const MEDIA_URL = /\/media\/[0-9a-f]{16}\.[a-z0-9]{1,10}(?=\))/y;
 const LIST  = /^ {0,3}([-*+]|\d{1,9}[.)])(?=[ \t]|$)/;
@@ -659,11 +670,11 @@ function plain_line(s: string): Span[] {
 }
 
 // the media store's files pasted in a text, ![name](/media/…) (a file
-// that isn't media is sent as a link, [name](/media/…), main.ts), each
-// its start and end, its name and its url: each found from its
-// "](/media/", its [ looked for back to the bracket before (so each
-// character is looked at once or twice), on its line, its name 999
-// characters at most
+// that isn't media is sent as a link, [name](/media/…), main.ts; a link
+// to media stays a link), each its start and end, its name and its url:
+// each found from its "](/media/", its [ looked for back to the bracket
+// before (so each character is looked at once or twice), on its line,
+// its name 999 characters at most
 export function md_pasted(s: string): Array<[number, number, string, string]> {
   const out: Array<[number, number, string, string]> = [];
   for (let k = s.indexOf("](/media/"); k >= 0; k = s.indexOf("](/media/", k + 1)) {
@@ -673,8 +684,10 @@ export function md_pasted(s: string): Array<[number, number, string, string]> {
     while (a >= 0 && k - a <= 1000 && s[a] !== "[" && s[a] !== "]" && s[a] !== "\n") {
       a--;
     }
-    const from = s[a - 1] === "!" ? a - 1 : a;
-    if (url !== null && s[a] === "[" && from >= (out.at(-1)?.[1] ?? 0)) {
+    const bang = s[a - 1] === "!";
+    const from = bang ? a - 1 : a;
+    const file = url !== null && !MEDIA.has(url[0].slice(url[0].lastIndexOf(".") + 1));
+    if (url !== null && s[a] === "[" && (bang || file) && from >= (out.at(-1)?.[1] ?? 0)) {
       out.push([from, MEDIA_URL.lastIndex + 1, s.slice(a + 1, k), url[0]]);
     }
   }
@@ -706,13 +719,15 @@ export function md_output(s: string, name = "result"): Block[] {
 
 // a show tool's result (Machine.ts): each line that is a file of the
 // media store, ![name](/media/…) (or a file's [name](/media/…): Device.ts
-// show), drawn as a message draws it, a
-// paragraph of its own; the lines between (a file refused, saying why) as
-// md_output's. One refused marks the whole result failed ("error: "
-// before its first line): dropped, its own line says it
+// show), drawn as a message draws it, a paragraph of its own; the lines
+// between (a file refused, saying why) as md_output's. A failed result
+// ("error: " before its first line, which may be a file shown) has the
+// word before its first line that isn't one (or alone), so it reads as a
+// failure
 export function md_shown(s: string, name = "result"): Block[] {
   const out: Block[] = [];
   const failed = s.startsWith(FAILED);
+  let marked = !failed;
   let rest: string[] = [];
   const said = () => {
     out.push(...md_output(rest.join("\n"), name));
@@ -724,9 +739,11 @@ export function md_shown(s: string, name = "result"): Block[] {
       said();
       out.push({ $: "Para", x: [{ $: "Pict", x: media[0][2], k: media[0][3], t: "" }] });
     } else {
-      rest.push(line);
+      rest.push(marked ? line : FAILED + line);
+      marked = true;
     }
   }
+  rest.push(...(marked ? [] : [FAILED.trim()]));
   said();
   return out;
 }

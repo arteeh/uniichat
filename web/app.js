@@ -895,6 +895,25 @@ function name_word(word) {
 // Md.ts
 var NAME2 = new RegExp("\\[(" + NAME + ")\\]", "g");
 var ONLY = new RegExp("^(?:" + NAME + ")$");
+var MEDIA = new Map([
+  ["png", "image/png"],
+  ["jpeg", "image/jpeg"],
+  ["gif", "image/gif"],
+  ["webp", "image/webp"],
+  ["svg", "image/svg+xml"],
+  ["mp4", "video/mp4"],
+  ["webm", "video/webm"],
+  ["mov", "video/quicktime"],
+  ["mp3", "audio/mpeg"],
+  ["m4a", "audio/mp4"],
+  ["aac", "audio/aac"],
+  ["ogg", "audio/ogg"],
+  ["opus", "audio/ogg"],
+  ["wav", "audio/wav"],
+  ["weba", "audio/webm"],
+  ["html", "text/html"]
+]);
+var MEDIA_AS = new Map([["jpg", "jpeg"], ["m4v", "mp4"], ["oga", "ogg"], ["htm", "html"]]);
 var MEDIA_URL = /\/media\/[0-9a-f]{16}\.[a-z0-9]{1,10}(?=\))/y;
 var LIST2 = /^ {0,3}([-*+]|\d{1,9}[.)])(?=[ \t]|$)/;
 var FENCE = /^ {0,3}(`{3,}|~{3,})/;
@@ -1393,8 +1412,10 @@ function md_pasted(s) {
 `) {
       a--;
     }
-    const from = s[a - 1] === "!" ? a - 1 : a;
-    if (url !== null && s[a] === "[" && from >= (out.at(-1)?.[1] ?? 0)) {
+    const bang = s[a - 1] === "!";
+    const from = bang ? a - 1 : a;
+    const file = url !== null && !MEDIA.has(url[0].slice(url[0].lastIndexOf(".") + 1));
+    if (url !== null && s[a] === "[" && (bang || file) && from >= (out.at(-1)?.[1] ?? 0)) {
       out.push([from, MEDIA_URL.lastIndex + 1, s.slice(a + 1, k), url[0]]);
     }
   }
@@ -1422,6 +1443,7 @@ function md_output(s, name = "result") {
 function md_shown(s, name = "result") {
   const out = [];
   const failed = s.startsWith(FAILED);
+  let marked = !failed;
   let rest = [];
   const said = () => {
     out.push(...md_output(rest.join(`
@@ -1435,9 +1457,11 @@ function md_shown(s, name = "result") {
       said();
       out.push({ $: "Para", x: [{ $: "Pict", x: media[0][2], k: media[0][3], t: "" }] });
     } else {
-      rest.push(line);
+      rest.push(marked ? line : FAILED + line);
+      marked = true;
     }
   }
+  rest.push(...marked ? [] : [FAILED.trim()]);
   said();
   return out;
 }
@@ -1961,32 +1985,15 @@ var NOTICE = 3 * 60 * 60 * 1000;
 var WAIT = "compressing…";
 var SUMS = "compressing earlier messages…";
 var UNSENT = "Sends once connected.";
-var MEDIA = new Map([
-  ["png", "image/png"],
-  ["jpeg", "image/jpeg"],
-  ["gif", "image/gif"],
-  ["webp", "image/webp"],
-  ["svg", "image/svg+xml"],
-  ["mp4", "video/mp4"],
-  ["webm", "video/webm"],
-  ["mov", "video/quicktime"],
-  ["mp3", "audio/mpeg"],
-  ["m4a", "audio/mp4"],
-  ["aac", "audio/aac"],
-  ["ogg", "audio/ogg"],
-  ["opus", "audio/ogg"],
-  ["wav", "audio/wav"],
-  ["weba", "audio/webm"],
-  ["html", "text/html"]
-]);
-var MEDIA_AS = new Map([["jpg", "jpeg"], ["m4v", "mp4"], ["oga", "ogg"], ["htm", "html"]]);
+var MEDIA2 = MEDIA;
+var MEDIA_AS2 = MEDIA_AS;
 var STORED = /^[0-9a-f]{16}\.([a-z0-9]{1,10})$/;
 function media_kind(url) {
   const m = /^\/(?:media|image)\/[0-9a-f]{16}\.([a-z0-9]{1,10})$/.exec(url);
   return m === null ? null : ext_kind(m[1]);
 }
 function ext_kind(ext) {
-  const type = MEDIA.get(ext);
+  const type = MEDIA2.get(ext);
   return type === undefined ? null : type === "text/html" ? "html" : type.split("/")[0];
 }
 function store_file(url) {
@@ -1995,7 +2002,7 @@ function store_file(url) {
 function media_ext(file) {
   const dot = file.lastIndexOf(".");
   const ext = dot < 0 ? "" : file.slice(dot + 1).toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 10);
-  return MEDIA_AS.get(ext) ?? ext;
+  return MEDIA_AS2.get(ext) ?? ext;
 }
 function size_show(bytes) {
   const units = ["B", "KB", "MB", "GB"];
@@ -2738,9 +2745,6 @@ function box_sizes(el) {
     SIZES.set(url, got);
     got.then((text) => {
       small.textContent ||= text;
-      if (text === "") {
-        SIZES.delete(url);
-      }
     });
   }
 }
@@ -4558,11 +4562,12 @@ function paint() {
   bars();
   if (P.rows) {
     markup($2("#log .rows"), view_body(v).map(row_html));
+    box_sizes($2("#log .rows"));
     P.rows = false;
   }
   markup($2("#log .tail"), view_tail(v).map(row_html));
+  box_sizes($2("#log .tail"));
   folds();
-  box_sizes($2("#log"));
   frames();
   const back = P.back === null ? null : document.querySelector(`#log [data-a="${P.back.a}"]`);
   if (back !== null && P.back !== null) {

@@ -264,17 +264,10 @@ const MARKS: Array<[string, number, string]> = [
 export const HEAD   = 12;
 export const IMAGES = "Images are png, jpeg, gif or webp.";
 
-// the kinds of the media store the chat shows (Memory.media_add), by a
-// file's extension (some named two ways, as the first): its content type;
-// the store keeps any other file too, downloaded only (Server.ts
-// Main.media). Maps, so a name an object has (constructor) is none
-export const MEDIA: ReadonlyMap<string, string> = new Map([
-  ["png", "image/png"], ["jpeg", "image/jpeg"], ["gif", "image/gif"], ["webp", "image/webp"], ["svg", "image/svg+xml"],
-  ["mp4", "video/mp4"], ["webm", "video/webm"], ["mov", "video/quicktime"],
-  ["mp3", "audio/mpeg"], ["m4a", "audio/mp4"], ["aac", "audio/aac"], ["ogg", "audio/ogg"], ["opus", "audio/ogg"], ["wav", "audio/wav"], ["weba", "audio/webm"],
-  ["html", "text/html"],
-]);
-export const MEDIA_AS: ReadonlyMap<string, string> = new Map([["jpg", "jpeg"], ["m4v", "mp4"], ["oga", "ogg"], ["htm", "html"]]);
+// the kinds of the media store the chat shows, and their other names
+// (kept in Md.ts, whose md_pasted reads them too)
+export const MEDIA = Md.MEDIA;
+export const MEDIA_AS = Md.MEDIA_AS;
 
 // a file in the media store, by its name: its hash's head, then its
 // extension (media_ext)

@@ -399,7 +399,7 @@ header > .imping { display: flex; flex-direction: column; justify-content: cente
 .msg .media { display: block; width: fit-content; max-width: 100%; margin: .4em 0; }
 .msg :is(img, video):is(.media, .media > *) { display: block; max-width: 100%; max-height: 70vh; width: auto; height: auto; border-radius: 8px; }
 .msg audio.media { width: min(100%, 480px); }
-/* a file of the store that isn't media (Html.ts file_html): a chip, its
+/* a file of the store that isn't media (Html.ts chip_html): a chip, its
    name and size, downloaded on a click */
 .msg a.file { display: inline-flex; align-items: center; gap: 8px; max-width: 100%; margin: .2em 0; padding: 6px 12px; border: 1px solid var(--frame); border-radius: 10px; background: var(--lift); color: var(--ink); font: 14px/1.4 var(--sans); font-style: normal; text-decoration: none; vertical-align: middle; }
 .msg a.file:hover { background: var(--hover); }

@@ -1001,11 +1001,12 @@ function paint(): void {
   bars();
   if (P.rows) {
     markup($("#log .rows"), View.view_body(v).map(Html.row_html));
+    Box.box_sizes($("#log .rows"));
     P.rows = false;
   }
   markup($("#log .tail"), View.view_tail(v).map(Html.row_html));
+  Box.box_sizes($("#log .tail"));
   folds();
-  Box.box_sizes($("#log"));
   frames();
   const back = P.back === null ? null : document.querySelector<HTMLElement>(`#log [data-a="${P.back.a}"]`);
   if (back !== null && P.back !== null) {
