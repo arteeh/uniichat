@@ -828,9 +828,15 @@ export namespace Tools {
     return "The server restarted, cutting " + work.join(", ") + "; nothing was lost: go on.";
   }
 
-  export async function tell(tools: Tools, name: string, message: string): Promise<string> {
+  // before: tells it had queued as a restart cut it (Memory `tells`),
+  // logged ahead of the message
+  export async function tell(tools: Tools, name: string, message: string, before: string[] = []): Promise<string> {
     const agent = Tools.agent(tools, name);
     if (agent === null) {
+      if (name in tools.mem.tells) {
+        delete tools.mem.tells[name];
+        Memory.save_queue(tools.mem);
+      }
       return "No agent " + name + " to tell.";
     }
     const run = agent.run;
@@ -851,7 +857,7 @@ export namespace Tools {
         Object.assign(agent, { view, replies: [], why: null });
       }
     }
-    Run.take(run, { text: message, imgs: [] });
+    Run.takes(run, [...before, message].map((text) => ({ text, imgs: [] })));
     return idle ? "Sent. " + name + "'s reply will reach you as a message." : "Sent. " + name + " gets it once its current reply is done, and its report answers it.";
   }
 
@@ -889,7 +895,7 @@ export namespace Tools {
 
   // what a subagent's run does (Run.ts Kind): each call reads its whole
   // log, so what it is told is logged there as its next call starts (a
-  // tell to one at work waits, queued, for its call to end); a call that
+  // tell to one at work waits, queued and kept, for its call to end); a call that
   // ended answered with tells queued meanwhile is followed by another.
   // Its replies end up in one report to the chat, unanswered if it was
   // stopped; tells left queued by a stop are logged, for its next call
@@ -906,7 +912,10 @@ export namespace Tools {
         take();
         return Tools.ask(tools, agent());
       },
-      queued : () => log.change(),
+      queued : (run) => {
+        Tools.queued(tools, run);
+        log.change();
+      },
       again  : () => false,
       ended  : (_, end) => {
         const a = agent();
@@ -925,6 +934,21 @@ export namespace Tools {
       on     : (run, ev) => log.on(run, ev),
       change : () => log.change(),
     };
+  }
+
+  // an agent's tells queued, kept with the chat (Memory `tells`), so a
+  // restart doesn't lose them (Server.ts Chat.resume)
+  export function queued(tools: Tools, run: Run<Say, Say>): void {
+    const texts = run.queue.map((x) => x.q.text);
+    if (texts.length === 0 && !(run.name in tools.mem.tells)) {
+      return;
+    }
+    if (texts.length === 0) {
+      delete tools.mem.tells[run.name];
+    } else {
+      tools.mem.tells[run.name] = texts;
+    }
+    Memory.save_queue(tools.mem);
   }
 
   // a call of an agent, on Tools.pick

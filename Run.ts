@@ -105,16 +105,24 @@ export namespace Run {
   // (the views told: kind.queued; a call waiting for a usage limit
   // woken), or as its loop logged it
   export function take<Q, M>(run: Run<Q, M>, q: Q): Promise<void> {
-    const { promise, resolve } = Promise.withResolvers<void>();
-    run.queue.push({ q, done: resolve });
+    return Run.takes(run, [q]);
+  }
+
+  // several taken at once, in order (one loop logs them all)
+  export function takes<Q, M>(run: Run<Q, M>, qs: Q[]): Promise<void> {
+    const dones = qs.map((q) => {
+      const { promise, resolve } = Promise.withResolvers<void>();
+      run.queue.push({ q, done: resolve });
+      return promise;
+    });
     if (!run.busy) {
       run.going = Run.loop(run);
-      return promise;
+      return Promise.all(dones).then(() => {});
     }
-    resolve();
+    run.queue.slice(run.queue.length - qs.length).forEach((x) => x.done());
     run.kind.queued(run);
     run.call?.wake();
-    return promise;
+    return Promise.all(dones).then(() => {});
   }
 
   // THE loop: what is queued logged, a call taking it all, and again

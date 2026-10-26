@@ -1101,17 +1101,20 @@ export namespace Chat {
     return {};
   }
 
-  // the work a restart cut goes on, told so: each agent, and Unii's turn
-  // by a note (none for a chat ended meanwhile; logged alone if only
-  // agents were cut); then what was queued for the turn (Memory `queue`)
+  // the work a restart cut goes on, told so: each agent (after the tells
+  // it had queued: Memory `tells`), and Unii's turn by a note (none for a
+  // chat ended meanwhile; logged alone if only agents were cut); then
+  // what was queued for the turn (Memory `queue`)
   export async function resume(chat: Chat, work: string[]): Promise<void> {
-    const text = Tools.restarted(work);
-    if (work.length > 0 && !work.includes(TURN)) {
+    const tells = chat.mem.tells;
+    const agents = [...new Set([...work.filter((w) => w !== TURN), ...Object.keys(tells)])];
+    const text = Tools.restarted([...(work.includes(TURN) ? [TURN] : []), ...agents]);
+    if (agents.length > 0 && !work.includes(TURN)) {
       Chat.push(chat, chat.main, "note", text);
     }
     const posts: Pending[] = [...(work.includes(TURN) ? [{ kind: "note" as const, text, images: [] }] : []), ...chat.mem.queue];
     posts.forEach((post) => void Run.take(chat.main, post));
-    await Promise.all(work.filter((w) => w !== TURN).map((w) => Tools.tell(chat.tools, w, text)));
+    await Promise.all(agents.map((w) => Tools.tell(chat.tools, w, text, tells[w] ?? [])));
   }
 
   // Timers
