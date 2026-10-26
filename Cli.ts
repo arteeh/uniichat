@@ -186,6 +186,8 @@ if ((SETS.length > 0 && !FLAG.has("--service")) || (FLAG.size > 0 && !runs && !(
 } else if (runs && part === "device") {
   if (SERVICE === undefined) {
     (await import("./Service.ts")).foreground(part!);
+  } else {
+    (await import("./Service.ts")).served(part!);
   }
   await (await import("./Device.ts")).run(URL_);
 } else if (cmd === "serve" && sub === "chatgpt" && [undefined, "logout", "status"].includes(more) && !odd([cmd, sub, ...(more ? [more] : [])])) {
@@ -201,6 +203,8 @@ if ((SETS.length > 0 && !FLAG.has("--service")) || (FLAG.size > 0 && !runs && !(
 } else if (runs && part === "serve") {
   if (SERVICE === undefined) {
     (await import("./Service.ts")).foreground(part!);
+  } else {
+    (await import("./Service.ts")).served(part!);
   }
   await (await import("./Server.ts")).serve(Number(sub ?? 8788));
 } else {

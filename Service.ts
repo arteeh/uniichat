@@ -11,6 +11,10 @@
 // name without it is someone else's, never changed. The installers
 // (install.sh, install.ps1, not in the repo) find the ones made here by
 // the same names and MARK, and restart them on the new unii.
+// -d returns once the part is up (`ready`: a device linked to its
+// server, a server listening), or says it isn't after UP; -d and `stop`
+// time each step in the part's log on Windows and macOS (the file `logs`
+// shows: `clock`), so a slow machine shows where the time went.
 
 import * as fs from "node:fs";
 import * as os from "node:os";
@@ -55,6 +59,13 @@ const RAN      = 600000;
 // how long `stop` gives a service asked to quit (Windows: watch) before
 // it ends it
 const BYE      = 5000;
+
+// how long -d waits for the part to be up (ready)
+const UP       = 20000;
+
+// the part this process runs as its service's (served), which tells -d
+// it is up (ready)
+let SERVED: Part | null = null;
 
 // the dirs the service sees as the shell that ran -d did, resolved: on
 // Linux and macOS in its environment, with PATH (their service managers
@@ -124,6 +135,26 @@ export function running(part: Part): string | null {
   return ["active", "activating", "reloading"].includes(state) ? "the systemd user service " + name(part) : null;
 }
 
+// this process runs `part` as its service's (UNII_SERVICE: Cli.ts)
+export function served(part: Part): void {
+  SERVED = part;
+}
+
+// the part is up (a device linked to its server, a server listening):
+// run as its service's, it says so in LOGS/<part>.up (its pid, the
+// time), which -d waits for (up), once (an old one linking again as a
+// new one starts never reads as the new one up)
+export function ready(part: Part): void {
+  if (SERVED !== part) {
+    return;
+  }
+  SERVED = null;
+  try {
+    fs.mkdirSync(LOGS, { recursive: true, mode: 0o700 });
+    fs.writeFileSync(LOGS + "/" + part + ".up", process.pid + " " + Date.now() + "\n");
+  } catch {}
+}
+
 // plain `unii serve` / `unii device`: in the foreground, said so; if
 // the background one runs, that's said and nothing more runs
 export function foreground(part: Part): void {
@@ -137,20 +168,21 @@ export function foreground(part: Part): void {
 
 // a service's own unii (Windows: under `supervise`), which ends once
 // its supervisor does (Windows ends a task's process alone, not those
-// it started). Its `part` (the supervisor's has none) ends then as a
-// signal ends it: its handlers run (a device says goodbye: Device.ts),
-// else it exits; on Windows it also ends so as `stop` asks it to
-// (Windows sends no signal: a file, <part>.stop, naming its supervisor,
-// read every 500 ms)
-export function watch(parent: number, part?: Part): void {
+// it started). Its `part` ends then as a signal ends it: its handlers
+// run (a device says goodbye: Device.ts), else it exits; on Windows it
+// also ends so as `stop` asks it to (Windows sends no signal: a file,
+// <part>.stop, naming its supervisor, read every 500 ms). A supervisor
+// (`me`: its own pid, `parent` its conhost) exits as its conhost ends or
+// the file names it, its part then ending as it sees it gone
+export function watch(parent: number, part?: Part, me = parent): void {
   const stop = part === undefined || !WIN ? null : LOGS + "/" + part + ".stop";
   let quit = false;
   setInterval(() => {
-    if (quit || (alive(parent) && (stop === null || read(stop)?.trim() !== String(parent)))) {
+    if (quit || (alive(parent) && (stop === null || read(stop)?.trim() !== String(me)))) {
       return;
     }
     quit = true;
-    if (part === undefined || process.listenerCount("SIGTERM") === 0) {
+    if (part === undefined || me !== parent || process.listenerCount("SIGTERM") === 0) {
       process.exit(0);
     }
     process.emit("SIGTERM");
@@ -167,6 +199,7 @@ function unit(part: Part): string {
 async function linux_start(part: Part, args: string[], env: Record<string, string>): Promise<void> {
   const n = name(part);
   linux_check(part);
+  const was = read(LOGS + "/" + part + ".up");
   // systemd's quoting: a value in "", \ and " escaped, a line break as
   // \n, % doubled (and in a command $ too)
   const q = (s: string) => '"' + s.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/\n/g, "\\n").replace(/%/g, "%%") + '"';
@@ -194,8 +227,8 @@ async function linux_start(part: Part, args: string[], env: Record<string, strin
   // a restart asked for, never refused for the crash restarts' limit
   run(["systemctl", "--user", "reset-failed", n]);
   systemctl("restart", "--no-block", n);
-  const up = await linux_up(n);
-  say(part, up, "the systemd user service " + n + ", started at login");
+  const state = () => run(["systemctl", "--user", "is-active", n]).out;
+  say(part, await up(part, was, () => state() === "failed", () => state() === "active"), "the systemd user service " + n + ", started at login");
   const user = os.userInfo().username;
   if (Bun.which("loginctl") !== null && run(["loginctl", "show-user", user, "--property=Linger", "--value"]).out === "no") {
     console.log("Lingering is off, so it runs only while you're logged in: `loginctl enable-linger` starts it at boot and keeps it up after you log out.");
@@ -231,22 +264,6 @@ function linux_check(part: Part): void {
   if (theirs !== null) {
     fail(n + " isn't unii's: " + theirs + " is a unit unii didn't make, so unii leaves it as it is. To use unii " + part + " -d, remove it (systemctl --user disable --now " + n + ", then the file); or keep using it.");
   }
-}
-
-// whether a unit restarted is up: active, and still a moment later
-async function linux_up(n: string): Promise<boolean> {
-  for (let k = 0; k < 40; k++) {
-    const state = run(["systemctl", "--user", "is-active", n]).out;
-    if (state === "active") {
-      await Bun.sleep(1500);
-      return run(["systemctl", "--user", "is-active", n]).out === "active";
-    }
-    if (state === "failed") {
-      return false;
-    }
-    await Bun.sleep(250);
-  }
-  return false;
 }
 
 function systemctl(...args: string[]): void {
@@ -289,9 +306,12 @@ async function mac_start(part: Part, args: string[], env: Record<string, string>
 </dict>
 </plist>
 `;
+  const step = clock(part, "-d");
   fs.mkdirSync(PLIST, { recursive: true });
   fs.writeFileSync(file, text);
   const pid = read(LOGS + "/" + part + ".pid");
+  const ready = read(LOGS + "/" + part + ".up");
+  step("LaunchAgent written");
   run(["launchctl", "enable", job]);
   if (loaded && was === text) {
     run(["launchctl", "kickstart", "-k", job]);
@@ -301,7 +321,10 @@ async function mac_start(part: Part, args: string[], env: Record<string, string>
     const again = (loaded ? "launchctl bootout '" + job + "' 2>/dev/null; " : "") + "launchctl bootstrap gui/" + process.getuid!() + " '" + file.replace(/'/g, "'\\''") + "'";
     await Bun.spawn(["/bin/sh", "-c", again], { detached: true, stdio: ["ignore", "inherit", "inherit"] }).exited;
   }
-  say(part, await up(part, pid), "the LaunchAgent " + n + ", started at login");
+  step("LaunchAgent started");
+  const now = await up(part, ready, () => supervised(part, pid) === false, () => supervised(part, pid) === true);
+  step(now === "up" ? "up" : "not up");
+  say(part, now, "the LaunchAgent " + n + ", started at login");
 }
 
 async function mac_stop(part: Part): Promise<void> {
@@ -315,43 +338,55 @@ async function mac_stop(part: Part): Promise<void> {
   if (!was.includes(MARK)) {
     fail(n + " isn't unii's: " + file + " isn't one unii made, so unii leaves it as it is.");
   }
+  const step = clock(part, "stop");
   fs.rmSync(file);
+  fs.rmSync(LOGS + "/" + part + ".up", { force: true });
   run(["launchctl", "bootout", "gui/" + process.getuid!() + "/" + n]);
+  step("LaunchAgent removed");
   console.log("unii " + part + " stopped: its background service " + n + " is removed.");
 }
 
 // Windows
 // -------
 // The task runs conhost --headless (no window) on `unii <part> --service`
-// (supervise), at the user's logon, as the user (Limited: no admin, no
-// UAC prompt); a run asked for while one runs stops it first
-// (MultipleInstances 3, StopExisting, which New-ScheduledTaskSettingsSet
-// has no name for), so Task Scheduler does a restart
+// (supervise), at the user's logon, as the user (InteractiveToken,
+// LeastPrivilege: no admin, no UAC prompt); a run asked for while one
+// runs stops it first (MultipleInstancesPolicy StopExisting), so Task
+// Scheduler does a restart. It is made and read by schtasks.exe from
+// its XML (TASK): the ScheduledTasks cmdlets take PowerShell and their
+// module ~0.7 s to load, schtasks a few ms
 
 async function win_start(part: Part, args: string[]): Promise<void> {
   const n = name(part);
+  const step = clock(part, "-d");
   const pid = read(LOGS + "/" + part + ".pid");
-  const line = ["--headless", ...command(), part, "--service", ...args].map(winq).join(" ");
-  const out = ps(`
-$t = Get-ScheduledTask -TaskName $env:UNII_TASK -TaskPath '\\' -ErrorAction SilentlyContinue
-if ($t -and ([string]$t.Description) -notmatch '${MARK}') { 'theirs'; return }
-$me = [Security.Principal.WindowsIdentity]::GetCurrent().Name
-$act = New-ScheduledTaskAction -Execute 'conhost.exe' -Argument $env:UNII_LINE -WorkingDirectory $HOME
-$at = New-ScheduledTaskTrigger -AtLogOn -User $me
-$who = New-ScheduledTaskPrincipal -UserId $me -LogonType Interactive -RunLevel Limited
-$set = New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::Zero) -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1) -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
-$set.CimInstanceProperties.Item('MultipleInstances').Value = 3
-Register-ScheduledTask -TaskName $env:UNII_TASK -TaskPath '\\' -Action $act -Trigger $at -Principal $who -Settings $set -Description $env:UNII_ABOUT -Force | Out-Null
-Start-ScheduledTask -TaskName $env:UNII_TASK -TaskPath '\\'
-'ok'`, { UNII_TASK: n, UNII_LINE: line, UNII_ABOUT: MARK + ": `unii " + part + " -d` made this task, and makes it again; `unii " + part + " stop` removes it." });
-  if (out === "theirs") {
-    fail(n + " isn't unii's: that Scheduled Task isn't one unii made, so unii leaves it as it is. To use unii " + part + " -d, remove it (Unregister-ScheduledTask " + n + "); or keep using it.");
+  const was = read(LOGS + "/" + part + ".up");
+  const had = win_task(n);
+  step("task looked up");
+  if (had !== null && !had.includes(MARK)) {
+    fail(n + " isn't unii's: that Scheduled Task isn't one unii made, so unii leaves it as it is. To use unii " + part + " -d, remove it (schtasks /delete /tn " + n + "); or keep using it.");
   }
-  say(part, await up(part, pid), "the Scheduled Task " + n + ", started at logon");
+  const line = ["--headless", ...command(), part, "--service", ...args].map(winq).join(" ");
+  const about = MARK + ": `unii " + part + " -d` made this task, and makes it again; `unii " + part + " stop` removes it.";
+  const file = path.join(os.tmpdir(), n + "-" + process.pid + ".xml");
+  // UTF-16, as schtasks reads a task's XML
+  fs.writeFileSync(file, Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from(TASK(about, user(), line, HOME), "utf16le")]));
+  try {
+    schtasks("/create", "/tn", "\\" + n, "/xml", file, "/f");
+  } finally {
+    fs.rmSync(file, { force: true });
+  }
+  step("task registered");
+  schtasks("/run", "/tn", "\\" + n);
+  step("task started");
+  const now = await up(part, was, () => supervised(part, pid) === false, () => supervised(part, pid) === true);
+  step(now === "up" ? "up" : "not up");
+  say(part, now, "the Scheduled Task " + n + ", started at logon");
 }
 
 async function win_stop(part: Part): Promise<void> {
   const n = name(part);
+  const step = clock(part, "stop");
   // what the task ran, and what that started (Windows ends only the
   // task's own process), if still unii; its file gone first, and the
   // task removed before its unii is asked to quit: run from the
@@ -362,21 +397,67 @@ async function win_stop(part: Part): Promise<void> {
   // device saying goodbye still
   const all = pids(part);
   const mine = ours(part, all);
-  fs.rmSync(LOGS + "/" + part + ".pid", { force: true });
-  const out = ps(`
-$t = Get-ScheduledTask -TaskName $env:UNII_TASK -TaskPath '\\' -ErrorAction SilentlyContinue
-if (-not $t) { 'none'; return }
-if (([string]$t.Description) -notmatch '${MARK}') { 'theirs'; return }
-if ($t.State -eq 'Running' -and $env:UNII_MINE -eq '0') { Stop-ScheduledTask -TaskName $env:UNII_TASK -TaskPath '\\' }
-Unregister-ScheduledTask -TaskName $env:UNII_TASK -TaskPath '\\' -Confirm:$false
-'ok'`, { UNII_TASK: n, UNII_MINE: String(mine.length) });
-  if (out === "theirs") {
+  step("processes looked up");
+  const had = win_task(n);
+  step("task looked up");
+  if (had === null) {
+    console.log("unii " + part + " isn't set up as a background service here: nothing to stop.");
+    return;
+  }
+  if (!had.includes(MARK)) {
     fail(n + " isn't unii's: that Scheduled Task isn't one unii made, so unii leaves it as it is.");
   }
-  if (out !== "none") {
-    await win_quit(part, all[0], mine);
+  fs.rmSync(LOGS + "/" + part + ".pid", { force: true });
+  fs.rmSync(LOGS + "/" + part + ".up", { force: true });
+  if (mine.length === 0 && /"Running"/.test(run(["schtasks", "/query", "/tn", "\\" + n, "/fo", "csv", "/nh"]).out)) {
+    run(["schtasks", "/end", "/tn", "\\" + n]);
+    step("task ended");
   }
-  console.log(out === "none" ? "unii " + part + " isn't set up as a background service here: nothing to stop." : "unii " + part + " stopped: its background service " + n + " is removed.");
+  schtasks("/delete", "/tn", "\\" + n, "/f");
+  step("task removed");
+  await win_quit(part, all[0], mine);
+  step("its unii ended");
+  console.log("unii " + part + " stopped: its background service " + n + " is removed.");
+}
+
+// a task's XML: the task -d makes (the cmdlets' defaults for the rest)
+function TASK(about: string, who: string, line: string, dir: string): string {
+  const x = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  return `<?xml version="1.0" encoding="UTF-16"?>
+<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+  <RegistrationInfo><Description>${x(about)}</Description></RegistrationInfo>
+  <Triggers><LogonTrigger><Enabled>true</Enabled><UserId>${x(who)}</UserId></LogonTrigger></Triggers>
+  <Principals><Principal id="Author"><UserId>${x(who)}</UserId><LogonType>InteractiveToken</LogonType><RunLevel>LeastPrivilege</RunLevel></Principal></Principals>
+  <Settings>
+    <MultipleInstancesPolicy>StopExisting</MultipleInstancesPolicy>
+    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
+    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
+    <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>
+    <RestartOnFailure><Interval>PT1M</Interval><Count>${RESTARTS}</Count></RestartOnFailure>
+    <Enabled>true</Enabled>
+  </Settings>
+  <Actions Context="Author"><Exec><Command>conhost.exe</Command><Arguments>${x(line)}</Arguments><WorkingDirectory>${x(dir)}</WorkingDirectory></Exec></Actions>
+</Task>
+`;
+}
+
+// the user, as a task names it (DOMAIN\user)
+function user(): string {
+  const name = process.env.USERNAME ?? os.userInfo().username;
+  return process.env.USERDOMAIN ? process.env.USERDOMAIN + "\\" + name : name;
+}
+
+// a task's XML, as schtasks shows it; null: no task of that name
+function win_task(n: string): string | null {
+  const out = run(["schtasks", "/query", "/tn", "\\" + n, "/xml"]);
+  return out.code === 0 ? out.out : null;
+}
+
+function schtasks(...args: string[]): void {
+  const out = run(["schtasks", ...args]);
+  if (out.code !== 0) {
+    fail("schtasks " + args[0] + " failed: " + (out.err || out.out || "exit " + out.code));
+  }
 }
 
 // a service's supervisor and part (`mine`) asked to quit by the file
@@ -397,36 +478,34 @@ async function win_quit(part: Part, supervisor: number | undefined, mine: number
   fs.rmSync(stop, { force: true });
 }
 
-function ps(script: string, env: Record<string, string>): string {
-  // an error as its message alone (PowerShell 7 adds colour codes)
-  const out = run([pwsh(), "-NoProfile", "-NonInteractive", "-Command", "$ErrorActionPreference = 'Stop'; try {" + script + "\n} catch { [Console]::Error.WriteLine($_.Exception.Message); exit 1 }"], env);
-  if (out.code !== 0) {
-    fail("PowerShell failed: " + (out.err || out.out || "exit " + out.code));
-  }
-  return out.out.split(/\r?\n/).pop() ?? "";
-}
-
 // Windows and macOS: the service's supervisor
 // -------------------------------------------
 // `unii <part> --service [arg]`, as the task or LaunchAgent runs it: it
 // runs `unii <part> [arg]` (UNII_SERVICE set: no foreground note), its
 // output to LOGS/<part>.log, each line timed, capped (CAP). Its pid and
-// the part's are in LOGS/<part>.pid; one left by a supervisor before it
-// (a restart: Windows ended that one alone) is waited for, then ended,
-// so the new part finds its port free: if still unii's (`ours`; a file
-// left by a crash or a sign-out may name pids reused since). On Windows a
+// the part's are in LOGS/<part>.pid; those left by a supervisor before it
+// (a restart: Windows ended that one's conhost alone) end before its part
+// starts, so the new part finds its port free: if still unii's (`ours`; a
+// file left by a crash or a sign-out may name pids reused since). On
+// Windows they are asked to quit at once (win_quit: a device says
+// goodbye), ended after BYE; elsewhere waited for, then ended. On Windows a
 // part that failed starts again (RESTARTS). Stopped (a signal), it ends
 // with 0, so launchd leaves it stopped.
 
 export async function supervise(part: Part, args: string[]): Promise<never> {
   if (WIN) {
     // the task's conhost, which Windows ends alone
-    watch(process.ppid);
+    watch(process.ppid, part, process.pid);
   }
   fs.mkdirSync(LOGS, { recursive: true, mode: 0o700 });
   fs.rmSync(LOGS + "/" + part + ".stop", { force: true });
   const file = LOGS + "/" + part + ".pid";
-  for (const pid of ours(part, pids(part).filter((pid) => pid !== process.pid))) {
+  const before = pids(part);
+  const old = ours(part, before.filter((pid) => pid !== process.pid));
+  if (WIN) {
+    await win_quit(part, before[0], old);
+  }
+  for (const pid of WIN ? [] : old) {
     for (let k = 0; k < 40 && alive(pid); k++) {
       await Bun.sleep(250);
     }
@@ -530,28 +609,56 @@ async function file_logs(part: Part, follow: boolean): Promise<void> {
 // Bits
 // ----
 
-// whether a service (re)started is up (Windows, macOS: its supervisor
-// and part, by their pid file, once written anew: `was`, as before),
-// waiting a while for it
-async function up(part: Part, was: string | null): Promise<boolean> {
-  for (let k = 0; k < 40; k++) {
-    const [a, b] = pids(part);
-    if (read(LOGS + "/" + part + ".pid") !== was && alive(a) && alive(b)) {
-      await Bun.sleep(1500);
-      return pids(part).every(alive);
+// -d waiting for its part to be up (ready: its .up file written anew,
+// `was` as before), UP at most: up; or not: down, its service failed
+// (`failed`, seen early), else late: it runs (`runs`), not up yet
+async function up(part: Part, was: string | null, failed: () => boolean, runs: () => boolean): Promise<"up" | "late" | "down"> {
+  for (const until = Date.now() + UP; Date.now() < until; ) {
+    const now = read(LOGS + "/" + part + ".up");
+    if (now !== null && now !== was && alive(Number(now.split(" ")[0]))) {
+      return "up";
     }
-    await Bun.sleep(250);
+    if (failed()) {
+      return "down";
+    }
+    await Bun.sleep(100);
   }
-  return false;
+  return runs() ? "late" : "down";
 }
 
-// -d's one line: where it runs, or that it doesn't
-function say(part: Part, up: boolean, where: string): void {
-  if (up) {
+// whether a service's supervisor and part run (Windows, macOS: by their
+// pid file, once written anew, `was` as before); null: not written yet
+function supervised(part: Part, was: string | null): boolean | null {
+  const now = read(LOGS + "/" + part + ".pid");
+  return now === null || now === was ? null : pids(part).every(alive);
+}
+
+// -d's one line: where it runs, or that it doesn't (yet)
+function say(part: Part, up: "up" | "late" | "down", where: string): void {
+  const logs = "`unii " + part + " logs` shows why.";
+  if (up === "up") {
     console.log("unii " + part + " runs in the background, as " + where + ": `unii " + part + " logs -f` follows it, `unii " + part + " stop` removes it.");
+  } else if (up === "late") {
+    console.log("unii " + part + " runs as " + where + ", but " + (part === "device" ? "hasn't linked to its server" : "isn't listening yet") + " after " + UP / 1000 + " s: " + logs);
   } else {
-    console.log("unii " + part + " is set up as " + where + ", but isn't running: `unii " + part + " logs` shows why.");
+    console.log("unii " + part + " is set up as " + where + ", but isn't running: " + logs);
   }
+}
+
+// a step of -d's or stop's (`verb`) as its time since the last, in the
+// part's log on Windows and macOS (Linux's is the journal: none there)
+function clock(part: Part, verb: string): (what: string) => void {
+  let last = performance.now();
+  return (what) => {
+    const now = performance.now();
+    if (WIN || MAC) {
+      try {
+        fs.mkdirSync(LOGS, { recursive: true, mode: 0o700 });
+        fs.appendFileSync(LOGS + "/" + part + ".log", new Date().toISOString() + " unii " + part + " " + verb + ": " + what + " in " + ((now - last) / 1000).toFixed(2) + " s\n");
+      } catch {}
+    }
+    last = now;
+  };
 }
 
 // the supervisor's pid and its part's (none: [])

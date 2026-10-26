@@ -36,6 +36,7 @@ import { Settings } from "./Settings.ts";
 import { INSTALL, INSTALL_PS1 } from "./Update.ts";
 import { move_over, write_whole } from "./Write.ts";
 import { Run, type Heard } from "./Run.ts";
+import * as Service from "./Service.ts";
 import * as Timer from "./Timer.ts";
 import { PROMPTS, SEARCHES, Tools } from "./Tools.ts";
 import { ACTIVE, FRAME, IDLE, IMAGES, live_push, MEDIA, PING, QUIT, SUMMARIES, TICK, TURN, WIRE, type Answer, type Live, type Part, type Server as Out, type Sums, type Wait } from "./View.ts";
@@ -1970,6 +1971,7 @@ export namespace Main {
       Memory.stop(Main.chat.mem);
     });
     console.log("unii: " + config.SITE + ", data in " + config.DIR + ", on 127.0.0.1:" + port);
+    Service.ready("serve");
     if (config.MCP_LEFT !== null) {
       console.error("unii: " + config.MCP_LEFT);
     }

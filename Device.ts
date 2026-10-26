@@ -25,6 +25,7 @@ import * as path from "node:path";
 import * as Client from "./Client.ts";
 import { Machine, SCRATCH, WIN, type Job } from "./Machine.ts";
 import { Mcp } from "./Mcp.ts";
+import * as Service from "./Service.ts";
 import { FRAME, media_kind, PING, QUIT, RETRY, TICK, WIRE } from "./View.ts";
 
 // Constants
@@ -88,6 +89,7 @@ export async function run(given: string | undefined): Promise<void> {
     const tick = setInterval(() => Date.now() - heard > PING && sock.close(), PING / 2);
     sock.onopen = () => {
       up = true;
+      Service.ready("device");
       outs.forEach((msg) => sock.send(JSON.stringify(msg)));
       told = "";
       tell();
