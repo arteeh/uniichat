@@ -15,8 +15,8 @@
 // fast. The count goes on across a patient call's tries (Ask `limits`).
 //
 // A wait of LONG or more parks the call: a Limit event tells the views
-// till when, and its thought says so once a call. A shorter wait reads as
-// the service being busy, each time. A stop, a message sent mid-run or a
+// till when, their live line while it lasts (no thought, no note: #49).
+// A shorter wait reads as the service being busy, each time. A stop, a message sent mid-run or a
 // resume ends the wait: the call asks once more and, still limited, waits
 // again, saying nothing more.
 //
@@ -52,13 +52,12 @@ import { Machine } from "./Machine.ts";
 
 // one call's usage limits: what it asks, where it tells what it does, its
 // stop; n: the limits in a row (its vendor counts each one it hits);
-// said: it said it waits; poke: ends its wait now (a message sent)
+// poke: ends its wait now (a message sent)
 export type Limit = {
   ask    : Ask;
   on     : (ev: Event) => void;
   signal : AbortSignal;
   n      : number;
-  said   : boolean;
   poke   : () => void;
 };
 
@@ -98,7 +97,7 @@ const POLLS = new Map<Vendor, Timer>();
 export namespace Limit {
 
   export function make(ask: Ask, on: (ev: Event) => void, signal: AbortSignal): Limit {
-    return { ask, on, signal, n: ask.limits ?? 0, said: false, poke: () => {} };
+    return { ask, on, signal, n: ask.limits ?? 0, poke: () => {} };
   }
 
   // the call hit a limit, its `n`th in a row (counted by its vendor),
@@ -153,9 +152,9 @@ export namespace Limit {
   }
 
   // the call waits `ms`: one of LONG or more parked (a Limit event: till
-  // when, `known` if the vendor told it), saying so once a call; a shorter
-  // one says it as when busy, each time. A stop, a poke or a resume ends
-  // the wait
+  // when, `known` if the vendor told it: the views' live line, gone as it
+  // ends); a shorter one says it as when busy, each time. A stop, a poke
+  // or a resume ends the wait
   export async function park(l: Limit, ms: number, known: boolean): Promise<void> {
     const wake = new AbortController();
     l.poke = () => wake.abort();
@@ -163,10 +162,7 @@ export namespace Limit {
     if (parked) {
       l.on({ $: "Limit", limit: { until: Date.now() + ms, known } });
     }
-    if (parked && !l.said) {
-      l.said = true;
-      l.on({ $: "Entry", kind: "mind", text: "The AI service reached a usage limit: asking again in " + Limit.span(ms) + "." });
-    } else if (!parked) {
+    if (!parked) {
       l.on({ $: "Entry", kind: "mind", text: "The AI service is busy: asking again in " + Math.ceil(ms / 1e3) + " s." });
     }
     try {
@@ -255,12 +251,6 @@ export namespace Limit {
       Limit.poll_soon(vendor);
     }
     return clear === true;
-  }
-
-  // a wait as people read it: "5 min", "3 h 20 min"
-  export function span(ms: number): string {
-    const min = Math.max(1, Math.round(ms / 60e3));
-    return min < 60 ? min + " min" : Math.floor(min / 60) + " h" + (min % 60 > 0 ? " " + (min % 60) + " min" : "");
   }
 
 }
