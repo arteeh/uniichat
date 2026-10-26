@@ -318,11 +318,18 @@ export namespace ChatGPT {
     };
   }
 
-  // one conversation's id (main's, each subagent's, the compactor's), the
-  // same for all its calls: sent as the session-id header too, which the
-  // backend routes its cache by
+  // the cache's session, the same for all its calls: main's; one for all
+  // subagents (each lives for a prompt or two, and they share their
+  // system prompt and tools, so each reads what the others cached); the
+  // compactor's. Sent as the session-id header too, which the backend
+  // routes its cache by
   export function session(ask: Ask): string {
-    return "unii-" + Bun.hash(JSON.stringify([ask.who ?? "main", ask.model, ask.system])).toString(36);
+    return "unii-" + Bun.hash(JSON.stringify([ChatGPT.sharer(ask), ask.model, ask.system])).toString(36);
+  }
+
+  // whose cache session a call is in (ChatGPT.session)
+  export function sharer(ask: Ask): string {
+    return ask.agent === true ? "sub" : ask.who ?? "main";
   }
 
   // a user message without its cache breakpoints
