@@ -22,12 +22,14 @@
 // nothing more.
 //
 // At a long limit a call ends instead of waiting (an Off, which its vendor
-// turns into a `down` end):
-// - a subagent's (Ask `agent`), whether it ran tools or not: its report
-//   names the vendor, the model and the reset;
-// - one that did nothing yet (ran no tool) and has a
-//   fallback to go on to (AskAI.ts), or picks again as it asks again (a
-//   summary's `repick`, so a compactor changed meanwhile counts).
+// turns into a `down` end) only if it did nothing yet (ran no tool) and
+// has a fallback to go on to (AskAI.ts), or picks again as it asks again
+// (a summary's `repick`, so a compactor changed meanwhile counts). A
+// subagent's waits as Unii's turn does (#50): its wait shows in the
+// master's "Agents at work now" (Tools.at_work), and a stop ends it. As
+// it would wake while the turn has messages queued (STAGGERED), it waits
+// STAGGER more, so the turn, woken by the same reset, takes them first
+// (a "stop it" among them comes before it does much).
 //
 // Every call asks the service: its answer is the truth, and a reset told
 // only times the wait. The exception is a limit under which asking would
@@ -78,6 +80,13 @@ export const LIMIT = 1800e3;
 
 // how often a sub's usage is read while a call waits on its limit
 export const POLL = 300e3;
+
+// how much later than Unii's turn a subagent wakes from a usage limit
+// while the turn has messages queued
+export const STAGGER = 30e3;
+
+// whether Unii's turn has messages queued (Server.ts sets it: Limit.staggered)
+let STAGGERED: () => boolean = () => false;
 
 // the limits told under which asking would bill (claude-sub's extra
 // usage, one per account: ClaudeSub.note), till their reset, by key: they
@@ -138,11 +147,15 @@ export namespace Limit {
     return { ms, known: left > 0 && ms === left };
   }
 
-  // whether a call waiting `ms` ends instead: a subagent's, or one that
-  // did nothing yet with a fallback or a repick; a wait under LONG never
-  // ends one
-  export function ends(ask: { agent?: boolean; fallback?: boolean; repick?: unknown }, acted: boolean, ms: number): boolean {
-    return ms >= LONG && (ask.agent === true || ((ask.fallback === true || ask.repick !== undefined) && !acted));
+  // whether a call waiting `ms` ends instead: one that did nothing yet
+  // with a fallback or a repick; a wait under LONG never ends one
+  export function ends(ask: { fallback?: boolean; repick?: unknown }, acted: boolean, ms: number): boolean {
+    return ms >= LONG && (ask.fallback === true || ask.repick !== undefined) && !acted;
+  }
+
+  // what tells whether Unii's turn has messages queued (STAGGERED)
+  export function staggered(queued: () => boolean): void {
+    STAGGERED = queued;
   }
 
   // a call ended at a long limit, its `n`th in a row: on what, and when it
@@ -155,19 +168,26 @@ export namespace Limit {
   // the call waits `ms`: one of LONG or more parked (a Limit event: till
   // when, `known` if the vendor told it: the views' live line, gone as it
   // ends); a shorter one says it as when busy, each time. A stop, a poke
-  // or a resume ends the wait
+  // or a resume ends the wait; a subagent's parked one that ends but by a
+  // stop or a poke while Unii's turn has messages queued goes on STAGGER
   export async function park(l: Limit, ms: number, known: boolean): Promise<void> {
     const wake = new AbortController();
     l.poke = () => wake.abort();
     const parked = ms >= LONG;
+    const vendor = l.ask.vendor;
     if (parked) {
-      l.on({ $: "Limit", limit: { until: Date.now() + ms, known } });
+      l.on({ $: "Limit", limit: { until: Date.now() + ms, known, vendor } });
     }
     if (!parked) {
       l.on({ $: "Entry", kind: "mind", text: "The AI service is busy: asking again in " + Math.ceil(ms / 1e3) + " s." });
     }
+    const until = AbortSignal.any([l.signal, wake.signal]);
     try {
-      await Limit.wait(l.ask.vendor, ms, AbortSignal.any([l.signal, wake.signal]));
+      await Limit.wait(vendor, ms, until);
+      if (parked && l.ask.agent === true && !until.aborted && STAGGERED()) {
+        l.on({ $: "Limit", limit: { until: Date.now() + STAGGER, known: true, vendor } });
+        await Limit.wait(vendor, STAGGER, until);
+      }
     } finally {
       l.poke = () => {};
       if (parked) {

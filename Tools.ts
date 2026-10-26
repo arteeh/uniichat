@@ -243,7 +243,7 @@ const OWN: Spec[] = [
   spec("date", "The date and time of message id.", { id: INT }, ["id"]),
 ];
 const BOSS: Spec[] = [
-  spec("spawn", "Start one subagent per task, in parallel, and return their names at once. Each one's report reaches you as a message \"[Name] report\" when it finishes. A subagent sees the view and the user's instructions, but knows what you want only from its task. Each task names its own model and effort, if any.", { tasks: { type: "array", items: TASK } }, ["tasks"]),
+  spec("spawn", "Start one subagent per task, in parallel, and return their names at once. Each one's report reaches you as a message \"[Name] report\" when it finishes. One that hits an AI service's usage limit waits for the reset and goes on by itself, as you do (Agents at work shows it waiting); stop ends it. A subagent sees the view and the user's instructions, but knows what you want only from its task. Each task names its own model and effort, if any.", { tasks: { type: "array", items: TASK } }, ["tasks"]),
   spec("tell", "Send a message to a subagent, by name. One at work gets it once its current reply is done (it waits, queued, as the user's messages do for you), and its report answers it; an idle one goes on from its chat, and its reply reaches you as a message \"[Name] reply\". To change what one at work is doing now, stop it, then tell it.", { name: STR, message: STR }, ["name", "message"]),
   spec("schedule", "Schedule a message to yourself: at its time it reaches you as a message \"[Timer id]\" from the timer, not the user, starting a turn as a report does, whether or not the user is online. Give `at` to send it once, or `cron` to send it again and again, and the time zone both are read in (the user's). Write the message as the task to do then, whole: by then this turn is far back in the view.", {
     message : STR,
@@ -254,7 +254,7 @@ const BOSS: Spec[] = [
   spec("schedules", "List the chat's schedules: id, when each comes next, its message.", {}, []),
   spec("unschedule", "Cancel a schedule, by its id.", { id: STR }, ["id"]),
   spec("stop", "Stop a subagent at once, by name, whatever it is doing (mid-call, waiting on a usage limit, running a tool on a device: that job is cancelled). Others keep running. Its report says it was stopped; its chat and scratch folder stay, so a later tell resumes it.", { name: STR, why: { type: "string", description: "Why, for its report." } }, ["name"]),
-  spec("resume", "Wake every call on this server waiting for an AI service's usage limit (your turn, summaries), when the user says a limit was reset early. Each asks again once; one still limited waits again. A subagent at a usage limit ends and reports it instead: tell it to go on.", {}, []),
+  spec("resume", "Wake every call on this server waiting for an AI service's usage limit (your turn, subagents, summaries), when the user says a limit was reset early. Each asks again once; one still limited waits again.", {}, []),
 ];
 const DEVICE = { device: { type: "string", description: "The name of the device to run on, one listed under Devices." } };
 function kit(who: string): Spec[] {
@@ -339,9 +339,11 @@ export namespace Tools {
 
   // the master's agents at work now, at the start of each of its calls'
   // messages: read from their calls, so the list is never kept apart and
-  // can't drift from the truth
+  // can't drift from the truth; one waiting for a usage limit says so,
+  // till when (UTC), so the master sees it without a turn of its own
   export function at_work(tools: Tools): Block {
-    const names = Tools.working(tools).map((a) => a.name);
+    const when = (at: number) => new Date(at).toISOString().slice(0, 16).replace("T", " ") + " UTC";
+    const names = Tools.working(tools).map(({ name, run }) => (run.limit === null ? name : name + " (waiting for the usage limit on " + run.limit.vendor + ", " + (run.limit.known ? "resumes " : "tries again ") + when(run.limit.until) + ")"));
     return { text: "Agents at work now: " + (names.length === 0 ? "none." : names.join(", ") + ".") + "\n\n", mark: false };
   }
 

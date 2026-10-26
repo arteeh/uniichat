@@ -35,6 +35,7 @@ import { Reap } from "./Reap.ts";
 import { Settings } from "./Settings.ts";
 import { INSTALL, INSTALL_PS1 } from "./Update.ts";
 import { move_over, write_whole } from "./Write.ts";
+import { Limit } from "./Limit.ts";
 import { Run, type Heard } from "./Run.ts";
 import * as Service from "./Service.ts";
 import * as Timer from "./Timer.ts";
@@ -286,6 +287,9 @@ export namespace Chat {
     const mem = Memory.load(CHAT, () => ({ system: Tools.prompt("compact"), searches: 0, server: "" }), Owner.act_put);
     // what ran as it was cut, read before anything saves what runs now
     const cut = mem.work;
+    // a subagent woken from a usage limit while the turn has messages
+    // queued waits a little more (Limit.park)
+    Limit.staggered(() => chat.main.queue.length > 0);
     // Unii's turn (Run.ts): a message queued is logged as its call starts
     // (Chat.posted); one queued stops a goal check running, whose answer
     // it drops; one of the user's left queued by a stop is the next turn

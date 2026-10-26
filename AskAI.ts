@@ -74,8 +74,9 @@ export type Block = { text: string; mark: boolean; back?: boolean };
 // searches: the most web searches it runs (0: no web tools); probe: its
 // first request goes once (its pick is DOWN); fallback: a pick follows
 // its own, which a long usage-limit wait goes on with instead (Limit.ends);
-// agent: a subagent's, which a long usage limit ends (after its
-// fallbacks) instead of parking it, its report saying so; talk: a turn's
+// agent: a subagent's, which waits at a usage limit as Unii's turn does
+// (after its fallbacks), woken a little later than it when the turn has
+// messages queued (Limit.park); talk: a turn's
 // in conversation mode (claude-api caches it an hour: Anthropic.ts);
 // repick: a patient call's pick as it starts over (AskAI.ask), which a
 // long usage limit ends a try for, as a fallback does; limits: the
@@ -105,8 +106,9 @@ type Cached = { until: number; ready: Promise<void> | null };
 export type Flight = { begun: () => void; end: () => void };
 
 // a call waiting for its vendor's usage limit: till when (ms since the
-// epoch), and whether the vendor told it (else it only asks again then)
-export type Parked = { until: number; known: boolean };
+// epoch), whether the vendor told it (else it only asks again then), and
+// which vendor's
+export type Parked = { until: number; known: boolean; vendor: Vendor };
 
 // a patient call failing: why (on what, and the vendor's words if it
 // said any), when it asks again (ms since the epoch), whether it waits
