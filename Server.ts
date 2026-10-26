@@ -489,9 +489,16 @@ export namespace Chat {
     return Memory.whole(chat.mem, chat.wait[0].id);
   }
 
-  // false: the turn ends
+  // false: the turn ends: at once if no model can be asked here (nor
+  // summaries written: it doesn't wait on them)
   export async function call(chat: Chat): Promise<boolean> {
     const mem = chat.mem;
+    Main.follow();
+    const none = config.config_none();
+    if (none !== null) {
+      Chat.failed(chat, none);
+      return false;
+    }
     const halt = (chat.halt = new AbortController());
     Chat.change(chat);
     await Tools.look(chat.tools);
@@ -1932,6 +1939,7 @@ export namespace Main {
         sock.close(QUIT, "signed out");
       });
       Tools.prune(Main.chat.tools, kept);
+      Main.follow();
     }, PING / 2);
     for (const sig of ["SIGTERM", "SIGINT", "SIGHUP"]) {
       process.on(sig, () => process.exit(0));
@@ -1954,6 +1962,7 @@ export namespace Main {
   export async function settings(req: Request): Promise<Response> {
     const fresh = { "cache-control": "no-store" };
     if (req.method === "GET") {
+      Main.follow();
       return Response.json(Settings.page(), { headers: fresh });
     }
     if (req.method !== "POST") {
@@ -1967,6 +1976,14 @@ export namespace Main {
       Chat.offer(Main.chat);
     }
     return Response.json(out.body, { status: out.status, headers: fresh });
+  }
+
+  // the defaults following a sign-in or out (config.config_follow): the
+  // chat runs on its pick if still offered, else on the new default
+  export function follow(): void {
+    if (config.config_follow()) {
+      Chat.offer(Main.chat);
+    }
   }
 
   // a failure no owner took: every background promise has one that ends

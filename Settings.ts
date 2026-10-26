@@ -24,7 +24,8 @@ import { write_whole } from "./Write.ts";
 // =====
 
 // a setting as shown: its value (config.json's or the environment's,
-// as a start reads it now), its default, where it comes from, its
+// as a start reads it now), its default and why it is that (config
+// config_default; "": no why), where it comes from, its
 // variable, when a change applies, whether the page may change it; and
 // one that applies on a restart, what this process runs on if that
 // differs (null: the same)
@@ -32,6 +33,7 @@ export type Row = {
   key     : string;
   value   : string;
   def     : string;
+  why     : string;
   from    : config.From;
   env     : string;
   apply   : "now" | "restart";
@@ -47,8 +49,8 @@ export type Key = { name: string; env: string; from: config.From; tail: string }
 // the page: the files' version, the settings, the keys, the profiles
 // (config.json's, by name, each its models in order; null: set by
 // UNII_PROFILES, not shown); why the page can't save (config.json
-// unreadable; null: it can)
-export type Page = { version: string; settings: Row[]; keys: Key[]; profiles: Record<string, string[]> | null; error: string | null };
+// unreadable; null: it can); why no model can be asked (null: one can)
+export type Page = { version: string; settings: Row[]; keys: Key[]; profiles: Record<string, string[]> | null; error: string | null; none: string | null };
 
 // a save's answer: its status and body (refused: why, and the setting
 // or "key.<name>" it is about), what it changed (`saved`), and whether
@@ -106,7 +108,8 @@ export namespace Settings {
       const from: config.From = process.env[env] !== undefined ? "env" : file[s.key] !== undefined && file[s.key] !== null ? "file" : "default";
       const value = config.config_value(file, s.key);
       const running = s.apply === "restart" && config.STARTED[s.key] !== value ? config.STARTED[s.key] : null;
-      return { key: s.key, value, def: s.def, from, env, apply: s.apply, web: s.web, running };
+      const def = config.config_default(file, s.key);
+      return { key: s.key, value, def: def.value, why: def.why, from, env, apply: s.apply, web: s.web, running };
     });
     const shown = Object.entries(config.VARS).map(([name, env]): Key => {
       const from = config.config_key_from(name, keys);
@@ -114,7 +117,7 @@ export namespace Settings {
       return { name, env, from, tail: Settings.tail(key) };
     });
     const profiles = process.env.UNII_PROFILES !== undefined ? null : Settings.profiles(file.profiles) ?? {};
-    return { version: snap.version, settings, keys: shown, profiles, error };
+    return { version: snap.version, settings, keys: shown, profiles, error, none: config.config_none() };
   }
 
   // a key's last characters, as shown: its letters and digits only (a

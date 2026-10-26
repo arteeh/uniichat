@@ -278,10 +278,11 @@ export function settings_html(page: Page): string {
   const shown = page.keys.filter((k) => k.from !== "env");
   const keys = shown.length === 0 ? "" : section_html("Keys", `<p class="sub">Kept in keys.json in the server's folder, readable by the server's user only, and never shown again, only their last characters.</p>` + shown.map(key_html).join(""));
   const error = page.error === null ? "" : `<p class="why bad">${esc(page.error)}</p>`;
+  const none = page.none === null ? "" : `<p class="why bad">${esc(page.none).replace(/`([^`]+)`/g, "<code>$1</code>")}.</p>`;
   const save = `<div class="save"><p class="why"></p><button class="chip go"${page.error === null ? "" : " disabled"}>Save</button></div>`;
   const head = `<p class="sub">The server's settings, in config.json in its folder.</p>`;
   const profiles = page.profiles === null ? "" : section_html("Profiles", `<p class="sub">Ranked models: a chat on a profile runs on the first and falls back to the next when one is out.</p><div class="set profiles" data-key="profiles"><div class="field"></div><p class="err"></p></div>`);
-  return head + error + `<form class="settings" autocomplete="off">` + group(GROUPS[0]) + profiles + keys + group(GROUPS[1]) + save + `</form>`;
+  return head + error + none + `<form class="settings" autocomplete="off">` + group(GROUPS[0]) + profiles + keys + group(GROUPS[1]) + save + `</form>`;
 }
 
 // the models the vendors and models checked offer, as "vendor:model"
@@ -361,7 +362,7 @@ function checks_html(name: string, all: string[], on: string[], vendor: (x: stri
 // where a value comes from, when a change applies, and the button back
 // to the default
 function from_html(r: Row): string {
-  const from = r.from === "file" ? "From config.json" : "Default";
+  const from = r.from === "file" ? "From config.json" : "Default" + (r.why === "" ? "" : ": " + esc(r.why));
   const apply = r.apply === "now" ? "applies at once" : "applies on a restart";
   const running = r.running === null ? "" : ` · running on <code>${esc(r.running === "" ? "(none)" : r.running)}</code> till then`;
   const reset = r.from === "file" ? ` <button type="button" class="reset">Use the default</button>` : "";

@@ -85,6 +85,24 @@ export const SETTINGS: Setting[] = [
   { key: "after",     def: "",                                  apply: "now",     web: false },
 ];
 
+// each vendor a default may take, by what makes it usable; its model
+const USABLE: Record<Vendor, string> = {
+  "claude-sub" : "signed in to Claude",
+  "openai-sub" : "signed in to ChatGPT",
+  "claude-api" : "Anthropic key set",
+  "openai-api" : "OpenAI key set",
+};
+const DEFAULT_MODEL: Record<Vendor, string> = {
+  "claude-sub" : "sonnet-5.5",
+  "openai-sub" : "gpt-6.1-sol",
+  "claude-api" : "sonnet-5.5",
+  "openai-api" : "gpt-6.1-sol",
+};
+
+// what the chat and the settings page say with nothing to ask
+const NONE     = "Not signed in and no API key: sign in with `unii serve claude` (or `unii serve chatgpt`) on the server, or set a key in Settings";
+const NONE_WHY = "not signed in, no key";
+
 // the keys, by name, and the variable each is read from
 export const VARS: Record<string, string> = {
   anthropic       : "ANTHROPIC_API_KEY",
@@ -94,6 +112,23 @@ export const VARS: Record<string, string> = {
 
 // config.json as read at the start
 const FILE: Record<string, unknown> = config_file();
+
+// openai-sub's ChatGPT sign-in (ChatGPT.ts)
+export const CHATGPT    = config_path(config_get("chatgpt", DIR + "/chatgpt.json"));
+
+// claude-sub's Claude Code (ClaudeSub.ts): its config dir, where its
+// sign-in is kept; the executable ("": the one unii carries, else the
+// Agent SDK's)
+export const CLAUDE_SUB = config_path(config_get("claude_sub", DIR + "/claude-sub"));
+export const CLAUDE     = config_path(config_get("claude", ""));
+
+// the keys the environment gave (removed from it), and every key as used:
+// the environment's, else keys.json's
+const ENV_KEYS: Record<string, string> = Object.fromEntries(Object.entries(VARS).map(([name, v]) => [name, config_key(v)]));
+export const KEYS: Record<string, string> = config_keys(keys_read());
+
+// the sign-ins and keys the defaults last followed (config_follow)
+let FOLLOWED = config_usable().join();
 
 const MADE = config_make(FILE);
 
@@ -121,22 +156,8 @@ export let   AGENTS     = MADE.agents;
 export const APPLE      = config_value(FILE, "apple");
 export const APNS       = config_value(FILE, "apns");
 
-// openai-sub's ChatGPT sign-in (ChatGPT.ts)
-export const CHATGPT    = config_path(config_get("chatgpt", DIR + "/chatgpt.json"));
-
-// claude-sub's Claude Code (ClaudeSub.ts): its config dir, where its
-// sign-in is kept; the executable ("": the one unii carries, else the
-// Agent SDK's)
-export const CLAUDE_SUB = config_path(config_get("claude_sub", DIR + "/claude-sub"));
-export const CLAUDE     = config_path(config_get("claude", ""));
-
 // the most a file put in the media store may be (config media_mb, in MB)
 export const MEDIA_MAX  = (Number(config_get("media_mb", "")) || 1024) * 2 ** 20;
-
-// the keys the environment gave (removed from it), and every key as used:
-// the environment's, else keys.json's
-const ENV_KEYS: Record<string, string> = Object.fromEntries(Object.entries(VARS).map(([name, v]) => [name, config_key(v)]));
-export const KEYS: Record<string, string> = config_keys(keys_read());
 
 // MCP servers run only on devices (Mcp.ts): UNII_MCP's are left out,
 // MCP_LEFT the note that says so (null: unset), for the log and the chat;
@@ -157,8 +178,73 @@ export const MCP_FILE = config_mcp_some(FILE.mcp);
 
 // a setting's value in `file`, the environment's winning, else its default
 export function config_value(file: Record<string, unknown>, key: string): string {
+  return config_env_value(key) ?? config_str(file[key]) ?? config_default(file, key).value;
+}
+
+// a setting's default, and why it is that (""; none but the picks'): the
+// vendors, pick and compactor follow what is signed in or has a key here
+// (config_usable), read as asked, so a sign-in counts without a restart:
+// the vendors usable, else claude-api; the pick and compactor on the
+// first usable vendor `file` offers, else on its first, at medium
+export function config_default(file: Record<string, unknown>, key: string): { value: string; why: string } {
   const def = SETTINGS.find((s) => s.key === key)?.def ?? "";
-  return config_env_value(key) ?? config_str(file[key]) ?? def;
+  const usable = config_usable();
+  if (key === "vendors") {
+    return usable.length === 0 ? { value: def, why: NONE_WHY } : { value: usable.join(), why: usable.map((v) => USABLE[v]).join(", ") };
+  }
+  if (key !== "pick" && key !== "compactor") {
+    return { value: def, why: "" };
+  }
+  const offered = config_value(file, "vendors").split(",").map((v) => v.trim());
+  const vendor = usable.find((v) => offered.includes(v)) ?? VENDORS.find((v) => offered.includes(v));
+  if (vendor === undefined) {
+    return { value: def, why: "" };
+  }
+  const why = usable.includes(vendor) ? USABLE[vendor] : usable.length === 0 ? NONE_WHY : vendor + " has no sign-in or key here";
+  return { value: vendor + ":" + DEFAULT_MODEL[vendor] + ":medium:slow", why };
+}
+
+// the vendors that can be asked here, in the order a default takes
+// them: claude-sub signed in, openai-sub signed in, claude-api and
+// openai-api with a key. Claude Code keeps its sign-in in its config dir:
+// .credentials.json, or (macOS, in the keychain) only its account in
+// .claude.json
+export function config_usable(): Vendor[] {
+  const read = (file: string): any => {
+    try {
+      return JSON.parse(fs.readFileSync(file, "utf8"));
+    } catch {
+      return null;
+    }
+  };
+  const claude = read(CLAUDE_SUB + "/.credentials.json")?.claudeAiOauth != null || read(CLAUDE_SUB + "/.claude.json")?.oauthAccount != null;
+  const chatgpt = typeof read(CHATGPT)?.tokens?.refresh_token === "string";
+  const has: Record<Vendor, boolean> = { "claude-sub": claude, "openai-sub": chatgpt, "claude-api": KEYS.anthropic !== "", "openai-api": KEYS.openai !== "" };
+  return (Object.keys(USABLE) as Vendor[]).filter((v) => has[v]);
+}
+
+// why nothing can be asked here (null: something can), as the chat and
+// the settings page say it
+export function config_none(): string | null {
+  return config_usable().length === 0 ? NONE : null;
+}
+
+// the sign-ins changed since the defaults last followed them: config.json
+// and keys.json read again (config_reload); true if they changed. One
+// wrong (a hand edit) is logged, and tried again on the next change
+export function config_follow(): boolean {
+  const now = config_usable().join();
+  if (now === FOLLOWED) {
+    return false;
+  }
+  FOLLOWED = now;
+  try {
+    config_reload();
+    return true;
+  } catch (err: any) {
+    console.error("unii: the sign-ins changed, but " + (err?.message ?? err));
+    return false;
+  }
 }
 
 function config_env_value(key: string): string | undefined {
