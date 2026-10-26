@@ -28,8 +28,9 @@
 // subagent's waits as Unii's turn does (#50): its wait shows in the
 // master's "Agents at work now" (Tools.at_work), and a stop ends it. As
 // it would wake while the turn has messages queued (STAGGERED), it waits
-// STAGGER more, so the turn, woken by the same reset, takes them first
-// (a "stop it" among them comes before it does much).
+// till the turn has taken them (up to STAGGER), so a "stop it" among
+// them comes before it does much: the turn, woken by the same reset,
+// first ends the call it was in.
 //
 // Every call asks the service: its answer is the truth, and a reset told
 // only times the wait. The exception is a limit under which asking would
@@ -81,9 +82,10 @@ export const LIMIT = 1800e3;
 // how often a sub's usage is read while a call waits on its limit
 export const POLL = 300e3;
 
-// how much later than Unii's turn a subagent wakes from a usage limit
-// while the turn has messages queued
-export const STAGGER = 30e3;
+// the longest a subagent woken from a usage limit waits for Unii's turn
+// to take its messages queued, looking every STAGGER_LOOK
+export const STAGGER      = 600e3;
+export const STAGGER_LOOK = 1e3;
 
 // whether Unii's turn has messages queued (Server.ts sets it: Limit.staggered)
 let STAGGERED: () => boolean = () => false;
@@ -169,7 +171,8 @@ export namespace Limit {
   // when, `known` if the vendor told it: the views' live line, gone as it
   // ends); a shorter one says it as when busy, each time. A stop, a poke
   // or a resume ends the wait; a subagent's parked one that ends but by a
-  // stop or a poke while Unii's turn has messages queued goes on STAGGER
+  // stop or a poke while Unii's turn has messages queued goes on till
+  // the turn takes them (up to STAGGER)
   export async function park(l: Limit, ms: number, known: boolean): Promise<void> {
     const wake = new AbortController();
     l.poke = () => wake.abort();
@@ -185,8 +188,11 @@ export namespace Limit {
     try {
       await Limit.wait(vendor, ms, until);
       if (parked && l.ask.agent === true && !until.aborted && STAGGERED()) {
-        l.on({ $: "Limit", limit: { until: Date.now() + STAGGER, known: true, vendor } });
-        await Limit.wait(vendor, STAGGER, until);
+        const end = Date.now() + STAGGER;
+        l.on({ $: "Limit", limit: { until: end, known: false, vendor } });
+        while (!until.aborted && STAGGERED() && Date.now() < end) {
+          await Machine.nap(STAGGER_LOOK, until);
+        }
       }
     } finally {
       l.poke = () => {};
