@@ -23,8 +23,8 @@ import { FIT, HEAD, IMAGE, image_kind, PIXELS } from "./View.ts";
 // Types
 // =====
 
-// a tool call to run here: its tool, its input, its agent's dir (a name,
-// under the device's work dir)
+// a tool call to run here: its tool, its input, its agent's name (its
+// folder under the device's work dir: Machine.agent_dir)
 export type Job = { name: string; input: any; cwd: string };
 
 // a tool as the vendors see it: its name, what it does, its input's
@@ -120,9 +120,15 @@ export function spec(name: string, info: string, fields: object, need: string[])
 
 export namespace Machine {
 
-  export async function run(job: Job, work: string, signal: AbortSignal): Promise<Out> {
+  // the folder an agent's relative paths resolve in: <work>/<agent>, `~/`
+  // in the work dir read as the home dir
+  export function agent_dir(work: string, agent: string): string {
     const root = work.startsWith("~/") ? os.homedir() + work.slice(1) : work;
-    const cwd = path.join(root, path.basename(job.cwd));
+    return path.join(root, path.basename(agent));
+  }
+
+  export async function run(job: Job, work: string, signal: AbortSignal): Promise<Out> {
+    const cwd = Machine.agent_dir(work, job.cwd);
     const input = job.input;
     const file = path.resolve(cwd, String(input.path));
     try {

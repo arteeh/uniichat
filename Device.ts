@@ -158,8 +158,7 @@ export async function run(given: string | undefined): Promise<void> {
 // its markdown line answered (one that isn't media, a link: downloaded);
 // one it refuses, why
 async function show(job: Job, work: string, url: string, token: string, signal: AbortSignal): Promise<{ text: string; fail: boolean }> {
-  const root = work.startsWith("~/") ? os.homedir() + work.slice(1) : work;
-  const cwd = path.join(root, path.basename(job.cwd));
+  const cwd = Machine.agent_dir(work, job.cwd);
   const lines: string[] = [];
   let fail = false;
   for (const p of [job.input.paths ?? []].flat().map(String)) {
