@@ -31,7 +31,7 @@
 // one user, whose every device is: each one's servers reach the chat,
 // unchecked.
 
-import { AskAI, type Ask, type Block, type Call, type Event, type Kind } from "./AskAI.ts";
+import { AskAI, type Ask, type Block, type Event, type Kind, type Say } from "./AskAI.ts";
 import type { Out } from "./Agent.ts";
 import { report_text } from "./Call.ts";
 import { clip_page } from "./Clip.ts";
@@ -43,10 +43,9 @@ import { Memory } from "./Memory.ts";
 import PROMPT from "./prompt.txt" with { type: "text" };
 import COMPACT_PROMPT from "./compact.txt" with { type: "text" };
 import { EFFORTS, Pick } from "./Pick.ts";
+import { Run } from "./Run.ts";
 import * as Timer from "./Timer.ts";
-import { PING, type Live } from "./View.ts";
-
-export type { Live };
+import { PING } from "./View.ts";
 
 // Types
 // =====
@@ -73,26 +72,19 @@ type Running = { term: string; job: Job; out: Promise<Out>; end: (out: Out) => v
 // work dir, its shell if not a POSIX one
 export type Link = { send: (msg: object) => void; live: () => boolean; work: string; shell: string | null };
 
-// a tool call awaiting its result (Server.ts Chat.on): its text as logged,
-// its tool's name, whether it is logged yet (something written while it
-// ran wrote it first: Chat.flush), whether it started (one queued behind
-// another of its step hasn't: AskAI.ts Start)
-export type Waiting = { text: string; tool: string; logged: boolean; started: boolean };
-
 // a task to spawn, with what it runs on
 export type Spawn = { task: string; role: Agent["role"] };
 
-// at work, the view its calls get and its replies so far
+// a subagent: its model and effort as spawned; at work, the view its
+// calls get, its replies so far, its report if stopped by the stop tool
+// (why), and its run (Run.ts; stopped: its report stays unanswered)
 export type Agent = {
   name    : string;
   role    : { effort: string | null; model: string | null };
-  call    : Call | null;
-  live    : Live[];
-  calls   : Map<string, Waiting>; // its tool calls awaiting their results, by id, in the order they started (Chat.on)
-  stop    : boolean; // its call was stopped: the report stays unanswered
-  why     : string | null; // its report, if stopped by the stop tool
+  why     : string | null;
   view    : Block[];
   replies : string[];
+  run     : Run<Say>;
 };
 
 // what the server does for agents (report: work stopped stays unanswered;
@@ -834,14 +826,14 @@ export namespace Tools {
     if (agent === null) {
       return "No agent " + name + " to tell.";
     }
-    if (agent.call !== null && agent.stop) {
+    if (agent.run.call !== null && agent.run.halt.signal.aborted) {
       // being stopped: told once it has ended, so the message isn't lost
       // in the call that ends
-      await agent.call.done.catch(() => {});
+      await agent.run.call.done.catch(() => {});
     }
-    if (agent.call !== null) {
+    if (agent.run.call !== null) {
       tools.hooks.push(agent, "user", message);
-      agent.call.send({ text: message, imgs: [] });
+      agent.run.call.send({ text: message, imgs: [] });
       return "Sent. " + name + " reads it between its tool calls, and its report answers it.";
     }
     const view = await Tools.view(tools);
@@ -849,13 +841,14 @@ export namespace Tools {
       return view;
     }
     tools.hooks.push(agent, "user", message);
-    Tools.run(tools, Object.assign(agent, { view, replies: [], stop: false, why: null }));
+    agent.run.halt = new AbortController();
+    Tools.run(tools, Object.assign(agent, { view, replies: [], why: null }));
     return "Sent. " + name + "'s reply will reach you as a message.";
   }
 
   export function start(tools: Tools, role: Agent["role"], task: string, view: Block[]): string {
     const name = Memory.agent_new(tools.mem);
-    const agent = { name, role, call: null, live: [], calls: new Map(), stop: false, why: null, view, replies: [] };
+    const agent = { name, role, why: null, view, replies: [], run: Run.make<Say>(name) };
     tools.agents.set(name, agent);
     tools.hooks.push(agent, "note", SUB_NOTE + (role.model === null ? "" : SUB_ON + role.model) + (role.effort === null ? "" : SUB_AT + role.effort));
     tools.hooks.push(agent, "user", task);
@@ -877,7 +870,7 @@ export namespace Tools {
     const log = Memory.agent(tools.mem, name);
     const note = log !== null && log.length > 0 && log[0].kind === "note" ? log[0].text : "";
     const sub = SUB_ROLE.exec(note);
-    return sub === null ? null : { name, role: { effort: sub[2] ?? null, model: sub[1] ?? null }, call: null, live: [], calls: new Map(), stop: false, why: null, view: [], replies: [] };
+    return sub === null ? null : { name, role: { effort: sub[2] ?? null, model: sub[1] ?? null }, why: null, view: [], replies: [], run: Run.make<Say>(name) };
   }
 
   // calls while a message waits in its log (told too late for the call
@@ -886,18 +879,18 @@ export namespace Tools {
   export async function run(tools: Tools, agent: Agent): Promise<void> {
     try {
       for (let more = true; more; ) {
-        agent.call = AskAI.ask(Tools.ask(tools, agent), (ev) => tools.hooks.on(agent, ev));
+        agent.run.call = AskAI.ask(Tools.ask(tools, agent), (ev) => tools.hooks.on(agent, ev));
         tools.hooks.change();
-        const end = await agent.call.done;
-        agent.call = null;
+        const end = await agent.run.call.done;
+        agent.run.call = null;
         agent.replies.push(end.ok ? end.text : agent.why ?? "failed: " + end.text);
         more = end.ok && end.left.length > 0;
       }
     } catch (err: any) {
-      agent.call = null;
+      agent.run.call = null;
       agent.replies.push("failed: " + String(err?.message ?? err));
     }
-    tools.hooks.report(agent, report_text(agent.name, agent.replies.join("\n\n")), agent.stop);
+    tools.hooks.report(agent, report_text(agent.name, agent.replies.join("\n\n")), agent.run.halt.signal.aborted);
   }
 
   // a call of an agent, on Tools.pick
@@ -943,7 +936,7 @@ export namespace Tools {
   }
 
   export function working(tools: Tools): Agent[] {
-    return [...tools.agents.values()].filter((a) => a.call !== null);
+    return [...tools.agents.values()].filter((a) => a.run.call !== null);
   }
 
   // the stop tool: the agent named stopped at once (Tools.stop), its
@@ -956,11 +949,11 @@ export namespace Tools {
     if (agent === null) {
       return { text: "No agent " + name + ".", fail: true };
     }
-    const call = agent.call;
+    const call = agent.run.call;
     let ended = true;
     if (call !== null) {
-      const live = agent.live.at(-1);
-      const last = [...agent.calls.values()].at(-1)?.text ?? (live && live.kind + ": " + live.text);
+      const live = agent.run.live.at(-1);
+      const last = [...agent.run.calls.values()].at(-1)?.text ?? (live && live.kind + ": " + live.text);
       const doing = last === undefined ? "" : " It was last at " + last.replace(/\s+/g, " ").slice(0, 300);
       agent.why = "Stopped by Unii" + (why.trim() === "" ? "." : ": " + why.trim().replace(/\.?$/, ".")) + doing;
       Tools.stop(tools, name);
@@ -992,8 +985,8 @@ export namespace Tools {
   // every agent at work (name null), or the one named
   export function stop(tools: Tools, name: string | null): void {
     for (const agent of Tools.working(tools).filter((a) => name === null || a.name === name)) {
-      agent.stop = true;
-      agent.call?.stop();
+      agent.run.halt.abort();
+      agent.run.call?.stop();
     }
   }
 
