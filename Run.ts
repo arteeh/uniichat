@@ -159,13 +159,14 @@ export namespace Run {
     } finally {
       kind.ending(run);
       run.call = null;
-      const left = await Run.logs(run).catch((err) => (kind.failed(run, String(err?.message ?? err)), []));
+      const left = await Run.logs(run);
       again = left.some(kind.again);
       run.wait = again ? run.wait : [];
       run.busy = false;
       kind.finish(run);
     }
-    if (again) {
+    // one taken as the last logging yielded found the loop still busy
+    if ((again || run.queue.length > 0) && !run.busy) {
       run.going = Run.loop(run);
     }
   }
