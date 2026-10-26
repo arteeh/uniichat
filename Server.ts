@@ -20,7 +20,7 @@
 import * as fs from "node:fs";
 import * as net from "node:net";
 import type { ServerWebSocket } from "bun";
-import { AskAI, type Call, type Event, type Kind, type Parked } from "./AskAI.ts";
+import { AskAI, type Ask, type Call, type End, type Event, type Kind, type Parked, type Say } from "./AskAI.ts";
 import { clip_pages } from "./Clip.ts";
 import { Disk } from "./Disk.ts";
 import { Mcp } from "./Mcp.ts";
@@ -35,7 +35,7 @@ import { Reap } from "./Reap.ts";
 import { Settings } from "./Settings.ts";
 import { INSTALL, INSTALL_PS1 } from "./Update.ts";
 import { move_over, write_whole } from "./Write.ts";
-import { Run } from "./Run.ts";
+import { Run, type Heard } from "./Run.ts";
 import * as Timer from "./Timer.ts";
 import { PROMPTS, SEARCHES, Tools } from "./Tools.ts";
 import { ACTIVE, FRAME, IDLE, IMAGES, live_push, MEDIA, PING, QUIT, SUMMARIES, TICK, TURN, WIRE, type Answer, type Live, type Part, type Server as Out, type Sums, type Wait } from "./View.ts";
@@ -66,7 +66,10 @@ type Sock = ServerWebSocket<{ who: string; tab: string; wire: string | null; hos
 type Body = { fh: fs.promises.FileHandle; size: number };
 
 // a message logged: its pages [id, end)
-type Msg = { id: number; end: number };
+export type Msg = { id: number; end: number };
+
+// Unii's turn's run, or a subagent's (Run.ts)
+type Talk = Run<Msg> | Run<Say>;
 
 // what the agent saw at its last call: the view before message `from`,
 // then every message from it on
@@ -277,20 +280,34 @@ export namespace Chat {
   // Main.start). One that fails to open throws, and the server ends
   export function open(): Chat {
     const mem = Memory.load(CHAT, () => ({ system: Tools.prompt("compact"), searches: 0, server: "" }), Owner.act_put);
-    const tools = Tools.serve(mem, {
-      push   : (agent, kind, text) => Chat.push(chat, agent.run, kind, text),
+    // Unii's turn (Run.ts): a message the running call takes now if it
+    // goes whole beside its view, else the next call does (a goal check
+    // running, whose answer it drops, stops)
+    const main = Run.make<Msg>(TURN, {
+      pick   : () => chat.pick,
+      begin  : () => Chat.begin(chat),
+      ask    : (_, take) => Chat.call(chat, take),
+      sends  : (_, msg) => (Memory.whole(mem, msg.id) === msg.id ? Memory.say(mem, msg.id, msg.end) : null),
+      queued : () => chat.check?.call.stop(),
+      ended  : (_, end) => Chat.ended(chat, end),
+      failed : (_, why) => Chat.failed(chat, why),
+      ending : () => Chat.ending(chat),
+      finish : () => Chat.finish(chat),
+      on     : (run, ev) => Chat.on(chat, run, ev),
+      change : () => Chat.change(chat),
+    });
+    const tools = Tools.serve(mem, main, {
+      push   : (run, kind, text) => Chat.push(chat, run, kind, text),
       note   : (text) => Chat.note(chat, text),
-      on     : (agent, ev) => Chat.on(chat, agent.run, ev),
-      report : (agent, text, stopped) => Chat.report(chat, agent.run, text, stopped),
+      on     : (run, ev) => Chat.on(chat, run, ev),
+      report : (text, take) => Chat.report(chat, text, take),
       change : () => Chat.change(chat),
       timed  : () => Chat.timed(chat),
-      pick   : () => chat.pick,
-      halt   : () => chat.main.halt.signal,
     });
     Chat.keep_pick(mem.pick);
     const pick = Pick.load(mem.pick, config.OFFER, config.PICK);
     const chat: Chat = {
-      mem, tools, pick, socks: new Set(), acts: new Map(), main: Run.make<Msg>(TURN), model: "", check: null, asked: false, open: 0,
+      mem, tools, pick, socks: new Set(), acts: new Map(), main, model: "", check: null, asked: false, open: 0,
       eye: { parts: [], from: 0 }, after: Promise.resolve(), batch: null, writes: Promise.resolve(), held: null, back: -1, sums: null,
     };
     // a saved pick (a profile, by name) not offered gave way: told once
@@ -345,7 +362,7 @@ export namespace Chat {
       images.push(name);
       at += size;
     }
-    await Chat.writing(chat, async () => Chat.take(chat, await Chat.text(chat, body, at, images, id)));
+    await Chat.writing(chat, async () => Run.take(chat.main, await Chat.text(chat, body, at, images, id)));
     return {};
   }
 
@@ -440,53 +457,31 @@ export namespace Chat {
     return { text: got.text };
   }
 
-  // a message logged: to the running call if whole beside its view, else
-  // to the next (a goal check running, whose answer it drops, stops)
-  export function take(chat: Chat, msg: Msg): void {
-    const mem = chat.mem;
-    const main = chat.main;
-    if (main.call !== null && Memory.whole(mem, msg.id) === msg.id) {
-      main.sent.push(msg);
-      main.call.send(Memory.say(mem, msg.id, msg.end));
-      return;
-    }
-    main.wait.push(msg);
-    chat.check?.call.stop();
-    if (!main.busy) {
-      Chat.turn(chat);
-    }
-  }
-
-  export async function turn(chat: Chat): Promise<void> {
-    const main = chat.main;
-    main.busy = true;
+  // a turn starts (its run's loop: Run.ts)
+  export function begin(chat: Chat): void {
     Tools.left(chat.tools);
     // a subagent working keeps the MCP servers it started with
     if (Tools.working(chat.tools).length === 0) {
       Tools.apply(chat.tools);
     }
-    try {
-      let go = true;
-      while (go && main.wait.length > 0) {
-        go = await Chat.call(chat);
-      }
-    } catch (err: any) {
-      Chat.failed(chat, String(err?.message ?? err));
-    } finally {
-      const why: string | null = main.halt.signal.aborted ? main.halt.signal.reason : null;
-      if (why !== null) {
-        Chat.note(chat, why);
-      }
-      main.call = null;
-      main.sent = [];
-      main.wait = [];
-      chat.sums = null;
-      main.busy = false;
-      Chat.live(chat, main, []);
-      Chat.phone(chat);
-      Chat.after(chat);
-      Chat.change(chat);
+  }
+
+  // a turn ends, still busy: why it was stopped, noted (Chat.interrupt)
+  export function ending(chat: Chat): void {
+    const halt = chat.main.halt.signal;
+    const why: string | null = halt.aborted ? halt.reason : null;
+    if (why !== null) {
+      Chat.note(chat, why);
     }
+    chat.sums = null;
+  }
+
+  // a turn ended: its reply to the phones, config.AFTER run, the views told
+  export function finish(chat: Chat): void {
+    Chat.live(chat, chat.main, []);
+    Chat.phone(chat);
+    Chat.after(chat);
+    Chat.change(chat);
   }
 
   // where a call's messages go whole from (a message meanwhile may move it)
@@ -494,21 +489,23 @@ export namespace Chat {
     return Memory.whole(chat.mem, chat.main.wait[0].id);
   }
 
-  // false: the turn ends: at once if no model can be asked here (nor
-  // summaries written: it doesn't wait on them)
-  export async function call(chat: Chat): Promise<boolean> {
+  // the turn's next call, once the summaries it waits on are built,
+  // taking the messages waiting (take); null: the turn ends: at once if no
+  // model can be asked here (nor summaries written: it doesn't wait on
+  // them)
+  export async function call(chat: Chat, take: () => Msg[]): Promise<Ask | null> {
     const mem = chat.mem;
     const halt = (chat.main.halt = new AbortController());
     Main.follow();
     const none = config.config_none();
     if (none !== null) {
       Chat.failed(chat, none);
-      return false;
+      return null;
     }
     Chat.change(chat);
     await Tools.look(chat.tools);
     if (halt.signal.aborted) {
-      return false;
+      return null;
     }
     let from = -1;
     while (from !== Chat.from(chat)) {
@@ -524,11 +521,11 @@ export namespace Chat {
         if (!halt.signal.aborted) {
           Chat.failed(chat, why);
         }
-        return false;
+        return null;
       }
     }
     chat.sums = null;
-    const msgs = (chat.main.sent = chat.main.wait.splice(0));
+    const msgs = take();
     const says = msgs.filter((m) => m.end > from).map((m) => Memory.say(mem, Math.max(m.id, from), m.end));
     const view = Memory.view(mem, from, mem.view.parts, mem.talk, mem.talk === null ? -1 : chat.back);
     chat.back = mem.talk === null ? -1 : view.length - 3;
@@ -545,20 +542,13 @@ export namespace Chat {
     chat.model = chat.pick.model;
     chat.asked = true;
     chat.open = 0;
-    const call = (chat.main.call = AskAI.ask(ask, (ev) => Chat.on(chat, chat.main, ev)));
-    Chat.change(chat);
-    return Chat.ended(chat, call, halt);
+    return ask;
   }
 
-  // the turn's call ends; false: the turn ends
-  export async function ended(chat: Chat, call: Call, halt: AbortController): Promise<boolean> {
+  // the turn's call ended (logged as such by Chat.on); false: the turn ends
+  export async function ended(chat: Chat, end: End): Promise<boolean> {
     const main = chat.main;
-    const end = await call.done;
-    main.call = null;
-    main.limit = null;
-    Chat.unanswered(chat, main);
-    Chat.live(chat, main, []);
-    main.wait.unshift(...main.sent.slice(main.sent.length - end.left.length));
+    const halt = main.halt;
     if (!end.ok && !halt.signal.aborted) {
       Chat.failed(chat, end.text);
     }
@@ -615,7 +605,7 @@ export namespace Chat {
       Memory.save(mem);
       Chat.note(chat, "Goal met.");
     } else if (on) {
-      await Chat.writing(chat, async () => Chat.take(chat, Chat.push(chat, chat.main, "user", GOAL_NO)));
+      await Chat.writing(chat, async () => Run.take(chat.main, Chat.push(chat, chat.main, "user", GOAL_NO)));
     }
     return !halt.signal.aborted;
   }
@@ -633,13 +623,13 @@ export namespace Chat {
   // to the chat (main, in pages), or an agent's log, after the tool calls
   // still waiting there (Chat.flush; a result, those up to its own); each
   // told to every view
-  export function push<M>(chat: Chat, run: Run<M>, kind: Kind, text: string, images: string[] = [], more = false, act?: string, pair: Pair = {}): Msg {
+  export function push(chat: Chat, run: Talk, kind: Kind, text: string, images: string[] = [], more = false, act?: string, pair: Pair = {}): Msg {
     Chat.flush(chat, run, kind === "echo" ? pair.of : undefined);
     return Chat.put(chat, run, { kind, text, images, more, act, ...pair });
   }
 
   // a message written where it goes, as it is (Chat.push)
-  export function put<M>(chat: Chat, run: Run<M>, msg: Log): Msg {
+  export function put(chat: Chat, run: Talk, msg: Log): Msg {
     if (run !== chat.main) {
       const { kind, text, of, tool } = msg;
       const id = Memory.agent_push(chat.mem, run.name, kind, text, { of, tool });
@@ -661,7 +651,7 @@ export namespace Chat {
   // anything else goes right on top of it). A result (upto: its call's
   // id) writes only those up to its own: one started after it ran later.
   // None between the pages of a message being written
-  export function flush<M>(chat: Chat, run: Run<M>, upto?: string): void {
+  export function flush(chat: Chat, run: Talk, upto?: string): void {
     const ids = [...run.calls.keys()];
     const end = upto === undefined ? ids.length : ids.indexOf(upto) + 1 || ids.length;
     const left = [...run.calls].slice(0, end).filter(([, call]) => !call.logged && call.started);
@@ -718,9 +708,16 @@ export namespace Chat {
 
   // what a call of main's or an agent's tells, as it comes: logged, kept
   // on its run, told to every view. A message the call took was logged as
-  // it came
-  export function on<M>(chat: Chat, run: Run<M>, ev: Event): void {
+  // it came. As a call ends, its tool calls left without a result are
+  // logged and what streams is cleared
+  export function on(chat: Chat, run: Talk, ev: Heard): void {
     const name = run === chat.main ? undefined : run.name;
+    if (ev.$ === "Ended") {
+      run.limit = null;
+      Chat.unanswered(chat, run);
+      Chat.live(chat, run, []);
+      return;
+    }
     if (ev.$ === "Limit") {
       return Chat.limit(chat, run, ev.limit);
     }
@@ -770,7 +767,7 @@ export namespace Chat {
 
   // the turn's or an agent's call waits for a usage limit (Limit.park), or
   // no longer (null), told to every view
-  export function limit<M>(chat: Chat, run: Run<M>, limit: Parked | null): void {
+  export function limit(chat: Chat, run: Talk, limit: Parked | null): void {
     run.limit = limit;
     Chat.all(chat, Chat.state(chat));
   }
@@ -778,7 +775,7 @@ export namespace Chat {
   // a call answers on a fallback, or back on its pick (AskAI.ts Run): a
   // note in the chat (an agent's log) as that changes; the turn's wait
   // names the model it runs on
-  export function ran<M>(chat: Chat, run: Run<M>, ev: Extract<Event, { $: "Run" }>): void {
+  export function ran(chat: Chat, run: Talk, ev: Extract<Event, { $: "Run" }>): void {
     const now = ev.from === null ? null : Pick.label(ev.run);
     if (run === chat.main) {
       chat.model = ev.run.model;
@@ -794,14 +791,14 @@ export namespace Chat {
   // what streams once an entry came: the tool calls awaiting their
   // results not logged yet (those queued too), in the order the log will
   // have them; what was drawn never vanishes before it is printed
-  export function waiting<M>(run: Run<M>): Live[] {
+  export function waiting(run: Talk): Live[] {
     return [...run.calls.values()].filter((call) => !call.logged).map((call) => ({ kind: "tool", text: call.text }));
   }
 
   // a call's tool calls left without a result (it was stopped), logged
   // as they are (those started and not yet), once it ends; one queued
   // that never started is no call made
-  export function unanswered<M>(chat: Chat, run: Run<M>): void {
+  export function unanswered(chat: Chat, run: Talk): void {
     const ids = [...run.calls.keys()];
     Chat.hold(chat, () => {
       Chat.flush(chat, run);
@@ -824,22 +821,18 @@ export namespace Chat {
   }
 
   // what streams for the chat (main) or an agent, set and told
-  export function live<M>(chat: Chat, run: Run<M>, live: Live[]): void {
+  export function live(chat: Chat, run: Talk, live: Live[]): void {
     run.live = live;
     Chat.all(chat, { $: "live", agent: run === chat.main ? undefined : run.name, live });
   }
 
-  // an agent's report, once it ends: a turn of its own, unless stopped.
-  // It is taken as a post is, between the chat's other logging
-  export function report<M>(chat: Chat, run: Run<M>, text: string, stopped: boolean): void {
-    run.limit = null;
-    run.fell = null;
-    Chat.unanswered(chat, run);
-    Chat.live(chat, run, []);
+  // an agent's report, once it ends: a turn of its own if taken (not
+  // stopped). It is logged as a post is, between the chat's other logging
+  export function report(chat: Chat, text: string, take: boolean): void {
     Chat.hold(chat, () => {
       const msg = Chat.push(chat, chat.main, "work", text);
-      if (!stopped) {
-        Chat.take(chat, msg);
+      if (take) {
+        Run.take(chat.main, msg);
       }
       Chat.change(chat);
     });
@@ -1083,7 +1076,7 @@ export namespace Chat {
     }
     const text = Tools.restarted(work);
     const msg = Chat.push(chat, chat.main, "note", text);
-    await Promise.all(work.map((w) => (w === TURN ? Chat.take(chat, msg) : Tools.tell(chat.tools, w, text))));
+    await Promise.all(work.map((w) => (w === TURN ? Run.take(chat.main, msg) : Tools.tell(chat.tools, w, text))));
   }
 
   // Timers
@@ -1129,7 +1122,7 @@ export namespace Chat {
           const msgs = fresh.map((t) => Chat.push(chat, chat.main, "work", Timer.timer_say(t, at), [], false, "timer " + t.id + " " + t.at));
           mem.timers = mem.timers.flatMap((t) => (dues.includes(t) ? (Timer.timer_after(t, at) ?? []) : [t]));
           Memory.save(mem);
-          msgs.forEach((msg) => Chat.take(chat, msg));
+          msgs.forEach((msg) => Run.take(chat.main, msg));
         }
         Chat.timed(chat);
       } catch (err: any) {
@@ -1155,10 +1148,10 @@ export namespace Chat {
 
   // UniiChat's turn only, with the spawns and tells it waits on (for the
   // view: Tools.view, on main's halt); agents go on. why: the note the
-  // turn's end logs (Chat.turn), so after the reply the stop cut; null: none
+  // turn's end logs (Chat.ending), so after the reply the stop cut; null:
+  // none
   export function interrupt(chat: Chat, why: string | null): void {
-    chat.main.halt.abort(why);
-    chat.main.call?.stop();
+    Run.stop(chat.main, why);
   }
 
   // all work, agents too; its why noted at the turn's end, or at once if
