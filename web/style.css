@@ -315,9 +315,9 @@ header > .imping { display: flex; flex-direction: column; justify-content: cente
 .msg li.task > input { margin: 0 .45em 0 -1.3em; vertical-align: -.1em; }
 .msg code { font: .82em var(--mono); background: var(--block); border-radius: 5px; padding: .1em .35em; }
 /* code in a message: filled, as the terminal; a call's code (on the
-   call's fill) and a file's lines: framed. Code never wraps on the
-   site: a long line overflows right, its pre scrolls */
-.msg pre { position: relative; font: 13.5px/1.6 var(--mono); white-space: pre; overflow-wrap: normal; background: var(--block); border-radius: 10px; padding: 13px 16px; overflow-x: auto; }
+   call's fill) and a file's lines: framed. A long line wraps, as the
+   rest of a message does: nothing scrolls sideways */
+.msg pre { position: relative; font: 13.5px/1.6 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; background: var(--block); border-radius: 10px; padding: 13px 16px; }
 .msg:is(.tool, .echo) pre, .msg pre.diff { background: none; border: 1.25px solid var(--frame); }
 .msg pre code { font: inherit; background: none; padding: 0; }
 .msg blockquote { padding-left: 1.2em; font: italic 16.5px/1.6 var(--serif); }
@@ -357,8 +357,12 @@ header > .imping { display: flex; flex-direction: column; justify-content: cente
    line's ink by its mark, kept ones faint, a read's in ink; its number
    unselectable */
 .msg pre.diff code > span.file { color: var(--ink); }
-.msg pre.diff code > span { display: block; }
-.msg pre.diff i { display: inline-block; width: calc(var(--nw) + 1ch); font-style: normal; color: var(--soft); user-select: none; }
+/* a wrapped line goes on under its text, its number and mark alone in
+   their column */
+.msg pre.diff code > span { display: block; padding-left: calc(var(--nw) + 3ch); text-indent: calc(-1 * (var(--nw) + 3ch)); }
+.msg pre.diff code > span.file { padding-left: calc(var(--nw) + 1ch); text-indent: calc(-1 * (var(--nw) + 1ch)); }
+.msg pre.diff code > span.gap { padding-left: 0; text-indent: 0; }
+.msg pre.diff i { display: inline-block; width: calc(var(--nw) + 1ch); text-indent: 0; font-style: normal; color: var(--soft); user-select: none; }
 .msg pre.diff .add { color: var(--add); }
 .msg pre.diff .del { color: var(--del); }
 .msg pre.diff .gap { color: var(--soft); }
@@ -381,6 +385,9 @@ header > .imping { display: flex; flex-direction: column; justify-content: cente
   .msg pre:has(> .copy) { padding-right: 40px; }
   .msg pre > .copy { top: 9px; right: 9px; }
 }
+/* a one-line block in a call or result is as tall as its Copy needs */
+.msg:is(.tool, .echo) pre:has(> .copy) { box-sizing: border-box; min-height: 34px; }
+.msg:is(.tool, .echo) pre > .copy { top: 3px; right: 4px; }
 /* a touch browser zooms the page into a field whose font is under 16px */
 @media (hover: none) { input, select { font-size: 16px; } }
 /* a finger needs 44px: small buttons take taps around them (a box
