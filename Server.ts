@@ -284,6 +284,8 @@ export namespace Chat {
   // Main.start). One that fails to open throws, and the server ends
   export function open(): Chat {
     const mem = Memory.load(CHAT, () => ({ system: Tools.prompt("compact"), searches: 0, server: "" }), Owner.act_put);
+    // what ran as it was cut, read before anything saves what runs now
+    const cut = mem.work;
     // Unii's turn (Run.ts): a message queued is logged as its call starts
     // (Chat.posted); one queued stops a goal check running, whose answer
     // it drops; one of the user's left queued by a stop is the next turn
@@ -334,7 +336,7 @@ export namespace Chat {
     Chat.timed(chat);
     Memory.pump(mem);
     Chat.progress(chat);
-    Chat.resume(chat, mem.work).finally(() => Chat.change(chat)).catch((err) => console.error("unii: resuming the chat: " + (err?.message ?? err)));
+    Chat.resume(chat, cut).finally(() => Chat.change(chat)).catch((err) => console.error("unii: resuming the chat: " + (err?.message ?? err)));
     return chat;
   }
 
