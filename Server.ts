@@ -322,13 +322,12 @@ export namespace Chat {
       eye: { parts: [], from: 0 }, after: Promise.resolve(), batch: null, writes: Promise.resolve(), held: null, back: -1, sums: null,
     };
     // a saved pick (a profile, by name) not offered gave way: told once
-    const shown = (p: Pick) => p.profile ?? Pick.label(p);
-    const saved = mem.pick === null ? null : shown(mem.pick as Pick);
-    if (saved !== null && saved !== shown(pick)) {
+    const saved = mem.pick === null ? null : Chat.pick_name(mem.pick as Pick);
+    if (saved !== null && saved !== Chat.pick_name(pick)) {
       mem.pick = pick;
       Memory.save(mem);
       Chat.keep_pick(mem.pick);
-      Chat.note(chat, saved + " isn't offered here, so the chat now runs on " + shown(pick) + ".");
+      Chat.note(chat, saved + " isn't offered here, so the chat now runs on " + Chat.pick_name(pick) + ".");
     }
     if (mem.count === 0) {
       Memory.push(mem, [{ kind: "unii", text: HELLO, line: HELLO_LINE }]);
@@ -342,6 +341,12 @@ export namespace Chat {
     Chat.progress(chat);
     Chat.resume(chat, cut).finally(() => Chat.change(chat)).catch((err) => console.error("unii: resuming the chat: " + (err?.message ?? err)));
     return chat;
+  }
+
+  // a pick as the chat tells whether it is still offered: a profile by its
+  // name (its first model may change), else its label
+  export function pick_name(pick: Pick): string {
+    return pick.profile ?? Pick.label(pick);
   }
 
   // the vendor of the pick the chat saved (its own, not the default)
@@ -1257,17 +1262,18 @@ export namespace Chat {
   }
 
   // the settings changed (Settings.ts): the chat runs on its pick if
-  // still offered, else on the default (told once, as Chat.open tells
-  // it), and its views see the offer
+  // still offered (a profile: by its name, whatever its first model now),
+  // else on the default (told once, as Chat.open tells it), and its views
+  // see the offer
   export function offer(chat: Chat): void {
     const pick = Pick.load(chat.mem.pick, config.OFFER, config.PICK);
-    const saved = chat.mem.pick === null ? null : Pick.label(chat.mem.pick as Pick);
+    const saved = chat.mem.pick === null ? null : Chat.pick_name(chat.mem.pick as Pick);
     chat.pick = pick;
-    if (saved !== null && saved !== Pick.label(pick)) {
+    if (saved !== null && saved !== Chat.pick_name(pick)) {
       chat.mem.pick = pick;
       Memory.save(chat.mem);
       Chat.keep_pick(chat.mem.pick);
-      Chat.note(chat, saved + " isn't offered here, so the chat now runs on " + Pick.label(pick) + ".");
+      Chat.note(chat, saved + " isn't offered here, so the chat now runs on " + Chat.pick_name(pick) + ".");
     }
     Chat.change(chat);
     Chat.talked(chat, TALK_SMALL);
