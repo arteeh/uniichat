@@ -38,8 +38,8 @@ export type Waiting = { text: string; tool: string; logged: boolean; started: bo
 export type Heard = Event | { $: "Ended" };
 
 // a message queued, not logged yet (Q), and what tells its taker it is
-// queued or logged (Run.take)
-export type Queued<Q> = { q: Q; done: () => void };
+// queued or logged, or why it couldn't be logged (Run.take)
+export type Queued<Q> = { q: Q; done: (why: string | null) => void };
 
 // a conversation (Q: a message for it as it comes, M: as logged: main's
 // are logged messages, a subagent's what it is told). busy: its loop runs
@@ -104,25 +104,25 @@ export namespace Run {
   // (which logs it at once). Done as it is queued behind a running loop
   // (the views told: kind.queued; a call waiting for a usage limit
   // woken), or as its loop logged it
-  export function take<Q, M>(run: Run<Q, M>, q: Q): Promise<void> {
-    return Run.takes(run, [q]);
+  export function take<Q, M>(run: Run<Q, M>, q: Q): Promise<string | null> {
+    return Run.takes(run, [q]).then(([why]) => why);
   }
 
   // several taken at once, in order (one loop logs them all)
-  export function takes<Q, M>(run: Run<Q, M>, qs: Q[]): Promise<void> {
+  export function takes<Q, M>(run: Run<Q, M>, qs: Q[]): Promise<(string | null)[]> {
     const dones = qs.map((q) => {
-      const { promise, resolve } = Promise.withResolvers<void>();
+      const { promise, resolve } = Promise.withResolvers<string | null>();
       run.queue.push({ q, done: resolve });
       return promise;
     });
     if (!run.busy) {
       run.going = Run.loop(run);
-      return Promise.all(dones).then(() => {});
+      return Promise.all(dones);
     }
-    run.queue.slice(run.queue.length - qs.length).forEach((x) => x.done());
-    run.kind.queued(run);
+    run.queue.slice(run.queue.length - qs.length).forEach((x) => x.done(null));
+    Run.safe(run, () => run.kind.queued(run));
     run.call?.wake();
-    return Promise.all(dones).then(() => {});
+    return Promise.all(dones);
   }
 
   // THE loop: what is queued logged, a call taking it all, and again
@@ -155,15 +155,15 @@ export namespace Run {
         }
       }
     } catch (err: any) {
-      kind.failed(run, String(err?.message ?? err));
+      Run.safe(run, () => kind.failed(run, String(err?.message ?? err)));
     } finally {
-      kind.ending(run);
+      Run.safe(run, () => kind.ending(run));
       run.call = null;
       const left = await Run.logs(run);
       again = left.some(kind.again);
       run.wait = again ? run.wait : [];
       run.busy = false;
-      kind.finish(run);
+      Run.safe(run, () => kind.finish(run));
     }
     // one taken as the last logging yielded found the loop still busy
     if ((again || run.queue.length > 0) && !run.busy) {
@@ -172,23 +172,41 @@ export namespace Run {
   }
 
   // what is queued logged, one by one in order, to wait for the next
-  // call; those logged
+  // call; those logged. One that can't be (a write failing) is dropped,
+  // its taker told why, and noted
   export async function logs<Q, M>(run: Run<Q, M>): Promise<Q[]> {
     const logged: Q[] = [];
+    let changed = false;
     while (run.queue.length > 0) {
       const { q, done } = run.queue[0];
-      // (one logged at once, as a subagent's, gives way to nothing)
-      const got = run.kind.log(run, q);
-      const msg = got instanceof Promise ? await got : got;
-      run.queue.shift();
-      run.wait.push(msg);
-      logged.push(q);
-      done();
+      try {
+        const got = run.kind.log(run, q);
+        const msg = got instanceof Promise ? await got : got;
+        run.wait.push(msg);
+        logged.push(q);
+        done(null);
+      } catch (err: any) {
+        const why = "a message couldn't be logged: " + String(err?.message ?? err);
+        done(why);
+        Run.safe(run, () => run.kind.failed(run, why));
+      } finally {
+        run.queue.shift();
+        changed = true;
+      }
     }
-    if (logged.length > 0) {
-      run.kind.queued(run);
+    if (changed) {
+      Run.safe(run, () => run.kind.queued(run));
     }
     return logged;
+  }
+
+  // a step of a run's that may throw (a write failing) doesn't wedge it
+  export function safe<Q, M>(run: Run<Q, M>, step: () => void): void {
+    try {
+      step();
+    } catch (err: any) {
+      console.error("unii: " + run.name + ": " + (err?.stack ?? err));
+    }
   }
 
   // the run stopped: its call cut, its loop ended (why: main's note of

@@ -385,8 +385,8 @@ export namespace Chat {
     }
     const text = (await Chat.read(body, at, body.size - at)).toString("utf8");
     const pics = [...images, ...await Chat.pictured(chat, text, images)];
-    await Run.take(chat.main, { kind: "user", text, images: pics, act: id });
-    return {};
+    const why = await Run.take(chat.main, { kind: "user", text, images: pics, act: id });
+    return why === null ? {} : { error: why };
   }
 
   // up to n bytes of a body, from byte `at`
