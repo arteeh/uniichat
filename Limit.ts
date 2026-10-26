@@ -1,50 +1,23 @@
 // Limit
 // =====
-// Usage limits, for every vendor, in one place. A usage limit is the
-// plan's or the account's quota running out: a 429 from an API (but
-// OpenAI's insufficient_quota, which is credit gone), a rate-limit stream
-// error, or Claude Code's rate_limit_event "rejected". The vendors only
-// detect one and count it (Limit `n`), and say how a call goes on after
-// it: Agent.ts asks again; ClaudeSub.ts starts a new Claude Code, or tells
-// the idle one to go on. What a call does at the limit is decided here.
+// Usage limits, for every vendor, in one place: the vendors only detect
+// one and count it (Limit `n`); what a call does at the limit is decided
+// here.
 //
-// A limit never fails a call by itself. The call waits for the reset the
-// vendor told, else for a doubling wait up to LIMIT (a patient call's, a
-// summary's: up to AskAI's AGAIN). From TRIES limits in a row on it waits
-// at least that doubling, so a limit that never clears is never asked
-// fast. The count goes on across a patient call's tries (Ask `limits`).
+// A limit never fails a call by itself: it waits for the reset the vendor
+// told, else a doubling wait up to LIMIT (a patient call's: AGAIN). A
+// wait of LONG or more parks it (a Limit event: the views' live line); a
+// shorter one reads as the service being busy. A stop, a wake (a message
+// queued for its run) or a resume ends the wait, and it asks again. It
+// ends instead (an Off) only if it ran no tool yet and has a fallback or
+// a repick. A subagent's waits as Unii's turn does, and as the turn
+// has messages queued it waits till they are taken (STAGGERED), so a
+// "stop it" among them comes first.
 //
-// A wait of LONG or more parks the call: a Limit event tells the views
-// till when, their live line while it lasts (no thought, no note: #49).
-// A shorter wait reads as the service being busy, each time. A stop, a
-// wake (a message queued for its run: Run.take) or a resume ends the
-// wait: the call asks once more and, still limited, waits again, saying
-// nothing more.
-//
-// At a long limit a call ends instead of waiting (an Off, which its vendor
-// turns into a `down` end) only if it did nothing yet (ran no tool) and
-// has a fallback to go on to (AskAI.ts), or picks again as it asks again
-// (a summary's `repick`, so a compactor changed meanwhile counts). A
-// subagent's waits as Unii's turn does (#50): its wait shows in the
-// master's "Agents at work now" (Tools.at_work), and a stop ends it. As
-// it would wake while the turn has messages queued (STAGGERED), it waits
-// till the turn has taken them (up to STAGGER), so a "stop it" among
-// them comes before it does much: the turn, woken by the same reset,
-// first ends the call it was in.
-//
-// Every call asks the service: its answer is the truth, and a reset told
-// only times the wait. The exception is a limit under which asking would
-// bill (claude-sub's extra usage, one per account: LIMITS). A call under
-// one waits for its reset before asking at all, and again after a resume
-// or a message, so neither spends money (Limit.guard).
-//
-// Limits may lift early (the plan resets them, or its user spends a
-// banked reset). While a call waits on a sub whose usage can be read
-// without asking a model (USAGE: openai-sub's), it is read every POLL, and
-// the calls waiting on it wake as it clears. claude-sub's is not polled:
-// only Claude Code reads it, with a sign-in we never touch, so a limit
-// lifted early wakes its calls by a resume or a message. A resume (the
-// master's `resume` tool) wakes every call waiting.
+// Under a limit where asking would bill (claude-sub's extra usage:
+// LIMITS) a call waits before asking at all (Limit.guard). A sub whose
+// usage can be read without a model (USAGE: openai-sub's) is read every
+// POLL while a call waits, waking it as the limit lifts early.
 
 import { AGAIN, type Ask, type Event, type Vendor } from "./AskAI.ts";
 import { TRIES } from "./Agent.ts";

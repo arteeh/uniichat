@@ -1,24 +1,12 @@
 // Run
 // ===
 // One conversation that calls a model: Unii's turn (named TURN) or a
-// subagent's (named by its name), with one way in and one loop for both.
-//
-// A message for it (the user's, a report, a timer's, a tell, a restart's
-// note) goes in by Run.take, and is queued: never handed to a call that
-// runs (#46). A run not running starts its loop, which logs what is
-// queued (each message gets its place in the log only now, so it sits
-// right before the reply to it), then makes one call taking all of it,
-// and again while more was queued meanwhile. A message queued for a call
-// that waits for a usage limit wakes it to ask again (Call.wake), no
-// more. A stop (Run.stop) cuts the running call and ends the loop; what
-// was queued is logged then, and goes on as the next turn if its kind
-// says so (Kind.again: main's, a message of the user's: Stop, then send).
-//
-// What differs between the two kinds is its Kind: how a call is asked
-// (main: the view, summaries waited on, devices, the goal check;
-// a subagent: its log), how a message is logged, what an end means, and
-// what is logged as the loop ends (main: why it was stopped; a subagent:
-// its report).
+// subagent's (by its name), with one way in (Run.take) and one loop.
+// A message for it is queued, never handed to a running call; the loop
+// logs what is queued (so it sits right before the reply to it), makes
+// one call taking it all, and goes again while more came meanwhile. A
+// stop cuts the call and ends the loop. What differs between the two is
+// their Kind.
 
 import { AskAI, type Ask, type Call, type End, type Event, type Parked } from "./AskAI.ts";
 import type { Pick } from "./Pick.ts";
