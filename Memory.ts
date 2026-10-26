@@ -894,7 +894,7 @@ export namespace Memory {
     const own = Memory.served(mem, l, i) === "compactor";
     const repick = () => Pick.ask(config.COMPACTOR);
     const told: { again: Again | null } = { again: null };
-    return AskAI.ask({ ...mem.share(), ...repick(), blocks, patient: true, repick, yields: own ? undefined : mem.dir }, (ev) => Memory.heard(mem, own, ev, told));
+    return AskAI.ask({ ...mem.share(), ...repick(), blocks, patient: true, repick, yields: own ? undefined : mem.dir, who: own ? "compactor" : "import" }, (ev) => Memory.heard(mem, own, ev, told));
   }
 
   // a summary's call's event: a failure waiting to ask again (Again)

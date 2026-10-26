@@ -155,11 +155,9 @@ const ROOMS = new Map<string, Room>();
 export namespace Agent {
 
   // a request's cache use as its vendor tells it (tokens; write null: not
-  // told, as OpenAI's), logged for each call but summaries' and imports'
+  // told), logged with whose it is
   export function cached(ask: Ask, read: number, write: number | null, input: number): void {
-    if (ask.patient !== true) {
-      console.error("cache " + ask.vendor + " " + ask.model + ": read " + read + (write === null ? "" : ", write " + write) + ", uncached " + input);
-    }
+    console.error("cache " + ask.vendor + " " + ask.model + " " + (ask.who ?? "main") + ": read " + read + (write === null ? "" : ", write " + write) + ", uncached " + input);
   }
 
   export function ask(ask: Ask, on: (ev: Event) => void): Try {

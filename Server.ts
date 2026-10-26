@@ -573,7 +573,7 @@ export namespace Chat {
     chat.eye = Chat.eye(mem, from);
     chat.socks.forEach((sock) => Chat.show(chat, sock));
     const blocks = [...view, Tools.devices(chat.tools), Tools.skills(chat.tools), Tools.at_work(chat.tools), { text: HEAD + text, mark: true }];
-    const ask = { ...Chat.share(chat, Tools.prompt("prompt")), searches: SEARCHES, server, blocks, imgs, talk: mem.talk !== null };
+    const ask = { ...Chat.share(chat, Tools.prompt("prompt")), searches: SEARCHES, server, blocks, imgs, talk: mem.talk !== null, who: "main" };
     chat.model = chat.pick.model;
     chat.asked = true;
     chat.open = 0;
@@ -610,7 +610,7 @@ export namespace Chat {
       return Memory.line({ l: 0, i }, msg.kind + ": " + msg.text) + "\n";
     });
     const blocks = [...Memory.view(mem, at), { text: tail.join("") + GOAL_ASK + goal, mark: true }];
-    return { call: AskAI.ask({ ...Chat.share(chat, GOAL), blocks }, (ev) => Chat.checking(chat, ev)), goal };
+    return { call: AskAI.ask({ ...Chat.share(chat, GOAL), blocks, who: "goal" }, (ev) => Chat.checking(chat, ev)), goal };
   }
 
   // a goal check's events: only its waits for a usage limit show, as the

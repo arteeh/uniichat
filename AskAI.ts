@@ -82,7 +82,9 @@ export type Block = { text: string; mark: boolean; back?: boolean };
 // repick: a patient call's pick as it starts over (AskAI.ask), which a
 // long usage limit ends a try for, as a fallback does; limits: the
 // usage limits in a row its last try ended at, on the pick this one
-// asks again (Limit.wait_for goes on from them)
+// asks again (Limit.wait_for goes on from them); who: whose conversation
+// (main, a subagent's name, compactor, import, goal), for its cache log
+// and openai-sub's cache key
 export type Ask = Pick & {
   system    : string;
   blocks    : Block[];
@@ -97,6 +99,7 @@ export type Ask = Pick & {
   talk?     : boolean;
   repick?   : () => Pick;
   limits?   : number;
+  who?      : string;
 };
 
 // a prefix cached: until when; while its leader's response has not

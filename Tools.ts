@@ -959,7 +959,7 @@ export namespace Tools {
     const own = Memory.file_text(PROMPTS.prompt.file);
     const system = own === "" ? SUB : SUB + "\n\n" + AGENT_PROMPT + "\n\n" + own;
     const blocks = [...agent.view, Tools.devices(tools), Tools.skills(tools), log];
-    return { ...run, system, blocks, searches: SEARCHES, server, agent: true };
+    return { ...run, system, blocks, searches: SEARCHES, server, agent: true, who: agent.name };
   }
 
   // what an agent runs on: config.AGENTS or else the chat's pick, with
