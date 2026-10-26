@@ -409,7 +409,9 @@ async function win_stop(part: Part): Promise<void> {
   }
   fs.rmSync(LOGS + "/" + part + ".pid", { force: true });
   fs.rmSync(LOGS + "/" + part + ".up", { force: true });
-  if (mine.length === 0 && /"Running"/.test(run(["schtasks", "/query", "/tn", "\\" + n, "/fo", "csv", "/nh"]).out)) {
+  // ended whatever its state (schtasks shows that in the system's
+  // language); on an idle task /end only fails, which is fine
+  if (mine.length === 0) {
     run(["schtasks", "/end", "/tn", "\\" + n]);
     step("task ended");
   }
