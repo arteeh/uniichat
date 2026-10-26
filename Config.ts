@@ -130,6 +130,9 @@ export const KEYS: Record<string, string> = config_keys(keys_read());
 // the sign-ins and keys the defaults last followed (config_follow)
 let FOLLOWED = config_usable().join();
 
+// the vendors the chat's own pick runs on (config_keep)
+let KEPT: string[] = [];
+
 // what runs as config.json and keys.json are read again (config_reload):
 // a patient call's wait, which its pick changed ends (AskAI.nap)
 export const RELOADED = new Set<() => void>();
@@ -188,24 +191,66 @@ export function config_value(file: Record<string, unknown>, key: string): string
 // a setting's default, and why it is that (""; none but the picks'): the
 // vendors, pick and compactor follow what is signed in or has a key here
 // (config_usable), read as asked, so a sign-in counts without a restart:
-// the vendors usable, else claude-api; the pick and compactor on the
-// first usable vendor `file` offers, else on its first, at medium
+// the vendors usable, and those a setting or the chat's pick names
+// (config_named: a sign-out never makes what the user chose wrong), else
+// claude-api; the pick and compactor on the first usable vendor `file`
+// offers, else on its first, with a model offered (DEFAULT_MODEL, else
+// the vendor's first), at medium
 export function config_default(file: Record<string, unknown>, key: string): { value: string; why: string } {
   const def = SETTINGS.find((s) => s.key === key)?.def ?? "";
-  const usable = config_usable();
-  if (key === "vendors") {
-    return usable.length === 0 ? { value: def, why: NONE_WHY } : { value: usable.join(), why: usable.map((v) => USABLE[v]).join(", ") };
-  }
-  if (key !== "pick" && key !== "compactor") {
+  if (key !== "vendors" && key !== "pick" && key !== "compactor") {
     return { value: def, why: "" };
   }
+  const usable = config_usable();
+  if (key === "vendors") {
+    const named = config_named(file).filter((v) => !usable.includes(v));
+    const whys = [...usable.map((v) => USABLE[v]), ...(named.length === 0 ? [] : [named.join(", ") + " chosen"])];
+    return usable.length + named.length === 0 ? { value: def, why: NONE_WHY } : { value: [...usable, ...named].join(), why: whys.join(", ") };
+  }
   const offered = config_value(file, "vendors").split(",").map((v) => v.trim());
-  const vendor = usable.find((v) => offered.includes(v)) ?? VENDORS.find((v) => offered.includes(v));
+  const models = config_value(file, "models").split(",").map((m) => m.trim());
+  const model = (v: Vendor) => (models.includes(DEFAULT_MODEL[v]) ? DEFAULT_MODEL[v] : Pick.models([v], models)[0]?.[1].label);
+  const order = [...usable, ...VENDORS.filter((v) => !usable.includes(v))].filter((v) => offered.includes(v));
+  const vendor = order.find((v) => model(v) !== undefined);
   if (vendor === undefined) {
     return { value: def, why: "" };
   }
   const why = usable.includes(vendor) ? USABLE[vendor] : usable.length === 0 ? NONE_WHY : vendor + " has no sign-in or key here";
-  return { value: vendor + ":" + DEFAULT_MODEL[vendor] + ":medium:slow", why };
+  return { value: vendor + ":" + model(vendor) + ":medium:slow", why };
+}
+
+// the vendors the user chose: those the pick, compactor and agents
+// settings, the profiles' models (the environment's or `file`'s, as they
+// read: one wrong is config_make's to tell) and the chat's own pick
+// (KEPT) name
+function config_named(file: Record<string, unknown>): Vendor[] {
+  const set = ["pick", "compactor", "agents"].map((key) => config_env_value(key) ?? config_str(file[key]) ?? "");
+  let profiles: unknown = file.profiles;
+  try {
+    profiles = process.env.UNII_PROFILES === undefined ? profiles : JSON.parse(process.env.UNII_PROFILES);
+  } catch {
+    profiles = null;
+  }
+  const lists = typeof profiles === "object" && profiles !== null ? Object.values(profiles) : [];
+  const falls = lists.flatMap((list: unknown) => (Array.isArray(list) ? list.map(String) : []));
+  const named = [...set, ...falls].map((text) => text.split(":")[0].trim());
+  return VENDORS.filter((v) => named.includes(v) || KEPT.includes(v));
+}
+
+// the vendors the chat's own pick runs on (Server.ts: a pick saved, as it
+// opens and as it changes): the default vendors keep them too
+// (config_named), so a sign-out never moves the chat off its pick; the
+// files read again as they change (one wrong: logged)
+export function config_keep(vendors: string[]): void {
+  if (vendors.join() === KEPT.join()) {
+    return;
+  }
+  KEPT = vendors;
+  try {
+    config_reload();
+  } catch (err) {
+    console.error("unii: " + (err instanceof Error ? err.message : String(err)));
+  }
 }
 
 // the vendors that can be asked here, in the order a default takes
@@ -214,15 +259,21 @@ export function config_default(file: Record<string, unknown>, key: string): { va
 // .credentials.json, or (macOS, in the keychain) only its account in
 // .claude.json
 export function config_usable(): Vendor[] {
-  const read = (file: string): any => {
+  // a JSON file's field (undefined: none, or no such file)
+  const field = (file: string, ...keys: string[]): unknown => {
+    let at: unknown;
     try {
-      return JSON.parse(fs.readFileSync(file, "utf8"));
+      at = JSON.parse(fs.readFileSync(file, "utf8"));
     } catch {
-      return null;
+      return undefined;
     }
+    for (const key of keys) {
+      at = typeof at === "object" && at !== null ? (at as Record<string, unknown>)[key] : undefined;
+    }
+    return at;
   };
-  const claude = read(CLAUDE_SUB + "/.credentials.json")?.claudeAiOauth != null || read(CLAUDE_SUB + "/.claude.json")?.oauthAccount != null;
-  const chatgpt = typeof read(CHATGPT)?.tokens?.refresh_token === "string";
+  const claude = field(CLAUDE_SUB + "/.credentials.json", "claudeAiOauth") != null || field(CLAUDE_SUB + "/.claude.json", "oauthAccount") != null;
+  const chatgpt = typeof field(CHATGPT, "tokens", "refresh_token") === "string";
   const has: Record<Vendor, boolean> = { "claude-sub": claude, "openai-sub": chatgpt, "claude-api": KEYS.anthropic !== "", "openai-api": KEYS.openai !== "" };
   return (Object.keys(USABLE) as Vendor[]).filter((v) => has[v]);
 }

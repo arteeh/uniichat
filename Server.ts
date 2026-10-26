@@ -296,6 +296,7 @@ export namespace Chat {
       pick   : () => chat.pick,
       halt   : () => chat.halt.signal,
     });
+    Chat.keep_pick(mem.pick);
     const pick = Pick.load(mem.pick, config.OFFER, config.PICK);
     const chat: Chat = {
       mem, tools, pick, socks: new Set(), acts: new Map(), busy: false, call: null, model: "", check: null, asked: false, open: 0, sent: [], wait: [],
@@ -308,6 +309,7 @@ export namespace Chat {
     if (saved !== null && saved !== shown(pick)) {
       mem.pick = pick;
       Memory.save(mem);
+      Chat.keep_pick(mem.pick);
       Chat.note(chat, saved + " isn't offered here, so the chat now runs on " + shown(pick) + ".");
     }
     if (mem.count === 0) {
@@ -322,6 +324,13 @@ export namespace Chat {
     Chat.progress(chat);
     Chat.resume(chat, mem.work).finally(() => Chat.change(chat)).catch((err) => console.error("unii: resuming the chat: " + (err?.message ?? err)));
     return chat;
+  }
+
+  // the vendor of the pick the chat saved (its own, not the default)
+  // kept offered, whatever is signed in (config.config_keep)
+  export function keep_pick(pick: object | null): void {
+    const vendor = pick === null ? undefined : (pick as Partial<Pick>).vendor;
+    config.config_keep(typeof vendor === "string" ? [vendor] : []);
   }
 
   // what a call of the chat starts with: its pick and system prompt. A
@@ -496,13 +505,13 @@ export namespace Chat {
   // summaries written: it doesn't wait on them)
   export async function call(chat: Chat): Promise<boolean> {
     const mem = chat.mem;
+    const halt = (chat.halt = new AbortController());
     Main.follow();
     const none = config.config_none();
     if (none !== null) {
       Chat.failed(chat, none);
       return false;
     }
-    const halt = (chat.halt = new AbortController());
     Chat.change(chat);
     await Tools.look(chat.tools);
     if (halt.signal.aborted) {
@@ -1234,6 +1243,7 @@ export namespace Chat {
     if (saved !== null && saved !== Pick.label(pick)) {
       chat.mem.pick = pick;
       Memory.save(chat.mem);
+      Chat.keep_pick(chat.mem.pick);
       Chat.note(chat, saved + " isn't offered here, so the chat now runs on " + Pick.label(pick) + ".");
     }
     Chat.change(chat);
@@ -1416,6 +1426,7 @@ export namespace Chat {
         chat.pick = chat.mem.pick = pick;
         chat.fell.clear();
         Memory.save(chat.mem);
+        Chat.keep_pick(pick);
         Chat.change(chat);
         Chat.talked(chat, TALK_SMALL);
         return {};
