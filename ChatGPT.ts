@@ -314,22 +314,8 @@ export namespace ChatGPT {
       stream              : true,
       include             : ["reasoning.encrypted_content"],
       service_tier        : ask.speed === "fast" ? "priority" : undefined,
-      prompt_cache_key    : ChatGPT.session(ask),
+      prompt_cache_key    : api.prompt_cache_key,
     };
-  }
-
-  // the cache's session, the same for all its calls: main's; one for all
-  // subagents (each lives for a prompt or two, and they share their
-  // system prompt and tools, so each reads what the others cached); the
-  // compactor's. Sent as the session-id header too, which the backend
-  // routes its cache by
-  export function session(ask: Ask): string {
-    return "unii-" + Bun.hash(JSON.stringify([ChatGPT.sharer(ask), ask.model, ask.system])).toString(36);
-  }
-
-  // whose cache session a call is in (ChatGPT.session)
-  export function sharer(ask: Ask): string {
-    return ask.agent === true ? "sub" : ask.who ?? "main";
   }
 
   // a user message without its cache breakpoints
@@ -403,7 +389,8 @@ export namespace ChatGPT {
     idle    : 1200e3,
     url     : RESPONSES,
     auth    : (refused) => ChatGPT.token(refused),
-    headers : (token, ask) => ({ ...ChatGPT.headers(token), "session-id": ChatGPT.session(ask), "thread-id": ChatGPT.session(ask) }),
+    // the backend routes its cache by the session-id header
+    headers : (token, ask) => ({ ...ChatGPT.headers(token), "session-id": OpenAI.session(ask), "thread-id": OpenAI.session(ask) }),
     body    : (ask, items, tools, max) => ChatGPT.body(ask, items, tools, max),
     start   : (ask) => ({ ...OpenAI.wire.start(ask), items: [] }),
     read    : (st, ev, on) => ChatGPT.read(st, ev, on),

@@ -43,11 +43,11 @@
 // which every call of its prefix would wait on.
 
 import { Agent } from "./Agent.ts";
-import { ChatGPT } from "./ChatGPT.ts";
 import { ClaudeSub } from "./ClaudeSub.ts";
 import { stream_lines } from "./Clip.ts";
 import { Limit } from "./Limit.ts";
 import { Machine } from "./Machine.ts";
+import { OpenAI } from "./OpenAI.ts";
 import { Pick } from "./Pick.ts";
 import * as config from "./Config.ts";
 
@@ -364,8 +364,8 @@ export namespace AskAI {
   // each block's hash seeded by the one before (64 bits)
   export function keys(ask: Ask): string[] {
     const last = ask.blocks.slice(0, -1).findLastIndex((b) => b.mark);
-    // openai-sub caches per session (ChatGPT.session)
-    const head = [ask.vendor, ask.model, ask.effort, ask.speed, ask.system, ask.searches > 0, ask.vendor === "openai-sub" ? ChatGPT.sharer(ask) : null];
+    // OpenAI caches per session (OpenAI.session)
+    const head = [ask.vendor, ask.model, ask.effort, ask.speed, ask.system, ask.searches > 0, ask.vendor.startsWith("openai") ? OpenAI.sharer(ask) : null];
     let key = Bun.hash(JSON.stringify(head));
     return ask.blocks.slice(0, last + 1).map((b) => String((key = Bun.hash(b.text, key))));
   }

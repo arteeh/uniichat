@@ -4,7 +4,8 @@
 // off. Reasoning keeps all turns (else a message sent mid-run drops it
 // and misses the cache); the speed is a service tier ("priority" is
 // fast). A marked block is an explicit breakpoint; the end is cached
-// implicitly only if marked. A server_error is busy, a
+// implicitly only if marked; a session's calls share one cache key
+// (OpenAI.session). A server_error is busy, a
 // rate_limit_exceeded a usage limit; failed, incomplete or refused
 // fails. Silent while it reasons, it is dead after 20 min.
 // Voice: TRANSCRIBER writes a recording out.
@@ -54,8 +55,22 @@ export namespace OpenAI {
       max_tool_calls       : ask.searches || undefined,
       service_tier         : tier,
       prompt_cache_options : cache,
+      prompt_cache_key     : OpenAI.session(ask),
       input                : [system, ...items.flatMap(OpenAI.input)],
     };
+  }
+
+  // the cache's session, the same for all its calls: main's; one for all
+  // subagents (each lives for a prompt or two, and they share their
+  // system prompt and tools, so each reads what the others cached); the
+  // compactor's
+  export function session(ask: Ask): string {
+    return "unii-" + Bun.hash(JSON.stringify([OpenAI.sharer(ask), ask.model, ask.system])).toString(36);
+  }
+
+  // whose cache session a call is in (OpenAI.session)
+  export function sharer(ask: Ask): string {
+    return ask.agent === true ? "sub" : ask.who ?? "main";
   }
 
   export function input(item: Item): unknown[] {
