@@ -526,7 +526,11 @@ export namespace Chat {
   // them)
   export async function call(chat: Chat, take: () => Msg[]): Promise<Ask | null> {
     const mem = chat.mem;
-    const halt = (chat.main.halt = new AbortController());
+    // the loop's (Run.loop): a stop while it logs what was queued ends it
+    const halt = chat.main.halt;
+    if (halt.signal.aborted) {
+      return null;
+    }
     Main.follow();
     const none = config.config_none();
     if (none !== null) {

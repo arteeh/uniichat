@@ -45,7 +45,7 @@ export type Queued<Q> = { q: Q; done: () => void };
 // are logged messages, a subagent's what it is told). busy: its loop runs
 // (going); queue: those waiting to be logged as its next call starts;
 // wait: logged, for the next call; halt: its stop (renewed as its loop
-// starts, and main's per call); calls: its tool calls awaiting their
+// starts); calls: its tool calls awaiting their
 // results, by id, in the order they started (Chat.on); limit: its call
 // waits for a usage limit (Limit.park); fell: the fallback its calls run
 // on (Chat.ran), forgotten as a pick is picked
