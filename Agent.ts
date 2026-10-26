@@ -29,9 +29,9 @@
 // naming the vendor, the model and the reset, so its report tells the
 // chat (a parked subagent waited unseen). claude-sub
 // waits alike, in Claude Code's loop (ClaudeSub.ts), on the same code:
-// what it says, its waits, LIMITS, the polls, resume. A plan's limit
-// whose reset is told (the Wire's `reset`; claude-sub's) is remembered
-// till then (LIMITS), so a call under it waits before asking. Limits
+// what it says, its waits, the polls, resume. Every call asks: the
+// service's answer is the truth, a reset told only times the wait and
+// says when (but claude-sub's under extra usage: LIMITS). Limits
 // may lift early (the plan resets them, or its user spends a banked
 // reset): while a call waits on a sub whose usage can be read without
 // asking a model (USAGE: openai-sub's) it is read every POLL, and the
@@ -128,7 +128,7 @@ export type Emit = (kind: Kind, text: string, fresh?: boolean) => void;
 // tokens as it counts them (null: not told), how its stream reads into a
 // step (S: what it read so far), which error responses are refusals
 // (null: not one), and when a plan's usage limit resets, as an error
-// response tells it (null: not told; remembered: LIMITS)
+// response tells it (null: not told)
 export type Wire<S> = {
   key     : string;
   auth?   : (refused: string | undefined) => Promise<string>;
@@ -173,9 +173,9 @@ export const LIMIT = 1800e3;
 // how often a sub's usage is read while a call waits on its limit
 export const POLL = 300e3;
 
-// the usage limits told, till their reset, by vendor and scope ("openai-sub
-// <model>", "claude-sub" for its plan, "claude-sub opus"...), and whether
-// asking under one would bill (claude-sub's extra usage)
+// the usage limits told, till their reset, by vendor ("claude-sub": one
+// per account), and whether asking under one would bill (claude-sub's
+// extra usage): only those keep a call from asking (ClaudeSub.limited)
 const LIMITS = new Map<string, { until: number; bills: boolean }>();
 
 // the calls waiting for a usage limit, by vendor: what wakes each
@@ -305,29 +305,16 @@ export namespace Agent {
   // it holds its room (Room): its model's, or its import's, which one
   // request holds at a time while the rest wait on it, so each import
   // has one request at a busy model however many it runs, and imports
-  // share its room alike. k: its busy tries, n: its usage-limit ones.
-  // Under a limit remembered (LIMITS) it waits before asking, unless a
-  // wake just ended its wait
+  // share its room alike. k: its busy tries, n: its usage-limit ones
   export async function step<S>(wire: Wire<S>, run: Run, key: string, make: (max: number) => unknown, items: Item[]): Promise<Step> {
     const signal = run.abort.signal;
     const model = run.ask.model;
     const own = run.ask.yields === undefined ? model : model + " " + run.ask.yields;
     const tries = run.ask.probe === true && items.length === 1 ? 1 : TRIES;
-    const scope = run.ask.vendor + " " + model;
     let asking = false;
-    let woke = false;
     let refused: string | undefined;
     try {
       for (let k = 0, n = 0; !signal.aborted; ) {
-        const under = woke ? null : Agent.under([scope], false);
-        woke = false;
-        if (under !== null) {
-          if (Agent.ends(run.ask, run.end.acted === true, under - Date.now())) {
-            return Agent.limit_off(Agent.fail("usage limit", []), under, run.ask);
-          }
-          woke = await Agent.park(run, run.on, signal, run.ask.vendor, under - Date.now(), true);
-          continue;
-        }
         await Agent.yielded(run, own, asking);
         const seen: Entry[] = [];
         const token = await Agent.race(Agent.token(wire, key, refused), signal);
@@ -345,9 +332,6 @@ export namespace Agent {
           continue;
         }
         const limit = step.stop === "limit";
-        if (res?.ok) {
-          Agent.note(scope, null);
-        }
         k += step.stop === "busy" ? 1 : 0;
         n += limit ? 1 : 0;
         if (step.stop === "down") {
@@ -366,12 +350,11 @@ export namespace Agent {
         if (limit) {
           const now = Date.now();
           const told = step.until ?? Agent.reset(res, now);
-          Agent.note(scope, step.until ?? null);
           const { ms, known } = Agent.limit_wait(told, n, run.ask.patient ? AGAIN : LIMIT, now);
           if (Agent.ends(run.ask, run.end.acted === true, ms)) {
             return Agent.limit_off(step, told, run.ask);
           }
-          woke = await Agent.park(run, run.on, signal, run.ask.vendor, ms, known);
+          await Agent.park(run, run.on, signal, run.ask.vendor, ms, known);
           continue;
         }
         const after = Number(res?.headers.get("retry-after") ?? "");
