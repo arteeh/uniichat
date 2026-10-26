@@ -4,7 +4,8 @@
 // picked into it, each an item right where it was put (a picture or a
 // video's first frame in its own aspect ratio, 150 px at most; a sound's,
 // a page's or any other file's tile, its name and size, one fixed size),
-// deleted as one character (Backspace after it, Delete before it).
+// deleted as one character (Backspace after it, Delete before it); a
+// picture's, clicked, opens whole (Viewer.ts).
 // Behind it, markdown: the text as typed, each item ![name](/media/…) (a
 // file that isn't media a link, [name](/media/…)) on a line of its own
 // (box_text), which is what is sent and kept as the draft; box_set draws

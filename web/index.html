@@ -51,6 +51,11 @@
   <p class="title">Schedules</p>
   <ul></ul>
 </div>
+<!-- a picture seen whole, over the chat (web/src/Viewer.ts) -->
+<dialog id="viewer" aria-label="Picture">
+  <div class="bar"><p class="name"></p><span class="zoom"></span><a class="get" title="Download" aria-label="Download"><svg viewBox="0 0 24 24"><path d="M12 4v11M7 10.5l5 5 5-5M5 19.5h14"/></svg></a><button class="shut" type="button" title="Close" aria-label="Close" autofocus><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div>
+  <div class="stage"><img alt="" draggable="false"><p class="why" hidden>Could not load this picture.</p><button class="prev" type="button" aria-label="Previous picture" hidden><svg viewBox="0 0 24 24"><path d="M15 6l-6 6 6 6"/></svg></button><button class="next" type="button" aria-label="Next picture" hidden><svg viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></button></div>
+</dialog>
 <div id="menu" popover>
   <button data-go="/settings">Settings</button>
   <button data-go="/tree">Memory</button>

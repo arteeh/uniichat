@@ -3812,6 +3812,356 @@ function start(meta) {
   };
 }
 
+// web/src/Viewer.ts
+var MAX = 8;
+var SLOP = 10;
+var DOUBLE = 320;
+var NEAR = 32;
+var PICS = "#log .pics a > img, #log a.media > img";
+var D = document.createElement("dialog");
+var STAGE = D;
+var IMG = document.createElement("img");
+var V = {
+  pic: null,
+  n: -1,
+  w: 0,
+  h: 0,
+  s: 1,
+  x: 0,
+  y: 0,
+  fit: 1,
+  swipe: 0,
+  theme: []
+};
+var PTS = new Map;
+var G = null;
+var TAP = null;
+function viewer_new() {
+  D = document.querySelector("#viewer");
+  STAGE = D.querySelector(".stage");
+  IMG = STAGE.querySelector("img");
+  D.addEventListener("close", closed);
+  D.querySelector(".shut").onclick = () => D.close();
+  D.querySelector(".prev").onclick = () => step(-1);
+  D.querySelector(".next").onclick = () => step(1);
+  D.addEventListener("keydown", key);
+  D.addEventListener("wheel", wheel, { passive: false });
+  STAGE.addEventListener("pointerdown", down);
+  STAGE.addEventListener("pointermove", move);
+  STAGE.addEventListener("pointerup", up);
+  STAGE.addEventListener("pointercancel", up);
+  IMG.addEventListener("dragstart", (ev) => ev.preventDefault());
+  D.addEventListener("gesturestart", (ev) => ev.preventDefault());
+  new ResizeObserver(refit).observe(STAGE);
+}
+function viewer_on() {
+  return D.open;
+}
+function viewer_pic(el) {
+  const link = el.closest("#log a.media, #log .pics a");
+  const img = link?.querySelector("img");
+  if (link != null && img != null) {
+    const src = link.getAttribute("href") ?? img.src;
+    return { src, name: img.alt.trim() || base(src), log: true };
+  }
+  const item = el.closest(".composer .item");
+  const pic = item?.querySelector("img");
+  if (item != null && pic != null) {
+    return { src: pic.src, name: item.dataset.name ?? base(pic.src), log: false };
+  }
+  return null;
+}
+function viewer_open(pic, push = true, el = null) {
+  if (push) {
+    history.pushState({ pic }, "", location.href);
+  }
+  if (V.pic?.src !== pic.src) {
+    const img = el?.closest("a")?.querySelector("img");
+    V.n = img == null ? -1 : [...document.querySelectorAll(PICS)].indexOf(img);
+    show(pic);
+  }
+  if (!D.open) {
+    const metas = [...document.querySelectorAll("meta[name=theme-color]")];
+    V.theme = metas.map((m) => m.content);
+    D.showModal();
+    metas.forEach((m) => m.content = getComputedStyle(D).backgroundColor);
+  }
+}
+function viewer_sync() {
+  const pic = history.state?.pic;
+  if (typeof pic?.src === "string" && typeof pic.name === "string") {
+    viewer_open({ src: pic.src, name: pic.name, log: pic.log === true }, false);
+  } else if (D.open) {
+    D.close();
+  }
+}
+function closed() {
+  const metas = [...document.querySelectorAll("meta[name=theme-color]")];
+  metas.forEach((m, k) => m.content = V.theme[k] ?? m.content);
+  V.pic = null;
+  PTS.clear();
+  G = TAP = null;
+  IMG.removeAttribute("src");
+  if (history.state?.pic != null) {
+    history.back();
+  }
+}
+function show(pic) {
+  V.pic = pic;
+  V.w = V.h = V.swipe = 0;
+  D.querySelector(".name").textContent = pic.name;
+  D.querySelector(".zoom").textContent = "";
+  const get = D.querySelector(".get");
+  get.href = pic.src;
+  get.download = file_name(pic);
+  const [list, k] = place();
+  D.querySelector(".prev").hidden = k <= 0;
+  D.querySelector(".next").hidden = k < 0 || k >= list.length - 1;
+  D.querySelector(".why").hidden = true;
+  IMG.classList.add("wait");
+  IMG.alt = pic.name;
+  IMG.src = pic.src;
+  IMG.decode().then(() => {
+    if (V.pic !== pic) {
+      return;
+    }
+    V.w = IMG.naturalWidth || STAGE.clientWidth;
+    V.h = IMG.naturalHeight || STAGE.clientHeight;
+    IMG.style.width = V.w + "px";
+    IMG.style.height = V.h + "px";
+    IMG.classList.remove("wait");
+    fit();
+  }, () => {
+    if (V.pic === pic) {
+      D.querySelector(".why").hidden = false;
+    }
+  });
+}
+function place() {
+  if (V.pic === null || !V.pic.log) {
+    return [[], -1];
+  }
+  const list = [...document.querySelectorAll(PICS)].map((img) => viewer_pic(img));
+  const src = V.pic.src;
+  const at = list.flatMap((p, k) => p.src === src ? [k] : []);
+  const k = at.reduce((best, k) => best < 0 || Math.abs(k - V.n) < Math.abs(best - V.n) ? k : best, -1);
+  V.n = k;
+  return [list, k];
+}
+function step(d) {
+  const [list, k] = place();
+  const to = k < 0 ? undefined : list[k + d];
+  if (to === undefined) {
+    return false;
+  }
+  history.replaceState({ pic: to }, "", location.href);
+  V.n = k + d;
+  show(to);
+  return true;
+}
+function fit() {
+  V.fit = fit_scale();
+  V.s = V.fit;
+  hold();
+  draw();
+}
+function fit_scale() {
+  return V.w === 0 ? 1 : Math.min(1, STAGE.clientWidth / V.w, STAGE.clientHeight / V.h);
+}
+function refit() {
+  if (V.w === 0) {
+    return;
+  }
+  const was = fitted();
+  V.fit = fit_scale();
+  V.s = was ? V.fit : Math.max(V.fit, V.s);
+  hold();
+  draw();
+}
+function fitted() {
+  return V.s <= V.fit * 1.001;
+}
+function zoom_at(x, y, s) {
+  const to = Math.min(Math.max(s, V.fit), Math.max(MAX, V.fit));
+  V.x = x - (x - V.x) * to / V.s;
+  V.y = y - (y - V.y) * to / V.s;
+  V.s = to;
+  hold();
+  draw();
+}
+function hold() {
+  const [w, h] = [V.w * V.s, V.h * V.s];
+  const [sw, sh] = [STAGE.clientWidth, STAGE.clientHeight];
+  V.x = w <= sw ? (sw - w) / 2 : Math.min(0, Math.max(sw - w, V.x));
+  V.y = h <= sh ? (sh - h) / 2 : Math.min(0, Math.max(sh - h, V.y));
+}
+function draw() {
+  IMG.style.transform = `translate(${V.x + V.swipe}px, ${V.y}px) scale(${V.s})`;
+  D.classList.toggle("big", !fitted());
+  D.querySelector(".zoom").textContent = V.w === 0 ? "" : Math.round(V.s * 100) + "%";
+}
+function toggle(x, y) {
+  const big = V.fit < 0.8 ? 1 : V.fit * 2.5;
+  ease();
+  zoom_at(x, y, fitted() ? big : V.fit);
+}
+function ease() {
+  D.classList.add("ease");
+  setTimeout(() => D.classList.remove("ease"), 220);
+}
+function at(x, y) {
+  const r = STAGE.getBoundingClientRect();
+  return [x - r.left, y - r.top];
+}
+function down(ev) {
+  if (ev.pointerType === "mouse" && ev.button !== 0 || ev.target.closest("button") !== null) {
+    return;
+  }
+  ev.preventDefault();
+  STAGE.setPointerCapture(ev.pointerId);
+  PTS.set(ev.pointerId, { x: ev.clientX, y: ev.clientY });
+  D.classList.remove("ease");
+  if (PTS.size === 1) {
+    G = { x: ev.clientX, y: ev.clientY, t: ev.timeStamp, moved: false, many: false, on: ev.target === IMG, mouse: ev.pointerType === "mouse" };
+  } else if (G !== null) {
+    G.many = true;
+  }
+}
+function move(ev) {
+  const was = PTS.get(ev.pointerId);
+  if (was === undefined || G === null) {
+    return;
+  }
+  const now = { x: ev.clientX, y: ev.clientY };
+  if (Math.hypot(now.x - G.x, now.y - G.y) > SLOP) {
+    G.moved = true;
+  }
+  if (PTS.size === 1) {
+    PTS.set(ev.pointerId, now);
+    if (!G.moved) {
+      return;
+    }
+    const [list, k] = fitted() && !G.many ? place() : [[], -1];
+    if (k >= 0 && list.length > 1) {
+      V.swipe += now.x - was.x;
+    } else {
+      V.x += now.x - was.x;
+      V.y += now.y - was.y;
+      hold();
+    }
+    draw();
+    return;
+  }
+  const [a, b] = [...PTS.values()];
+  const [mx, my] = at((a.x + b.x) / 2, (a.y + b.y) / 2);
+  const span = Math.hypot(a.x - b.x, a.y - b.y);
+  PTS.set(ev.pointerId, now);
+  const [c, d] = [...PTS.values()];
+  const [nx, ny] = at((c.x + d.x) / 2, (c.y + d.y) / 2);
+  V.swipe = 0;
+  V.x += nx - mx;
+  V.y += ny - my;
+  zoom_at(nx, ny, span === 0 ? V.s : V.s * Math.hypot(c.x - d.x, c.y - d.y) / span);
+}
+function up(ev) {
+  if (!PTS.delete(ev.pointerId) || PTS.size > 0) {
+    return;
+  }
+  const g = G;
+  G = null;
+  if (V.swipe !== 0) {
+    const swipe = V.swipe;
+    V.swipe = 0;
+    if (ev.type === "pointerup" && Math.abs(swipe) > Math.min(80, STAGE.clientWidth / 5) && step(swipe < 0 ? 1 : -1)) {
+      return;
+    }
+    ease();
+    draw();
+    return;
+  }
+  if (ev.type !== "pointerup" || g === null || g.moved || g.many || ev.timeStamp - g.t > 500) {
+    return;
+  }
+  const tap = { x: ev.clientX, y: ev.clientY, t: ev.timeStamp };
+  if (TAP !== null && tap.t - TAP.t < DOUBLE && Math.hypot(tap.x - TAP.x, tap.y - TAP.y) < NEAR) {
+    TAP = null;
+    toggle(...at(tap.x, tap.y));
+    return;
+  }
+  TAP = tap;
+  if (g.mouse && !g.on) {
+    D.close();
+  }
+}
+function wheel(ev) {
+  ev.preventDefault();
+  if (V.w === 0 || !STAGE.contains(ev.target)) {
+    return;
+  }
+  const px = ev.deltaY * (ev.deltaMode === 1 ? 16 : ev.deltaMode === 2 ? STAGE.clientHeight : 1);
+  zoom_at(...at(ev.clientX, ev.clientY), V.s * Math.exp(-px * (ev.ctrlKey ? 0.01 : 0.002)));
+}
+function key(ev) {
+  if (ev.ctrlKey || ev.metaKey || ev.altKey) {
+    return;
+  }
+  const [x, y] = [STAGE.clientWidth / 2, STAGE.clientHeight / 2];
+  const on = ev.target.closest("a, button") !== null;
+  switch (ev.key) {
+    case "ArrowLeft":
+    case "ArrowRight": {
+      step(ev.key === "ArrowLeft" ? -1 : 1);
+      break;
+    }
+    case "+":
+    case "=": {
+      ease();
+      zoom_at(x, y, V.s * 1.5);
+      break;
+    }
+    case "-": {
+      ease();
+      zoom_at(x, y, V.s / 1.5);
+      break;
+    }
+    case "0": {
+      ease();
+      fit();
+      break;
+    }
+    case "ArrowUp":
+    case "ArrowDown":
+    case "PageUp":
+    case "PageDown":
+    case "Home":
+    case "End": {
+      break;
+    }
+    case " ": {
+      if (on) {
+        return;
+      }
+      break;
+    }
+    default: {
+      return;
+    }
+  }
+  ev.preventDefault();
+}
+function base(src) {
+  const last = src.split(/[?#]/)[0].split("/").pop() ?? "";
+  try {
+    return decodeURIComponent(last) || "picture";
+  } catch {
+    return last;
+  }
+}
+function file_name(pic) {
+  const ext = /\.([a-z0-9]{1,10})$/i.exec(base(pic.src))?.[1];
+  return ext === undefined || /\.[a-z0-9]{1,10}$/i.test(pic.name) ? pic.name : pic.name + "." + ext;
+}
+
 // web/src/main.ts
 var APP = window.webkit?.messageHandlers?.unii ?? null;
 var DESK = matchMedia("(hover: hover)");
@@ -3849,7 +4199,8 @@ var P = {
   saving: 0,
   gave: null,
   back: null,
-  after: false
+  after: false,
+  at: ""
 };
 function $2(sel) {
   return document.querySelector(sel);
@@ -3913,7 +4264,7 @@ function solo(title, sub) {
 function chat() {
   const file = $2("input[type=file]");
   box_new(BOX2, { input: typed, files: attach });
-  BOX2.addEventListener("blur", () => draw(false));
+  BOX2.addEventListener("blur", () => draw2(false));
   BOX2.onkeydown = (ev) => {
     if (ev.key === "Enter" && !ev.shiftKey && !ev.isComposing && ev.keyCode !== 229 && DESK.matches) {
       ev.preventDefault();
@@ -3933,7 +4284,8 @@ function chat() {
     attach([...file.files ?? []]);
     file.value = "";
   };
-  onpopstate = route;
+  onpopstate = popped;
+  viewer_new();
   importer();
   document.ondragover = (ev) => ev.preventDefault();
   document.ondrop = (ev) => {
@@ -3947,7 +4299,7 @@ function chat() {
     if (box_focused() && box_caret()[0] === box_text().length) {
       BOX2.scrollTop = BOX2.scrollHeight;
     }
-    draw(true);
+    draw2(true);
   };
   document.onscroll = () => {
     if (at_end()) {
@@ -3959,7 +4311,7 @@ function chat() {
     mine_show();
   };
   $2(".mine").onclick = mine;
-  $2(".down").onclick = down;
+  $2(".down").onclick = down2;
   const keep = new ResizeObserver(() => {
     if (P.still) {
       P.still = false;
@@ -3978,7 +4330,7 @@ function chat() {
     }
     frames(true);
   });
-  draw(true);
+  draw2(true);
 }
 function signed() {
   document.body.className = "";
@@ -3994,7 +4346,7 @@ function typed() {
       xhr.abort();
     }
   }
-  draw(true);
+  draw2(true);
 }
 function submit() {
   if (box_items().some((item) => item.dataset.state === "bad")) {
@@ -4080,12 +4432,18 @@ function act(a) {
   for (const msg of view_act(v, a)) {
     link_send(v, msg, a.$ === "Send" ? (out) => back(a, out) : undefined, said);
   }
-  draw(a.$ === "Send");
+  draw2(a.$ === "Send");
 }
 function click(ev) {
   const target = ev.target;
   const el = target.closest("[data-act], [data-copy], [data-go], [data-knob], .choices > button");
   const sel = getSelection();
+  const pic = viewer_pic(target);
+  if (pic !== null && !(ev.ctrlKey || ev.metaKey || ev.shiftKey || ev.altKey) && (sel === null || sel.isCollapsed)) {
+    ev.preventDefault();
+    viewer_open(pic, true, target);
+    return;
+  }
   const cut = target.closest(".unfold") ?? (el === null && target.closest("a") === null ? target.closest(".msg.long:not(.shown) > .cut") : null);
   if (cut !== null && (sel === null || sel.isCollapsed)) {
     unfold(cut.parentElement);
@@ -4095,7 +4453,7 @@ function click(ev) {
     return;
   }
   if (el.dataset.knob !== undefined) {
-    place(el);
+    place2(el);
     return;
   }
   el.closest(".choices")?.hidePopover();
@@ -4115,7 +4473,7 @@ function click(ev) {
     navigator.clipboard.writeText(text).then(() => copied(el), () => toast("Could not copy."));
   }
 }
-function place(knob) {
+function place2(knob) {
   const menu = $2("#pick-" + knob.dataset.knob);
   const box = knob.getBoundingClientRect();
   const { clientWidth: w, clientHeight: h } = document.documentElement;
@@ -4223,7 +4581,7 @@ async function mic() {
   };
   rec.start();
   P.rec = rec;
-  draw(false);
+  draw2(false);
   meter(stream, rec);
 }
 function meter(stream, rec) {
@@ -4263,10 +4621,10 @@ function meter(stream, rec) {
 function words(audio) {
   const act = { $: "voice", type: audio.type, body: () => audio };
   link_send(v, act, heard);
-  draw(false);
+  draw2(false);
 }
 function heard(out) {
-  draw(false);
+  draw2(false);
   const text = out.text?.trim() ?? "";
   if (text === "") {
     toast(out.error ?? "No words heard.");
@@ -4294,7 +4652,7 @@ function in_use(off = false) {
   P.used = { ws, on, at: Date.now() };
 }
 async function lost(up) {
-  draw(true);
+  draw2(true);
   const me = up ? null : await fetch("/api/me").catch(() => null);
   if (me !== null && me.status === 401) {
     location.href = "/";
@@ -4320,7 +4678,7 @@ function hear(msg) {
     renew_due(msg.build);
   }
   import_welcome();
-  draw(true);
+  draw2(true);
 }
 function importer() {
   const form = $2("#import form");
@@ -4537,7 +4895,7 @@ function html_parse(html) {
   MARKUP.set(child, html);
   return child;
 }
-function draw(stick) {
+function draw2(stick) {
   P.stick = P.stick && stick;
   if (P.frame === 0) {
     P.frame = requestAnimationFrame(() => {
@@ -4660,7 +5018,7 @@ function mine_show() {
   $2(".mine").hidden = first === null || !mine_above(first);
   $2(".down").hidden = P.end || innerHeight + scrollY >= document.documentElement.scrollHeight - 1;
 }
-function down() {
+function down2() {
   scrollTo(0, document.documentElement.scrollHeight);
   P.end = true;
   mine_show();
@@ -4686,6 +5044,7 @@ function route() {
   document.body.classList.toggle("tree", tree);
   $2("#account").hidden = !page;
   $2("#tree").hidden = !tree;
+  P.at = location.pathname + location.hash;
   P.shown = chat && P.away !== null ? shown_key() : location.pathname;
   if (chat && P.away !== null) {
     P.end = P.away.end;
@@ -4703,7 +5062,14 @@ function route() {
   } else {
     tree_hide();
   }
-  draw(chat && P.end);
+  draw2(chat && P.end);
+}
+function popped() {
+  if (location.pathname + location.hash !== P.at) {
+    route();
+  }
+  viewer_sync();
+  draw2(true);
 }
 async function account() {
   const el = $2("#account");
@@ -4770,7 +5136,7 @@ async function account_prompt(form) {
     P.dirty.delete(form);
     P.since = true;
   }
-  draw(false);
+  draw2(false);
 }
 async function notify_state() {
   P.push = null;
@@ -5070,7 +5436,7 @@ async function settings_save(form, page, unset, listed, profs) {
   settings_draw(out);
   P.dirty.delete(form);
   P.since = true;
-  draw(false);
+  draw2(false);
   toast(later.length === 0 ? "Saved." : "Saved. " + later.join(", ") + " " + (later.length === 1 ? "applies" : "apply") + " once the server restarts.");
 }
 function renew_due(build) {
@@ -5086,11 +5452,11 @@ function renew_due(build) {
   }
   P.since = P.due && P.since;
   P.due = true;
-  draw(false);
+  draw2(false);
 }
 function renew_free(hidden = false) {
   const page = location.pathname !== "/" && location.pathname !== TREE;
-  const quiet = P.rec === null && UPS.size === 0 && v.out.length === 0 && !$2("#import").matches(":popover-open");
+  const quiet = P.rec === null && UPS.size === 0 && v.out.length === 0 && !$2("#import").matches(":popover-open") && !viewer_on();
   const typing = !DESK.matches && box_focused() && !hidden;
   return quiet && !typing && (!page || P.since && P.dirty.size === 0 && P.saving === 0);
 }

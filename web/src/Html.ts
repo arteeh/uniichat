@@ -111,6 +111,7 @@ function head_html(c: Call.Call, text: string, device: string): string {
   return `<p class="call">${where}${icon}${verb}${esc(text)}</p>`;
 }
 
+// (a link to its file: a plain click opens it in the page, Viewer.ts)
 function images_html(names: string[]): string {
   const pics = names.map((name) => {
     const url = "/image/" + esc(name);
@@ -530,7 +531,7 @@ function span_html(s: Md.Span): string {
       }
       return `<a href="${esc(s.k)}"${s.t === "" ? "" : ` title="${esc(s.t)}"`} target="_blank" rel="noopener">${spans_html(s.x)}</a>`;
     }
-    case "Pict": { // a file of the media store inline (an image opens whole), a file that isn't media its chip, any other a link
+    case "Pict": { // a file of the media store inline (an image opens whole: Viewer.ts), a file that isn't media its chip, any other a link
       const [k, title, kind] = [esc(s.k), s.t === "" ? "" : ` title="${esc(s.t)}"`, View.media_kind(s.k)];
       return kind === "image" ? `<a class="media" href="${k}" target="_blank"><img src="${k}" alt="${esc(s.x)}"${title} loading="lazy"></a>`
         : kind === "video" ? `<video class="media" src="${k}"${title} controls preload="metadata"></video>`

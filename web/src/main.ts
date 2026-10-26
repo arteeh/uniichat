@@ -9,8 +9,9 @@
 // streaming, touches no row.
 // The markup is index.html's: the header, the chat, the settings page
 // (/settings, once /account) or the memory tree (/tree: Tree.ts), and the
-// footer as the terminal's. A tab is no device; a signed-out one is told
-// how to sign in (`unii serve link`). The site installs as an app
+// footer as the terminal's; a picture opens over them (Viewer.ts). A tab
+// is no device; a signed-out one is told how to sign in (`unii serve
+// link`). The site installs as an app
 // (manifest.webmanifest, sw.js) and may notify (Notifications); in the
 // iOS app (ios/: APP) the app notifies.
 
@@ -20,6 +21,7 @@ import * as View from "../../View.ts";
 import * as Box from "./Box.ts";
 import * as Html from "./Html.ts";
 import * as Tree from "./Tree.ts";
+import * as Viewer from "./Viewer.ts";
 
 // Types
 // =====
@@ -70,7 +72,8 @@ const BACK = $<HTMLInputElement>("#import [name=back]");
 // found: the sources read, by name; done: sessions imported before; off:
 // left out (Import.Want); step: the import's; away: the chat's scroll as
 // a page (the settings, the tree) was opened over it, kept for its return;
-// used: what the server was last told of this page's use (in_use)
+// used: what the server was last told of this page's use (in_use); at:
+// the path (and hash) route last showed
 const P = {
   rec   : null as MediaRecorder | null,
   shown : "",
@@ -98,6 +101,7 @@ const P = {
   gave  : null as WebSocket | null,
   back  : null as { a: number; top: number } | null,
   after : false,
+  at    : "",
 };
 
 function $<T extends HTMLElement>(sel: string): T {
@@ -210,7 +214,8 @@ function chat(): void {
     attach([...(file.files ?? [])]);
     file.value = "";
   };
-  onpopstate = route;
+  onpopstate = popped;
+  Viewer.viewer_new();
   importer();
   document.ondragover = (ev) => ev.preventDefault();
   // on an agent's page (no box) a drop is let go: it would wait unseen
@@ -403,6 +408,13 @@ function click(ev: MouseEvent): void {
   const target = ev.target as HTMLElement;
   const el = target.closest<HTMLElement>("[data-act], [data-copy], [data-go], [data-knob], .choices > button");
   const sel = getSelection();
+  // a picture opens in the page (Viewer.ts); with a key held, as a link
+  const pic = Viewer.viewer_pic(target);
+  if (pic !== null && !(ev.ctrlKey || ev.metaKey || ev.shiftKey || ev.altKey) && (sel === null || sel.isCollapsed)) {
+    ev.preventDefault();
+    Viewer.viewer_open(pic, true, target);
+    return;
+  }
   const cut = target.closest(".unfold") ?? (el === null && target.closest("a") === null ? target.closest(".msg.long:not(.shown) > .cut") : null);
   if (cut !== null && (sel === null || sel.isCollapsed)) {
     unfold(cut.parentElement!);
@@ -1171,6 +1183,7 @@ function route(): void {
   document.body.classList.toggle("tree", tree);
   $("#account").hidden = !page;
   $("#tree").hidden = !tree;
+  P.at = location.pathname + location.hash;
   P.shown = chat && P.away !== null ? shown_key() : location.pathname;
   if (chat && P.away !== null) {
     P.end = P.away.end;
@@ -1190,6 +1203,17 @@ function route(): void {
     Tree.tree_hide();
   }
   draw(chat && P.end);
+}
+
+// back or forward: another page shows (route), or the same, a picture
+// opened or closed over it only (Viewer.ts: no page of its own); a
+// reload put off while it showed may go now (bars)
+function popped(): void {
+  if (location.pathname + location.hash !== P.at) {
+    route();
+  }
+  Viewer.viewer_sync();
+  draw(true);
 }
 
 async function account(): Promise<void> {
@@ -1617,12 +1641,13 @@ async function settings_save(form: HTMLFormElement, page: any, unset: Set<string
 // lost, keeping what it showed: the box's text and caret, the folds
 // opened, where the chat or the page was scrolled. Never while the mic
 // records, a file uploads, an act awaits its answer, or Import History
-// is open; on a phone, not while its keyboard is up (the box focused),
-// but as the page is hidden. On the settings page only once a change is
-// saved after the new build came, with nothing else edited and unsaved,
-// or as it is left. Checked again right before reloading. The cached
-// shell is dropped first; at most two reloads per build (the second
-// past the browser's cache too), then one more on each new socket.
+// or a picture (Viewer.ts) is open; on a phone, not while its keyboard
+// is up (the box focused), but as the page is hidden. On the settings
+// page only once a change is saved after the new build came, with
+// nothing else edited and unsaved, or as it is left. Checked again
+// right before reloading. The cached shell is dropped first; at most two
+// reloads per build (the second past the browser's cache too), then one
+// more on each new socket.
 
 function renew_due(build: string | undefined): void {
   if (build === undefined || P.build === "" || build === P.build) {
@@ -1642,7 +1667,7 @@ function renew_due(build: string | undefined): void {
 
 function renew_free(hidden = false): boolean {
   const page = location.pathname !== "/" && location.pathname !== TREE;
-  const quiet = P.rec === null && UPS.size === 0 && v.out.length === 0 && !$("#import").matches(":popover-open");
+  const quiet = P.rec === null && UPS.size === 0 && v.out.length === 0 && !$("#import").matches(":popover-open") && !Viewer.viewer_on();
   const typing = !DESK.matches && Box.box_focused() && !hidden;
   return quiet && !typing && (!page || (P.since && P.dirty.size === 0 && P.saving === 0));
 }
