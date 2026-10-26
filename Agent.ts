@@ -253,6 +253,7 @@ export namespace Agent {
       }
       if (step.stop === "down" || step.stop === "lost" || step.stop === "fail") {
         end.text ||= step.stop === "down" ? step.refusal?.say ?? BUSY : step.why;
+        end.why = step.why;
         end.long = step.stop !== "lost" && TOO_LONG.test(step.why);
         end.stop = step.stop;
         end.off = step.off;

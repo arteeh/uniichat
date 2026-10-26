@@ -711,6 +711,10 @@ export namespace Chat {
     if (ev.$ === "Limit") {
       return Chat.limit(chat, name ?? TURN, ev.limit);
     }
+    // (only a patient call, a summary's, tells it: Memory.ask)
+    if (ev.$ === "Again") {
+      return;
+    }
     if (ev.$ === "Run") {
       Chat.ran(chat, agent, ev);
       return;
@@ -1024,11 +1028,15 @@ export namespace Chat {
     }
   }
 
-  // as the view changes (Memory's wait): the state; done when all are
-  // built; not as the chat is let go (Chat.resumed)
+  // as the view changes (Memory's wait): the state, while the turn waits
+  // on summaries (they come, or fail: Memory `again`) or an import runs;
+  // done when all are built; not as the chat is let go (Chat.resumed)
   export function progress(chat: Chat): void {
     const batch = chat.batch;
     if (batch === null || chat.mem.done) {
+      if (!chat.mem.done && Chat.waits(chat) === SUMMARIES) {
+        Chat.all(chat, Chat.state(chat));
+      }
       return;
     }
     if (batch.open.every((n) => n === 0)) {
@@ -1191,7 +1199,7 @@ export namespace Chat {
     const room = Chat.room(chat);
     const size = chat.mem.talk === null ? 0 : Memory.talk_size(chat.mem);
     const talk = chat.mem.talk === null ? null : { from: chat.mem.talk, used: Math.min(1, size / room), size, room };
-    return { $: "state", busy: chat.busy, wait: Chat.waits(chat), agents, runs, pick: chat.pick, ...config.OFFER, importing, limits: chat.limits, timers, mcp, talk, build: BUILD, site: config.SITE };
+    return { $: "state", busy: chat.busy, wait: Chat.waits(chat), agents, runs, pick: chat.pick, ...config.OFFER, importing, limits: chat.limits, again: chat.mem.again, timers, mcp, talk, build: BUILD, site: config.SITE };
   }
 
   export function waits(chat: Chat): Wait {

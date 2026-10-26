@@ -659,7 +659,7 @@ export namespace ClaudeSub {
       }
       if (!ok) {
         console.error("claude-sub: " + (err ? err + ": " : "") + (why || msg.subtype).slice(0, 300));
-        return { text: BUSY, stop: "down", off: err !== undefined && OFF.includes(err), long: TOO_LONG.test(why) };
+        return { text: BUSY, why: (err ? err + ": " : "") + (why || msg.subtype), stop: "down", off: err !== undefined && OFF.includes(err), long: TOO_LONG.test(why) };
       }
       const says = sent.splice(0);
       if (says.length === 0) {
