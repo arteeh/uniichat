@@ -561,9 +561,11 @@ export namespace Tools {
     const d = tools.devices.get(name) ?? { who, host, terms: new Map(), jobs: new Map(), skills: [], mcp: [], why: "", clash: "" };
     d.terms.set(term, link);
     tools.devices.set(name, d);
-    // its links lost are a process before this one's: it restarted
-    for (const [old, l] of [...d.terms]) {
-      if (old !== term && !l.live()) {
+    // its other links are a process before this one's (a link is its
+    // process's: its socket opened anew keeps it, Device.ts tab): it
+    // restarted, whether or not their sockets were seen to close yet
+    for (const old of [...d.terms.keys()]) {
+      if (old !== term) {
         Tools.detach(tools, old, name, "restarted");
       }
     }
@@ -598,10 +600,12 @@ export namespace Tools {
 
   // a link lost (its socket closed with no QUIT): detached GRACE later,
   // unless its device linked again on it (its process's socket opened
-  // anew) and that link lives
+  // anew) and that link lives. One gone already (a new process took its
+  // device: attach), or one whose socket opened anew before the old one
+  // was seen to close, is left as it is
   export function lost(tools: Tools, term: string, device: string): void {
     const link = tools.devices.get(device)?.terms.get(term);
-    if (link === undefined) {
+    if (link === undefined || link.live()) {
       return;
     }
     setTimeout(() => {

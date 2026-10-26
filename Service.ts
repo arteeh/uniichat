@@ -137,19 +137,20 @@ export function foreground(part: Part): void {
 
 // a service's own unii (Windows: under `supervise`), which ends once
 // its supervisor does (Windows ends a task's process alone, not those
-// it started). Its `part` (the supervisor's has none) also ends as
-// `stop` asks it to (Windows sends no signal: a file, <part>.stop,
-// naming its supervisor), and either way as a signal ends it: its
-// handlers run (a device says goodbye: Device.ts), else it exits
+// it started). Its `part` (the supervisor's has none) ends then as a
+// signal ends it: its handlers run (a device says goodbye: Device.ts),
+// else it exits; on Windows it also ends so as `stop` asks it to
+// (Windows sends no signal: a file, <part>.stop, naming its supervisor,
+// read every 500 ms)
 export function watch(parent: number, part?: Part): void {
-  const stop = part === undefined ? null : LOGS + "/" + part + ".stop";
+  const stop = part === undefined || !WIN ? null : LOGS + "/" + part + ".stop";
   let quit = false;
   setInterval(() => {
     if (quit || (alive(parent) && (stop === null || read(stop)?.trim() !== String(parent)))) {
       return;
     }
     quit = true;
-    if (stop === null || process.listenerCount("SIGTERM") === 0) {
+    if (part === undefined || process.listenerCount("SIGTERM") === 0) {
       process.exit(0);
     }
     process.emit("SIGTERM");
@@ -354,7 +355,11 @@ async function win_stop(part: Part): Promise<void> {
   // what the task ran, and what that started (Windows ends only the
   // task's own process), if still unii; its file gone first, and the
   // task removed before its unii is asked to quit: run from the
-  // service's own shell (a device's job), the quit ends this
+  // service's own shell (a device's job), the quit ends this. With none
+  // of its unii known (no pid file, or a pid not unii's now) while the
+  // task runs, the task is stopped, as the last resort: its supervisor
+  // ends as its task does, and its part as that one does (watch), a
+  // device saying goodbye still
   const all = pids(part);
   const mine = ours(part, all);
   fs.rmSync(LOGS + "/" + part + ".pid", { force: true });
@@ -362,8 +367,9 @@ async function win_stop(part: Part): Promise<void> {
 $t = Get-ScheduledTask -TaskName $env:UNII_TASK -TaskPath '\\' -ErrorAction SilentlyContinue
 if (-not $t) { 'none'; return }
 if (([string]$t.Description) -notmatch '${MARK}') { 'theirs'; return }
+if ($t.State -eq 'Running' -and $env:UNII_MINE -eq '0') { Stop-ScheduledTask -TaskName $env:UNII_TASK -TaskPath '\\' }
 Unregister-ScheduledTask -TaskName $env:UNII_TASK -TaskPath '\\' -Confirm:$false
-'ok'`, { UNII_TASK: n });
+'ok'`, { UNII_TASK: n, UNII_MINE: String(mine.length) });
   if (out === "theirs") {
     fail(n + " isn't unii's: that Scheduled Task isn't one unii made, so unii leaves it as it is.");
   }
