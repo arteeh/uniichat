@@ -686,6 +686,14 @@ export namespace Memory {
     return (mem.ready[side][0] ?? [])[k] ?? mem.count;
   }
 
+  // how many of the chat's messages before `end` have no summary of
+  // their own yet (level 0, side 0: those a turn waits on)
+  export function unbuilt(mem: Memory, end: number): number {
+    const queue = mem.ready[0][0] ?? [];
+    const k = queue.findIndex((i) => i >= end);
+    return k < 0 ? queue.length : k;
+  }
+
   // a node ready (on), or no more (built)
   export function ready(mem: Memory, { l, i }: Part, on: boolean): void {
     const queue = (mem.ready[Memory.side(mem, l, i)][l] ??= []);

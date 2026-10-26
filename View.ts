@@ -58,10 +58,14 @@ export const OPENING = 1;
 export const SUMMARIES = "summaries";
 export type Wait = string;
 
+// the summaries a turn waits on: built since it began waiting, in all
+export type Sums = { done: number; total: number };
+
 // agents: those at work; runs: what each runs on (Tools.shown);
 // vendors, models, profiles: those offered;
 // limits: the calls waiting for a usage
-// limit, by TURN or agent name; again: how the chat's summaries last
+// limit, by TURN or agent name; sums: the summaries a turn waits on
+// (null: none); again: how the chat's summaries last
 // failed, waiting to ask again (Memory `again`); timers: the chat's schedules, each
 // message's head; talk: conversation mode (null: standard); build: the
 // web app's (main.ts renew); site: the server's address (config site:
@@ -78,6 +82,7 @@ export type State = {
   profiles? : Record<string, Fall[]>;
   importing : Progress | null;
   limits    : Record<string, Parked>;
+  sums      : Sums | null;
   again     : Again | null;
   timers    : Timer[];
   mcp       : Plug[];
@@ -356,6 +361,7 @@ export function view_new(): View {
     models    : LABELS,
     importing : null,
     limits    : {},
+    sums      : null,
     again     : null,
     timers    : [],
     mcp       : [],
@@ -594,20 +600,22 @@ export function view_tail(v: View, live = view_stream(v)): Row[] {
   if (v.page !== null || rows.length > 0 || v.wait === "") {
     return [...rows, ...kept, ...load];
   }
-  return [Cap(v.wait === SUMMARIES ? sums_show(v.again) : "waiting for " + v.wait + "…"), ...kept, ...load];
+  return [Cap(v.wait === SUMMARIES ? sums_show(v.sums, v.again) : "waiting for " + v.wait + "…"), ...kept, ...load];
 }
 
-// summaries a turn waits on, and why they don't come if they fail
-// (Again): what it says, when it asks again in the viewer's time
-export function sums_show(again: Again | null, now = Date.now()): string {
+// summaries a turn waits on, how many are done, and why they don't come
+// if they fail (Again): what it says, when it asks again in the
+// viewer's time
+export function sums_show(sums: Sums | null, again: Again | null, now = Date.now()): string {
+  const head = sums === null ? SUMS : SUMS.replace(/…$/, "") + ": " + sums.done + " of " + sums.total;
   if (again === null) {
-    return SUMS;
+    return head;
   }
   const at   = new Date(again.until);
   const day  = at.toDateString() === new Date(now).toDateString() ? {} : { weekday: "short" as const };
   const when = again.limit ? "at " + at.toLocaleString(undefined, { ...day, hour: "2-digit", minute: "2-digit" }) : "in " + Math.max(1, Math.ceil((again.until - now) / 60e3)) + " min";
   const why  = again.why.length > 120 ? again.why.slice(0, 120) + "…" : again.why.replace(/\.$/, "");
-  return SUMS + " · compactor: " + why + ", asking again " + when;
+  return head + " · compactor: " + why + ", asking again " + when;
 }
 
 // a call waiting for a usage limit: when it asks again, in the viewer's

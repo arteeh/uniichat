@@ -2033,6 +2033,7 @@ function view_new() {
     models: LABELS,
     importing: null,
     limits: {},
+    sums: null,
     again: null,
     timers: [],
     mcp: [],
@@ -2251,17 +2252,18 @@ function view_tail(v, live = view_stream(v)) {
   if (v.page !== null || rows.length > 0 || v.wait === "") {
     return [...rows, ...kept, ...load];
   }
-  return [Cap(v.wait === SUMMARIES ? sums_show(v.again) : "waiting for " + v.wait + "…"), ...kept, ...load];
+  return [Cap(v.wait === SUMMARIES ? sums_show(v.sums, v.again) : "waiting for " + v.wait + "…"), ...kept, ...load];
 }
-function sums_show(again, now = Date.now()) {
+function sums_show(sums, again, now = Date.now()) {
+  const head = sums === null ? SUMS : SUMS.replace(/…$/, "") + ": " + sums.done + " of " + sums.total;
   if (again === null) {
-    return SUMS;
+    return head;
   }
   const at = new Date(again.until);
   const day = at.toDateString() === new Date(now).toDateString() ? {} : { weekday: "short" };
   const when = again.limit ? "at " + at.toLocaleString(undefined, { ...day, hour: "2-digit", minute: "2-digit" }) : "in " + Math.max(1, Math.ceil((again.until - now) / 60000)) + " min";
   const why = again.why.length > 120 ? again.why.slice(0, 120) + "…" : again.why.replace(/\.$/, "");
-  return SUMS + " · compactor: " + why + ", asking again " + when;
+  return head + " · compactor: " + why + ", asking again " + when;
 }
 function limit_show(limit, now = Date.now()) {
   const at = new Date(limit.until);

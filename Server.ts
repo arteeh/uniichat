@@ -37,7 +37,7 @@ import { INSTALL, INSTALL_PS1 } from "./Update.ts";
 import { move_over, write_whole } from "./Write.ts";
 import * as Timer from "./Timer.ts";
 import { PROMPTS, SEARCHES, Tools, type Agent, type Live, type Waiting } from "./Tools.ts";
-import { ACTIVE, FRAME, IDLE, IMAGES, live_push, MEDIA, PING, QUIT, SUMMARIES, TICK, TURN, WIRE, type Answer, type Part, type Server as Out, type Wait } from "./View.ts";
+import { ACTIVE, FRAME, IDLE, IMAGES, live_push, MEDIA, PING, QUIT, SUMMARIES, TICK, TURN, WIRE, type Answer, type Part, type Server as Out, type Sums, type Wait } from "./View.ts";
 import * as config from "./Config.ts";
 import hello_md from "./hello.md" with { type: "text" };
 import app_js from "./web/app.js" with { type: "file" };
@@ -91,7 +91,9 @@ type Batch = Kept & { micros: number[][]; open: number[]; left: number; all: num
 // fallback its calls ("") or an agent's (by name, till it reports) run
 // on (Chat.ran), forgotten as a pick is picked; back: the view's block
 // the turn's last call (in conversation mode) marked last, which the
-// next marks too, for claude-api's cache (Memory.view)
+// next marks too, for claude-api's cache (Memory.view); sums: the
+// summaries the call waits on, the messages before `from` whose own
+// wasn't built as it began waiting (null: it doesn't wait)
 type Chat = {
   mem   : Memory;
   tools : Tools;
@@ -117,6 +119,7 @@ type Chat = {
   limits: Record<string, Parked>;
   fell  : Map<string, string>;
   back  : number;
+  sums  : { from: number; total: number } | null;
 };
 
 // Constants
@@ -297,7 +300,7 @@ export namespace Chat {
     const chat: Chat = {
       mem, tools, pick, socks: new Set(), acts: new Map(), busy: false, call: null, model: "", check: null, asked: false, open: 0, sent: [], wait: [],
       halt: new AbortController(), live: [], calls: new Map(), eye: { parts: [], from: 0 }, after: Promise.resolve(), batch: null,
-      writes: Promise.resolve(), held: null, limits: {}, fell: new Map(), back: -1,
+      writes: Promise.resolve(), held: null, limits: {}, fell: new Map(), back: -1, sums: null,
     };
     // a saved pick (a profile, by name) not offered gave way: told once
     const shown = (p: Pick) => p.profile ?? Pick.label(p);
@@ -507,15 +510,20 @@ export namespace Chat {
     }
     let from = -1;
     while (from !== Chat.from(chat)) {
+      // those before the last `from` are built: those up to this one join
       from = Chat.from(chat);
+      chat.sums = { from, total: (chat.sums?.total ?? 0) + Memory.unbuilt(mem, from) };
+      Chat.all(chat, Chat.state(chat));
       const why = await Memory.settle(mem, from, halt.signal);
       if (why !== null) {
+        chat.sums = null;
         if (!halt.signal.aborted) {
           Chat.failed(chat, why);
         }
         return false;
       }
     }
+    chat.sums = null;
     const msgs = (chat.sent = chat.wait.splice(0));
     const says = msgs.filter((m) => m.end > from).map((m) => Memory.say(mem, Math.max(m.id, from), m.end));
     const view = Memory.view(mem, from, mem.view.parts, mem.talk, mem.talk === null ? -1 : chat.back);
@@ -1199,7 +1207,13 @@ export namespace Chat {
     const room = Chat.room(chat);
     const size = chat.mem.talk === null ? 0 : Memory.talk_size(chat.mem);
     const talk = chat.mem.talk === null ? null : { from: chat.mem.talk, used: Math.min(1, size / room), size, room };
-    return { $: "state", busy: chat.busy, wait: Chat.waits(chat), agents, runs, pick: chat.pick, ...config.OFFER, importing, limits: chat.limits, again: chat.mem.again, timers, mcp, talk, build: BUILD, site: config.SITE };
+    return { $: "state", busy: chat.busy, wait: Chat.waits(chat), agents, runs, pick: chat.pick, ...config.OFFER, importing, limits: chat.limits, sums: Chat.sums(chat), again: chat.mem.again, timers, mcp, talk, build: BUILD, site: config.SITE };
+  }
+
+  // the summaries the call waits on, done and in all (View Sums)
+  export function sums(chat: Chat): Sums | null {
+    const sums = chat.sums;
+    return sums === null || sums.total === 0 ? null : { done: sums.total - Memory.unbuilt(chat.mem, sums.from), total: sums.total };
   }
 
   export function waits(chat: Chat): Wait {
