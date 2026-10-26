@@ -1,38 +1,13 @@
-// Service
-// =======
-// `unii serve -d [port]`, `unii device -d [url]`: the part as a user
-// service of the OS, which starts it at login and again if it crashes:
-// a systemd user unit (Linux), a Scheduled Task at logon, as the user,
-// no admin (Windows), a LaunchAgent (macOS), each named unii-<part>. Run
-// again, the OS's service manager restarts it (so it works from a shell
-// of the very unii it restarts); `stop` stops and removes it; `logs`
-// shows its output: the journal on Linux, else LOGS/<part>.log, which
-// the service writes, capped (`supervise`). Each holds MARK: one by its
-// name without it is someone else's, never changed. The installers
-// (install.sh, install.ps1, not in the repo) find the ones made here by
-// the same names and MARK, and restart them on the new unii.
-// -d returns once the part is up (`ready`: a device linked to its
-// server, a server listening), or says it isn't after UP; -d and `stop`
-// time each step in the part's log on Windows and macOS (the file `logs`
-// shows: `clock`), so a slow machine shows where the time went.
-
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 
-// Types
-// =====
-
 export type Part = "serve" | "device";
-
-// Constants
-// =========
 
 const WIN  = process.platform === "win32";
 const MAC  = process.platform === "darwin";
 const HOME = os.homedir();
 
-// what marks a service as unii's (the installers look for it too)
 export const MARK = "unii-made";
 
 const DATA  = (process.env.UNII_DIR ?? "~/.unii").replace(/^~(?=[\\/]|$)/, HOME);
@@ -40,56 +15,34 @@ const LOGS  = DATA + "/logs";
 const UNITS = (process.env.XDG_CONFIG_HOME || HOME + "/.config") + "/systemd/user";
 const PLIST = HOME + "/Library/LaunchAgents";
 
-// a log file's most bytes: past it, it becomes <part>.log.1 (the one
-// before that dropped) and starts anew; a line's most characters (past
-// them, cut)
 const CAP   = 2 ** 20;
 const LINE  = 16384;
 
-// what `logs` shows before it follows
 const LINES = 200;
 
-// on Windows the service restarts itself, a minute apart, 3 times at
-// most in a row (a run of RAN resets the count); launchd and systemd
-// restart theirs
 const RESTARTS = WIN ? 3 : 0;
 const AFTER    = 60000;
 const RAN      = 600000;
 
-// how long `stop` gives a service asked to quit (Windows: watch) before
-// it ends it
 const BYE      = 5000;
 
-// how long -d waits for the part to be up (ready)
 const UP       = 20000;
 
-// the part this process runs as its service's (served), which tells -d
-// it is up (ready)
 let SERVED: Part | null = null;
 
-// the dirs the service sees as the shell that ran -d did, resolved: on
-// Linux and macOS in its environment, with PATH (their service managers
-// give a bare one); on Windows, whose task has no environment of the
-// shell's, as --env=<name>=<dir> arguments (Cli.ts sets them)
 export const DIRS = ["UNII_DIR", "XDG_CONFIG_HOME"];
 
 const ABOUT: Record<Part, string> = { serve: "UniiChat server (unii serve)", device: "UniiChat device (unii device)" };
-
-// Service
-// =======
 
 export function name(part: Part): string {
   return "unii-" + part;
 }
 
-// this unii, as a command: its executable (from source: bun and Cli.ts)
 export function command(): string[] {
   const bun = /^bun(\.exe)?$/i.test(path.basename(process.execPath));
   return bun ? [process.execPath, path.resolve(process.argv[1])] : [process.execPath];
 }
 
-// -d: the service made (or made again) and (re)started by the OS, its
-// status told
 export async function start(part: Part, args: string[]): Promise<void> {
   const dirs = Object.fromEntries(DIRS.flatMap((k) => (process.env[k] ? [[k, path.resolve(k === "UNII_DIR" ? DATA : process.env[k]!)]] : [])));
   if (part === "device") {
@@ -102,7 +55,6 @@ export async function start(part: Part, args: string[]): Promise<void> {
   return MAC ? mac_start(part, args, env) : linux_start(part, args, env);
 }
 
-// `stop`: the service stopped and removed
 export async function stop(part: Part): Promise<void> {
   if (WIN) {
     return win_stop(part);
@@ -110,7 +62,6 @@ export async function stop(part: Part): Promise<void> {
   return MAC ? mac_stop(part) : linux_stop(part);
 }
 
-// `logs [-f]`: its output, the last LINES lines, then followed
 export async function logs(part: Part, follow: boolean): Promise<void> {
   if (WIN || MAC) {
     return file_logs(part, follow);
@@ -122,7 +73,6 @@ export async function logs(part: Part, follow: boolean): Promise<void> {
   process.exitCode = await Bun.spawn(cmd, { stdio: ["inherit", "inherit", "inherit"] }).exited;
 }
 
-// where the service unii made runs now; null: it doesn't
 export function running(part: Part): string | null {
   if (WIN || MAC) {
     return ours(part, pids(part).slice(0, 1)).length > 0 ? (WIN ? "the Scheduled Task " : "the LaunchAgent ") + name(part) : null;
@@ -135,15 +85,10 @@ export function running(part: Part): string | null {
   return ["active", "activating", "reloading"].includes(state) ? "the systemd user service " + name(part) : null;
 }
 
-// this process runs `part` as its service's (UNII_SERVICE: Cli.ts)
 export function served(part: Part): void {
   SERVED = part;
 }
 
-// the part is up (a device linked to its server, a server listening):
-// run as its service's, it says so in LOGS/<part>.up (its pid, the
-// time), which -d waits for (up), once (an old one linking again as a
-// new one starts never reads as the new one up)
 export function ready(part: Part): void {
   if (SERVED !== part) {
     return;
@@ -155,8 +100,6 @@ export function ready(part: Part): void {
   } catch {}
 }
 
-// plain `unii serve` / `unii device`: in the foreground, said so; if
-// the background one runs, that's said and nothing more runs
 export function foreground(part: Part): void {
   const where = running(part);
   if (where !== null) {
@@ -166,14 +109,6 @@ export function foreground(part: Part): void {
   console.log("Running in the foreground. `unii " + part + " -d` runs it as a background service.");
 }
 
-// a service's own unii (Windows: under `supervise`), which ends once
-// its supervisor does (Windows ends a task's process alone, not those
-// it started). Its `part` ends then as a signal ends it: its handlers
-// run (a device says goodbye: Device.ts), else it exits; on Windows it
-// also ends so as `stop` asks it to (Windows sends no signal: a file,
-// <part>.stop, naming its supervisor, read every 500 ms). A supervisor
-// (`me`: its own pid, `parent` its conhost) exits as its conhost ends or
-// the file names it, its part then ending as it sees it gone
 export function watch(parent: number, part?: Part, me = parent): void {
   const stop = part === undefined || !WIN ? null : LOGS + "/" + part + ".stop";
   let quit = false;
@@ -188,9 +123,6 @@ export function watch(parent: number, part?: Part, me = parent): void {
     process.emit("SIGTERM");
   }, stop === null ? 2000 : 500).unref();
 }
-
-// Linux
-// -----
 
 function unit(part: Part): string {
   return UNITS + "/" + name(part) + ".service";
@@ -224,7 +156,6 @@ async function linux_start(part: Part, args: string[], env: Record<string, strin
   fs.writeFileSync(unit(part), text);
   systemctl("daemon-reload");
   systemctl("enable", "--quiet", n);
-  // a restart asked for, never refused for the crash restarts' limit
   run(["systemctl", "--user", "reset-failed", n]);
   systemctl("restart", "--no-block", n);
   const state = () => run(["systemctl", "--user", "is-active", n]).out;
@@ -242,7 +173,6 @@ async function linux_stop(part: Part): Promise<void> {
     console.log("unii " + part + " isn't set up as a background service here: nothing to stop.");
     return;
   }
-  // its files first: run from the service's own shell, the stop ends this
   systemctl("disable", "--quiet", n);
   fs.rmSync(unit(part));
   systemctl("daemon-reload");
@@ -250,8 +180,6 @@ async function linux_stop(part: Part): Promise<void> {
   console.log("unii " + part + " stopped: its background service " + n + " is removed.");
 }
 
-// systemd's user manager up, and no unit by the service's name but
-// unii's: else why not, and nothing changes
 function linux_check(part: Part): void {
   const n = name(part);
   if (Bun.which("systemctl") === null || run(["systemctl", "--user", "show", "--property=Version", "--value"]).code !== 0) {
@@ -272,9 +200,6 @@ function systemctl(...args: string[]): void {
     fail("systemctl --user " + args.join(" ") + " failed: " + (out.err || "exit " + out.code));
   }
 }
-
-// macOS
-// -----
 
 function plist(part: Part): string {
   return PLIST + "/" + name(part) + ".plist";
@@ -316,8 +241,6 @@ async function mac_start(part: Part, args: string[], env: Record<string, string>
   if (loaded && was === text) {
     run(["launchctl", "kickstart", "-k", job]);
   } else {
-    // as a session of its own: run from the service's own shell, the
-    // bootout ends this
     const again = (loaded ? "launchctl bootout '" + job + "' 2>/dev/null; " : "") + "launchctl bootstrap gui/" + process.getuid!() + " '" + file.replace(/'/g, "'\\''") + "'";
     await Bun.spawn(["/bin/sh", "-c", again], { detached: true, stdio: ["ignore", "inherit", "inherit"] }).exited;
   }
@@ -345,16 +268,6 @@ async function mac_stop(part: Part): Promise<void> {
   step("LaunchAgent removed");
   console.log("unii " + part + " stopped: its background service " + n + " is removed.");
 }
-
-// Windows
-// -------
-// The task runs conhost --headless (no window) on `unii <part> --service`
-// (supervise), at the user's logon, as the user (InteractiveToken,
-// LeastPrivilege: no admin, no UAC prompt); a run asked for while one
-// runs stops it first (MultipleInstancesPolicy StopExisting), so Task
-// Scheduler does a restart. It is made and read by schtasks.exe from
-// its XML (TASK): the ScheduledTasks cmdlets take PowerShell and their
-// module ~0.7 s to load, schtasks a few ms
 
 async function win_start(part: Part, args: string[]): Promise<void> {
   const n = name(part);
@@ -387,14 +300,6 @@ async function win_start(part: Part, args: string[]): Promise<void> {
 async function win_stop(part: Part): Promise<void> {
   const n = name(part);
   const step = clock(part, "stop");
-  // what the task ran, and what that started (Windows ends only the
-  // task's own process), if still unii; its file gone first, and the
-  // task removed before its unii is asked to quit: run from the
-  // service's own shell (a device's job), the quit ends this. With none
-  // of its unii known (no pid file, or a pid not unii's now) while the
-  // task runs, the task is stopped, as the last resort: its supervisor
-  // ends as its task does, and its part as that one does (watch), a
-  // device saying goodbye still
   const all = pids(part);
   const mine = ours(part, all);
   step("processes looked up");
@@ -422,7 +327,6 @@ async function win_stop(part: Part): Promise<void> {
   console.log("unii " + part + " stopped: its background service " + n + " is removed.");
 }
 
-// a task's XML: the task -d makes (the cmdlets' defaults for the rest)
 function TASK(about: string, who: string, line: string, dir: string): string {
   const x = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   return `<?xml version="1.0" encoding="UTF-16"?>
@@ -443,13 +347,11 @@ function TASK(about: string, who: string, line: string, dir: string): string {
 `;
 }
 
-// the user, as a task names it (DOMAIN\user)
 function user(): string {
   const name = process.env.USERNAME ?? os.userInfo().username;
   return process.env.USERDOMAIN ? process.env.USERDOMAIN + "\\" + name : name;
 }
 
-// a task's XML, as schtasks shows it; null: no task of that name
 function win_task(n: string): string | null {
   const out = run(["schtasks", "/query", "/tn", "\\" + n, "/xml"]);
   return out.code === 0 ? out.out : null;
@@ -462,10 +364,6 @@ function schtasks(...args: string[]): void {
   }
 }
 
-// a service's supervisor and part (`mine`) asked to quit by the file
-// its part watches (watch), naming the supervisor; given BYE, so a
-// device says goodbye (QUIT) and the server lets it go at once; then, as
-// a last resort, ended
 async function win_quit(part: Part, supervisor: number | undefined, mine: number[]): Promise<void> {
   const stop = LOGS + "/" + part + ".stop";
   if (supervisor !== undefined && mine.length > 0) {
@@ -479,20 +377,6 @@ async function win_quit(part: Part, supervisor: number | undefined, mine: number
   }
   fs.rmSync(stop, { force: true });
 }
-
-// Windows and macOS: the service's supervisor
-// -------------------------------------------
-// `unii <part> --service [arg]`, as the task or LaunchAgent runs it: it
-// runs `unii <part> [arg]` (UNII_SERVICE set: no foreground note), its
-// output to LOGS/<part>.log, each line timed, capped (CAP). Its pid and
-// the part's are in LOGS/<part>.pid; those left by a supervisor before it
-// (a restart: Windows ended that one's conhost alone) end before its part
-// starts, so the new part finds its port free: if still unii's (`ours`; a
-// file left by a crash or a sign-out may name pids reused since). On
-// Windows they are asked to quit at once (win_quit: a device says
-// goodbye), ended after BYE; elsewhere waited for, then ended. On Windows a
-// part that failed starts again (RESTARTS). Stopped (a signal), it ends
-// with 0, so launchd leaves it stopped.
 
 export async function supervise(part: Part, args: string[]): Promise<never> {
   if (WIN) {
@@ -544,7 +428,6 @@ export async function supervise(part: Part, args: string[]): Promise<never> {
   process.exit(stopping ? 0 : code);
 }
 
-// a log's writer: each line timed; past CAP the file goes to .1
 function logger(file: string): (text: string) => void {
   let size = fs.existsSync(file) ? fs.statSync(file).size : 0;
   return (text) => {
@@ -564,8 +447,6 @@ function logger(file: string): (text: string) => void {
   };
 }
 
-// a stream's lines, each to `put` as it ends (one past LINE as it gets
-// there: never held whole)
 async function lines(stream: ReadableStream<Uint8Array>, put: (line: string) => void): Promise<void> {
   const dec = new TextDecoder();
   let rest = "";
@@ -595,7 +476,6 @@ async function file_logs(part: Part, follow: boolean): Promise<void> {
   while (follow) {
     await Bun.sleep(500);
     const size = fs.existsSync(file) ? fs.statSync(file).size : 0;
-    // a new file: it was capped (.1)
     at = size < at ? 0 : at;
     if (size > at) {
       const fd = fs.openSync(file, "r");
@@ -608,12 +488,6 @@ async function file_logs(part: Part, follow: boolean): Promise<void> {
   }
 }
 
-// Bits
-// ----
-
-// -d waiting for its part to be up (ready: its .up file written anew,
-// `was` as before), UP at most: up; or not: down, its service failed
-// (`failed`, seen early), else late: it runs (`runs`), not up yet
 async function up(part: Part, was: string | null, failed: () => boolean, runs: () => boolean): Promise<"up" | "late" | "down"> {
   for (const until = Date.now() + UP; Date.now() < until; ) {
     const now = read(LOGS + "/" + part + ".up");
@@ -628,14 +502,11 @@ async function up(part: Part, was: string | null, failed: () => boolean, runs: (
   return runs() ? "late" : "down";
 }
 
-// whether a service's supervisor and part run (Windows, macOS: by their
-// pid file, once written anew, `was` as before); null: not written yet
 function supervised(part: Part, was: string | null): boolean | null {
   const now = read(LOGS + "/" + part + ".pid");
   return now === null || now === was ? null : pids(part).every(alive);
 }
 
-// -d's one line: where it runs, or that it doesn't (yet)
 function say(part: Part, up: "up" | "late" | "down", where: string): void {
   const logs = "`unii " + part + " logs` shows why.";
   if (up === "up") {
@@ -647,8 +518,6 @@ function say(part: Part, up: "up" | "late" | "down", where: string): void {
   }
 }
 
-// a step of -d's or stop's (`verb`) as its time since the last, in the
-// part's log on Windows and macOS (Linux's is the journal: none there)
 function clock(part: Part, verb: string): (what: string) => void {
   let last = performance.now();
   return (what) => {
@@ -663,13 +532,10 @@ function clock(part: Part, verb: string): (what: string) => void {
   };
 }
 
-// the supervisor's pid and its part's (none: [])
 function pids(part: Part): number[] {
   return (read(LOGS + "/" + part + ".pid") ?? "").trim().split(/\s+/).map(Number).filter((n) => Number.isInteger(n) && n > 0);
 }
 
-// of `list`, the pids still of this unii running `part`, by their command
-// lines (Windows: one it won't show isn't)
 export function ours(part: Part, list: number[]): number[] {
   const live = list.filter(alive);
   if (live.length === 0) {
@@ -679,9 +545,6 @@ export function ours(part: Part, list: number[]): number[] {
   return live.filter((pid) => got.some(([p, line]) => p === pid && runs(line, part)));
 }
 
-// -d's for a device: a warning if a device runs here in the foreground
-// (`unii device`, not the service's), as two with one device.json take
-// turns as one device
 function alone(): void {
   const service = WIN || MAC ? pids("device") : [];
   const theirs = (pid: number) => (WIN || MAC ? service.includes(pid) : (read("/proc/" + pid + "/cgroup") ?? "").includes("/" + name("device") + ".service"));
@@ -691,15 +554,11 @@ function alone(): void {
   }
 }
 
-// whether a command line is this unii's (its executable's name) running
-// `part`, then `then`
 function runs(line: string, part: Part, then = "(\\s|$)"): boolean {
   const exe = path.basename(command().at(-1)!).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   return new RegExp('(^|[\\\\/\\s"])' + exe + '"?\\s+"?' + part + '"?' + then, "i").test(line);
 }
 
-// the processes here, [pid, command line]; on Windows those `wql` picks
-// (a CIM filter)
 function procs(wql: string): Array<[number, string]> {
   const out = WIN
     ? run([pwsh(), "-NoProfile", "-NonInteractive", "-Command", "Get-CimInstance Win32_Process -Filter $env:UNII_WQL | ForEach-Object { [string]$_.ProcessId + ' ' + $_.CommandLine }"], { UNII_WQL: wql }).out
@@ -752,7 +611,6 @@ function read(file: string): string | null {
   }
 }
 
-// a command's exit code and output (trimmed), with `env` added
 function run(cmd: string[], env: Record<string, string> = {}): { code: number; out: string; err: string } {
   const p = Bun.spawnSync(cmd, { env: { ...process.env, ...env }, stdin: "ignore", stdout: "pipe", stderr: "pipe", windowsHide: true });
   return { code: p.exitCode ?? 1, out: p.stdout.toString().trim(), err: p.stderr.toString().trim() };

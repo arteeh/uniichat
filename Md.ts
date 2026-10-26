@@ -1,67 +1,34 @@
-// Md
-// ==
-// Markdown as GitHub reads it (GFM), as tokens both views draw (Html.ts,
-// Paint.ts): fenced and indented code, headings, rules, quotes, lists
-// (nested, tasks), tables (aligned), paragraphs (each line its own);
-// code spans, emphasis (nested), strikethrough, links, autolinks, bare
-// urls, images, escapes, and agent names (`[FireAnt]`, linked to its
-// chat, unless a link's `(…)` follows). Raw HTML stays text, and a link
-// goes only to http(s), mailto or a path here (link_safe). Spans are read
-// by a scanner (span_parse), and every line by checks that look at each
-// character a bounded number of times, as a message can be long (100 KB
-// and more, read again as it streams). `md_plain` reads text as it is:
-// paragraphs, lines, names and the media store's files pasted only. `md_output` reads a tool's result
-// as a file's lines: a read's as its lines, a unified diff (Machine.ts
-// writes them, git too) as its file and hunks, any other text as lines
-// named "result", so every result looks as a read does. Tokens hold
-// raw text; each emitter escapes it. A block is read by its first line
-// and runs while the next pass its test. A span is the first mark at its
-// point.
-
 import { ENTITIES } from "./Entities.ts";
 import * as Names from "./Names.ts";
 
-// Types
-// =====
-
 export type Span =
-  | { $: "Text"; x: string }                     // x
-  | { $: "Code"; x: string }                     // `x`
-  | { $: "Bold"; x: Span[] }                     // **x**, __x__
-  | { $: "Ital"; x: Span[] }                     // *x*, _x_
-  | { $: "Strk"; x: Span[] }                     // ~~x~~
-  | { $: "Link"; x: Span[]; k: string; t: string } // [x](k "t") (k: link_safe), <k>, or a bare url
-  | { $: "Pict"; x: string; k: string; t: string } // ![x](k "t"): an image, x its alt text
-  | { $: "Name"; x: string }                     // [x]: an agent, x its name
-  | { $: "Brk" };                                // a line's end
+  | { $: "Text"; x: string }
+  | { $: "Code"; x: string }
+  | { $: "Bold"; x: Span[] }
+  | { $: "Ital"; x: Span[] }
+  | { $: "Strk"; x: Span[] }
+  | { $: "Link"; x: Span[]; k: string; t: string }
+  | { $: "Pict"; x: string; k: string; t: string }
+  | { $: "Name"; x: string }
+  | { $: "Brk" };
 
-// k: a label, or ""
-export type Code = { $: "Code"; k: string; x: string }; // ```k x ```
+export type Code = { $: "Code"; k: string; x: string };
 
-// a line of a diff: kept (" "), dropped ("-") or added ("+"), its number
-// in the old file if dropped, else in the new one
 export type Line = { s: " " | "-" | "+"; n: number; x: string };
 
 export type Block =
-  | { $: "Para"; x: Span[] }               // its lines, a Brk between
-  | { $: "Head"; k: number; x: Span[] }    // # x (k: the level, 1 to 6)
+  | { $: "Para"; x: Span[] }
+  | { $: "Head"; k: number; x: Span[] }
   | Code
-  | { $: "Rule" }                          // ---
-  | { $: "Quot"; x: Block[] }              // > x
-  | { $: "List"; k: boolean; n: number; t: boolean; x: Block[][]; c: Array<boolean | null> } // - x (k: numbered, 1. x, from n; t: tight; each item its blocks; c: each a task's box, checked or not, or null)
-  | { $: "Tabl"; x: Span[][][]; a: string[] } // | x | (rows of cells; 1st: head; a: each column's alignment, "left", "center", "right" or "")
-  | { $: "Diff"; k: string; x: Line[][] }  // --- k, +++ k, then hunks (@@ -1,2 +1,3 @@)
-  | { $: "File"; k: string; n: number; x: string[] } // a file's lines x, from line n, named k (a read's "lines 4-7 of 15", else "result")
-
-// Constants
-// =========
+  | { $: "Rule" }
+  | { $: "Quot"; x: Block[] }
+  | { $: "List"; k: boolean; n: number; t: boolean; x: Block[][]; c: Array<boolean | null> }
+  | { $: "Tabl"; x: Span[][][]; a: string[] }
+  | { $: "Diff"; k: string; x: Line[][] }
+  | { $: "File"; k: string; n: number; x: string[] }
 
 const NAME  = new RegExp("\\[(" + Names.NAME + ")\\]", "g");
 const ONLY  = new RegExp("^(?:" + Names.NAME + ")$");
-// the kinds of the media store the chat shows (Memory.media_add), by a
-// file's extension (some named two ways, as the first): its content type;
-// the store keeps any other file too, downloaded only (Server.ts
-// Main.media). Maps, so a name an object has (constructor) is none
 export const MEDIA: ReadonlyMap<string, string> = new Map([
   ["png", "image/png"], ["jpeg", "image/jpeg"], ["gif", "image/gif"], ["webp", "image/webp"], ["svg", "image/svg+xml"],
   ["mp4", "video/mp4"], ["webm", "video/webm"], ["mov", "video/quicktime"],
@@ -69,59 +36,37 @@ export const MEDIA: ReadonlyMap<string, string> = new Map([
   ["html", "text/html"],
 ]);
 export const MEDIA_AS: ReadonlyMap<string, string> = new Map([["jpg", "jpeg"], ["m4v", "mp4"], ["oga", "ogg"], ["htm", "html"]]);
-// a media store's file, right after a pasted file's ](: its url
 const MEDIA_URL = /\/media\/[0-9a-f]{16}\.[a-z0-9]{1,10}(?=\))/y;
 const LIST  = /^ {0,3}([-*+]|\d{1,9}[.)])(?=[ \t]|$)/;
 const FENCE = /^ {0,3}(`{3,}|~{3,})/;
 const TASK  = /^\[([ xX])\](?=[ \t]|$)[ \t]?/;
 const PUNCT = /[\p{P}\p{S}]/u;
-// an autolink, <scheme:…>, at the scanner's point
 const AUTO  = /<((?:https?:\/\/|mailto:)[^\s<>]*)>/iy;
 const MAIL  = /<([A-Za-z0-9.!#$%&'*+\/=?^_`{|}~-]+@[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*)>/y;
 const BARE  = /https?:\/\/|www\./iy;
-// a character of a bare email address's name, and its domain after its @
 const LOCAL = /[A-Za-z0-9._+-]/;
 const EMAIL = /[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)+/y;
 const ENTITY = /&(?:#[0-9]{1,7}|#[xX][0-9a-fA-F]{1,6}|[A-Za-z][A-Za-z0-9]{1,31});/y;
-// a setext heading's underline: = for a level 1, - for a level 2
 const SETEXT = /^ {0,3}(=+|-+)[ \t]*$/;
 const HEAD  = /^ {0,3}(#{1,6})(?:[ \t]+(.*))?$/;
 const QUOT  = /^ {0,3}>[ \t]?/;
 const ROW   = /^\s*\|.*\|\s*$/;
 const PIPE  = /(?<!\\)\|/;
-// a table's bar's cell: dashes, a : at either end aligning its column
 const CELL  = /^[ \t]*:?-+:?[ \t]*$/;
 const NEW   = /^\+\+\+ (.*)$/;
 const READ  = /^\[(lines (\d+)-\d+ of \d+[^\]]*)\]$/;
-// before a failed tool's result (Agent.ts, ClaudeSub.ts)
 const FAILED = "error: ";
 const HUNK  = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/;
 const MARKS = /^(?:\s*(?:[-*+]|\d{1,9}[.)])(?:[ \t]+|$)|\s*>\s?)*/;
 
-// how many parentheses deep a link's url may be (more: no link, so a
-// long line of them is read once)
 const DEPTH = 32;
 
-// how many lists and quotes deep one is still read (past it, its lines
-// are text: a list or quote in one costs every line under it a copy)
 const DEEP  = 16;
 
-// Globals
-// =======
-
-// the reference definitions of the text md_parse reads, by label
-// (def_label), found by a first read of its blocks (COLLECT: no spans
-// read then), so a link may come before its definition
 let DEFS = new Map<string, { k: string; t: string }>();
 let COLLECT = false;
 
-// a definition's title that found no end from a line on to a blank line
-// (title_end_lines), by its lines, its delimiter: none starts between
-// them either, so it is never looked for again
 let UNSHUT: { lines: string[]; from: Map<string, [number, number]> } = { lines: [], from: new Map() };
-
-// Constructors
-// ============
 
 export function Text(x: string): Span {
   return { $: "Text", x };
@@ -131,10 +76,6 @@ export function Name(x: string): Span {
   return { $: "Name", x };
 }
 
-// Parse
-// =====
-
-// the text between the matches of re, and each match as mark reads it
 function spans_by(s: string, re: RegExp, mark: (m: RegExpMatchArray) => Span): Span[] {
   const out: Span[] = [];
   let at = 0;
@@ -152,22 +93,10 @@ function spans_by(s: string, re: RegExp, mark: (m: RegExpMatchArray) => Span): S
   return out;
 }
 
-// the scanner's list: a node a span made (text, a mark's text, or a span
-// done), the nodes around it; a mark's node its mark (Mark)
 type Node = { x: Span; m: Mark | null; prev: Node | null; next: Node | null };
 
-// a mark the scanner holds: a run of *, _ or ~ (n of its len left; open,
-// close: whether it may open and close emphasis), or a [ or ![, at its
-// node, from source index at; the marks before and after it (GFM's
-// delimiter stack)
 type Mark = { c: string; n: number; len: number; open: boolean; close: boolean; at: number; node: Node; prev: Mark | null; next: Mark | null };
 
-// a text's spans, read left to right as GFM's spec reads them: code
-// spans, autolinks, entities and escapes first; a ] makes a link (inline
-// or by a reference definition: DEFS) of its [, emphasis inside it
-// matched then; emphasis left is matched at the end, outermost last
-// (its delimiter runs, rule of 3); marks left are text. Every step moves
-// on past what it read, or looks at most to a line's end
 export function span_parse(s: string): Span[] {
   if (COLLECT) {
     return [];
@@ -175,12 +104,9 @@ export function span_parse(s: string): Span[] {
   const head: Node = { x: Text(""), m: null, prev: null, next: null };
   let tail = head;
   let marks: Mark | null = null;
-  // the [ and ![ open; the [ among them (a link has no link in it, nor a
-  // bare url); below dead, none may make a link any more (one was made)
   const brackets: Mark[] = [];
   let [links, dead] = [0, 0];
   const ticks = ticks_at(s);
-  // where no unescaped end of a title, by its delimiter, is after (link_tail)
   const unshut = new Map<string, number>();
   let [i, text] = [0, ""];
   const add = (x: Span, m: Mark | null = null): Node => {
@@ -267,7 +193,6 @@ export function span_parse(s: string): Span[] {
         dead = o.c === "[" ? brackets.length : dead;
         i = got.end;
       } else if (got !== null) {
-        // a link where no link may go: its source, as text
         emphasis(o);
         tail = o.node;
         o.node.next = null;
@@ -291,7 +216,6 @@ export function span_parse(s: string): Span[] {
     } else if (c === "*" || c === "_" || c === "~") {
       const n = run_len(s, i, c);
       const [open, close] = flanks(s, i, n, c);
-      // (a run that can neither open nor close is text: an _ in a word)
       if ((c === "~" && n > 2) || (!open && !close)) {
         text += s.slice(i, i + n);
       } else {
@@ -305,7 +229,6 @@ export function span_parse(s: string): Span[] {
       put(ok ? { $: "Link", x: [Text(k)], k: url, t: "" } : Text(k));
       i += k.length;
     } else if (c === "@" && text !== "" && LOCAL.test(s[i - 1]) && links === 0 && (EMAIL.lastIndex = i + 1, EMAIL.test(s)) && !/[-_]$/.test(s.slice(i + 1, EMAIL.lastIndex))) {
-      // a bare email address: its name, read already, then its domain
       let at = text.length;
       while (at > 0 && LOCAL.test(text[at - 1])) {
         at--;
@@ -324,9 +247,6 @@ export function span_parse(s: string): Span[] {
   emphasis(null);
   return nodes_spans(head.next);
 
-  // emphasis matched over the marks after bottom (null: all), each
-  // closer with the nearest opener it may close (GFM's process emphasis);
-  // the marks after bottom then dropped, their nodes text
   function emphasis(bottom: Mark | null): void {
     const floor = new Map<string, Mark | null>();
     let closer = bottom === null ? marks_first(marks) : bottom.next;
@@ -397,7 +317,6 @@ export function span_parse(s: string): Span[] {
   }
 }
 
-// the marks' list (marks: its last) without m; its last after
 function mark_drop(marks: Mark | null, m: Mark): Mark | null {
   if (m.prev !== null) {
     m.prev.next = m.next;
@@ -418,8 +337,6 @@ function marks_first(marks: Mark | null): Mark | null {
   return m;
 }
 
-// the spans of the nodes from `from` up to `upto` (null: the end), text
-// joined
 function nodes_spans(from: Node | null, upto: Node | null = null): Span[] {
   const out: Span[] = [];
   for (let n = from; n !== null && n !== upto; n = n.next) {
@@ -428,10 +345,6 @@ function nodes_spans(from: Node | null, upto: Node | null = null): Span[] {
   return out;
 }
 
-// a reference link's target right after its ] at i: [ref] (or [] for
-// the link's own text, from `from` to i), or none (a shortcut, [text]
-// alone); its definition's url and title (DEFS), and where it ends; null
-// if none. A label is 999 characters at most
 function link_ref(s: string, i: number, from: number): { k: string; t: string; end: number } | null {
   if (DEFS.size === 0) {
     return null;
@@ -444,13 +357,10 @@ function link_ref(s: string, i: number, from: number): { k: string; t: string; e
   return def === undefined ? null : { ...def, end: i + (full?.[0].length ?? 0) };
 }
 
-// a label as definitions match it: its case and its runs of blanks not
-// told apart
 function def_label(s: string): string {
   return s.trim().replace(/\s+/g, " ").toLowerCase().toUpperCase();
 }
 
-// an entity (&amp;, &#35;, &#x23;) as the text it names; null: none
 function entity(s: string): string | null {
   const num = /^&#([xX]?)([0-9a-fA-F]+);$/.exec(s);
   if (num !== null) {
@@ -460,19 +370,14 @@ function entity(s: string): string | null {
   return ENTITIES.get(s.slice(1, -1)) ?? null;
 }
 
-// a link's url as written (its escapes and entities read), its spaces (a
-// <url> may have them) as %20
 function url_of(k: string): string {
   return text_unescape(k).replace(/ /g, "%20");
 }
 
-// a text's entities and escapes as what they stand for (a link's url and
-// title)
 function text_unescape(s: string): string {
   return s.replace(/\\([!-/:-@[-`{-~])|&#?[0-9A-Za-z]{1,32};/g, (m, esc) => esc ?? entity(m) ?? m);
 }
 
-// a span put after spans: text joins the text before it
 function spans_push(spans: Span[], span: Span): void {
   const last = spans[spans.length - 1];
   if (span.$ === "Text" && last?.$ === "Text") {
@@ -482,7 +387,6 @@ function spans_push(spans: Span[], span: Span): void {
   }
 }
 
-// spans as plain text (a summary's, an image's alt)
 export function spans_text(spans: Span[]): string {
   return spans.map((x) => (x.$ === "Brk" ? " " : x.$ === "Name" ? "[" + x.x + "]" : typeof x.x === "string" ? x.x : spans_text(x.x))).join("");
 }
@@ -495,8 +399,6 @@ function run_len(s: string, i: number, c: string): number {
   return j - i;
 }
 
-// where each run of backticks starts, by its length: ticks(from, n), the
-// first run of exactly n at or after from (-1: none); asked in order
 function ticks_at(s: string): (from: number, n: number) => number {
   const runs = new Map<number, number[]>();
   for (let i = s.indexOf("`"); i >= 0; i = s.indexOf("`", i)) {
@@ -528,10 +430,6 @@ function flanks(s: string, i: number, n: number, c: string): [boolean, boolean] 
   return c === "_" ? [left && (!right || PUNCT.test(before)), right && (!left || PUNCT.test(after))] : [left, right];
 }
 
-// a link's (k "t") right after its ] at i: its url (in <> or bare, its
-// parentheses balanced), its title, and where it ends; null if none.
-// `unshut`: where no end of a title (by its delimiter) is after, found
-// by a look that failed, so it is looked for once
 function link_tail(s: string, i: number, unshut: Map<string, number>): { k: string; t: string; end: number } | null {
   if (s[i] !== "(") {
     return null;
@@ -588,8 +486,6 @@ function link_tail(s: string, i: number, unshut: Map<string, number>): { k: stri
   return { k: url_of(k), t: text_unescape(t), end: j + 1 };
 }
 
-// where a title from j ends: its delimiter q, unescaped (in a (title)
-// no unescaped "(" either); -1: none (`unshut`: q's none from there on)
 function title_end(s: string, j: number, q: string, unshut: Map<string, number>): number {
   if (j >= (unshut.get(q) ?? Infinity)) {
     return -1;
@@ -607,8 +503,6 @@ function title_end(s: string, j: number, q: string, unshut: Map<string, number>)
   return -1;
 }
 
-// whether a link may go to k: http, https or mailto, or a path on this
-// site (one /, not // nor /\: another site)
 export function link_safe(k: string): boolean {
   return /^(?:https?:\/\/|mailto:)[^\s\x00-\x1f]*$/i.test(k) || /^\/(?![\/\\])[^\s\x00-\x1f]*$/.test(k) || k === "/";
 }
@@ -637,8 +531,6 @@ function url_bare(s: string, i: number): string {
   return s.slice(i, j);
 }
 
-// where an entity-like &name; ends at `semi` (its ; at semi) starts, its
-// & after i; -1 if none
 function entity_back(s: string, i: number, semi: number): number {
   let k = semi;
   while (k > i && /[A-Za-z0-9]/.test(s[k - 1])) {
@@ -647,7 +539,6 @@ function entity_back(s: string, i: number, semi: number): number {
   return k < semi && k > i && s[k - 1] === "&" ? k - 1 : -1;
 }
 
-// a line's text, its marks dropped (a summary is plain text: View.ts)
 export function md_flat(s: string): string {
   return spans_text(span_parse(s));
 }
@@ -658,7 +549,6 @@ export function md_plain(s: string): Block[] {
   return kept.map((p) => ({ $: "Para", x: p.split("\n").flatMap((l, k) => [...(k === 0 ? [] : [{ $: "Brk" } as Span]), ...plain_line(l)]) }));
 }
 
-// a line's names, and the files pasted in it (md_pasted) as media
 function plain_line(s: string): Span[] {
   const out: Span[] = [];
   let at = 0;
@@ -669,12 +559,6 @@ function plain_line(s: string): Span[] {
   return [...out, ...spans_by(s.slice(at), NAME, (m) => Name(m[1]))];
 }
 
-// the media store's files pasted in a text, ![name](/media/…) (a file
-// that isn't media is sent as a link, [name](/media/…), main.ts; a link
-// to media stays a link), each its start and end, its name and its url:
-// each found from its "](/media/", its [ looked for back to the bracket
-// before (so each character is looked at once or twice), on its line,
-// its name 999 characters at most
 export function md_pasted(s: string): Array<[number, number, string, string]> {
   const out: Array<[number, number, string, string]> = [];
   for (let k = s.indexOf("](/media/"); k >= 0; k = s.indexOf("](/media/", k + 1)) {
@@ -694,10 +578,6 @@ export function md_pasted(s: string): Array<[number, number, string, string]> {
   return out;
 }
 
-// a tool's result: a read's lines a File, each unified diff in it a
-// Diff, the text around them a File named "result" (none if blank); or
-// named `name` (a result apart from its call: "↳ shell result"), a
-// read's too, before its lines
 export function md_output(s: string, name = "result"): Block[] {
   const lines = s.replace(/\r/g, "").split("\n");
   const read  = READ.exec(lines[lines.length - 1]);
@@ -717,13 +597,6 @@ export function md_output(s: string, name = "result"): Block[] {
   return [...out, ...output_lines(lines.slice(at), name)];
 }
 
-// a show tool's result (Machine.ts): each line that is a file of the
-// media store, ![name](/media/…) (or a file's [name](/media/…): Device.ts
-// show), drawn as a message draws it, a paragraph of its own; the lines
-// between (a file refused, saying why) as md_output's. A failed result
-// ("error: " before its first line, which may be a file shown) has the
-// word before its first line that isn't one (or alone), so it reads as a
-// failure
 export function md_shown(s: string, name = "result"): Block[] {
   const out: Block[] = [];
   const failed = s.startsWith(FAILED);
@@ -748,16 +621,12 @@ export function md_shown(s: string, name = "result"): Block[] {
   return out;
 }
 
-// a result's text as a File named so, its blank lines at either end
-// dropped; none if all blank
 function output_lines(lines: string[], name: string): Block[] {
   const from = lines.findIndex((l) => l.trim() !== "");
   const upto = lines.findLastIndex((l) => l.trim() !== "");
   return from < 0 ? [] : [{ $: "File", k: name, n: 1, x: lines.slice(from, upto + 1) }];
 }
 
-// null: no diff starts at line i (its "---" and "+++" lines, then hunks,
-// each exactly as long as its header counts); and the line after it
 function diff_parse(lines: string[], i: number): [Block | null, number] {
   const file  = NEW.exec(lines[i + 1] ?? "");
   const hunks : Line[][] = [];
@@ -776,7 +645,6 @@ function diff_parse(lines: string[], i: number): [Block | null, number] {
   return hunks.length === 0 ? [null, i + 1] : [{ $: "Diff", k: file[1], x: hunks }, j];
 }
 
-// null: the lines from j don't fill the header's counts
 function hunk_parse(lines: string[], j: number, h: RegExpExecArray): [Line[] | null, number] {
   let [olds, news] = [Number(h[2] ?? 1), Number(h[4] ?? 1)];
   let [o, n] = [Number(h[1]), Number(h[3])];
@@ -816,12 +684,6 @@ export function md_parse(src: string): Block[] {
   }
 }
 
-// a link's reference definition at line i (GFM's): [label]: url "title".
-// Its label, 999 characters at most, over lines too; its url on the
-// label's line or the next; its title (if any: else only blanks after
-// the url) on the url's line or the next, over lines; then only blanks
-// to its line's end; never over a blank line. Its label, url, title and
-// the line after it; null: none
 function def_at(lines: string[], i: number): { label: string; k: string; t: string; next: number } | null {
   const first = indent(lines[i]);
   if (first > 3 || lines[i][first] !== "[") {
@@ -829,7 +691,6 @@ function def_at(lines: string[], i: number): { label: string; k: string; t: stri
   }
   let [r, c] = [i, first + 1];
   const ch = () => (c < lines[r].length ? lines[r][c] : "\n");
-  // onto the next line, if it goes on (no blank one)
   const down = () => r + 1 < lines.length && lines[r + 1].trim() !== "" && ([r, c] = [r + 1, 0], true);
   const blanks = () => {
     while (ch() === " " || ch() === "\t") {
@@ -876,7 +737,6 @@ function def_at(lines: string[], i: number): { label: string; k: string; t: stri
   }
   const def = { label, k: url_of(k), t: "", next: r + 1 };
   const bare = lines[r].slice(c).trim() === "";
-  // its title: after a blank, on this line or (none more on it) the next
   const at = c;
   blanks();
   const moved = ch() === "\n" && down();
@@ -893,10 +753,6 @@ function def_at(lines: string[], i: number): { label: string; k: string; t: stri
   return { ...def, t: text_unescape(t), next: end[0] + 1 };
 }
 
-// where a definition's title from line r, column c ends (its delimiter
-// q, unescaped; in a (title) no unescaped "(" either), over lines but no
-// blank one; null: none. One that runs to a blank line or the end says
-// so (UNSHUT), so a title after it on those lines isn't looked for again
 function title_end_lines(lines: string[], r: number, c: number, q: string): [number, number] | null {
   if (UNSHUT.lines !== lines) {
     UNSHUT = { lines, from: new Map() };
@@ -922,15 +778,12 @@ function title_end_lines(lines: string[], r: number, c: number, q: string): [num
   return null;
 }
 
-// the blocks of lines d lists or quotes deep, and whether a blank line
-// parts two of them (a list item's: a loose list)
 function blocks_parse(lines: string[], d: number): [Block[], boolean] {
   const out: Block[] = [];
   let [i, gap, apart] = [0, false, false];
   while (i < lines.length) {
     const [block, next] = block_parse(lines, i, d);
     if (block === undefined) {
-      // (a definition: no block, no gap)
     } else if (block === null) {
       gap = out.length > 0;
     } else {
@@ -942,8 +795,6 @@ function blocks_parse(lines: string[], d: number): [Block[], boolean] {
   return [out, apart];
 }
 
-// null: a blank line; undefined: a link's definition (kept in DEFS); and
-// the line after the block
 function block_parse(lines: string[], i: number, d: number): [Block | null | undefined, number] {
   const line = lines[i];
   const head = HEAD.exec(line);
@@ -998,36 +849,28 @@ function block_parse(lines: string[], i: number, d: number): [Block | null | und
     }
     return [{ $: "Code", k: "", x: body.join("\n") }, end];
   }
-  // a definition makes no block (the first of a label counts)
   const def = def_at(lines, i);
   if (def !== null) {
     const label = def_label(def.label);
     DEFS.set(label, DEFS.get(label) ?? { k: def.k, t: def.t });
     return [undefined, def.next];
   }
-  // a paragraph; with a line of = or - under it, a heading (setext)
   const end = runs((l, j) => l.trim() !== "" && !block_starts(lines, j) && !SETEXT.test(l));
   const x = span_parse(lines.slice(i, end).join("\n").trim());
   const under = SETEXT.exec(lines[end] ?? "");
   return under === null ? [{ $: "Para", x }, end] : [{ $: "Head", k: under[1][0] === "=" ? 1 : 2, x }, end + 1];
 }
 
-// a fence's mark (``` or ~~~, or longer) if line opens code; a ``` one
-// has no ` after it
 function fence_open(line: string): string | null {
   const m = FENCE.exec(line);
   return m === null || (m[1][0] === "`" && line.slice(line.indexOf(m[1]) + m[1].length).includes("`")) ? null : m[1];
 }
 
-// whether line ends code its fence opened: the same mark, as long or longer
 function fence_shuts(line: string, fence: string): boolean {
   const m = /^ {0,3}(`{3,}|~{3,})[ \t]*$/.exec(line);
   return m !== null && m[1][0] === fence[0] && m[1].length >= fence.length;
 }
 
-// a table's columns' alignments, if a table starts at line i: its head,
-// a row with a |, over its bar, as many cells, of dashes (: at an end
-// aligns it)
 function table_head(lines: string[], i: number): string[] | null {
   const [head, bar] = [lines[i], lines[i + 1] ?? ""];
   const cells = cells_split(bar);
@@ -1038,8 +881,6 @@ function table_head(lines: string[], i: number): string[] | null {
   });
 }
 
-// a heading's text, its closing #s dropped (a run of them after a blank,
-// or all it has)
 function head_text(x: string): string {
   const t = x.trimEnd();
   let k = t.length;
@@ -1049,8 +890,6 @@ function head_text(x: string): string {
   return k === 0 ? "" : t[k - 1] === " " || t[k - 1] === "\t" ? t.slice(0, k).trimEnd() : t;
 }
 
-// whether a line is a rule: three or more of one of - * _, blanks
-// between, at most 3 spaces in
 function is_rule(l: string): boolean {
   if (indent(l) > 3) {
     return false;
@@ -1069,12 +908,6 @@ function is_rule(l: string): boolean {
   return n >= 3;
 }
 
-// a list: its items, of one kind (one bullet, or one number's end).
-// An item runs on over the lines as far in as its text (its paragraphs,
-// its sub-lists), blank lines between them too, and over the lines
-// right under its paragraph that start no block. It is tight but a
-// blank line parts two items or two of an item's blocks. Numbered, it
-// counts from its first item's number (GFM's list items and lists)
 function list_parse(lines: string[], i: number, d: number): [Block, number] {
   const kind  = list_kind(lines[i]);
   const items : string[][] = [];
@@ -1118,8 +951,6 @@ function list_parse(lines: string[], i: number, d: number): [Block, number] {
   return [{ $: "List", k, n: k ? Number(first.slice(0, -1)) : 1, t, x: parts.map((p) => p[0]), c: boxes }, end];
 }
 
-// an item's line s: whether a paragraph is open after it (a line under
-// it can go on with it), and whether a fence is (fenced: before it)
 function item_line(s: string, fenced: boolean): [boolean, boolean] {
   const x = is_rule(s) ? "" : s.replace(MARKS, "");
   if (FENCE.test(x)) {
@@ -1128,13 +959,10 @@ function item_line(s: string, fenced: boolean): [boolean, boolean] {
   return [!fenced && x.trim() !== "" && !HEAD.test(x) && !is_rule(x) && !ROW.test(x), fenced];
 }
 
-// a line, the tabs in its indent and after its list marks as spaces, to
-// the next 4th column
 function untab(l: string): string {
   return l.replace(/^[ \t]*(?:(?:[-*+]|\d{1,9}[.)])[ \t]+)*/, (pre) => [...pre].reduce((out, c) => out + (c === "\t" ? " ".repeat(4 - (out.length % 4)) : c), ""));
 }
 
-// a line's leading blanks
 function indent(l: string): number {
   return l.search(/\S|$/);
 }
@@ -1147,9 +975,6 @@ function lines_run(lines: string[], i: number, test: (l: string, j: number) => b
   return j;
 }
 
-// whether line j starts a block block_parse reads, but a paragraph: one
-// ends a paragraph, a rule too ("---" right under a line), a table only
-// with its bar under it, a list item only with text, numbered only at 1
 function block_starts(lines: string[], j: number): boolean {
   const l = lines[j];
   const m = LIST.exec(l);
@@ -1157,22 +982,17 @@ function block_starts(lines: string[], j: number): boolean {
   return fence_open(l) !== null || HEAD.test(l) || is_rule(l) || QUOT.test(l) || item || table_head(lines, j) !== null;
 }
 
-// a list item's kind: its bullet (-, *, +) or its number's end (., ));
-// null: no item (a rule, as "- - -", is none). A list is of one kind
 function list_kind(l: string): string | null {
   const m = LIST.exec(l);
   return m === null || is_rule(l) ? null : m[1].slice(-1);
 }
 
-// a table row's cells, n of them, so each row has the head's
 function row_cells(line: string, n: number): Span[][] {
   const cells = cells_split(line);
   const all = Array.from({ length: n }, (_, k) => cells[k] ?? "");
   return all.map((c) => span_parse(c.trim().replace(/\\\|/g, "|")));
 }
 
-// a row's cells: split at each | but an escaped one (\\|), a | at either
-// end dropped
 function cells_split(line: string): string[] {
   return line.trim().replace(/^\||(?<!\\)\|$/g, "").split(/(?<!\\)\|/);
 }

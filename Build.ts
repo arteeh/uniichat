@@ -1,13 +1,3 @@
-// Build
-// =====
-// `bun Build.ts [target] [outfile]` (`bun run build`): one `unii`
-// executable for a Bun target (default this machine's: bun-linux-x64,
-// bun-linux-arm64, -musl, bun-darwin-arm64, bun-darwin-x64,
-// bun-windows-x64), carrying that platform's Claude Code for claude-sub
-// (ClaudeSub.ts writes it out on first use), so none needs installing. A
-// platform's package missing from node_modules (`bun install` fetches
-// only this machine's) is fetched with `npm pack`, at the SDK's version.
-
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";

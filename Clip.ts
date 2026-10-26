@@ -1,21 +1,5 @@
-// Clip
-// ====
-// CAP characters: the most text a model gets in one piece (Claude Code
-// keeps a command's output to 30,000 too). A command's output is clipped
-// to its head and tail as it streams (Machine.ts); any text kept is never
-// cut, but goes in pages (a message logged, a zoom, a read). It imports
-// nothing: the device side and the browser use it. A clip is a copy (a
-// slice would keep its source alive).
-
-// Constants
-// =========
-
 export const CAP = 30000;
 
-// Clip
-// ====
-
-// a text taken in pieces
 export function clip(): { add: (str: string) => void; text: () => string } {
   const half = CAP / 2;
   const keep = half - 64;
@@ -42,8 +26,6 @@ export function clip(): { add: (str: string) => void; text: () => string } {
   return { add, text };
 }
 
-// where the page of a text from `at` ends: CAP characters on, after its
-// last newline if it has one, else where a character ends
 export function clip_end(str: string, at: number): number {
   if (str.length - at <= CAP) {
     return str.length;
@@ -53,7 +35,6 @@ export function clip_end(str: string, at: number): number {
   return nl >= at ? nl + 1 : at + CAP - (low ? 1 : 0);
 }
 
-// a text in pages
 export function clip_pages(str: string): string[] {
   const pages: string[] = [];
   let at = 0;
@@ -65,21 +46,17 @@ export function clip_pages(str: string): string[] {
   return pages;
 }
 
-// a text's page from `at`, and past it where to go on
 export function clip_page(str: string, at: number): string {
   const end = clip_end(str, at);
   const on  = "\n[characters " + (at + 1) + "-" + end + " of " + str.length + "; go on with at " + end + "]";
   return str.slice(at, end) + (end < str.length ? on : "");
 }
 
-// a byte stream's lines, those of each read whole (one cut short waits
-// for the next read; the stream's last comes last, "" if it ends one)
 export async function* stream_lines(stream: ReadableStream<Uint8Array>): AsyncGenerator<string[]> {
   const reader = stream.getReader();
   const utf8 = new TextDecoder();
   let rest = "";
   for (let got = await reader.read(); !got.done; got = await reader.read()) {
-    // (a character cut between two reads waits for the next)
     const text = utf8.decode(got.value, { stream: true });
     const nl = text.lastIndexOf("\n");
     if (nl >= 0) {

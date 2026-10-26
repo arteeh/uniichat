@@ -1,12 +1,3 @@
-// Term
-// ====
-// `unii [url]`: a terminal view of the agent (Server.ts). It feeds a View
-// the server's messages and the person's acts, and prints what it says
-// (Paint.ts, Screen.ts) into the terminal's own scrollback. Every act of
-// the site is a command here (COMMANDS, /help). From a pipe, each line is
-// a message. Its file is tui.json (Client.ts): the server it opens by
-// default (the last one signed in to) and its sign-in to each, by host.
-
 import * as child from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
@@ -18,15 +9,6 @@ import { type Move, Pick } from "./Pick.ts";
 import * as Screen from "./Screen.ts";
 import * as View from "./View.ts";
 
-// Types
-// =====
-
-// the terminal: its sign-in; ended: input's; pending: commands at
-// work; last: UniiChat's message printed last (-1: none); wait: parts up
-// to it not printed (term_settle); out: lines to print; wipe: first;
-// due: a paint; settle: the page's print at a new size; imgs: for the
-// next message; flow: how much of each message streaming is printed
-// (Infinity: logged); logs: of each agent's page, the messages printed
 type Term = {
   v       : View.View;
   scr     : Screen.Screen;
@@ -45,28 +27,16 @@ type Term = {
   logs    : Map<string, number>;
 };
 
-// a line of /help: how it is typed ("": keys only), its keys, what it
-// does; it runs on its argument, or by a key on "" (or the key's name)
 type Cmd = [use: string, keys: string, text: string, run: (t: Term, arg: string) => void | Promise<void>];
 
-// Constants
-// =========
-
-// paths on Windows take \\, not /
 const WIN = process.platform === "win32";
 
-// the margin left of each line
 const MARGIN = 2;
 
-// a paint's frame: a stream's pieces come faster than a screen shows
-// them (ms)
 const FRAME = 16;
 
-// a size held this long is settled: a drag's sizes come faster, and each
-// would print the whole page again (ms)
 const SETTLE = 100;
 
-// where Claude Code and Codex keep their sessions
 const CODEX   = process.env.CODEX_HOME ?? os.homedir() + "/.codex";
 const IMPORTS = [
   (process.env.CLAUDE_CONFIG_DIR ?? os.homedir() + "/.claude") + "/projects",
@@ -74,21 +44,14 @@ const IMPORTS = [
   CODEX + "/archived_sessions",
 ];
 
-// what /import takes: its day; a site's export (its zip, or its
-// conversations.json)
 const SINCE  = /\bsince +(\d{4}-\d\d-\d\d)\b/;
 const EXPORT = /\.(zip|json)$/i;
 const HOW = "Pick with /import [claude] [chatgpt] [since 2026-06-01] [tools] [sessions] [-#n] [<export>.zip] [go] (-#n: not session n; go: import); /import pause or resume: the import running. Exports, on each website: " + Object.entries(Import.EXPORTS).map(([app, how]) => app + ": " + how).join("; ") + "; it emails you a zip.";
 
-// the keys on an agent's page, which has no input: a tab back, quit,
-// suspend and Esc (UniiChat's turn interrupted; agents go on); none that
-// types, sends or moves the pick
 const PAGE_KEYS = ["Tab", "Ctrl+D", "Ctrl+Z", "Esc"];
 
-// the pick's moves by Shift and an arrow
 const ARROWS: Record<string, Move> = { "Shift+Left": "prev", "Shift+Right": "next", "Shift+Up": "up", "Shift+Down": "down" };
 
-// all a person can do here, by group (the editing keys are Screen's)
 function term_groups(v: View.View): [group: string, cmds: Cmd[]][] {
   return [
     ["Chat", [
@@ -133,9 +96,6 @@ function term_commands(v: View.View): Cmd[] {
   return term_groups(v).flatMap(([, cmds]) => cmds);
 }
 
-// Term
-// ====
-
 function term_new(url: string, token: string): Term {
   Paint.paint_site(url);
   const t: Term = {
@@ -169,7 +129,6 @@ function term_new(url: string, token: string): Term {
   return t;
 }
 
-// connects, by View's link
 function term_connect(t: Term): void {
   View.link_open(t.v, {
     open : (query) => new WebSocket(t.url.replace(/^http/, "ws") + "/ws" + query, { headers: Client.auth(t.token) } as any),
@@ -179,8 +138,6 @@ function term_connect(t: Term): void {
   });
 }
 
-// a socket lost (up: it had opened): the footer says offline; one that
-// never opened, if the server refuses this terminal's session, quits
 async function term_lost(t: Term, up: boolean): Promise<boolean> {
   term_draw(t);
   if (!up && !await Client.signed(t.url, t.token)) {
@@ -192,8 +149,6 @@ async function term_lost(t: Term, up: boolean): Promise<boolean> {
   return true;
 }
 
-// an act to the server (a message shown while it waits offline); a
-// message refused goes back in the input
 function term_send(t: Term, msg: View.Client, sent?: View.Sent): void {
   const said = sent === undefined ? "" : sent.text.trim();
   View.link_send(t.v, msg, (a) => {
@@ -207,7 +162,6 @@ function term_send(t: Term, msg: View.Client, sent?: View.Sent): void {
   }, said);
 }
 
-// a message of the server: to the view, then to the jobs and the page
 function term_hear(t: Term, msg: View.Server): void {
   const first = msg.$ === "view" && t.v.parts.length === 0;
   const was   = t.v.page;
@@ -228,7 +182,6 @@ function term_hear(t: Term, msg: View.Server): void {
   }
 }
 
-// an act of the person: to the view; the messages it sends the server
 function term_act(t: Term, act: View.Act): View.Client[] {
   const was = t.v.page;
   const out = View.view_act(t.v, act);
@@ -237,8 +190,6 @@ function term_act(t: Term, act: View.Act): View.Client[] {
   return out;
 }
 
-// a message the server refused, back in the input, unless another is in
-// it; from a pipe, the end, failed
 function term_back(t: Term, sent: View.Sent): void {
   if (!t.scr.tty) {
     process.exitCode = 1;
@@ -252,9 +203,6 @@ function term_back(t: Term, sent: View.Sent): void {
   t.imgs = sent.images ?? [];
 }
 
-// the page shown was `was`: another prints below, after its name (a
-// wipe and whole print took seconds on a long page); an agent's has no
-// input (a pipe's lines still go on)
 function term_went(t: Term, was: View.Page | null): void {
   t.scr.off = t.scr.tty && !View.view_typing(t.v);
   if (t.v.page !== was) {
@@ -263,25 +211,18 @@ function term_went(t: Term, was: View.Page | null): void {
   }
 }
 
-// the input's history: the user's messages known
 function term_history(t: Term): void {
   const sent = [...t.v.whole].sort((a, b) => a[0] - b[0]).flatMap(([, e]) => (e.kind === "user" ? [e.text] : []));
   t.scr.ed.hist = sent;
   t.scr.ed.at   = sent.length;
 }
 
-// input's end: quits once all it sent is answered and no work runs
 function term_idle(t: Term): void {
   if (t.ended && t.pending <= 0 && t.v.out.length === 0 && !View.view_running(t.v)) {
     term_quit(t);
   }
 }
 
-// Keys
-// ----
-
-// a key ("": text typed): its line of COMMANDS (an agent's page: of
-// PAGE_KEYS)
 function term_press(t: Term, key: string): void {
   const cmd = term_commands(t.v).find((c) => c[1] !== "" && c[1].split(", ").includes(key));
   if (cmd !== undefined && (!t.scr.off || PAGE_KEYS.includes(key))) {
@@ -290,8 +231,6 @@ function term_press(t: Term, key: string): void {
   term_draw(t);
 }
 
-// Enter: runs a command, or sends the input; text not sent stays (it
-// was lost: an unknown /word)
 function term_enter(t: Term): void {
   const text = Screen.ed_take(t.scr.ed);
   if (term_command(t, text)) {
@@ -306,9 +245,6 @@ function term_enter(t: Term): void {
   Screen.ed_type(t.scr.ed, text);
 }
 
-// Ctrl+C or Ctrl+D: clears the input; on an empty one, Ctrl+C interrupts
-// UniiChat's turn (never quits), Ctrl+D quits, as it does on an agent's
-// page (its input's text kept)
 function term_clear(t: Term, key: string): void {
   if (t.scr.ed.text !== "" && !t.scr.off) {
     Screen.ed_take(t.scr.ed);
@@ -319,18 +255,12 @@ function term_clear(t: Term, key: string): void {
   }
 }
 
-// the next tab
 function term_cycle(t: Term): void {
   const tabs = View.view_tabs(t.v);
   const at   = tabs.findIndex((tab) => tab.here) + 1;
   term_act(t, { $: "Goto", name: tabs[at % tabs.length].name });
 }
 
-// Commands
-// --------
-
-// a command typed (`/name arg`): runs it (pending while it works on);
-// false if the text is none
 function term_command(t: Term, text: string): boolean {
   const word = text.trim().split(/\s+/)[0];
   const cmd = term_commands(t.v).find(([use]) => use !== "" && use.split(" ")[0] === word);
@@ -345,7 +275,6 @@ function term_command(t: Term, text: string): boolean {
   return cmd !== undefined;
 }
 
-// the commands and keys by group, in two columns, then the editing keys
 function term_help(t: Term): void {
   const how   = (c: Cmd) => [c[0], c[1]].filter((x) => x !== "").join(", ");
   const left  = Math.max(...term_commands(t.v).map((c) => Paint.text_width(how(c)))) + 2;
@@ -357,10 +286,6 @@ function term_help(t: Term): void {
   t.out = t.out.concat(term_inset([[], ...term_groups(t.v).flatMap(group), [Paint.Run("Editing", bold)], ...edit]));
 }
 
-// attaches the image at a path (as typed or dropped: quoted, escaped, ~)
-// to the next message, its bytes as read now (a Bun file inside a Blob
-// adds nothing to it, Bun 1.3.14: the server got the text alone and
-// refused the message); a file of another kind is refused here
 async function term_image(t: Term, arg: string): Promise<void> {
   const file = arg.replace(/^(['"])(.*)\1$/, "$2").replace(/\\(.)/g, "$1").replace(/^~(?=\/|$)/, os.homedir());
   if (!fs.existsSync(file) || !fs.statSync(file).isFile()) {
@@ -376,7 +301,6 @@ async function term_image(t: Term, arg: string): Promise<void> {
   term_note(t, "Attached " + arg + "; it goes with the next message (" + t.imgs.length + " waiting).");
 }
 
-// stops all that runs, or the agent named
 function term_stop(t: Term, arg: string): void {
   const name = term_agent(t, arg);
   if (arg !== "" && !t.v.agents.includes(name)) {
@@ -386,13 +310,10 @@ function term_stop(t: Term, arg: string): void {
   term_send(t, arg === "" ? { $: "stop" } : { $: "stop", name });
 }
 
-// an agent at work whose name starts with arg, else arg
 function term_agent(t: Term, arg: string): string {
   return t.v.agents.find((a) => a.toLowerCase().startsWith(arg.toLowerCase())) ?? arg;
 }
 
-// the person's choice for block #id or #id+n (its name, View.block_name),
-// open or closed, whatever it shows now: it holds until Fold all
 function term_block(t: Term, arg: string, open: boolean): void {
   const name = /^#?(\d+)(?:\+(\d+))?$/.exec(arg);
   const id   = Number(name?.[1]);
@@ -407,17 +328,12 @@ function term_block(t: Term, arg: string, open: boolean): void {
   }
 }
 
-// block #id+n as chosen, printed below what is printed, then a note: the
-// scrollback is never written over, so the reader keeps their place, and
-// an opened block shows where one reads (it may be far above); the page
-// shows the choice in place at its next whole print
 function term_shown(t: Term, id: number, n: number, open: boolean): void {
   const row = block_row(View.view_body(t.v), id, n);
   term_rows(t, open && row !== undefined ? [row] : [], false);
   term_note(t, (open ? "Opened " : "Closed ") + View.block_name(id, n) + ".");
 }
 
-// the row of block #id+n, among rows or inside their boxes
 function block_row(rows: View.Row[], id: number, n: number): View.Row | undefined {
   for (const r of rows) {
     if ((r.$ === "Sum" || r.$ === "Box") && r.id === id && r.n === n) {
@@ -431,7 +347,6 @@ function block_row(rows: View.Row[], id: number, n: number): View.Row | undefine
   return undefined;
 }
 
-// folds all (printed when the tops come), or unfolds
 function term_fold(t: Term): void {
   if (t.v.page !== null) {
     return;
@@ -443,8 +358,6 @@ function term_fold(t: Term): void {
   }
 }
 
-// shows an agent's chat, by the start of its name, or UniiChat's; no
-// name lists the tabs
 function term_tab(t: Term, arg: string): void {
   const main = arg.toLowerCase() === View.MAIN.toLowerCase();
   if (arg === "") {
@@ -453,21 +366,16 @@ function term_tab(t: Term, arg: string): void {
   term_act(t, { $: "Goto", name: main ? null : term_agent(t, arg) });
 }
 
-// moves the pick one step (a key)
 function term_move(t: Term, move: Move): void {
   term_act(t, { $: "Move", move });
 }
 
-// a part of the pick: to the value given, or, none, the values it may
-// take, the pick's marked
 function term_pick(t: Term, move: Move, arg: string): void {
   const knob = View.view_pick(t.v).find((k) => k.move === move);
   if (arg !== "" || knob === undefined || t.v.pick === null) {
     term_act(t, { $: "Move", move, to: arg });
     return;
   }
-  // a model two vendors offer is listed under each (/model vendor:model
-  // picks the other's), the profiles under their own head
   const pick  = t.v.pick;
   const opts  = Pick.options(pick, move, t.v);
   const head  = (p: Pick) => (p.profile !== undefined ? "profiles" : p.vendor);
@@ -480,8 +388,6 @@ function term_pick(t: Term, move: Move, arg: string): void {
   term_note(t, move[0].toUpperCase() + move.slice(1) + "s: " + list + ". Pick one with " + how + ".");
 }
 
-// the chat's MCP servers (its devices'), on or off in this chat; with
-// a name, that one switched
 function term_mcp(t: Term, arg: string): void {
   if (arg !== "") {
     term_act(t, { $: "Plug", name: arg });
@@ -491,7 +397,6 @@ function term_mcp(t: Term, arg: string): void {
   term_note(t, list.length === 0 ? "No MCP servers: none is set up." : "MCP servers: " + list.join(", ") + ". Turn one on or off with /mcp <name>.");
 }
 
-// the memory mode (Html.ts MODES), or with a name, that one
 function term_mode(t: Term, arg: string): void {
   if (arg === "standard" || arg === "conversation") {
     term_act(t, { $: "Talk", on: arg === "conversation" });
@@ -511,11 +416,6 @@ async function term_export(t: Term): Promise<void> {
   }
 }
 
-// this computer's Claude and ChatGPT chats, and the websites' exports
-// given (EXPORT), not imported yet, as the words want (claude, chatgpt;
-// Import.Want: since a day; tools; -#n: not session n): without go,
-// what it finds (sessions: and the list); with go, sent;
-// pause, resume: the import running
 async function term_import(t: Term, arg: string): Promise<void> {
   if (/^(pause|resume)$/.test(arg)) {
     return term_send(t, { $: "go", on: arg === "resume" });
@@ -559,7 +459,6 @@ async function term_import(t: Term, arg: string): Promise<void> {
   term_send(t, { $: "import", body: () => Import.import_body(plan.picked) });
 }
 
-// a dir's sessions (none if it is missing), a file at a time
 async function term_sessions(dir: string): Promise<Import.Session[]> {
   const files = fs.existsSync(dir) ? fs.readdirSync(dir, { recursive: true }).map((f) => dir + "/" + (WIN ? String(f).replaceAll("\\", "/") : f)).filter(Import.import_file) : [];
   const found: Import.Session[] = [];
@@ -569,7 +468,6 @@ async function term_sessions(dir: string): Promise<Import.Session[]> {
   return found;
 }
 
-// a site's export file's sessions
 async function export_sessions(path: string): Promise<Import.Session[]> {
   if (!fs.existsSync(path)) {
     throw new Error("no file " + path);
@@ -586,7 +484,6 @@ async function term_logout(t: Term): Promise<void> {
   term_quit(t);
 }
 
-// a GET of the server; failing, a note says it could not do `what`
 async function term_get(t: Term, path: string, what: string): Promise<Response | null> {
   const res = await fetch(t.url + path, { headers: Client.auth(t.token) }).catch(() => null);
   if (res === null || !res.ok) {
@@ -596,22 +493,17 @@ async function term_get(t: Term, path: string, what: string): Promise<Response |
   return res;
 }
 
-// quits, telling the server, once all printed is out
-// (a write's callback comes after those before it), with exitCode
 function term_quit(t: Term): void {
   t.v.ws?.close(View.QUIT);
   term_paint(t);
   process.stdout.write("", () => process.exit());
 }
 
-// quits at a signal (the terminal may be gone: nothing printed)
 function term_bye(t: Term): void {
   t.v.ws?.close(View.QUIT);
   process.exit(0);
 }
 
-// a page for the browser: its link printed (a terminal reached over ssh
-// has no browser of its own), then opened in the browser here, if any
 function term_browse(t: Term, what: string, url: string): void {
   term_note(t, what + ": " + url);
   browse(url);
@@ -626,16 +518,11 @@ function browse(url: string): void {
   }
 }
 
-// a note printed above the footer
 function term_note(t: Term, text: string): void {
   t.v.notes.push(text);
   term_draw(t);
 }
 
-// Printing
-// --------
-
-// what a server message prints, as it comes
 function term_print(t: Term, msg: View.Server): void {
   const v     = t.v;
   const main  = v.page === null;
@@ -656,7 +543,6 @@ function term_print(t: Term, msg: View.Server): void {
       if (msg.agent !== v.page?.name) {
         return;
       }
-      // a page's log comes again at each reconnect
       const text = term_logged(t, msg.kind, msg.text);
       const page = msg.agent ?? "";
       const n    = v.page?.log?.length ?? 0;
@@ -667,7 +553,6 @@ function term_print(t: Term, msg: View.Server): void {
       t.last = main && msg.id !== undefined ? msg.id : t.last;
       const due  = main && msg.id !== undefined && View.part_due(v, [msg.id, 1], v.parts[v.parts.length - 2]);
       const head = due ? [View.Cap(View.AI)] : [];
-      // (the message before it, which a result's head depends on: View.entry_of)
       const before = main ? v.whole.get((msg.id ?? 0) - 1) : v.page?.log?.[n - 2];
       term_rows(t, [...head, ...View.entry_rows(msg.id ?? null, msg.kind, text, msg.images, View.entry_of(msg, before))], false);
       return;
@@ -687,15 +572,12 @@ function term_print(t: Term, msg: View.Server): void {
   }
 }
 
-// the page shown, whole, alone on the screen and its scrollback (a new
-// size, /fold): no other is printed then
 function term_page(t: Term): void {
   term_rows(t, [], true);
   [t.last, t.wait, t.logs] = [-1, [], new Map()];
   term_show(t);
 }
 
-// what of the page shown was never printed, then its stream again
 function term_show(t: Term): void {
   const page = t.v.page;
   t.flow = new Map([...t.flow].filter(([, done]) => done === Infinity));
@@ -711,10 +593,6 @@ function term_show(t: Term): void {
   term_rows(t, View.view_body(t.v), false);
 }
 
-// a new view of the chat: the parts holding a message past the one
-// printed last print as they settle, after the AI notice if none is,
-// since a terminal's scrollback is never written over; what changed
-// above (new summaries) shows at the next whole print (a resize, /fold)
 function term_after(t: Term): void {
   const head = t.last < 0 ? [View.Cap(View.AI)] : [];
   t.wait = t.wait.concat(t.v.parts.filter(([id, n]) => id + n - 1 > t.last));
@@ -723,9 +601,6 @@ function term_after(t: Term): void {
   term_settle(t);
 }
 
-// prints the parts not printed, in order, up to one whose summary isn't
-// known yet: from it on they show in the footer till it is (an import's
-// blocks, the oldest built last)
 function term_settle(t: Term): void {
   const rows = View.view_rows(t.v, t.wait);
   const wait = rows.findIndex((r) => View.rows_wait(t.v, r));
@@ -734,9 +609,6 @@ function term_settle(t: Term): void {
   term_rows(t, rows.slice(0, done).flat(), false);
 }
 
-// prints what streams that no piece to come changes, a message at a
-// time: whole once a message after it started, else its settled blocks;
-// a message with a part left holds back those after it
 function term_flow(t: Term): void {
   const live = View.view_stream(t.v);
   for (const [l, done] of t.flow) {
@@ -758,9 +630,6 @@ function term_flow(t: Term): void {
   }
 }
 
-// the part of a message logged not printed yet: what follows the printed
-// head of the first message streaming of its kind that it starts with;
-// that one prints no more
 function term_logged(t: Term, kind: Kind, text: string): string {
   const fresh = View.view_stream(t.v).filter((l) => !t.flow.has(l)).map((l): [View.Live, number] => [l, 0]);
   const heads = [...t.flow].filter(([, done]) => done < Infinity).concat(fresh);
@@ -775,13 +644,10 @@ function term_logged(t: Term, kind: Kind, text: string): string {
   return piece_trim(text.slice(l.text.slice(0, done).trim().length));
 }
 
-// a piece of a message as printed: no blank lines around it
 function piece_trim(text: string): string {
   return text.replace(/^\s*\n/, "").trimEnd();
 }
 
-// rows to print above the footer (with wipe: alone on the screen), after
-// the notes before them, painted
 function term_rows(t: Term, rows: View.Row[], wipe: boolean): void {
   t.out  = wipe ? [] : t.out;
   t.wipe = t.wipe || wipe;
@@ -789,7 +655,6 @@ function term_rows(t: Term, rows: View.Row[], wipe: boolean): void {
   term_draw(t);
 }
 
-// rows as lines, after a blank line, in the margin
 function term_lines(rows: View.Row[]): Paint.Line[] {
   return term_inset(rows.length === 0 ? [] : [[], ...Paint.rows_lines(rows, term_inner())]);
 }
@@ -803,14 +668,11 @@ function term_inner(): number {
   return Screen.screen_width() - 2 * MARGIN;
 }
 
-// a new size: the page laid out again, at the new width, once the size
-// settles
 function term_resize(t: Term): void {
   clearTimeout(t.settle);
   t.settle = setTimeout(() => term_page(t), SETTLE);
 }
 
-// a paint, a frame from now, unless one is due
 function term_draw(t: Term): void {
   if (!t.due) {
     t.due = true;
@@ -818,11 +680,6 @@ function term_draw(t: Term): void {
   }
 }
 
-// prints the lines due, the notes and what of the stream settled, then
-// the footer: the rest of the stream (its last lines that fit), the rule,
-// the input, a rule (offline while the socket is not open), the tabs.
-// The screen's top row stays free: an erase from the top left clears
-// the screen, which tmux keeps in its scrollback at each paint
 function term_paint(t: Term): void {
   t.out = t.out.concat(term_lines(t.v.notes.splice(0).map(View.Cap)));
   term_flow(t);
@@ -831,7 +688,6 @@ function term_paint(t: Term): void {
   const room  = (process.stdout.rows || 24) - 1;
   const off   = t.scr.off;
   const input = off ? null : Screen.screen_input(t.scr, iw, room - 3, View.HINT + " · /help");
-  // with no input, the rule under it only to say offline
   const under = off && t.v.up ? [] : [Paint.rule_text(t.v.up ? "" : "offline", iw)];
   const own   = term_inset([Paint.rule_line(t.v, iw), ...(input?.lines ?? []), ...under, Paint.tabs_line(t.v, iw)]);
   const rest  = View.view_stream(t.v).map((l) => ({ kind: l.kind, text: l.text.slice(t.flow.get(l) ?? 0) }));
@@ -845,11 +701,6 @@ function term_paint(t: Term): void {
   t.due  = false;
 }
 
-// Main
-// ====
-
-// the chat in this terminal: signed in first, if not yet (the server
-// it signs in to becomes the default)
 export async function main(given: string | undefined): Promise<void> {
   const conf = Client.read("tui");
   const url = Client.server(given, conf);

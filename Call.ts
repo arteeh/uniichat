@@ -1,47 +1,10 @@
-// Call
-// ====
-// A tool call as people read it. Logged as its tool's name, a space and its
-// input's JSON (`zoom {"id":6243,"n":1}`; an MCP client's prefix,
-// `mcp__unii__`, dropped), it shows on its device (its `device` field) as its
-// emoji (Theme.TOOL), its name in bold and a head, as its tool reads (READS): a
-// command as itself; a file tool its path, read's lines after it, write's
-// content in a block, edit's files (the diff comes in its result); zoom and
-// date the message (`#6243`, a line `#6243+8`, an agent by name); spawn its
-// tasks, tell and computer (in logs from before computer use went) their
-// name and text in blocks; schedule its time
-// (or cron) and zone, its message in a block. Any other call, or an
-// edit whose edits are no list, shows its name and short values as arguments
-// (`web_search "bend"`; short: JSON within SHORT chars, and a string without
-// spaces or escapes), over a code block for each other value, keyed by its name
-// unless alone. A call still streaming reads as its input so far: its open
-// string and brackets closed, else up to its last whole field.
-//
-// A user's MCP server's tool (`<device>_<server>__<tool>`: Mcp.ts) shows as
-// `<server>: <tool>` on its device, its input as any other call's; its
-// device is up to the first `_` (as Config.config_mcp_prefix writes it:
-// other characters a -), and one from before release 24,
-// `<server>__<tool>`, names none (one of those whose server has a `_`,
-// `my_server__x`, can't be told from one of device my's, so shows so).
-//
-// An agent's report is logged as `[Name]` on its own line, its replies,
-// and a line naming its whole chat (the model reads who sent it); it
-// shows as its replies alone, framed and named by its agent.
-
 import type * as Md from "./Md.ts";
 
-// Types
-// =====
-
-// name: the bare tool name ("": no call), shown bold; head: the rest of
-// its line (a command's lines); device: where it runs ("": none named)
 export type Call = { name: string; head: string; device: string; blocks: Md.Code[] };
 
 type Input = Record<string, unknown>;
 
 type Shown = { head: string; blocks: Md.Code[] };
-
-// Constants
-// =========
 
 const SHORT = 60;
 
@@ -49,7 +12,6 @@ const CALL = /^(\S+) (\{[\s\S]*)$/;
 
 const MCP = /^mcp__.+?__/;
 
-// a user's MCP server's tool: its device, its server, its tool
 const THEIRS = /^(?:([A-Za-z0-9-]+)_)?([A-Za-z0-9-]+(?:_[A-Za-z0-9-]+)*)__(.+)$/;
 
 const READS = new Map<string, (x: Input) => Shown>([
@@ -66,9 +28,6 @@ const READS = new Map<string, (x: Input) => Shown>([
   ["schedule", (x) => ({ head: (x.cron === undefined ? String(x.at ?? "") : "cron " + x.cron) + " " + String(x.zone ?? ""), blocks: text_block(x.message) })],
 ]);
 
-// Report
-// ======
-
 export type Report = { name: string; text: string };
 
 export function report_text(name: string, text: string): string {
@@ -79,9 +38,6 @@ export function report_read(text: string): Report | null {
   const m = /^\[([^\]\n]+)\]\s*([\s\S]*?)(?:\s*Full chat: zoom\("[^"\n]*"\))?\s*$/.exec(text);
   return m === null ? null : { name: m[1], text: m[2] };
 }
-
-// Parse
-// =====
 
 export function call_parse(text: string): Call {
   const m     = CALL.exec(text);
@@ -99,31 +55,23 @@ export function call_parse(text: string): Call {
   return { name, device: typeof device === "string" ? device : "", ...shown };
 }
 
-// a tool's name as logged (`shell`, `mcp__unii__show`,
-// `ceres_cua-driver__click`) as a call shows it (`show`, `cua-driver: click`)
 export function tool_name(logged: string): string {
   const name = logged.replace(MCP, "");
   const theirs = THEIRS.exec(name);
   return theirs === null ? name : theirs[2] + ": " + theirs[3];
 }
 
-// the call on one line, after its name: its head, then each block,
-// spaces folded, then its device
 export function call_line(c: Call): string {
   const blocks = c.blocks.map((b) => (b.k === "" ? "" : b.k + ": ") + b.x);
   const where  = c.device === "" ? [] : ["· " + c.device];
   return [c.head, ...blocks, ...where].join(" ").replace(/\s+/g, " ").trim();
 }
 
-// the call as it shows, for Copy: its name and head, then each block; an
-// MCP call's device after its head (its name no longer says it), not a
-// shell's (its command copies as is)
 export function call_text(c: Call): string {
   const where = c.name.includes(": ") && c.device !== "" ? " · " + c.device : "";
   return [(c.name + " " + c.head).trim() + where, ...c.blocks.map((b) => b.x)].join("\n");
 }
 
-// any tool's input: its short values as arguments, the rest in blocks
 function input_shown(input: Input): Shown {
   const keys   = Object.keys(input);
   const args   : string[] = [];
@@ -142,57 +90,45 @@ function input_shown(input: Input): Shown {
   return { head: args.join(" "), blocks };
 }
 
-// a text as a block ([]: none)
 function text_block(x: unknown): Md.Code[] {
   return typeof x === "string" && x !== "" ? [{ $: "Code", k: "", x: x.replace(/\n$/, "") }] : [];
 }
 
-// the message or line zoom and date name: `#6243`, `#6243+8` (n > 1), an
-// agent's name as is
 function msg_show(id: unknown, n: unknown): string {
   const many = typeof n === "number" && n > 1 ? "+" + n : "";
   return typeof id === "number" ? "#" + id + many : String(id ?? "");
 }
 
-// a spawn's count of tasks, then each task's model and effort if named
-// (a log from before release 26: the call's, its tasks plain strings)
 function tasks_show(tasks: unknown, model: unknown, effort: unknown): string {
   const list = Array.isArray(tasks) ? tasks : [];
   const knobs = [...new Set([knobs_show(model, effort), ...list.map((t) => knobs_show(t?.model, t?.effort))])].filter((k) => k !== "").map((k) => " · " + k).join("");
   return list.length + (list.length === 1 ? " agent" : " agents") + knobs;
 }
 
-// a model and effort named, as "opus-5.5 high" ("": none)
 function knobs_show(model: unknown, effort: unknown): string {
   return [model, effort].filter((k) => typeof k === "string").join(" ");
 }
 
-// a spawn's task as a block, keyed by its model and effort if named
 function task_block(t: any): Md.Code[] {
   return typeof t === "string" ? text_block(t) : text_block(t?.task).map((b) => ({ ...b, k: knobs_show(t.model, t.effort) }));
 }
 
-// a read's lines, as path:4-7 shows them ("": the whole file)
 function lines_show(offset: unknown, limit: unknown): string {
   const from = typeof offset === "number" ? offset : 1;
   const to   = typeof limit === "number" ? String(from + limit - 1) : "";
   return offset === undefined && limit === undefined ? "" : ":" + from + "-" + to;
 }
 
-// a video's range, as view_video takes it
 function range_show(start: unknown, end: unknown, unit: unknown): string {
   const s = unit === "second" ? "s" : "";
   return start === undefined && end === undefined ? "" : " " + (start ?? 0) + s + "-" + (end ?? "") + (end === undefined ? "" : s);
 }
 
-// the files an edit's list names, each once
 function edits_files(edits: unknown[]): string {
   const paths = edits.map((e: any) => e?.path).filter((p) => typeof p === "string");
   return [...new Set(paths)].join(", ");
 }
 
-// null: no JSON object, nor a prefix of one; `field`: where the input's
-// last whole field ends (just after its "{" if none)
 function input_parse(text: string): Record<string, unknown> | null {
   const shut: string[] = [];
   let quote = false;
@@ -219,7 +155,6 @@ function input_parse(text: string): Record<string, unknown> | null {
   return object_parse(full) ?? object_parse(text.slice(0, field) + "}");
 }
 
-// null: no JSON object
 function object_parse(text: string): Record<string, unknown> | null {
   try {
     const x = JSON.parse(text);

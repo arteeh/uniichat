@@ -1,28 +1,11 @@
-// Client
-// ======
-// What the terminal (Term.ts) and a device (Device.ts) share, each with
-// a file of its own in DIR (${XDG_CONFIG_HOME:-~/.config}/unii:
-// tui.json, device.json, 0600; nothing in the server's ~/.unii): the
-// server it reaches (the url given, else $UNII_URL, else its file's,
-// else a server on this computer) and its sign-in there (Owner.ts): a
-// token made here, good once the owner types the code it shows in a
-// browser signed in to that server.
-
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as View from "./View.ts";
 import { write_whole } from "./Write.ts";
 
-// Constants
-// =========
-
 export const DIR   = (process.env.XDG_CONFIG_HOME || os.homedir() + "/.config") + "/unii";
 export const LOCAL = "http://127.0.0.1:8788";
 
-// Client
-// ======
-
-// a client's file (name: tui, device) as read; none: {}
 export function read(name: string): Record<string, any> {
   try {
     const json = JSON.parse(fs.readFileSync(DIR + "/" + name + ".json", "utf8"));
@@ -32,16 +15,12 @@ export function read(name: string): Record<string, any> {
   }
 }
 
-// a client's file written whole (it may hold a token: 0600 from its first
-// byte), then moved in place
 export function write(name: string, conf: object): void {
   const file = DIR + "/" + name + ".json";
   fs.mkdirSync(DIR, { recursive: true, mode: 0o700 });
   write_whole(file, JSON.stringify(conf, null, 2) + "\n");
 }
 
-// the server: given, else $UNII_URL, else the file's, else this
-// computer's
 export function server(given: string | undefined, conf: Record<string, any>): string {
   return (given ?? process.env.UNII_URL ?? conf.url ?? LOCAL).replace(/\/$/, "");
 }
@@ -50,8 +29,6 @@ export function auth(token: string | undefined): Record<string, string> {
   return token ? { authorization: "Bearer " + token } : {};
 }
 
-// whether a token is signed in: the server doesn't refuse it (one it
-// can't reach may be: the client waits for it)
 export async function signed(url: string, token: string | undefined): Promise<boolean> {
   if (!token) {
     return false;
@@ -60,10 +37,6 @@ export async function signed(url: string, token: string | undefined): Promise<bo
   return res === null || res.status !== 401;
 }
 
-// signs in, as `what` ("the terminal on host"): a token made here, which
-// the server keeps once the owner, in a browser signed in, opens the link
-// printed and types the code shown; its wait asked again till the link
-// expires
 export async function login(url: string, what: string): Promise<string> {
   const key = Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString("base64url");
   const out = await View.post(url + "/api/login", { key, what });
@@ -95,7 +68,6 @@ export function fail(why: string): never {
   process.exit(1);
 }
 
-// a host's name, as its key in a file
 export function host(url: string): string {
   return new URL(url).host;
 }

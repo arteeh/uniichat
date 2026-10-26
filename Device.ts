@@ -1,23 +1,3 @@
-// Device
-// ======
-// `unii device [url]`: this computer as a device of a unii server, on
-// its own, with no terminal open (`unii device -d` runs it as a
-// background service: Service.ts). The agent's tools (Machine.ts) and its
-// own MCP servers (Mcp.here) run here as jobs, each in its agent's
-// scratch folder (Machine.SCRATCH, never in the work dir), till done or
-// halted; all they left
-// running dies as the device stops. Its file is device.json (Client.ts):
-// the server, its sign-in, its name as the agent sees it (default: on
-// macOS its local host name, Bonjour's, else the host's) and its work
-// dir, the user's projects, which unii never writes in on its own
-// (default ~/.unii/work). It signs in once (the owner confirms it in
-// a browser), then holds one socket to the server, opened again as one
-// is lost. A job's output is an act ({ $: "out" }), kept till answered
-// and sent again on the next socket, which the server does once.
-// Its own MCP servers are the `mcp` of its ~/.unii/config.json ($UNII_DIR,
-// README), told the server on each socket and again as they change
-// (Tools.servers): programs run here, URLs reached from here (Mcp.here).
-
 import * as child from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
@@ -28,27 +8,15 @@ import { Mcp } from "./Mcp.ts";
 import * as Service from "./Service.ts";
 import { FRAME, media_kind, PING, QUIT, RETRY, TICK, WIRE } from "./View.ts";
 
-// Constants
-// =========
-
 const LOCAL = process.platform === "darwin" ? child.spawnSync("scutil", ["--get", "LocalHostName"]).stdout?.toString().trim() : "";
 const HOST  = LOCAL || os.hostname();
 const WORK  = "~/.unii/work";
 const FILE  = (process.env.UNII_DIR ?? "~/.unii").replace(/^~(?=[\\/]|$)/, os.homedir()) + "/config.json";
 
-// how often config.json is read for a change to its MCP servers, in ms
 const LOOK = 2000;
 
-// the longest a device stopping waits for its goodbye (QUIT) to close
-// its socket, in ms
 const BYE = 2000;
 
-// Device
-// ======
-
-// device.json, signed in to the server given (else its own: Client.server),
-// the owner confirming it in a browser if it isn't yet: before `unii
-// device -d` goes to the background too (Service.ts)
 export async function signin(given: string | undefined): Promise<{ url: string; token: string; name: string; work: string }> {
   const conf = Client.read("device");
   const url = Client.server(given, conf);
@@ -69,10 +37,8 @@ export async function run(given: string | undefined): Promise<void> {
   const jobs = new Map<string, AbortController>();
   const outs = new Map<string, object>();
   let ws: WebSocket | null = null;
-  // stopping: its goodbye sent (QUIT)
   let quitting = false;
   const send = (msg: object) => ws?.readyState === WebSocket.OPEN && ws.send(JSON.stringify(msg));
-  // the MCP servers as last told ("": not yet on this socket)
   let told = "";
   const tell = () => {
     const mcp = servers();
@@ -123,9 +89,6 @@ export async function run(given: string | undefined): Promise<void> {
       setTimeout(open, RETRY);
     };
   };
-  // a job run here, its output answered; one too large for a socket
-  // message (FRAME, less 1 KiB for the act around it) answers its size
-  // instead, failed (sent, it would close the socket at every try)
   const job = async (id: string, job: Job) => {
     const abort = new AbortController();
     jobs.set(id, abort);
@@ -138,9 +101,6 @@ export async function run(given: string | undefined): Promise<void> {
     outs.set(act.id, act);
     send(act);
   };
-  // stopped (a signal; on Windows `stop`'s file: Service.watch), it says
-  // goodbye (QUIT), so the server lets it go at once, and ends as its
-  // socket closes (BYE at most)
   process.on("exit", Machine.end);
   for (const sig of ["SIGHUP", "SIGTERM", "SIGINT"]) {
     process.on(sig, () => {
@@ -158,9 +118,6 @@ export async function run(given: string | undefined): Promise<void> {
   open();
 }
 
-// show: each file streamed to the server's media store (Memory.media_add),
-// its markdown line answered (one that isn't media, a link: downloaded);
-// one it refuses, why
 async function show(job: Job, url: string, token: string, signal: AbortSignal): Promise<{ text: string; fail: boolean }> {
   const cwd = Machine.agent_dir(job.cwd);
   const lines: string[] = [];
@@ -174,8 +131,6 @@ async function show(job: Job, url: string, token: string, signal: AbortSignal): 
   return { text: lines.join("\n"), fail };
 }
 
-// a file posted to the media store: its name there, or why not (a stop
-// cancels it: the server drops what it got)
 async function show_one(file: string, shown: string, url: string, token: string, signal: AbortSignal): Promise<{ name: string } | { error: string }> {
   if (signal.aborted) {
     return { error: "Stopped." };
@@ -196,8 +151,6 @@ async function show_one(file: string, shown: string, url: string, token: string,
   }
 }
 
-// the `mcp` of config.json (the object, or the file it names), as JSON:
-// {} if none; null if it can't be read, why said once
 let said = "";
 function servers(): string | null {
   try {

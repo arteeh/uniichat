@@ -1,19 +1,3 @@
-// Machine
-// =======
-// The tools that touch a device: shell, read, write, edit, view_video,
-// show (TOOLS; show is the device's own, as it posts to the server), run
-// by a device (Device.ts) as Jobs, each in its agent's scratch folder
-// (SCRATCH/<agent>: never in the work dir, the user's projects). A stop
-// kills the job's shell and its process group. The stop tool's halt job
-// kills all an agent's shells left (UNII_AGENT); as the device quits,
-// end() kills every shell's group (SHELLS), and any process marked
-// UNII_RUN that left it.
-// A file changed (write over one, edit) answers as a unified diff (Diff),
-// which both views draw as one (Md.ts). read shows an image file as an
-// image; view_video, frames of a video on one sheet (ffmpeg's).
-// This side imports nothing of the server's (whose Config.ts would take
-// the user's API keys out of the jobs' environment).
-
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -22,29 +6,15 @@ import { CAP, clip, clip_end } from "./Clip.ts";
 import { Mcp } from "./Mcp.ts";
 import { FIT, HEAD, IMAGE, image_kind, PIXELS } from "./View.ts";
 
-// Types
-// =====
-
-// a tool call to run here: its tool, its input, its agent's name (its
-// scratch folder: Machine.agent_dir)
 export type Job = { name: string; input: any; cwd: string };
 
-// a tool as the vendors see it: its name, what it does, its input's
-// JSON Schema
 export type Spec = { name: string; info: string; schema: object };
 
-// a skill on a device: its name, what it is for, its folder
 export type Skill = { name: string; description: string; dir: string };
 
-// a line of a diff: kept in both texts (" "), only in the old ("-"), only
-// in the new ("+")
 type Op = { s: " " | "-" | "+"; x: string };
 
-// lines a0 to a1 of an old text, b0 to b1 of a new one (ends excluded)
 type Box = [number, number, number, number];
-
-// Constants
-// =========
 
 // on Windows, PowerShell (pwsh, else Windows PowerShell): its output in
 // UTF-8, without progress bars, its stderr read with stdout (PowerShell's
@@ -53,54 +23,37 @@ export const WIN = process.platform === "win32";
 const SHELL = WIN ? Bun.which("pwsh") ?? "powershell.exe" : process.env.SHELL ?? "/bin/sh";
 const PWSH  = "$ProgressPreference = 'SilentlyContinue'; $OutputEncoding = [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false); ";
 
-// this unii's mark, set as UNII_RUN on every process its shells start
-// (each child inherits it, as UNII_AGENT, the agent whose job it was),
-// and how to list this user's processes with their environment, to find
-// those that left their shell's group
 const RUN = crypto.randomUUID();
 const UID = String(process.getuid?.() ?? "");
 const PS  = process.platform === "darwin" ? ["ps", "-wwE", "-U", UID, "-o", "pid=,command="] : ["ps", "-wwe", "-u", UID, "-o", "pid=,args=", "e"];
 
-// the shells started here, by agent, kept until their process groups are
-// empty, so end() and halt() kill a backgrounded job whose shell already
-// exited
 const SHELLS = new Map<Bun.Subprocess, string>();
 
-// how long halt() tries to see an agent's processes gone (ms)
 const GONE = 3000;
 
-// the lines kept around each change in a diff
 const CONTEXT = 3;
 
 export const STR = { type: "string" };
 export const INT = { type: "integer" };
 
-// the most frames a video sheet takes
 const SHEET = 100;
 
-// a video sheet's gap between frames, and around them, in px
 const GAP = 4;
 
 // the containers (ffprobe's names) a seek lands exactly in; in others
 // (MPEG-TS...) it may land a keyframe late, so they decode from the start
 const INDEXED = /\b(mov|mp4|matroska|webm|avi)\b/;
 
-// frames further apart than this, in seconds, are each sought on their
-// own, rather than all decoded from the first
 const SPARSE = 2;
 
 // the packets read past a range's end: a frame shows after those decoded
 // before it, at most this many later
 const REORDER = 16;
 
-// the smallest side of a frame on a sheet, in px
 const CELL = 16;
 
-// where each agent's scratch folder is, by its name: in the unii dir
-// ($UNII_DIR, else ~/.unii), on Windows too
 export const SCRATCH = (process.env.UNII_DIR ?? "~/.unii").replace(/[\\/]+$/, "") + "/scratch";
 
-// a shell call's timeout, in seconds: the least and the most
 const TIMEOUT = [1, 3600];
 
 const EDIT = { type: "object", properties: { path: STR, old: STR, new: STR, all: { type: "boolean" } }, required: ["path", "old", "new"] };
@@ -114,23 +67,13 @@ export const TOOLS: Spec[] = [
   spec("edit", "Replace text in files: the edits in order, each on its file as the edits before it left it. old must match exactly, whitespace included, and only once, unless all is true, which replaces every match. If any edit fails, no file is changed. Answers a unified diff of each file.", { edits: { type: "array", items: EDIT, minItems: 1 } }, ["edits"]),
 ];
 
-// Spec
-// ====
-
-// a tool whose input is an object of these fields, the `need` ones
-// required
 export function spec(name: string, info: string, fields: object, need: string[]): Spec {
   const schema = { type: "object", properties: fields, required: need };
   return { name, info, schema };
 }
 
-// Machine
-// =======
-
 export namespace Machine {
 
-  // the folder an agent's relative paths resolve in, its scratch folder:
-  // SCRATCH/<agent>, `~` read as the home dir
   export function agent_dir(agent: string): string {
     const root = SCRATCH.replace(/^~(?=[\\/]|$)/, os.homedir());
     return path.join(root, path.basename(agent));
@@ -194,12 +137,6 @@ export namespace Machine {
     }
   }
 
-  // runs a command, in its own process group (detached), every process
-  // marked UNII_RUN, its output decoded as one stream (a char split over
-  // reads stays whole; a broken one at its end shows) and cut as it
-  // comes. A stop kills the group and ends the wait at once, whatever
-  // still holds its output. Past `ms` the wait ends, the command left
-  // running: its output still read (a pipe closed could end it), unkept
   export async function shell(cwd: string, command: string, ms: number, signal: AbortSignal): Promise<Out> {
     SHELLS.forEach((_, p) => Machine.group(p) || SHELLS.delete(p));
     const agent = path.basename(cwd);
@@ -250,16 +187,12 @@ export namespace Machine {
     return { text: (text === "" ? "" : text + "\n") + "(" + exit + " in " + secs.toFixed(1) + " s)", fail: exit !== "exit 0" };
   }
 
-  // whether a shell's process group may still hold a job: the shell runs,
-  // or it is gone but its id names no live process and its group still
-  // has one
   export function group(proc: Bun.Subprocess): boolean {
     const ended = proc.exitCode !== null || proc.signalCode !== null;
     // Windows has no groups, and an ended shell's id may be reused
     return !ended || (!WIN && !Machine.alive(proc.pid) && Machine.alive(-proc.pid));
   }
 
-  // whether a process (pid) or a process group (-pid) exists
   export function alive(pid: number): boolean {
     try {
       process.kill(pid, 0);
@@ -269,7 +202,6 @@ export namespace Machine {
     }
   }
 
-  // a process, or a group (-pid); on Windows, a process and its tree
   export function kill(pid: number): void {
     try {
       if (WIN) {
@@ -280,16 +212,10 @@ export namespace Machine {
     } catch {}
   }
 
-  // as this unii quits: kills every shell's process group (a job still in
-  // it dies), then any process that left its group (UNII_RUN), so none is
-  // left orphaned
   export function end(): void {
     Machine.sweep(null);
   }
 
-  // the stop tool's: every process an agent's shells started killed, in
-  // their groups or out; how many are left after GONE (null: Windows,
-  // which can't tell)
   export async function halt(agent: string): Promise<number | null> {
     const until = Date.now() + GONE;
     let left = Machine.sweep(agent);
@@ -300,9 +226,6 @@ export namespace Machine {
     return left;
   }
 
-  // the shells' groups of `agent` (null: all) killed, then each process
-  // marked theirs that left its group; how many were found so (null: on
-  // Windows, which has no ps to find them)
   export function sweep(agent: string | null): number | null {
     for (const [proc, who] of SHELLS) {
       if ((agent === null || who === agent) && Machine.group(proc)) {
@@ -318,8 +241,6 @@ export namespace Machine {
     return found.length;
   }
 
-  // `limit` lines from line `offset`, from its character `at`: a page of
-  // them (Clip.ts), and past it where to go on; failed if there are none
   export function read(file: string, offset: number, limit: number, at: number): Out {
     const data = fs.readFileSync(file);
     if (data.includes(0)) {
@@ -343,7 +264,6 @@ export namespace Machine {
     return { text: text.slice(at, end).replace(/\n$/, "") + shown, fail: false };
   }
 
-  // a file's first HEAD bytes
   export function head(file: string): Buffer {
     const fd = fs.openSync(file, "r");
     try {
@@ -354,17 +274,11 @@ export namespace Machine {
     }
   }
 
-  // the longest side an image goes at: max_side, if given, up to FIT
   export function side(max: unknown): number {
     const n = Math.floor(Number(max));
     return n >= 1 && n < FIT ? n : FIT;
   }
 
-  // an image file as models get it, decoded (null: it isn't, as its
-  // header said): as is, if no larger than side, of IMAGE bytes at most
-  // and no GIF (an animated one goes as its first frame); else fit to
-  // side, as a PNG or WebP (a JPEG's as a JPEG), then as a JPEG, smaller
-  // each time, till it takes IMAGE bytes at most
   export async function image(data: Buffer, kind: string, side: number): Promise<Out | null> {
     const size = await new Bun.Image(data).metadata().catch(() => null);
     if (size === null) {
@@ -394,15 +308,6 @@ export namespace Machine {
     }
   }
 
-  // frames of a video (input: view_video's) on one sheet, as ffmpeg makes
-  // it, with a line on the whole video from ffprobe. The frames taken are
-  // start, start + step... up to end, by number (seconds: the frames in
-  // them). Each frame's time comes from its packet's (ffprobe), read up to
-  // end, so a frame's number holds in a variable frame rate too. ffmpeg
-  // seeks to start (between it and the frame before), where the container
-  // lets it (INDEXED), else it decodes from the file's start; one seek per
-  // frame if they are SPARSE apart. It decodes on the CPU: a few frames a
-  // call, the same on every machine
   export async function video(file: string, input: any, signal: AbortSignal): Promise<Out> {
     const [ffmpeg, ffprobe] = ["ffmpeg", "ffprobe"].map((bin) => Bun.which(bin, { PATH: process.env.PATH ?? "" }));
     if (ffmpeg === null || ffprobe === null) {
@@ -421,8 +326,6 @@ export namespace Machine {
     const sec    = input.unit === "second";
     const given  = (x: unknown) => x !== undefined && x !== null;
     const [s0, s1] = [given(input.start) ? Number(input.start) : 0, given(input.end) ? Number(input.end) : Infinity];
-    // the frames' times, from the file's start, in order: up to the
-    // range's end (and REORDER packets past it), or all (whole)
     const upto   = s1 === Infinity ? [] : ["-read_intervals", sec ? "%+" + (s1 + 1) : "%+#" + (Math.round(s1) + 1 + REORDER)];
     const packs  = await Machine.exec([ffprobe, "-v", "error", "-select_streams", String(stream.index), ...upto, "-show_entries", "packet=pts_time", "-of", "csv=p=0", file], signal);
     const lines  = packs.out.toString().split("\n").filter((l) => l.trim() !== "");
@@ -443,8 +346,6 @@ export namespace Machine {
     if (sec && times === null && !(fps > 0)) {
       return { text: about + "\nIts frame times are unknown: give start and end in frames.", fail: true };
     }
-    // a time's frame: the first at or after it (start), the last at or
-    // before it (end)
     const frame  = (t: number, last: boolean) => (!sec ? Math.round(t) : times === null ? Math.round(t * fps) : last ? times.filter((x) => x <= t + 1e-6).length - 1 : times.filter((x) => x < t - 1e-6).length);
     const start  = frame(s0, false);
     const most   = nb > 0 ? nb - 1 : times !== null ? times.length - 1 : Infinity;
@@ -481,8 +382,6 @@ export namespace Machine {
     const grid  = "tile=" + cols + "x" + rows + ":nb_frames=" + count + ":padding=" + GAP + ":margin=" + GAP + ":color=white";
     const takes = Array.from({ length: count }, (_, i) => start + i * step);
     const apart = seeks && count > 1 && (times![takes[count - 1]] - times![start]) / (count - 1) > SPARSE;
-    // the sheet, its frames stamped (or not: an ffmpeg without drawtext)
-    // with number n and time t (text, or drawtext expressions)
     const sheet = async (stamp: boolean) => {
       const marks = (n: string, t: string) => (stamp ? ",drawtext=text='" + n + "'" + label + ":y=2,drawtext=text='" + t + "'" + label + ":y=h-th-4" : "");
       if (apart) {
@@ -521,15 +420,12 @@ export namespace Machine {
     return a > 0 && b > 0 ? a / b : 0;
   }
 
-  // a program's output, its errors, its exit code; killed on a stop
   export async function exec(argv: string[], signal: AbortSignal, stdin?: Buffer): Promise<{ out: Buffer; err: string; code: number }> {
     const proc = Bun.spawn(argv, { stdin: stdin ?? "ignore", stdout: "pipe", stderr: "pipe", signal });
     const [out, err] = await Promise.all([new Response(proc.stdout).arrayBuffer(), new Response(proc.stderr).text()]);
     return { out: Buffer.from(out), err, code: await proc.exited };
   }
 
-  // a file (named as given: shown) written whole: its diff (a new one's,
-  // all its lines added), so a write reads as an edit
   export function write(file: string, shown: string, content: string): Out {
     const was = fs.existsSync(file) ? fs.readFileSync(file, "utf8") : "";
     fs.mkdirSync(path.dirname(file), { recursive: true });
@@ -537,10 +433,6 @@ export namespace Machine {
     return { text: text_diff(shown, was, content), fail: false };
   }
 
-  // the edits, in order, each on its file as the ones before left it;
-  // every file is written only once all of them apply, so a failed one
-  // changes none. Each file, named as its first edit gives it, answers
-  // its diff
   export function edit(cwd: string, edits: unknown): Out {
     const list  = Array.isArray(edits) ? edits : [];
     const files = new Map<string, { shown: string; was: string; text: string }>();
@@ -567,13 +459,6 @@ export namespace Machine {
     return { text: diffs.join("\n"), fail: false };
   }
 
-  // Skills
-  // ------
-
-  // Agent Skills (<name>/SKILL.md) in ~/.agents/skills, the user's
-  // global ones only (a repo's are read as its AGENTS.md is: prompt.txt):
-  // one that can't be read or lacks a valid name and description is left
-  // out
   export function skills(home: string): Skill[] {
     const found = new Map<string, Skill>();
     const root = home + "/.agents/skills";
@@ -604,9 +489,6 @@ export namespace Machine {
     return { text: "Skill " + name + ", in " + skill.dir + " (its other files are there):\n\n" + text, fail: false };
   }
 
-  // ms, or till the signal aborts: none, if it already did (an abort
-  // event comes once); its listener gone either way (a call at a usage
-  // limit naps without end on one signal)
   export function nap(ms: number, signal: AbortSignal): Promise<void> {
     return new Promise((ok) => {
       const done = () => {
@@ -620,9 +502,6 @@ export namespace Machine {
   }
 
 }
-
-// Frontmatter
-// ===========
 
 // a SKILL.md's YAML frontmatter, from its first 64 KB; a regular file only,
 // so a FIFO or device can't hang the device
@@ -639,13 +518,6 @@ function skill_head(file: string): any {
   return m === null ? null : Bun.YAML.parse(m[1]);
 }
 
-// Diff
-// ====
-
-// a file's change as a unified diff: its name as old and new file, then
-// each run of changes in a hunk with CONTEXT lines around it (runs that
-// close share one), clipped as a command's output. Lines keep their "\n",
-// so a last one without it differs, and says so as git does
 function text_diff(file: string, was: string, now: string): string {
   const [a, b] = [text_lines(was), text_lines(now)];
   const ops = lines_diff(a, b);
@@ -683,11 +555,6 @@ function text_diff(file: string, was: string, now: string): string {
   return out.text();
 }
 
-// the shortest script from lines a to lines b: their lines kept (the
-// most, lines_match), and in each gap between two the old lines
-// dropped, then the new added, as git shows them. A line only one text
-// has is never kept, so the match runs without them (a file rewritten
-// whole needs no search)
 function lines_diff(a: string[], b: string[]): Op[] {
   const [in_a, in_b] = [new Set(a), new Set(b)];
   const ia    = a.flatMap((x, i) => (in_b.has(x) ? [i] : []));
@@ -705,7 +572,6 @@ function lines_diff(a: string[], b: string[]): Op[] {
   return ops_push(ops, "+", b, j, b.length);
 }
 
-// lines i to j of xs, each as an op of mark s
 function ops_push(ops: Op[], s: Op["s"], xs: string[], i: number, j: number): Op[] {
   for (let k = i; k < j; k++) {
     ops.push({ s, x: xs[k] });
@@ -713,11 +579,6 @@ function ops_push(ops: Op[], s: Op["s"], xs: string[], i: number, j: number): Op
   return ops;
 }
 
-// the lines of a and b kept in a box of them, as their pairs [i, j]
-// pushed in order: a longest common subsequence (Myers, in linear space):
-// the common head and tail; between them, unless a side is empty, the
-// middle snake (box_snake), and each part around it done alike. Time
-// (n+m)·d, d the lines changed
 function lines_match(a: string[], b: string[], box: Box, pairs: [number, number][]): [number, number][] {
   let [a0, a1, b0, b1] = box;
   let tail = 0;
@@ -741,17 +602,11 @@ function lines_match(a: string[], b: string[], box: Box, pairs: [number, number]
   return pairs;
 }
 
-// a text's lines, each with its "\n" (the last may lack it), and the
-// "\ No newline at end of file" git puts after such a line in a diff
 function text_lines(text: string): string[] {
   const lines = text.match(/[^\n]*\n|[^\n]+$/g) ?? [];
   return lines.map((l) => (l.endsWith("\n") ? l : l + "\n\\ No newline at end of file"));
 }
 
-// a box's middle snake, as the box it spans: where a shortest path from
-// its top corner meets one from its bottom, both grown a step d at a
-// time, each keeping the furthest x reached on each diagonal k = x - y
-// (vf from the top, vb from the bottom, counted back)
 function box_snake(a: string[], b: string[], [a0, a1, b0, b1]: Box): Box {
   const [n, m] = [a1 - a0, b1 - b0];
   const delta = n - m;
