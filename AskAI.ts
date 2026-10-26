@@ -172,13 +172,13 @@ const WEEK = 7 * 86400e3;
 
 // how long a vendor keeps a cache entry unused, in ms, as single flight
 // counts it (openai-sub's backend tells none: the shorter guess).
-// claude-sub's Claude Code caches for an hour (ClaudeSub.ts ENV), but
-// single flight counts it 5 minutes here
+// claude-sub's Claude Code marks every entry for an hour (ClaudeSub.ts
+// ENV and its own mark, HOUR)
 export const TTL: Record<Vendor, number> = {
   "claude-api" : 300e3,
   "openai-api" : 1800e3,
   "openai-sub" : 300e3,
-  "claude-sub" : 300e3,
+  "claude-sub" : 3600e3,
 };
 
 // the prefixes cached, by key (AskAI.keys)
