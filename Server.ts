@@ -492,7 +492,7 @@ export namespace Chat {
   export function begin(chat: Chat): void {
     Tools.left(chat.tools);
     // a subagent working keeps the MCP servers it started with
-    if (Tools.working(chat.tools).length === 0) {
+    if (Tools.holding(chat.tools).length === 0) {
       Tools.apply(chat.tools);
     }
   }
@@ -804,7 +804,7 @@ export namespace Chat {
   // no longer (null), told to every view
   export function limit(chat: Chat, run: Talk, limit: Parked | null): void {
     run.limit = limit;
-    Chat.all(chat, Chat.state(chat));
+    Chat.change(chat);
   }
 
   // a call answers on a fallback, or back on its pick (AskAI.ts Run): a
@@ -1293,8 +1293,9 @@ export namespace Chat {
   // what runs is saved, and told to every view
   export function change(chat: Chat): void {
     const work = Chat.running(chat);
-    // nothing at work: the MCP servers' changes need not wait for a turn
-    if (work.length === 0) {
+    // nothing at work (or only waiting for a usage limit, which may last
+    // days): the MCP servers' changes need not wait for a turn
+    if ((!chat.main.busy || chat.main.limit !== null) && Tools.holding(chat.tools).length === 0) {
       Tools.apply(chat.tools);
     }
     if (String(work) !== String(chat.mem.work)) {

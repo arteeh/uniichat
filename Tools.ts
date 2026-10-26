@@ -997,6 +997,12 @@ export namespace Tools {
     return [...tools.agents.values()].filter((a) => a.run.busy);
   }
 
+  // those at work that hold the MCP servers they started with: all but
+  // those waiting for a usage limit, which call none meanwhile
+  export function holding(tools: Tools): Agent[] {
+    return Tools.working(tools).filter((a) => a.run.limit === null);
+  }
+
   // the stop tool: the agent named stopped at once (Tools.stop), its
   // report saying why and what it was last doing; waited for (up to
   // HALT), then every process its shells started killed on each open
