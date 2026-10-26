@@ -77,6 +77,7 @@ const MORE = ["Task", "DesignSync"];
 // mark after a 5m one
 const ENV = {
   CLAUDE_CODE_PROMPT_CACHE_TTL             : "1h",
+  CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL    : "1h", // its side requests too
   CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC : "1", // updates, telemetry, error reports
   CLAUDE_CODE_DISABLE_AUTO_MEMORY          : "1",
   CLAUDE_CODE_DISABLE_ATTACHMENTS          : "1", // "@path" in a message stays text
