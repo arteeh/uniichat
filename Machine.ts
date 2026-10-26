@@ -94,10 +94,13 @@ const REORDER = 16;
 // the smallest side of a frame on a sheet, in px
 const CELL = 16;
 
+// a shell call's timeout, in seconds: the least and the most
+const TIMEOUT = [1, 3600];
+
 const EDIT = { type: "object", properties: { path: STR, old: STR, new: STR, all: { type: "boolean" } }, required: ["path", "old", "new"] };
 
 export const TOOLS: Spec[] = [
-  spec("shell", "Run a command with the device's shell ($SHELL -c), stdout and stderr together, and return its output, then its exit code and time, as (exit 0 in 0.4 s); output past " + CAP + " characters keeps its head and tail. Each call is a new shell. The call waits until the command and everything holding its output end, so give background jobs their own output file. Background jobs live only while the device runs: stopping it kills every process the calls started.", { command: STR }, ["command"]),
+  spec("shell", "Run a command with the device's shell ($SHELL -c), stdout and stderr together, and return its output, then its exit code and time, as (exit 0 in 0.4 s); output past " + CAP + " characters keeps its head and tail. Each call is a new shell. The call waits until the command and everything holding its output end, or until timeout seconds pass: then it returns the output so far and the shell's pid, and leaves it running (a later call can end it; a stop kills it). Set timeout to how long the command should take, with room to spare. Start a background job (a server) detached, with its own output file, so the call needn't wait for its timeout. Background jobs live only while the device runs: stopping it kills every process the calls started.", { command: STR, timeout: { type: "integer", minimum: TIMEOUT[0], maximum: TIMEOUT[1], description: "Seconds to wait, " + TIMEOUT[0] + " to " + TIMEOUT[1] + ": then the call returns, leaving the command running." } }, ["command", "timeout"]),
   spec("read", "Read a text file. offset: the first line to show (from 1); limit: how many lines; at: the character of the first line to start from. It ends saying the lines shown, as [lines 4-7 of 15]; output past " + CAP + " characters comes in pages, saying where to go on. An image file (png, jpeg, gif, webp) comes as the picture, scaled to fit " + FIT + " px, or max_side px if given (a GIF shows its first frame; view_video plays it).", { path: STR, offset: INT, limit: INT, at: INT, max_side: INT }, ["path"]),
   spec("write", "Write a whole file, making its directories. Answers a unified diff of what changed (a new file: all its lines added).", { path: STR, content: STR }, ["path", "content"]),
   spec("view_video", "See part of a video (any file ffmpeg opens: mp4, mkv, webm, mov, avi, gif...) as ONE image: a grid of its frames, row by row, each stamped with its frame number (top) and time (bottom), fitting " + FIT + " px, or max_side px. It also answers a line on the whole video (duration, fps, frames, size). start and end: the range, ends included, in frames from 0 (or seconds, with unit \"second\"); by default the whole video. step: take every step-th frame; by default the one that gives at most 16. Each frame gets smaller as more share the sheet: past about 25 they get hard to read, and " + SHEET + " is the most. For a long stretch, raise step, narrow the range, or call again on the next range. Needs ffmpeg and ffprobe on the device.", { path: STR, start: { type: "number" }, end: { type: "number" }, unit: { type: "string", enum: ["frame", "second"] }, step: INT, max_side: INT }, ["path"]),
@@ -135,7 +138,11 @@ export namespace Machine {
       fs.mkdirSync(cwd, { recursive: true });
       switch (job.name) {
         case "shell": {
-          return await Machine.shell(cwd, String(input.command), signal);
+          const secs = input.timeout === undefined || input.timeout === null || input.timeout === "" ? NaN : Number(input.timeout);
+          if (!(secs >= TIMEOUT[0] && secs <= TIMEOUT[1])) {
+            return { text: "shell needs timeout: the seconds to wait for the command, a whole number from " + TIMEOUT[0] + " to " + TIMEOUT[1] + " (then the call returns, leaving it running). Nothing was run.", fail: true };
+          }
+          return await Machine.shell(cwd, String(input.command), secs * 1e3, signal);
         }
         case "read": {
           const kind = image_kind(Machine.head(file));
@@ -184,8 +191,9 @@ export namespace Machine {
   // marked UNII_RUN, its output decoded as one stream (a char split over
   // reads stays whole; a broken one at its end shows) and cut as it
   // comes. A stop kills the group and ends the wait at once, whatever
-  // still holds its output
-  export async function shell(cwd: string, command: string, signal: AbortSignal): Promise<Out> {
+  // still holds its output. Past `ms` the wait ends, the command left
+  // running: its output still read (a pipe closed could end it), unkept
+  export async function shell(cwd: string, command: string, ms: number, signal: AbortSignal): Promise<Out> {
     SHELLS.forEach((_, p) => Machine.group(p) || SHELLS.delete(p));
     const agent = path.basename(cwd);
     const start = performance.now();
@@ -209,19 +217,30 @@ export namespace Machine {
       readers.forEach((r) => r.cancel().catch(() => {}));
     };
     signal.addEventListener("abort", kill, { once: true });
-    await Promise.all(readers.map(async (reader) => {
+    let kept = true;
+    const read = Promise.all(readers.map(async (reader) => {
       try {
         for (let got = await reader.read(); !got.done; got = await reader.read()) {
-          out.add(got.value);
+          if (kept) {
+            out.add(got.value);
+          }
         }
       } catch {}
-    }));
+    })).then(() => proc.exited);
+    let timer: Timer | undefined;
+    const late = new Promise<"late">((ok) => (timer = setTimeout(() => ok("late"), ms)));
+    const ended = await Promise.race([read, late]);
+    clearTimeout(timer);
     signal.removeEventListener("abort", kill);
-    const code = await proc.exited;
-    const time = ((performance.now() - start) / 1000).toFixed(1) + " s";
-    const exit = signal.aborted ? "stopped" : proc.signalCode ? "killed by " + proc.signalCode : "exit " + code;
+    const secs = (performance.now() - start) / 1000;
     const text = (WIN ? out.text().replace(/\r\n/g, "\n") : out.text()).replace(/\n$/, "");
-    return { text: (text === "" ? "" : text + "\n") + "(" + exit + " in " + time + ")", fail: exit !== "exit 0" };
+    if (ended === "late" && !signal.aborted) {
+      kept = false;
+      return { text: (text === "" ? "" : text + "\n") + "(still running after " + Math.round(secs) + " s, pid " + proc.pid + "; not killed)", fail: false };
+    }
+    const code = await proc.exited;
+    const exit = signal.aborted ? "stopped" : proc.signalCode ? "killed by " + proc.signalCode : "exit " + code;
+    return { text: (text === "" ? "" : text + "\n") + "(" + exit + " in " + secs.toFixed(1) + " s)", fail: exit !== "exit 0" };
   }
 
   // whether a shell's process group may still hold a job: the shell runs,
