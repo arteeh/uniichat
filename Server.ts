@@ -1272,14 +1272,15 @@ export namespace Chat {
     }
   }
 
-  // a socket closed; a device goes only if it quit (a link lost is no
-  // quit: its jobs wait for it, its MCP servers don't)
+  // a socket closed; a device goes at once if it quit (a link lost is no
+  // quit: its jobs wait for it a grace time, its MCP servers don't:
+  // Tools.lost)
   export function leave(chat: Chat, sock: Sock, quit: boolean): void {
     chat.socks.delete(sock);
     if (quit && sock.data.device !== null) {
       Tools.detach(chat.tools, sock.data.tab, sock.data.device);
     } else if (sock.data.device !== null) {
-      Tools.plug(chat.tools);
+      Tools.lost(chat.tools, sock.data.tab, sock.data.device);
     }
   }
 

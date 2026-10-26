@@ -52,6 +52,10 @@ const RESTARTS = WIN ? 3 : 0;
 const AFTER    = 60000;
 const RAN      = 600000;
 
+// how long `stop` gives a service asked to quit (Windows: watch) before
+// it ends it
+const BYE      = 5000;
+
 // the dirs the service sees as the shell that ran -d did, resolved: on
 // Linux and macOS in its environment, with PATH (their service managers
 // give a bare one); on Windows, whose task has no environment of the
@@ -133,9 +137,23 @@ export function foreground(part: Part): void {
 
 // a service's own unii (Windows: under `supervise`), which ends once
 // its supervisor does (Windows ends a task's process alone, not those
-// it started)
-export function watch(parent: number): void {
-  setInterval(() => alive(parent) || process.exit(0), 2000).unref();
+// it started). Its `part` (the supervisor's has none) also ends as
+// `stop` asks it to (Windows sends no signal: a file, <part>.stop,
+// naming its supervisor), and either way as a signal ends it: its
+// handlers run (a device says goodbye: Device.ts), else it exits
+export function watch(parent: number, part?: Part): void {
+  const stop = part === undefined ? null : LOGS + "/" + part + ".stop";
+  let quit = false;
+  setInterval(() => {
+    if (quit || (alive(parent) && (stop === null || read(stop)?.trim() !== String(parent)))) {
+      return;
+    }
+    quit = true;
+    if (stop === null || process.listenerCount("SIGTERM") === 0) {
+      process.exit(0);
+    }
+    process.emit("SIGTERM");
+  }, stop === null ? 2000 : 500).unref();
 }
 
 // Linux
@@ -334,24 +352,43 @@ Start-ScheduledTask -TaskName $env:UNII_TASK -TaskPath '\\'
 async function win_stop(part: Part): Promise<void> {
   const n = name(part);
   // what the task ran, and what that started (Windows ends only the
-  // task's own process), if still unii; its file gone first: run from
-  // the service's own shell, the stop ends this
-  const mine = ours(part, pids(part));
+  // task's own process), if still unii; its file gone first, and the
+  // task removed before its unii is asked to quit: run from the
+  // service's own shell (a device's job), the quit ends this
+  const all = pids(part);
+  const mine = ours(part, all);
   fs.rmSync(LOGS + "/" + part + ".pid", { force: true });
   const out = ps(`
 $t = Get-ScheduledTask -TaskName $env:UNII_TASK -TaskPath '\\' -ErrorAction SilentlyContinue
 if (-not $t) { 'none'; return }
 if (([string]$t.Description) -notmatch '${MARK}') { 'theirs'; return }
-Stop-ScheduledTask -TaskName $env:UNII_TASK -TaskPath '\\'
 Unregister-ScheduledTask -TaskName $env:UNII_TASK -TaskPath '\\' -Confirm:$false
 'ok'`, { UNII_TASK: n });
   if (out === "theirs") {
     fail(n + " isn't unii's: that Scheduled Task isn't one unii made, so unii leaves it as it is.");
   }
-  for (const pid of out === "none" ? [] : mine) {
-    run(["taskkill", "/T", "/F", "/PID", String(pid)]);
+  if (out !== "none") {
+    await win_quit(part, all[0], mine);
   }
   console.log(out === "none" ? "unii " + part + " isn't set up as a background service here: nothing to stop." : "unii " + part + " stopped: its background service " + n + " is removed.");
+}
+
+// a service's supervisor and part (`mine`) asked to quit by the file
+// its part watches (watch), naming the supervisor; given BYE, so a
+// device says goodbye (QUIT) and the server lets it go at once; then, as
+// a last resort, ended
+async function win_quit(part: Part, supervisor: number | undefined, mine: number[]): Promise<void> {
+  const stop = LOGS + "/" + part + ".stop";
+  if (supervisor !== undefined && mine.length > 0) {
+    fs.writeFileSync(stop, String(supervisor));
+    for (const until = Date.now() + BYE; mine.some(alive) && Date.now() < until; ) {
+      await Bun.sleep(100);
+    }
+  }
+  for (const pid of mine.filter(alive)) {
+    run(["taskkill", "/T", "/F", "/PID", String(pid)]);
+  }
+  fs.rmSync(stop, { force: true });
 }
 
 function ps(script: string, env: Record<string, string>): string {
@@ -381,6 +418,7 @@ export async function supervise(part: Part, args: string[]): Promise<never> {
     watch(process.ppid);
   }
   fs.mkdirSync(LOGS, { recursive: true, mode: 0o700 });
+  fs.rmSync(LOGS + "/" + part + ".stop", { force: true });
   const file = LOGS + "/" + part + ".pid";
   for (const pid of ours(part, pids(part).filter((pid) => pid !== process.pid))) {
     for (let k = 0; k < 40 && alive(pid); k++) {

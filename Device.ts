@@ -36,6 +36,10 @@ const FILE  = (process.env.UNII_DIR ?? "~/.unii").replace(/^~(?=[\\/]|$)/, os.ho
 // how often config.json is read for a change to its MCP servers, in ms
 const LOOK = 2000;
 
+// the longest a device stopping waits for its goodbye (QUIT) to close
+// its socket, in ms
+const BYE = 2000;
+
 // Device
 // ======
 
@@ -62,6 +66,8 @@ export async function run(given: string | undefined): Promise<void> {
   const jobs = new Map<string, AbortController>();
   const outs = new Map<string, object>();
   let ws: WebSocket | null = null;
+  // stopping: its goodbye sent (QUIT)
+  let quitting = false;
   const send = (msg: object) => ws?.readyState === WebSocket.OPEN && ws.send(JSON.stringify(msg));
   // the MCP servers as last told ("": not yet on this socket)
   let told = "";
@@ -101,6 +107,9 @@ export async function run(given: string | undefined): Promise<void> {
       }
     };
     sock.onclose = async () => {
+      if (quitting) {
+        process.exit(0);
+      }
       clearInterval(tick);
       ws = null;
       Mcp.lost();
@@ -125,11 +134,21 @@ export async function run(given: string | undefined): Promise<void> {
     outs.set(act.id, act);
     send(act);
   };
+  // stopped (a signal; on Windows `stop`'s file: Service.watch), it says
+  // goodbye (QUIT), so the server lets it go at once, and ends as its
+  // socket closes (BYE at most)
   process.on("exit", Machine.end);
   for (const sig of ["SIGHUP", "SIGTERM", "SIGINT"]) {
     process.on(sig, () => {
-      ws?.close(QUIT);
-      process.exit(0);
+      if (quitting) {
+        return;
+      }
+      quitting = true;
+      if (ws?.readyState !== WebSocket.OPEN) {
+        process.exit(0);
+      }
+      ws.close(QUIT);
+      setTimeout(() => process.exit(0), BYE);
     });
   }
   open();

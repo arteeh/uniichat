@@ -8,7 +8,10 @@
 // per sign-in (host, host-2...), listed in each call's message. A name
 // stays its sign-in's while the server runs, so a call meant for one
 // computer never reaches another. A device's links are its sockets: one
-// whose link is lost stays, its jobs waiting, until it quits. It is told its
+// lost (closed with no QUIT: a network blip, or a device that died) stays
+// GRACE, its jobs waiting, then goes as one that quit does: its jobs fail,
+// and it is no longer open; one of a device that links again from a new
+// process (a restart) goes at once. It is told its
 // jobs' ids as they change, and each job new to it; a job's output is an
 // act (Server.ts). A device's skills (Machine.skills), read as a job when
 // it joins and as each turn starts, are listed in each call's message
@@ -40,7 +43,7 @@ import PROMPT from "./prompt.txt" with { type: "text" };
 import COMPACT_PROMPT from "./compact.txt" with { type: "text" };
 import { EFFORTS, Pick } from "./Pick.ts";
 import * as Timer from "./Timer.ts";
-import type { Live } from "./View.ts";
+import { PING, type Live } from "./View.ts";
 
 export type { Live };
 
@@ -129,6 +132,10 @@ export const SEARCHES = 10;
 
 // how long the stop tool waits for its agent to end (ms)
 const HALT = 5000;
+
+// how long a device's link lost counts as open, waiting to be linked
+// again (ms)
+const GRACE = 3 * PING;
 
 // the chats' tools, by their secret; the server, once one is
 const CHATS = new Map<string, Tools>();
@@ -554,6 +561,12 @@ export namespace Tools {
     const d = tools.devices.get(name) ?? { who, host, terms: new Map(), jobs: new Map(), skills: [], mcp: [], why: "", clash: "" };
     d.terms.set(term, link);
     tools.devices.set(name, d);
+    // its links lost are a process before this one's: it restarted
+    for (const [old, l] of [...d.terms]) {
+      if (old !== term && !l.live()) {
+        Tools.detach(tools, old, name, "restarted");
+      }
+    }
     Tools.sync(d, term, () => true);
     Tools.look(tools, name);
     Tools.plug(tools);
@@ -569,16 +582,33 @@ export namespace Tools {
     mine.filter(([id]) => fresh(id)).forEach(([id, j]) => send({ $: "job", id, job: j.job }));
   }
 
-  export function detach(tools: Tools, term: string, device: string): void {
+  // a link gone (its device quit, or `how` else), its jobs failing so
+  export function detach(tools: Tools, term: string, device: string, how = "stopped"): void {
     const d = tools.devices.get(device);
     if (d === undefined || !d.terms.delete(term)) {
       return;
     }
     for (const job of d.jobs.values()) {
       if (job.term === term) {
-        job.end({ text: "The device " + device + " that ran this stopped.", fail: true });
+        job.end({ text: "The device " + device + " that ran this " + how + ".", fail: true });
       }
     }
+    Tools.plug(tools);
+  }
+
+  // a link lost (its socket closed with no QUIT): detached GRACE later,
+  // unless its device linked again on it (its process's socket opened
+  // anew) and that link lives
+  export function lost(tools: Tools, term: string, device: string): void {
+    const link = tools.devices.get(device)?.terms.get(term);
+    if (link === undefined) {
+      return;
+    }
+    setTimeout(() => {
+      if (tools.devices.get(device)?.terms.get(term) === link && !link.live()) {
+        Tools.detach(tools, term, device);
+      }
+    }, GRACE).unref?.();
     Tools.plug(tools);
   }
 
@@ -716,8 +746,9 @@ export namespace Tools {
     return run.out;
   }
 
-  // a job started on a device's link (the last live one), told to it;
-  // else why not
+  // a job started on a device's link (the last live one, else the last:
+  // lost, it fails within GRACE unless linked again), told to it; else
+  // why not
   export function start_job(tools: Tools, device: string, job: Job, id: string): Running | string {
     const d = Tools.open(tools, device);
     if (typeof d === "string") {

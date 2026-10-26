@@ -148,7 +148,7 @@ const part = cmd === "serve" || cmd === "device" ? cmd : null;
 const flags = (...ok: string[]) => [...FLAG].every((f) => ok.includes(f)) && !(FLAG.has("-d") && FLAG.has("--service"));
 const runs = part !== null && (part === "device" ? sub === undefined : sub === undefined || /^\d+$/.test(sub)) && !odd([cmd, ...(sub ? [sub] : [])]) && (part === "device" || URL_ === undefined) && flags("-d", "--service");
 if (SUPERVISOR > 0) {
-  (await import("./Service.ts")).watch(SUPERVISOR);
+  (await import("./Service.ts")).watch(SUPERVISOR, part ?? undefined);
 }
 
 // what a service -d makes or stop ends must not carry the marks of the
