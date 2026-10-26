@@ -2,8 +2,8 @@
 // =====
 // One way to call a model: a system prompt and a user message in;
 // Deltas (live pieces) and an Entry per finished message out. send()
-// hands the agent a message at its next chance, stop() aborts, wake()
-// ends a wait for a usage limit (Limit.ts), `left` holds those never
+// hands the agent a message at its next chance (it ends a wait for a
+// usage limit too: Limit.ts), stop() aborts, `left` holds those never
 // taken. Every vendor is an API run in our loop (Agent.ts) but
 // claude-sub, run in Claude Code's (ClaudeSub.ts).
 //
@@ -151,7 +151,6 @@ export type End = {
 export type Try = {
   send : (say: Say) => void;
   stop : () => void;
-  wake : () => void;
   done : Promise<End>;
 };
 
@@ -170,8 +169,10 @@ export const AGAIN = 60e3;
 // plan's limits last a week at most)
 const WEEK = 7 * 86400e3;
 
-// how long a vendor keeps a cache entry unused, in ms (openai-sub's
-// backend tells none: the shorter guess)
+// how long a vendor keeps a cache entry unused, in ms, as single flight
+// counts it (openai-sub's backend tells none: the shorter guess).
+// claude-sub's Claude Code caches for an hour (ClaudeSub.ts ENV), but
+// single flight counts it 5 minutes here
 export const TTL: Record<Vendor, number> = {
   "claude-api" : 300e3,
   "openai-api" : 1800e3,
@@ -202,9 +203,7 @@ export namespace AskAI {
       call.stop();
     };
     const { promise, resolve } = Promise.withResolvers<End>();
-    // a patient call's wait to ask again, which a wake ends too
-    let nap: AbortController | null = null;
-    const out: Call = { send, stop, wake: () => (call.wake(), nap?.abort()), done: promise };
+    const out: Call = { send, stop, done: promise };
     let picks = AskAI.falls(ask);
     // why each pick failed or was skipped, this call
     let whys: (string | null)[] = picks.map(() => null);
@@ -256,8 +255,7 @@ export namespace AskAI {
           const ms = Math.min(WEEK, Math.max(AGAIN, (end.until ?? 0) - Date.now()));
           const why = left.vendor + ":" + Pick.named(left).model + ": " + (limited ? "usage limit" : end.why ?? end.text);
           on({ $: "Again", again: { why, until: Date.now() + ms, limit: limited } });
-          await AskAI.nap(ask, picks, limited ? left.vendor : null, ms, (nap = new AbortController()), halt.signal);
-          nap = null;
+          await AskAI.nap(ask, picks, limited ? left.vendor : null, ms, halt.signal);
           const now = ask.repick === undefined || halt.signal.aborted ? picks : AskAI.falls(ask.repick());
           if (!AskAI.same(now, picks)) {
             picks = now;
@@ -292,23 +290,24 @@ export namespace AskAI {
     return a.map(Pick.label).join() === b.map(Pick.label).join();
   }
 
-  // a patient call's wait to ask again, `ms`, till a stop (`signal`), a
-  // wake (`wake`) or, at a usage limit on `vendor` (null: none), a resume
-  // or that vendor's usage read clear (Limit.wait); and, if it picks
-  // again (`repick`), as config is read again with other picks than
-  // `picks` (a compactor changed in Settings counts at once)
-  export async function nap(ask: Ask, picks: Pick[], vendor: Vendor | null, ms: number, wake: AbortController, signal: AbortSignal): Promise<void> {
-    const moved = () => {
+  // a patient call's wait to ask again, `ms`, till a stop (`signal`) or,
+  // at a usage limit on `vendor` (null: none), a resume or that vendor's
+  // usage read clear (Limit.wait); and, if it picks again (`repick`), as
+  // config is read again with other picks than `picks` (a compactor
+  // changed in Settings counts at once)
+  export async function nap(ask: Ask, picks: Pick[], vendor: Vendor | null, ms: number, signal: AbortSignal): Promise<void> {
+    const moved = new AbortController();
+    const reread = () => {
       if (ask.repick !== undefined && !AskAI.same(AskAI.falls(ask.repick()), picks)) {
-        wake.abort();
+        moved.abort();
       }
     };
-    config.RELOADED.add(moved);
+    config.RELOADED.add(reread);
     try {
-      const both = AbortSignal.any([signal, wake.signal]);
+      const both = AbortSignal.any([signal, moved.signal]);
       await (vendor === null ? Machine.nap(ms, both) : Limit.wait(vendor, ms, both));
     } finally {
-      config.RELOADED.delete(moved);
+      config.RELOADED.delete(reread);
     }
   }
 
@@ -319,7 +318,7 @@ export namespace AskAI {
     } catch (err: any) {
       const end = AskAI.end(err.message);
       const send = (say: Say) => end.left.push(say);
-      return { send, stop: () => {}, wake: () => {}, done: Promise.resolve(end) };
+      return { send, stop: () => {}, done: Promise.resolve(end) };
     }
   }
 

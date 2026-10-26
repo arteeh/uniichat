@@ -576,10 +576,6 @@ export function config_snapshot(): Snapshot {
   return { file, keys, version: hash.digest("hex").slice(0, 32) };
 }
 
-export function config_version(): string {
-  return config_snapshot().version;
-}
-
 // Keys
 // ====
 // The keys the settings page set, by name, in keys.json: plain JSON,

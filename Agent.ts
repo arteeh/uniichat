@@ -192,7 +192,7 @@ export namespace Agent {
       end.left = run.sent;
       return end;
     })();
-    return { send, stop, wake: () => run.limit.poke(), done };
+    return { send, stop, done };
   }
 
   export async function loop<S>(wire: Wire<S>, run: Doing): Promise<void> {

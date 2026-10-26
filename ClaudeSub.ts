@@ -217,17 +217,13 @@ export namespace ClaudeSub {
     return pids.some((pid) => pid > 0 && Machine.alive(pid));
   }
 
-  // the SDK, loaded once (a test hands in its own)
+  // the SDK, loaded once
   export function sdk(): Promise<Sdk> {
     LOADED.sdk ??= import("@anthropic-ai/claude-agent-sdk").catch((err) => {
       LOADED.sdk = null;
       throw err;
     });
     return LOADED.sdk;
-  }
-
-  export function use(sdk: unknown): void {
-    LOADED.sdk = Promise.resolve(sdk as Sdk);
   }
 
   // its environment: ours, less what would sign it in or send it
@@ -267,8 +263,8 @@ export namespace ClaudeSub {
     process.exitCode = await run.exited;
   }
 
-  // a call (ClaudeSub.run); a message sent, a wake or a stop ends a wait
-  // for a usage limit
+  // a call (ClaudeSub.run); a message sent or a stop ends a wait for a
+  // usage limit
   export function ask(ask: Ask, on: (ev: Event) => void): Try {
     const end = AskAI.end("");
     const sent: Say[] = [];
@@ -290,7 +286,7 @@ export namespace ClaudeSub {
       end.left = sent;
       return end;
     });
-    return { send, stop, wake: () => limit.poke(), done };
+    return { send, stop, done };
   }
 
   // what a call's Claude Code starts with; builtin: Claude Code's tools
@@ -342,12 +338,6 @@ export namespace ClaudeSub {
 
   // Summaries' slots
   // ----------------
-
-  // the summaries' and imports' Claude Codes running, those waiting (for
-  // tests)
-  export function slots(): { busy: number; waits: number } {
-    return { busy: SLOTS.busy, waits: SLOTS.waits.length };
-  }
 
   // a slot for a summary's or import's Claude Code (false: stopped while
   // waiting), in line: a chat's summaries first, then imports
@@ -462,11 +452,6 @@ export namespace ClaudeSub {
     const bills = info.isUsingOverage === true || info.overageStatus === "allowed" || info.overageStatus === "allowed_warning";
     const on = info.status === "rejected" || info.isUsingOverage === true;
     Limit.note("claude-sub", on && bills ? ClaudeSub.reset(info) ?? Date.now() + LIMIT : null);
-  }
-
-  // the limits told forgotten (for tests)
-  export function forget(): void {
-    Limit.forget("claude-sub");
   }
 
   // a call ended at a long usage limit (Limit.Off), logged

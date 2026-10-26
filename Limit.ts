@@ -16,9 +16,9 @@
 //
 // A wait of LONG or more parks the call: a Limit event tells the views
 // till when, and its thought says so once a call. A shorter wait reads as
-// the service being busy, each time. A stop, a message sent mid-run, a
-// wake or a resume ends the wait: the call asks once more and, still
-// limited, waits again, saying nothing more.
+// the service being busy, each time. A stop, a message sent mid-run or a
+// resume ends the wait: the call asks once more and, still limited, waits
+// again, saying nothing more.
 //
 // At a long limit a call ends instead of waiting (an Off, which its vendor
 // turns into a `down` end):
@@ -31,8 +31,8 @@
 // Every call asks the service: its answer is the truth, and a reset told
 // only times the wait. The exception is a limit under which asking would
 // bill (claude-sub's extra usage, one per account: LIMITS). A call under
-// one waits for its reset before asking at all, and again after any wake,
-// so no wake spends money (Limit.guard).
+// one waits for its reset before asking at all, and again after a resume
+// or a message, so neither spends money (Limit.guard).
 //
 // Limits may lift early (the plan resets them, or its user spends a
 // banked reset). While a call waits on a sub whose usage can be read
@@ -52,7 +52,7 @@ import { Machine } from "./Machine.ts";
 
 // one call's usage limits: what it asks, where it tells what it does, its
 // stop; n: the limits in a row (its vendor counts each one it hits);
-// said: it said it waits; poke: ends its wait now (a message sent, a wake)
+// said: it said it waits; poke: ends its wait now (a message sent)
 export type Limit = {
   ask    : Ask;
   on     : (ev: Event) => void;
@@ -114,7 +114,8 @@ export namespace Limit {
   }
 
   // before asking: under a limit told whose asking would bill (`key`:
-  // LIMITS), the call waits for its reset, again after any wake, or ends
+  // LIMITS), the call waits for its reset, again after a resume or a
+  // message, or ends
   // (Off); null: ask now, or it was stopped
   export async function guard(l: Limit, key: string, acted: boolean): Promise<Off | null> {
     for (let until = Limit.under([key]); until !== null && !l.signal.aborted; until = Limit.under([key])) {
@@ -209,15 +210,6 @@ export namespace Limit {
     const now = Date.now();
     const told = keys.map((k) => LIMITS.get(k) ?? 0).filter((until) => until > now);
     return told.length > 0 ? Math.max(...told) : null;
-  }
-
-  // the limits kept forgotten: `vendor`'s, or all
-  export function forget(vendor?: Vendor): void {
-    for (const key of [...LIMITS.keys()]) {
-      if (vendor === undefined || key === vendor || key.startsWith(vendor + " ")) {
-        LIMITS.delete(key);
-      }
-    }
   }
 
   // every call waiting for a usage limit (`vendor`'s, or any) woken; how

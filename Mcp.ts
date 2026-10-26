@@ -115,8 +115,7 @@ export namespace Mcp {
   }
 
   // the chat's servers made `confs`: one gone or changed ends as its last
-  // call does (as Mcp.end's), a new one waits for its first listing or
-  // call
+  // call does, a new one waits for its first listing or call
   export function sync(servers: Servers, confs: config.McpServer[]): void {
     const want = new Map(confs.map((conf) => [conf.name, conf]));
     for (const [name, s] of servers.all) {
@@ -367,16 +366,6 @@ export namespace Mcp {
     const text = clip();
     text.add(texts.join("\n"));
     return { text: text.text(), fail: got?.isError === true, imgs };
-  }
-
-  // a chat's servers end: at once, or (gone) each as its last call does
-  export function end(servers: Servers): void {
-    for (const s of servers.all.values()) {
-      s.gone = true;
-      if (s.calls === 0) {
-        Mcp.close(s);
-      }
-    }
   }
 
   // a server ended (turned off, dead): its calls running fail
