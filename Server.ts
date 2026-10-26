@@ -488,6 +488,7 @@ export namespace Chat {
       chat.call = null;
       chat.sent = [];
       chat.wait = [];
+      chat.sums = null;
       chat.busy = false;
       Chat.live(chat, null, []);
       Chat.phone(chat);
@@ -522,7 +523,9 @@ export namespace Chat {
       // those before the last `from` are built: those up to this one join
       from = Chat.from(chat);
       chat.sums = { from, total: (chat.sums?.total ?? 0) + Memory.unbuilt(mem, from) };
-      Chat.all(chat, Chat.state(chat));
+      if (chat.sums.total > 0) {
+        Chat.all(chat, Chat.state(chat));
+      }
       const why = await Memory.settle(mem, from, halt.signal);
       if (why !== null) {
         chat.sums = null;
