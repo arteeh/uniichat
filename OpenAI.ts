@@ -149,7 +149,9 @@ export namespace OpenAI {
     const u = res.usage;
     if (typeof u?.input_tokens === "number") {
       const read = u.input_tokens_details?.cached_tokens ?? 0;
-      Agent.cached(ask, read, null, u.input_tokens - read);
+      const told = u.input_tokens_details?.cache_write_tokens;
+      const write = typeof told === "number" ? told : null;
+      Agent.cached(ask, read, write, Math.max(0, u.input_tokens - read - (write ?? 0)));
     }
     const out: any[] = res.output;
     const calls = out.filter((o) => o.type === "function_call");

@@ -175,13 +175,13 @@ export const AGAIN = 60e3;
 const WEEK = 7 * 86400e3;
 
 // how long a vendor keeps a cache entry unused, in ms, as single flight
-// counts it (openai-sub's backend tells none: the shorter guess).
-// claude-api's and claude-sub's marks are all an hour's (Anthropic.ts
-// HOUR; Claude Code's own by ClaudeSub.ts ENV, ours by its HOUR)
+// counts it: claude-api's and claude-sub's marks are all an hour's
+// (Anthropic.ts HOUR; Claude Code's own by ClaudeSub.ts ENV); OpenAI's
+// default is 30 minutes, and openai-sub's backend tells none
 export const TTL: Record<Vendor, number> = {
   "claude-api" : 3600e3,
   "openai-api" : 1800e3,
-  "openai-sub" : 300e3,
+  "openai-sub" : 1800e3,
   "claude-sub" : 3600e3,
 };
 
@@ -363,7 +363,8 @@ export namespace AskAI {
   // each block's hash seeded by the one before (64 bits)
   export function keys(ask: Ask): string[] {
     const last = ask.blocks.slice(0, -1).findLastIndex((b) => b.mark);
-    const head = [ask.vendor, ask.model, ask.effort, ask.speed, ask.system, ask.searches > 0];
+    // openai-sub caches per conversation (ChatGPT.session)
+    const head = [ask.vendor, ask.model, ask.effort, ask.speed, ask.system, ask.searches > 0, ask.vendor === "openai-sub" ? ask.who ?? "main" : null];
     let key = Bun.hash(JSON.stringify(head));
     return ask.blocks.slice(0, last + 1).map((b) => String((key = Bun.hash(b.text, key))));
   }

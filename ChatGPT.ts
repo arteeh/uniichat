@@ -314,8 +314,15 @@ export namespace ChatGPT {
       stream              : true,
       include             : ["reasoning.encrypted_content"],
       service_tier        : ask.speed === "fast" ? "priority" : undefined,
-      prompt_cache_key    : "unii-" + Bun.hash(JSON.stringify([ask.model, ask.system, ask.blocks[0]?.text ?? ""])).toString(36),
+      prompt_cache_key    : ChatGPT.session(ask),
     };
+  }
+
+  // one conversation's id (main's, each subagent's, the compactor's), the
+  // same for all its calls: sent as the session-id header too, which the
+  // backend routes its cache by
+  export function session(ask: Ask): string {
+    return "unii-" + Bun.hash(JSON.stringify([ask.who ?? "main", ask.model, ask.system])).toString(36);
   }
 
   // a user message without its cache breakpoints
@@ -389,7 +396,7 @@ export namespace ChatGPT {
     idle    : 1200e3,
     url     : RESPONSES,
     auth    : (refused) => ChatGPT.token(refused),
-    headers : (token) => ChatGPT.headers(token),
+    headers : (token, ask) => ({ ...ChatGPT.headers(token), "session-id": ChatGPT.session(ask), "thread-id": ChatGPT.session(ask) }),
     body    : (ask, items, tools, max) => ChatGPT.body(ask, items, tools, max),
     start   : (ask) => ({ ...OpenAI.wire.start(ask), items: [] }),
     read    : (st, ev, on) => ChatGPT.read(st, ev, on),
