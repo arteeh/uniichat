@@ -1,24 +1,3 @@
-// ChatGPT
-// =======
-// The openai-sub vendor: a ChatGPT plan instead of an API key, signed in
-// and called as Codex CLI does (openai/codex: codex-rs login, codex-api).
-// `unii serve chatgpt` (or `bun ChatGPT.ts`) signs in as Codex's OAuth client,
-// by a device code typed at auth.openai.com/codex/device (no redirect
-// back to this computer: the server is often another). The tokens go to FILE
-// (config `chatgpt`), in Codex's auth.json shape, mode 600. Each request
-// reads FILE; the access token is refreshed 5 min before it expires and
-// once on a 401, one refresh at a time in a process. A refresh refused as
-// used reads FILE again for a while (another process refreshed it), as
-// Codex does; one saves only if FILE still holds the tokens it refreshed
-// (a logout or sign-in since wins).
-// The body is Codex's: openai-api's parts (OpenAI.ts), the system prompt
-// as `instructions`, no max_output_tokens. A usage limit (a 429
-// usage_limit_reached) waits for the reset it tells, as at every vendor
-// (Agent.ts); while a call waits, the plan's usage is read as Codex reads
-// it for its /status (GET wham/usage, no model asked: ChatGPT.clear), so
-// a limit lifted early (a banked reset spent) wakes it.
-// config `chatgpt_issuer` and `chatgpt_url` point it elsewhere (tests).
-
 import * as fs from "node:fs";
 import * as path from "node:path";
 import type { Ask } from "./AskAI.ts";
@@ -27,45 +6,28 @@ import { OpenAI, type State } from "./OpenAI.ts";
 import * as config from "./Config.ts";
 import { write_whole } from "./Write.ts";
 
-// Types
-// =====
-
 export type Tokens = { id_token: string; access_token: string; refresh_token: string; account_id: string };
 
-// FILE, as Codex writes its auth.json
 export type Auth = { auth_mode: "chatgpt"; OPENAI_API_KEY: null; tokens: Tokens; last_refresh: string };
 
-// a stream read so far, and the items it gave
 type Sub = State & { items: any[] };
 
-// Constants
-// =========
-
-// Codex CLI's OAuth client
 const CLIENT    = "app_EMoamEEZ73f0CkXaXp7hrann";
 const ISSUER    = config.config_get("chatgpt_issuer", "https://auth.openai.com").replace(/\/$/, "");
 const CODEX     = config.config_get("chatgpt_url", "https://chatgpt.com/backend-api/codex").replace(/\/$/, "");
 const RESPONSES = CODEX + "/responses";
 const USAGE     = CODEX.replace(/\/codex$/, "") + "/wham/usage";
 
-// how close to its expiry a token is refreshed; how old a token with no
-// expiry may get; the longest a request to the issuer takes; how long a
-// sign-in waits for its user to enter its device code; how long
-// a refresh refused as used waits for another process's tokens (ms)
 const EARLY   = 5 * 60e3;
 const OLD     = 8 * 86400e3;
 const REQUEST = 20e3;
 const DEVICE  = 15 * 60e3;
 const SETTLE  = 2e3;
 
-// the claim with a token's account
 const CLAIMS = "https://api.openai.com/auth";
 
-// refresh errors that only signing in again fixes
 const GONE = ["refresh_token_expired", "refresh_token_reused", "refresh_token_invalidated", "invalid_grant"];
 
-// 429s no reset lifts, and what the user reads of each (a usage limit,
-// usage_limit_reached, waits for its reset: ChatGPT.reset)
 const LIMITS: Record<string, string> = {
   usage_not_included  : "doesn't include this use",
   insufficient_quota  : "is out of quota",
@@ -73,18 +35,10 @@ const LIMITS: Record<string, string> = {
 
 const SIGN_IN = "run `unii serve chatgpt` on the server";
 
-// the refresh under way in this process, which every call waits on
 let REFRESHING: Promise<Auth> | null = null;
-
-// ChatGPT
-// =======
 
 export namespace ChatGPT {
 
-  // Tokens
-  // ------
-
-  // a JWT's claims ({}: not one)
   export function claims(jwt: string): any {
     try {
       return JSON.parse(Buffer.from(jwt.split(".")[1], "base64url").toString("utf8")) ?? {};
@@ -101,7 +55,6 @@ export namespace ChatGPT {
     }
   }
 
-  // FILE's sign-in (null: none)
   export function load(): Auth | null {
     if (!fs.existsSync(config.CHATGPT)) {
       return null;
@@ -113,13 +66,11 @@ export namespace ChatGPT {
     return auth;
   }
 
-  // written whole (a temp file renamed over it), owner only, its dir made
   export function save(auth: Auth): void {
     fs.mkdirSync(path.dirname(config.CHATGPT), { recursive: true, mode: 0o700 });
     write_whole(config.CHATGPT, JSON.stringify(auth, null, 2) + "\n");
   }
 
-  // a sign-in from a token response (old: the tokens it refreshed)
   export function auth(got: any, old?: Tokens): Auth {
     const id_token = got.id_token ?? old?.id_token ?? "";
     const tokens: Tokens = {
@@ -131,14 +82,11 @@ export namespace ChatGPT {
     return { auth_mode: "chatgpt", OPENAI_API_KEY: null, tokens, last_refresh: new Date().toISOString() };
   }
 
-  // whether it is refreshed now
   export function due(auth: Auth, now = Date.now()): boolean {
     const exp = ChatGPT.claims(auth.tokens.access_token).exp;
     return typeof exp === "number" ? exp * 1000 <= now + EARLY : !(Date.parse(auth.last_refresh) > now - OLD);
   }
 
-  // the access token a request sends, refreshed if due or if it is the
-  // one a 401 refused (Agent.ts Wire auth)
   export async function token(refused?: string): Promise<string> {
     const auth = ChatGPT.load();
     if (auth === null) {
@@ -151,14 +99,10 @@ export namespace ChatGPT {
     return (await REFRESHING).tokens.access_token;
   }
 
-  // an error that asking again may get past: a busy try (Agent.ts)
   export function busy(why: string): Error {
     return Object.assign(new Error("ChatGPT token refresh failed: " + why), { busy: true });
   }
 
-  // as Codex asks it (its fields only); refused for good, FILE read again
-  // for SETTLE ms: another process's new tokens, if it writes some. Saved
-  // only if FILE still holds `old`'s, else FILE's sign-in is the one used
   export async function refresh(old: Auth): Promise<Auth> {
     const newer = () => {
       const now = ChatGPT.load();
@@ -209,10 +153,6 @@ export namespace ChatGPT {
     return auth;
   }
 
-  // Sign-in
-  // -------
-
-  // an authorization code's tokens, saved
   export async function exchange(code: string, redirect: string, verifier: string): Promise<Auth> {
     const form = new URLSearchParams({ grant_type: "authorization_code", client_id: CLIENT, code, redirect_uri: redirect, code_verifier: verifier });
     const res = await fetch(ISSUER + "/oauth/token", { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: form, signal: AbortSignal.timeout(REQUEST) });
@@ -225,9 +165,6 @@ export namespace ChatGPT {
     return auth;
   }
 
-  // by a device code: the link and code to show, then polling till the
-  // user entered it, within `wait` ms; a poll the issuer fails (5xx, no
-  // answer) polls on
   export async function device(show: (url: string, code: string) => void, wait = DEVICE): Promise<Auth> {
     const api = ISSUER + "/api/accounts/deviceauth";
     const post = (path: string, body: object) =>
@@ -254,8 +191,6 @@ export namespace ChatGPT {
     throw new Error("ChatGPT device sign-in timed out after " + Math.round(wait / 60e3) + " minutes");
   }
 
-  // revokes the refresh token (Codex's logout), then forgets the sign-in
-  // whether or not that worked
   export async function logout(): Promise<string> {
     const auth = ChatGPT.load();
     if (auth === null) {
@@ -271,14 +206,12 @@ export namespace ChatGPT {
     return "Signed out of ChatGPT" + (res?.ok ? "." : " (its token wasn't revoked: " + (res ? "HTTP " + res.status : "offline") + ").");
   }
 
-  // who FILE is signed in as
   export function who(auth: Auth): string {
     const id = ChatGPT.claims(auth.tokens.id_token);
     const plan = id[CLAIMS]?.chatgpt_plan_type;
     return (id.email ?? "an account") + (plan ? " (" + plan + " plan)" : "");
   }
 
-  // `unii serve chatgpt [logout|status]`; status exits 1 if not signed in
   export async function cli(args: string[]): Promise<void> {
     if (args.includes("logout")) {
       console.log(await ChatGPT.logout());
@@ -293,9 +226,6 @@ export namespace ChatGPT {
     const auth = await ChatGPT.device((url, code) => console.log("To sign this server in to ChatGPT, open\n\n  " + url + "\n\nand enter the code\n\n  " + code + "\n\n(it expires in 15 minutes; enter it only if you started this sign-in)"));
     console.log("\nSigned in to ChatGPT as " + ChatGPT.who(auth) + "; tokens in " + config.CHATGPT + ".\nOffer it with the config vendors=openai-sub (README).");
   }
-
-  // Wire
-  // ----
 
   // the body Codex sends, its fields in its order, of openai-api's parts:
   // the system prompt as `instructions` (the backend requires it), no
@@ -318,7 +248,6 @@ export namespace ChatGPT {
     };
   }
 
-  // a user message without its cache breakpoints
   export function unmark(item: any): any {
     if (item.role !== "user" || !Array.isArray(item.content)) {
       return item;
@@ -350,8 +279,6 @@ export namespace ChatGPT {
     return end;
   }
 
-  // a 429 no reset lifts (null: not one): the backend's words logged,
-  // ours said (which, the plan)
   export function refusal(res: Response, text: string): Refusal | null {
     const err = ChatGPT.json(text).error ?? {};
     const kind = [err.type, err.code].find((k) => typeof k === "string" && Object.hasOwn(LIMITS, k));
@@ -363,8 +290,6 @@ export namespace ChatGPT {
     return { why, say: "the ChatGPT plan" + plan + " this server runs on " + LIMITS[kind] };
   }
 
-  // when a usage limit (a 429 usage_limit_reached) resets, as its body
-  // tells (null: not told, or not one)
   export function reset(res: Response, text: string): number | null {
     const err = ChatGPT.json(text).error ?? {};
     if (res.status !== 429 || ![err.type, err.code].includes("usage_limit_reached")) {

@@ -1,39 +1,3 @@
-// Agent
-// =====
-// claude-api, openai-api and openai-sub in Unii's own loop; a Wire
-// (Anthropic.ts, OpenAI.ts, ChatGPT.ts) shapes requests and reads
-// streams. Each step sends every
-// item and streams one output; tool calls run in order, and the call
-// ends at a step with no tools (a message sent meanwhile waits for the
-// next call: Run.ts). A request goes again, TRIES times at most (a
-// probe's first once: AskAI.ts DOWN), after its retry-after or a
-// doubling wait, for a passing reason (`busy`: no connection, a retry
-// status unless SPENT, a stream error, cut short or silent for the
-// wire's `idle`), dropping what it streamed. A request that yields
-// (an import's summary, AskAI.ts) sends nothing while one that doesn't
-// (a turn's, a chat's summary, which a turn waits on) waits on its busy
-// model: the room a busy vendor has goes to the chats first, and many
-// imports never starve every chat of the summaries its next turn needs.
-// An import asks a busy model again by one request at a time, the rest
-// waiting on it, so imports share what room is left alike, however many
-// requests each runs.
-// A usage limit (a 429 but OpenAI's insufficient_quota, or a rate-limit
-// stream error) is counted and handed to Limit.ts, which waits (then the
-// request asks again) or ends the call, as it does for every vendor.
-// A busy model is logged as its first request asks again and as its
-// last is done, never each try (a storm logged ~600 lines a second).
-// A call ends answered
-// (`fail`: the model's answer failed, a refusal or a stop reason: its
-// input's doing) or not: `down`, the vendor's (a refusal of the request,
-// as when the API key's credit is gone, or busy past TRIES; `off` if
-// every call's would be: busy past TRIES, a status of OFF, SPENT); `lost`,
-// ours (a stop), saying why. A vendor's why
-// (`busy`, `down`) goes to the log; the user reads only that the AI
-// service is busy, as the call's end, each retry's thought and where a
-// call is cut (a vendor's errors speak of the server's account, not the
-// user's). A stop ends the call at once, its request cut. A request takes
-// its place in single flight (AskAI.wait).
-
 import { AskAI, type Ask, type Block, type Flight, type Try, type End, type Event, type Img, type Kind } from "./AskAI.ts";
 import { Anthropic } from "./Anthropic.ts";
 import { OpenAI } from "./OpenAI.ts";
@@ -43,14 +7,10 @@ import { live_push } from "./View.ts";
 import { Machine, type Spec } from "./Machine.ts";
 import * as config from "./Config.ts";
 
-// Types
-// =====
-
 export type Out = { text: string; fail: boolean; imgs?: Img[] };
 
 export type Tool = Spec;
 
-// a running call, and its usage limits (Limit.ts)
 type Doing = {
   ask   : Ask;
   on    : (ev: Event) => void;
@@ -61,27 +21,17 @@ type Doing = {
 
 export type Back = { id: string; out: Out };
 
-// a room at a busy model, a model's or an import's (AskAI.ts `yields`):
-// the requests asking again that hold it (a model's: those that don't
-// yield; an import's: the one asking for all its requests), and those
-// waiting till none does; a model's counts all its requests asking
-// again too, logged as they go from none to some and back
 type Room = { busy: number; asking: number; wait: Array<() => void> };
 
 export type Item =
-  | { $: "User"; parts: Block[]; imgs: Img[] } // user text, images
-  | { $: "Turn"; out: unknown[] }             // the model's output, as its API gave it
-  | { $: "Back"; backs: Back[] };             // tool results
+  | { $: "User"; parts: Block[]; imgs: Img[] }
+  | { $: "Turn"; out: unknown[] }
+  | { $: "Back"; backs: Back[] };
 
-// a tool call: its input (null: not JSON)
 export type Use = { id: string; name: string; input: unknown };
 
 export type Entry = { kind: Kind; text: string; of?: string };
 
-// note: what it did other than asked; off: down for every call (End.off);
-// refusal: the vendor's, if down by one; until: a plan's usage limit's
-// reset, as told (Wire `reset`); limits: ended at a usage limit
-// (Limit.off), the usage limits in a row (End.limits)
 export type Step = {
   out      : unknown[];
   uses     : Use[];
@@ -95,21 +45,10 @@ export type Step = {
   limits?  : number;
 };
 
-// a refusal asking again soon won't change (a ChatGPT plan without this
-// use; a long usage limit a fallback goes on past: Limit.off): why
-// (logged), what the user reads, and when it lifts, if told (ms since
-// 1970)
 export type Refusal = { why: string; say: string; until?: number };
 
 export type Emit = (kind: Kind, text: string, fresh?: boolean) => void;
 
-// an API: its key's name in config.KEYS (or `auth`: a signed-in
-// account's token for each try, refused: the one a 401 refused, which it
-// refreshes; an error with `busy` set: none for now), a body's input
-// tokens as it counts them (null: not told), how its stream reads into a
-// step (S: what it read so far), which error responses are refusals
-// (null: not one), and when a plan's usage limit resets, as an error
-// response tells it (null: not told)
 export type Wire<S> = {
   key     : string;
   auth?   : (refused: string | undefined) => Promise<string>;
@@ -125,10 +64,6 @@ export type Wire<S> = {
   step    : (st: S, ask: Ask) => Step;
 };
 
-// Constants
-// =========
-
-// a request's most output tokens: the models' own cap
 const MAX   = 128000;
 export const TRIES = 8;
 
@@ -138,24 +73,14 @@ export const TRIES = 8;
 const OFF   = [401, 402, 403, 404];
 const SPENT = /insufficient_quota|billing_hard_limit_reached|credit balance is too low/i;
 
-// what a call the vendor never answered says
 export const BUSY  = "the AI service is busy or unavailable right now";
 
-// a refusal of a request too long for the model (Anthropic's, OpenAI's,
-// Claude Code's words), or Anthropic's stop at the window's end:
-// conversation mode ends on it (Server.ts)
 export const TOO_LONG = /prompt is too long|context.length|context (limit|window)|model_context_window_exceeded|too many (input )?tokens/i;
 
-// the rooms held or waited on, by model, or model and import (Agent.step)
 const ROOMS = new Map<string, Room>();
-
-// Agent
-// =====
 
 export namespace Agent {
 
-  // a request's cache use as its vendor tells it (tokens; write null: not
-  // told), logged with whose it is
   export function cached(ask: Ask, read: number, write: number | null, input: number): void {
     console.error("cache " + ask.vendor + " " + ask.model + " " + (ask.who ?? "main") + ": read " + read + (write === null ? "" : ", write " + write) + ", uncached " + input);
   }
@@ -200,8 +125,6 @@ export namespace Agent {
     const items: Item[] = [{ $: "User", parts, imgs: ask.imgs ?? [] }];
     while (!signal.aborted) {
       const step = await Agent.step(wire, run, key, (max) => wire.body(ask, items, tools, max), items);
-      // our tools' calls run one by one below: each queued till it starts
-      // (its Start), so none is logged as begun before the ones ahead end
       const ours = new Set(step.uses.map((use) => use.id));
       for (const entry of step.entries) {
         on({ $: "Entry", ...entry, ...(entry.kind === "tool" && entry.of !== undefined && ours.has(entry.of) ? { queued: true } : {}) });
@@ -244,14 +167,6 @@ export namespace Agent {
     }
   }
 
-  // make: the request's body, writing `max` tokens at most. Asking again,
-  // it holds its room (Room): its model's, or its import's, which one
-  // request holds at a time while the rest wait on it, so each import
-  // has one request at a busy model however many it runs, and imports
-  // share its room alike. k: its busy tries; its usage-limit ones in a
-  // row are the Limit's `n` (a patient call's try going on from those its
-  // last try ended at: Ask `limits`). A patient call's failures are
-  // logged as it waits to ask again (Memory.heard), not here
   export async function step<S>(wire: Wire<S>, run: Doing, key: string, make: (max: number) => unknown, items: Item[]): Promise<Step> {
     const signal = run.abort.signal;
     const model = run.ask.model;
@@ -314,9 +229,6 @@ export namespace Agent {
     }
   }
 
-  // a promise's value, or null once `signal` aborts (or had); its
-  // listener gone either way (a call at a usage limit asks again without
-  // end), and its failure after that ignored
   export function race<T>(go: Promise<T>, signal: AbortSignal): Promise<T | null> {
     go.catch(() => {});
     let drop = () => {};
@@ -327,9 +239,6 @@ export namespace Agent {
     });
     return Promise.race([go, stopped]).finally(drop);
   }
-
-  // Usage limits
-  // ------------
 
   // when a usage limit resets, as the vendor tells it (ms since the epoch;
   // null: not told, past, or too far for a timer): its retry-after
@@ -348,8 +257,6 @@ export namespace Agent {
     return after?.[1] ?? (told.length > 0 ? Math.max(...told.map(([, t]) => t)) : null);
   }
 
-  // a try's key, or a signed-in wire's token (refused: the one a 401
-  // refused); one it can't get for now, a busy step
   export async function token<S>(wire: Wire<S>, key: string, refused: string | undefined): Promise<string | Step> {
     if (wire.auth === undefined) {
       return key;
@@ -370,8 +277,6 @@ export namespace Agent {
     return room;
   }
 
-  // a request asks `model` again, holding `own`, its model's room or its
-  // import's; the model's first says why
   export function hold(model: string, own: string, why: string): void {
     if (Agent.room(model).asking++ === 0) {
       console.error(model + ": " + why.slice(0, 300) + ": its requests ask again");
@@ -379,7 +284,6 @@ export namespace Agent {
     Agent.room(own).busy += 1;
   }
 
-  // ... and lets go of it, answered or not: the last frees those waiting
   export function free(model: string, own: string): void {
     const room = Agent.room(own);
     room.busy -= 1;
@@ -396,8 +300,6 @@ export namespace Agent {
     }
   }
 
-  // a request that yields waits while a request that doesn't holds its
-  // model's room, and while another holds its import's
   export async function yielded(run: Doing, own: string, asking: boolean): Promise<void> {
     const keys = run.ask.yields === undefined ? [] : asking ? [run.ask.model] : [run.ask.model, own];
     for (;;) {
@@ -409,8 +311,6 @@ export namespace Agent {
     }
   }
 
-  // one request, in single flight (AskAI.wait): its response, if any,
-  // and step
   export async function request<S>(wire: Wire<S>, run: Doing, key: string, body: unknown, seen: Entry[]): Promise<{ res: Response | null; step: Step }> {
     const flight = await AskAI.wait(run.ask);
     if (run.abort.signal.aborted) {
@@ -476,8 +376,6 @@ export namespace Agent {
     return should === "true" || (should !== "false" && busy);
   }
 
-  // seen: what streamed, as told to the call (none once it stopped); st:
-  // what it read; begun: its response began (Flight)
   export async function stream<S>(wire: Wire<S>, run: Doing, body: ReadableStream<Uint8Array>, timer: Timer, seen: Entry[], st: S, begun: () => void): Promise<Step> {
     const ask = run.ask;
     const on: Emit = (kind, text, fresh) => {
@@ -517,7 +415,6 @@ export namespace Agent {
     }
   }
 
-  // null: not JSON
   export function parse(json: string): unknown {
     try {
       return JSON.parse(json || "{}");
@@ -525,9 +422,6 @@ export namespace Agent {
       return null;
     }
   }
-
-  // Tools
-  // -----
 
   export async function use(run: Doing, tools: Tool[], use: Use): Promise<Out> {
     if (!tools.some((t) => t.name === use.name)) {
@@ -545,7 +439,6 @@ export namespace Agent {
     }
   }
 
-  // the call's tools, and the notes their listing gave it (Tools.answer)
   export async function server(run: Doing): Promise<{ tools: Tool[]; notes: string[] }> {
     if (!run.ask.server) {
       return { tools: [], notes: [] };

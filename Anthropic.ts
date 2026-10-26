@@ -1,30 +1,6 @@
-// Anthropic
-// =========
-// The wire of claude-api (Agent.ts): the Messages API, streamed, with
-// adaptive thinking summarized and fast as `speed`. Outputs go back
-// whole, items of one role joined. A marked block gets cache_control, a
-// marked end the top-level one too (which Anthropic counts apart: a
-// request takes four in all), and so does the system prompt: what every
-// call shares (tools, system) stays cached whatever its view does, so a
-// view written anew writes only itself. Every mark of every call (turns,
-// subagents, summaries) caches an hour (HOUR; the API refuses an hour's
-// after a 5 minutes' one, so none is 5 minutes). A turn in conversation
-// mode (Ask `talk`) marks a block further back too (Block `back`): its
-// end then needs no mark of its own, the top-level one ends it (four in
-// all still). A stream builds blocks from
-// pieces; tool_use and end_turn end a step, pause_turn asks again, an
-// error event is busy (a rate_limit_error a usage limit). It pings while
-// the model thinks, so 5 silent minutes mean it is dead.
-
 import type { Ask, Block, Img } from "./AskAI.ts";
 import { Agent, type Emit, type Entry, type Item, type Step, type Tool, type Use, type Wire } from "./Agent.ts";
 
-// Types
-// =====
-
-// a stream read so far: the content blocks, the JSON of each tool input
-// that came in pieces, how it stopped and why, the speed it ran at, an
-// error, its usage (input tokens: cache reads, writes, the rest)
 type State = {
   blocks : any[];
   json   : string[];
@@ -35,16 +11,9 @@ type State = {
   used   : { read: number; write: number; input: number } | null;
 };
 
-// Constants
-// =========
-
-// a cache mark: an hour's, always
 const HOUR  = { type: "ephemeral", ttl: "1h" };
 const WEB   = { type: "web_search_20260318", name: "web_search" };
 const FAST  = "fast-mode-2026-02-01";
-
-// Anthropic
-// =========
 
 export namespace Anthropic {
 
@@ -90,8 +59,6 @@ export namespace Anthropic {
     };
   }
 
-  // talk: the call's first message in conversation mode, its `back`
-  // block marked, its last (the top-level mark's) not
   export function message(item: Item, talk = false): { role: string; content: any[] } {
     switch (item.$) {
       case "User": {
@@ -115,7 +82,6 @@ export namespace Anthropic {
     }
   }
 
-  // content blocks: the texts (none empty), then the images
   export function content(texts: string[], imgs: Img[]): unknown[] {
     const blocks = texts.filter((text) => text !== "").map((text) => ({ type: "text", text }));
     return [...blocks, ...imgs.map(Anthropic.image)];
@@ -125,7 +91,6 @@ export namespace Anthropic {
     return { type: "image", source: { type: "base64", media_type: img.type, data: img.data } };
   }
 
-  // one stream event; whether it is the last
   export function read(st: State, ev: any, on: Emit): boolean {
     switch (ev.type) {
       case "message_start": {
@@ -157,18 +122,15 @@ export namespace Anthropic {
     return ev.type === "message_stop";
   }
 
-  // a usage's input tokens: cache reads, writes, the rest (null: none told)
   export function used(u: any): State["used"] {
     const n = (x: unknown) => (typeof x === "number" ? x : 0);
     return typeof u.input_tokens === "number" ? { read: n(u.cache_read_input_tokens), write: n(u.cache_creation_input_tokens), input: u.input_tokens } : null;
   }
 
-  // the speed it ran at, as its usage tells
   export function usage(st: State, u: any): void {
     st.speed = u.speed === undefined ? st.speed : u.speed === "fast" ? "fast" : "slow";
   }
 
-  // a piece of a content block, added to it
   export function delta(st: State, k: number, delta: any): void {
     const block = st.blocks[k];
     switch (delta.type) {
@@ -195,8 +157,6 @@ export namespace Anthropic {
     }
   }
 
-  // what an event shows live: thoughts, replies, a tool call as it forms
-  // (its name, then its input's JSON in pieces, as Call.ts reads it)
   export function live(ev: any, on: Emit): void {
     const block = ev.content_block ?? {};
     const delta = ev.delta ?? {};
@@ -214,7 +174,6 @@ export namespace Anthropic {
     }
   }
 
-  // the step a stream gave
   export function step(st: State, ask: Ask): Step {
     if (st.used !== null) {
       Agent.cached(ask, st.used.read, st.used.write, st.used.input);
@@ -251,8 +210,6 @@ export namespace Anthropic {
     return { ...step, stop: "fail", why: "stopped: " + st.stop + (why ? " (" + why + ")" : "") };
   }
 
-  // the messages of an output, in order (a run of text blocks, split
-  // where citations go, is one reply)
   export function entries(out: any[]): Entry[] {
     const entries: Entry[] = [];
     for (const b of out) {
@@ -267,7 +224,6 @@ export namespace Anthropic {
     return entries.map((e) => ({ ...e, text: e.text.trim() })).filter((e) => e.text);
   }
 
-  // the message of a block, if any
   export function entry(b: any): Entry | null {
     const c = b.content;
     switch (b.type) {
@@ -288,10 +244,6 @@ export namespace Anthropic {
     return { kind: "echo", text: Anthropic.result(c) || "(no output)", of: b.tool_use_id };
   }
 
-  // the text of a server tool's result. Every call gets one, even empty
-  // or kept secret (code execution under web search gives its output
-  // encrypted), since a call is logged with its result: one without
-  // would wait to the turn's end, below the reply
   export function result(c: any): string {
     if (Array.isArray(c)) {
       return c.map((r: any) => r.title + " " + r.url).join("\n");

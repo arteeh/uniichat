@@ -1,41 +1,3 @@
-// ClaudeSub
-// =========
-// The claude-sub vendor: a Claude plan instead of an API key, on the
-// Claude Agent SDK. Its Claude Code (the SDK's own binary, unmodified,
-// carried inside a compiled unii; config `claude` names another) runs
-// with CLAUDE_CONFIG_DIR at DIR (config `claude_sub`): `unii serve claude` runs
-// its `claude auth login` there, so the sign-in is Anthropic's own and
-// the token stays Claude Code's, kept and refreshed by it, never read by
-// us. A call is one turn: our system prompt, our blocks as its message,
-// our tools over MCP (the chat's URL, Tools.ts, set over Claude Code's
-// pipe: never on its command line) and web search, always; Claude Code's
-// own tools, settings, skills, memory and compaction off. It runs the
-// tool loop; we log what it streams. A message sent meanwhile waits for
-// the next call (Run.ts). Not signed in, the call ends as one its vendor can't
-// be asked for here (no stop, as with no API key), saying how to sign in.
-// An error Claude Code ends a turn with (past its own retries) is the
-// vendor's, as at the other vendors (Agent.ts): logged, the user told
-// only that the AI service is busy; one that is the account's or every
-// call's (the service down, billing, no such model) is `off`, so a
-// fallback goes on.
-//
-// A Claude Code per call: each call starts its own (~235 MB while it
-// runs), which exits as the call ends; a stop kills it (its tool jobs
-// stop as their requests drop). Chat turns and subagents start theirs at
-// once: a parent waits on its subagents, so a cap there could deadlock.
-// Summaries and imports wait on no call: SUMS of them run at most at once
-// (Memory.ts starts up to JOBS), a chat's summaries ahead of imports'.
-//
-// Usage limits are handled as for every vendor (Limit.ts). Claude Code
-// tells one by a rate_limit_event "rejected", saying when it resets, then
-// a reply with error rate_limit. After the wait, a call that ran no tool
-// of ours asks again in a new Claude Code; one that did keeps its Claude Code, idle, and is told to go on (ON): its
-// conversation as it was, tool results in, so no tool runs again. Usage
-// billed past the plan (isUsingOverage: extra usage) is a limit too: the
-// turn is interrupted at once (an answer already whole is kept: it is
-// paid), and the limit is noted (ClaudeSub.note) so no call asks under it
-// till its reset (Limit.guard).
-
 import * as child from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
@@ -48,26 +10,16 @@ import { Machine } from "./Machine.ts";
 import { live_push, type Live } from "./View.ts";
 import * as config from "./Config.ts";
 
-// Constants
-// =========
-
 const DIR = config.CLAUDE_SUB;
 
-// the most summaries' and imports' Claude Codes running at once
 export const SUMS = 4;
 
-// a carried binary's copy younger than this is never removed (another
-// process may have just written it, not yet marked it as its own)
 const FRESH = 60e3;
 
-// what a call that ran tools is told as its usage limit resets
 export const ON = "(The AI service's usage limit cut your last step short. It has reset: go on.)";
 
-// Claude Code's tools kept: web search, as claude-api has (Anthropic.ts)
 const WEB = ["WebSearch"];
 
-// the rest, by name, so none comes back: the SDK's list, and older
-// names it lacks
 const MORE = ["Task", "DesignSync"];
 
 // what turns off what Claude Code does beyond calling the model; its
@@ -90,9 +42,6 @@ const HOUR = { type: "ephemeral", ttl: "1h" };
 
 const SIGN_IN = "claude-sub is not signed in, or its sign-in expired: run `unii serve claude` on the server";
 
-// the errors Claude Code ends a turn with that are every call's, not
-// this one's: the service down past its retries, the account's (as
-// Agent.ts OFF), no such model
 const OFF = ["server_error", "overloaded", "billing_error", "account_on_hold", "oauth_org_not_allowed", "verification_required", "model_not_found"];
 
 const NO_BIN = "claude-sub needs Claude Code: `bun install` in uniichat's folder, or set `claude` to a Claude Code executable";
@@ -102,8 +51,6 @@ const DIED = "Claude Code ended early";
 
 type Sdk = typeof import("@anthropic-ai/claude-agent-sdk");
 
-// a call's Claude Code: its query, the messages it reads, its process
-// (once spawned), when that exited, and what tells it did
 type Code = {
   q    : Query;
   box  : ReturnType<typeof ClaudeSub.inbox>;
@@ -112,34 +59,18 @@ type Code = {
   gone : () => void;
 };
 
-// a turn's end: the call's, or a usage limit (until: its reset, if told,
-// ms since 1970; text: Claude Code's words)
 type Out = Partial<End> & { limit?: { until: number | null; text: string } };
 
-// a summary or import waiting for a slot: an import's or not, its place
-// in line, what lets it go
 type Wait = { imp: boolean; n: number; go: () => void };
 
-// a turn's Claude Code ended unbidden
 class Died extends Error {}
 
-// State
-// =====
-
-// the binary and the SDK, loaded once
 const LOADED = { bin: null as Promise<string> | null, sdk: null as Promise<Sdk> | null };
 
-// the summaries' slots: how many run, those waiting
 const SLOTS = { busy: 0, waits: [] as Wait[], n: 0 };
-
-// ClaudeSub
-// =========
 
 export namespace ClaudeSub {
 
-  // the Claude Code it runs: config `claude`, else the one a compiled unii
-  // carries (Build.ts; written out once, under the unii dir, as a process
-  // can't run it from inside unii), else the SDK's in node_modules
   export function bin(): Promise<string> {
     LOADED.bin ??= ClaudeSub.find().catch((err) => {
       LOADED.bin = null;
@@ -163,16 +94,11 @@ export namespace ClaudeSub {
     }
   }
 
-  // the SDK's package for this machine (musl Linux: its own)
   export function platform(): string {
     const musl = process.platform === "linux" && fs.existsSync("/lib") && fs.readdirSync("/lib").some((f) => f.startsWith("ld-musl-"));
     return process.platform + "-" + process.arch + (musl ? "-musl" : "");
   }
 
-  // the carried binary written out under the unii dir, by the SDK's
-  // extractFromBunfs (to a dir named by its hash; /tmp is often RAM),
-  // marked as this process's, and the copies of other versions no
-  // running unii uses removed (`prune`)
   export async function extract(inside: string): Promise<string> {
     const { extractFromBunfs } = await import("@anthropic-ai/claude-agent-sdk/extract");
     const was = process.env.CLAUDE_CODE_TMPDIR;
@@ -187,8 +113,6 @@ export namespace ClaudeSub {
     }
   }
 
-  // a binary's copy marked as used by this process (a file named by its
-  // pid, under `users`), unmarked as it exits
   export function claim(dir: string): void {
     const mine = path.join(dir, "users", String(process.pid));
     fs.mkdirSync(path.dirname(mine), { recursive: true, mode: 0o700 });
@@ -196,8 +120,6 @@ export namespace ClaudeSub {
     process.once("exit", () => fs.rmSync(mine, { force: true }));
   }
 
-  // the copies of other versions (dirs claude-agent-sdk-<hash> in home
-  // but `keep`) removed, but those a live process marked, or new
   export function prune(home: string, keep: string): void {
     for (const old of fs.readdirSync(home)) {
       const dir = path.join(home, old);
@@ -217,7 +139,6 @@ export namespace ClaudeSub {
     return pids.some((pid) => pid > 0 && Machine.alive(pid));
   }
 
-  // the SDK, loaded once
   export function sdk(): Promise<Sdk> {
     LOADED.sdk ??= import("@anthropic-ai/claude-agent-sdk").catch((err) => {
       LOADED.sdk = null;
@@ -226,10 +147,6 @@ export namespace ClaudeSub {
     return LOADED.sdk;
   }
 
-  // its environment: ours, less what would sign it in or send it
-  // elsewhere (an API key, a token, a base URL, Bedrock, Vertex...) or
-  // change its cache's TTL (FORCE_PROMPT_CACHING_5M)
-  // (its config dir made, or kept, its owner's alone)
   export function env(): Record<string, string | undefined> {
     fs.mkdirSync(DIR, { recursive: true, mode: 0o700 });
     fs.chmodSync(DIR, 0o700);
@@ -238,8 +155,6 @@ export namespace ClaudeSub {
   }
 
 
-  // `unii serve claude [logout|status]`, as `unii serve chatgpt`: status
-  // reads Claude Code's JSON into one line, and exits 1 if not signed in
   export async function cli(args: string[]): Promise<void> {
     if (args.includes("status")) {
       const run = Bun.spawn([await ClaudeSub.bin(), "auth", "status"], { env: ClaudeSub.env(), stdio: ["ignore", "pipe", "inherit"] });
@@ -263,8 +178,6 @@ export namespace ClaudeSub {
     process.exitCode = await run.exited;
   }
 
-  // a call (ClaudeSub.run); a wake or a stop ends a wait for a usage
-  // limit
   export function ask(ask: Ask, on: (ev: Event) => void): Try {
     const end = AskAI.end("");
     const abort = new AbortController();
@@ -284,15 +197,6 @@ export namespace ClaudeSub {
     return { wake, stop, done };
   }
 
-  // what a call's Claude Code starts with; builtin: Claude Code's tools
-  // (the SDK's BUILTIN_TOOL_NAMES). Web search is always on (a summary's
-  // call has it too). Our tools load up front, never behind its tool
-  // search, and a call may run past the 60 s Claude Code gives an HTTP
-  // MCP request. Our MCP server is set once it runs (ClaudeSub.connect),
-  // over its pipe: its secret URL is never on its command line. Our
-  // system prompt after the SDK's `boundary`: Claude Code then marks it
-  // alone for the cache, not its own first line too, so a request has a
-  // mark to spare (ClaudeSub.inbox)
   export function options(ask: Ask, abort: AbortController, builtin: readonly string[], boundary: string): Options {
     const tools = WEB;
     const deny = [...builtin, ...MORE].filter((t) => !tools.includes(t));
@@ -331,11 +235,6 @@ export namespace ClaudeSub {
   }
 
 
-  // Summaries' slots
-  // ----------------
-
-  // a slot for a summary's or import's Claude Code (false: stopped while
-  // waiting), in line: a chat's summaries first, then imports
   export function slot(ask: Ask, signal: AbortSignal): Promise<boolean> {
     return new Promise((ok) => {
       if (signal.aborted) {
@@ -365,12 +264,6 @@ export namespace ClaudeSub {
     ClaudeSub.grant();
   }
 
-  // A call's Claude Code
-  // --------------------
-
-  // a call's Claude Code, started on its pick (holding a slot if `held`:
-  // freed as it exits); its process spawned as the SDK's own spawn does
-  // (stderr unread), but watched
   export function start(sdk: Sdk, bin: string, ask: Ask, held: boolean): Code {
     const box = ClaudeSub.inbox();
     let gone = () => {};
@@ -396,8 +289,6 @@ export namespace ClaudeSub {
     return code;
   }
 
-  // a call's Claude Code ended (the SDK's close: SIGTERM, then SIGKILL),
-  // done as it exits
   export function close(code: Code): Promise<void> {
     code.box.close();
     try {
@@ -409,7 +300,6 @@ export namespace ClaudeSub {
     return code.exit;
   }
 
-  // its next message
   export function read(code: Code): Promise<IteratorResult<SDKMessage>> {
     const next = code.q.next().catch((err) => {
       throw new Died(err?.message ?? String(err));
@@ -418,8 +308,6 @@ export namespace ClaudeSub {
     return next;
   }
 
-  // our MCP server set for the call (a call with none, as a summary's, has
-  // no tools of ours); why it failed (null: it didn't, or a stop came)
   export async function connect(code: Code, server: string, signal: AbortSignal): Promise<string | null> {
     if (server === "") {
       return null;
@@ -429,9 +317,6 @@ export namespace ClaudeSub {
     return err === undefined ? null : "claude-sub couldn't reach UniiChat's tools: " + err;
   }
 
-  // Usage limits
-  // ------------
-
   // when a limit Claude Code told resets (ms since 1970; null: not told).
   // It tells seconds
   export function reset(info: SDKRateLimitInfo): number | null {
@@ -439,17 +324,12 @@ export namespace ClaudeSub {
     return typeof at === "number" && at > 0 ? (at < 1e12 ? at * 1e3 : at) : null;
   }
 
-  // a limit told asking under which would bill (extra usage on), kept
-  // till its reset (LIMIT if not told), or lifted (Limit.note): the
-  // account's, one whatever its kind (rateLimitType: five-hour, weekly,
-  // a model's). One that wouldn't bill isn't kept: the next call asks
   export function note(info: SDKRateLimitInfo): void {
     const bills = info.isUsingOverage === true || info.overageStatus === "allowed" || info.overageStatus === "allowed_warning";
     const on = info.status === "rejected" || info.isUsingOverage === true;
     Limit.note("claude-sub", on && bills ? ClaudeSub.reset(info) ?? Date.now() + LIMIT : null);
   }
 
-  // a call ended at a long usage limit (Limit.Off), logged
   export function off(ask: Ask, off: Off, acted: boolean): Partial<End> {
     if (ask.patient !== true) {
       console.error(ask.model + ": " + off.why.slice(0, 300));
@@ -457,17 +337,6 @@ export namespace ClaudeSub {
     return { text: off.say, why: off.why, stop: "down", off: true, acted, until: off.until, limits: off.limits };
   }
 
-  // A call
-  // ------
-
-  // the call's end: its Claude Code started (a summary's once it has a
-  // slot), our MCP server set, its message in, its turn read to its end.
-  // Before asking, the billing guard (Limit.guard); at a usage limit,
-  // Limit.hit: it waits, then asks again (ran no tool: in a new Claude
-  // Code) or goes on (ON), or it ends (Off). One whose Claude Code dies before
-  // anything came out is tried once more. A binary's copy gone since
-  // (removed by hand) is written out again. A patient call's failures are
-  // logged as it waits to ask again (Memory.heard), not here
   export async function run(ask: Ask, on: (ev: Event) => void, signal: AbortSignal, limit: Limit): Promise<Partial<End>> {
     let bin = await ClaudeSub.bin();
     if (!fs.existsSync(bin)) {
@@ -551,10 +420,6 @@ export namespace ClaudeSub {
     }
   }
 
-  // a turn read to its result (null: stopped); a tool of ours run marks
-  // the call `acted`. At usage billed past the plan the turn is
-  // interrupted: its end a limit, unless its answer came whole (paid
-  // already)
   export async function turn(code: Code, ask: Ask, emit: Emit, log: (ev: Event) => void, signal: AbortSignal, acted: { v: boolean }, fresh: () => void): Promise<Out | null> {
     const stopped = new Promise<"stop">((ok) => (signal.aborted ? ok("stop") : signal.addEventListener("abort", () => ok("stop"), { once: true })));
     let info: SDKRateLimitInfo | null = null;
@@ -618,7 +483,6 @@ export namespace ClaudeSub {
     }
   }
 
-  // a turn read to its result, what's left of it unseen
   export async function settle(code: Code): Promise<void> {
     for (;;) {
       const r = await ClaudeSub.read(code);
@@ -628,7 +492,6 @@ export namespace ClaudeSub {
     }
   }
 
-  // the results in a message Claude Code sent itself, each as logged
   export function backs(content: any[]): Array<{ kind: "echo"; text: string; of: string }> {
     const results = content.filter((b) => b.type === "tool_result");
     return results.map((b) => ({ kind: "echo", text: (b.is_error ? "error: " : "") + (AskAI.show(b.content) || "(no output)"), of: b.tool_use_id }));

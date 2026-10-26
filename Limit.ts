@@ -1,35 +1,8 @@
-// Limit
-// =====
-// Usage limits, for every vendor, in one place: the vendors only detect
-// one and count it (Limit `n`); what a call does at the limit is decided
-// here.
-//
-// A limit never fails a call by itself: it waits for the reset the vendor
-// told, else a doubling wait up to LIMIT (a patient call's: AGAIN). A
-// wait of LONG or more parks it (a Limit event: the views' live line); a
-// shorter one reads as the service being busy. A stop, a wake (a message
-// queued for its run) or a resume ends the wait, and it asks again. It
-// ends instead (an Off) only if it ran no tool yet and has a fallback or
-// a repick. A subagent's waits as Unii's turn does, and as the turn
-// has messages queued it waits till the turn has answered them
-// (ANSWERING), so a "stop it" among them comes first.
-//
-// Under a limit where asking would bill (claude-sub's extra usage:
-// LIMITS) a call waits before asking at all (Limit.guard). A sub whose
-// usage can be read without a model (USAGE: openai-sub's) is read every
-// POLL while a call waits, waking it as the limit lifts early.
-
 import { AGAIN, type Ask, type Event, type Vendor } from "./AskAI.ts";
 import { TRIES } from "./Agent.ts";
 import { ChatGPT } from "./ChatGPT.ts";
 import { Machine } from "./Machine.ts";
 
-// Types
-// =====
-
-// one call's usage limits: what it asks, where it tells what it does, its
-// stop; n: the limits in a row (its vendor counts each one it hits);
-// poke: ends its wait now (a wake: a message queued for its run)
 export type Limit = {
   ask    : Ask;
   on     : (ev: Event) => void;
@@ -38,47 +11,24 @@ export type Limit = {
   poke   : () => void;
 };
 
-// a call ended at a long limit instead of waiting, for its fallback, its
-// patient call's repick or its subagent's report: why (logged), what the
-// user reads, when it resets if told (ms since 1970), and the limits in a
-// row (End.limits)
 export type Off = { why: string; say: string; until?: number; limits: number };
 
-// Constants
-// =========
-
-// from how long a wait parks its call, and the longest wait between tries
-// when no reset is told
 export const LONG  = 60e3;
 export const LIMIT = 1800e3;
 
-// how often a sub's usage is read while a call waits on its limit
 export const POLL = 300e3;
 
-// the longest a subagent woken from a usage limit waits for Unii's turn
-// to answer its messages queued, looking every STAGGER_LOOK
 export const STAGGER      = 600e3;
 export const STAGGER_LOOK = 1e3;
 
-// Unii's turn: whether it has messages queued, and whether it runs
-// (Server.ts sets it: Limit.answering)
 let ANSWERING: () => { queued: boolean; busy: boolean } = () => ({ queued: false, busy: false });
 
-// the limits told under which asking would bill (claude-sub's extra
-// usage, one per account: ClaudeSub.note), till their reset, by key: they
-// keep a call from asking (Limit.guard)
 const LIMITS = new Map<string, number>();
 
-// the calls waiting for a usage limit, by vendor: what wakes each
 const PARKED = new Set<{ vendor: Vendor; poke: () => void }>();
 
-// the subs whose usage is read without asking a model: whether their
-// limit cleared (null: can't tell now); the reads due, by vendor
 const USAGE: Partial<Record<Vendor, () => Promise<boolean | null>>> = { "openai-sub": () => ChatGPT.clear() };
 const POLLS = new Map<Vendor, Timer>();
-
-// Limit
-// =====
 
 export namespace Limit {
 
@@ -86,9 +36,6 @@ export namespace Limit {
     return { ask, on, signal, n: ask.limits ?? 0, poke: () => {} };
   }
 
-  // the call hit a limit, its `n`th in a row (counted by its vendor),
-  // whose reset the vendor told (null: not told): the call ends (Off), or
-  // it waits and goes on (null)
   export async function hit(l: Limit, told: number | null, acted: boolean, why: string): Promise<Off | null> {
     const { ms, known } = Limit.wait_for(told, l.n, l.ask.patient ? AGAIN : LIMIT);
     if (Limit.ends(l.ask, acted, ms)) {
@@ -98,10 +45,6 @@ export namespace Limit {
     return null;
   }
 
-  // before asking: under a limit told whose asking would bill (`key`:
-  // LIMITS), the call waits for its reset, again after a resume or a
-  // message, or ends
-  // (Off); null: ask now, or it was stopped
   export async function guard(l: Limit, key: string, acted: boolean): Promise<Off | null> {
     for (let until = Limit.under([key]); until !== null && !l.signal.aborted; until = Limit.under([key])) {
       const ms = until - Date.now();
@@ -113,9 +56,6 @@ export namespace Limit {
     return null;
   }
 
-  // how long a call waits at its `n`th limit in a row: till the reset told
-  // (from TRIES on, at least the doubling), else a doubling up to `pace`;
-  // known: it waits for the reset told
   export function wait_for(told: number | null, n: number, pace: number, now = Date.now()): { ms: number; known: boolean } {
     const back = Math.min(2 ** n * 1e3, pace);
     const left = told === null ? 0 : told - now;
@@ -123,30 +63,19 @@ export namespace Limit {
     return { ms, known: left > 0 && ms === left };
   }
 
-  // whether a call waiting `ms` ends instead: one that did nothing yet
-  // with a fallback or a repick; a wait under LONG never ends one
   export function ends(ask: { fallback?: boolean; repick?: unknown }, acted: boolean, ms: number): boolean {
     return ms >= LONG && (ask.fallback === true || ask.repick !== undefined) && !acted;
   }
 
-  // what tells whether Unii's turn has messages queued or runs (ANSWERING)
   export function answering(turn: () => { queued: boolean; busy: boolean }): void {
     ANSWERING = turn;
   }
 
-  // a call ended at a long limit, its `n`th in a row: on what, and when it
-  // resets, if told
   export function off(why: string, until: number | null, ask: { vendor: Vendor; model: string }, n: number): Off {
     const when = until === null ? "reset time unknown" : "resets " + new Date(until).toISOString().slice(0, 16).replace("T", " ") + " UTC";
     return { why: why + "; " + when, say: "usage limit on " + ask.vendor + " (" + ask.model + "), " + when, until: until ?? undefined, limits: n };
   }
 
-  // the call waits `ms`: one of LONG or more parked (a Limit event: till
-  // when, `known` if the vendor told it: the views' live line, gone as it
-  // ends); a shorter one says it as when busy, each time. A stop, a poke
-  // or a resume ends the wait; a subagent's parked one that ends but by a
-  // stop or a poke while Unii's turn has messages queued goes on till
-  // the turn that answers them ends (up to STAGGER)
   export async function park(l: Limit, ms: number, known: boolean): Promise<void> {
     const wake = new AbortController();
     l.poke = () => wake.abort();
@@ -177,9 +106,6 @@ export namespace Limit {
     }
   }
 
-  // a wait of `ms` for a usage limit of `vendor`'s, till `signal` aborts
-  // or a resume wakes it (one the usage read clear does: USAGE, read every
-  // POLL while one waits). A patient call waits here too (AskAI.nap)
   export async function wait(vendor: Vendor, ms: number, signal: AbortSignal): Promise<void> {
     const wake = new AbortController();
     const me = { vendor, poke: () => wake.abort() };
@@ -193,8 +119,6 @@ export namespace Limit {
     }
   }
 
-  // a limit told under which asking would bill (`key`: LIMITS), kept till
-  // its reset, or lifted (null)
   export function note(key: string, until: number | null): void {
     if (until !== null && until > Date.now()) {
       LIMITS.set(key, until);
@@ -203,22 +127,18 @@ export namespace Limit {
     }
   }
 
-  // the latest reset of the limits kept of `keys` (null: none)
   export function under(keys: string[]): number | null {
     const now = Date.now();
     const told = keys.map((k) => LIMITS.get(k) ?? 0).filter((until) => until > now);
     return told.length > 0 ? Math.max(...told) : null;
   }
 
-  // every call waiting for a usage limit (`vendor`'s, or any) woken; how
-  // many. A call under a limit whose asking would bill waits on (guard)
   export function resume(vendor?: Vendor): number {
     const woken = [...PARKED].filter((p) => vendor === undefined || p.vendor === vendor);
     woken.forEach((p) => p.poke());
     return woken.length;
   }
 
-  // `vendor`'s usage read in POLL, if it can be and no read is due
   export function poll_soon(vendor: Vendor): void {
     if (USAGE[vendor] === undefined || POLLS.has(vendor)) {
       return;
@@ -231,7 +151,6 @@ export namespace Limit {
     POLLS.set(vendor, timer);
   }
 
-  // `vendor`'s usage read due cancelled once no call waits for it
   export function poll_off(vendor: Vendor): void {
     if (![...PARKED].some((p) => p.vendor === vendor)) {
       clearTimeout(POLLS.get(vendor));
@@ -239,9 +158,6 @@ export namespace Limit {
     }
   }
 
-  // `vendor`'s usage read, if a call still waits for it: cleared, its
-  // calls waiting wake (resume); else, while one waits, it is read again
-  // in POLL
   export async function poll(vendor: Vendor): Promise<boolean> {
     if (![...PARKED].some((p) => p.vendor === vendor)) {
       return false;

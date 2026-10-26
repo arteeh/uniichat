@@ -1,36 +1,14 @@
-// OpenAI
-// ======
-// The wire of openai-api (Agent.ts): the Responses API, streamed, store
-// off. Reasoning keeps all turns (else a message sent mid-run drops it
-// and misses the cache); the speed is a service tier ("priority" is
-// fast). A marked block is an explicit breakpoint; the end is cached
-// implicitly only if marked; a session's calls share one cache key
-// (OpenAI.session). A server_error is busy, a
-// rate_limit_exceeded a usage limit; failed, incomplete or refused
-// fails. Silent while it reasons, it is dead after 20 min.
-// Voice: TRANSCRIBER writes a recording out.
-
 import type { Ask, Img } from "./AskAI.ts";
 import { Agent, type Emit, type Entry, type Item, type Step, type Tool, type Use, type Wire } from "./Agent.ts";
 import * as config from "./Config.ts";
 
-// Types
-// =====
-
-// a stream read so far: the final response, or an error event
 export type State = { res: any; error: any };
-
-// Constants
-// =========
 
 const TIERS: Record<string, string> = { slow: "default", fast: "fast", ultrafast: "ultrafast" };
 
 const MARK = { mode: "explicit" };
 
 export const TRANSCRIBER = "gpt-transcribe";
-
-// OpenAI
-// ======
 
 export namespace OpenAI {
 
@@ -60,15 +38,10 @@ export namespace OpenAI {
     };
   }
 
-  // the cache's session, the same for all its calls: main's; one for all
-  // subagents (each lives for a prompt or two, and they share their
-  // system prompt and tools, so each reads what the others cached); the
-  // compactor's
   export function session(ask: Ask): string {
     return "unii-" + Bun.hash(JSON.stringify([OpenAI.sharer(ask), ask.model, ask.system])).toString(36);
   }
 
-  // whose cache session a call is in (OpenAI.session)
   export function sharer(ask: Ask): string {
     return ask.agent === true ? "sub" : ask.who ?? "main";
   }
@@ -95,7 +68,6 @@ export namespace OpenAI {
     return { type: "input_image", image_url: "data:" + img.type + ";base64," + img.data };
   }
 
-  // one stream event; whether it is the last
   export function read(st: State, ev: any, on: Emit): boolean {
     switch (ev.type) {
       case "response.output_text.delta": {
@@ -141,8 +113,6 @@ export namespace OpenAI {
     return false;
   }
 
-  // a tool call starting, shown live (Call.ts): its name, then the
-  // pieces of its arguments
   export function live(item: any, on: Emit): void {
     if (item.type === "function_call") {
       on("tool", item.name + " ", true);
@@ -152,13 +122,11 @@ export namespace OpenAI {
     }
   }
 
-  // the speed a response ran at
   export function tier(res: any): string {
     const tier = res.service_tier === "priority" ? "fast" : res.service_tier;
     return tier in TIERS ? tier : "slow";
   }
 
-  // the step a stream gave
   export function step(st: State, ask: Ask): Step {
     const res = st.res ?? { status: "failed", error: st.error, output: [] };
     const u = res.usage;
@@ -188,8 +156,6 @@ export namespace OpenAI {
     return { ...step, stop: uses.length > 0 ? "tools" : "done" };
   }
 
-  // the messages of an output item: a thought; a reply and the web
-  // sources it cites; a tool call
   export function entries(o: any): Entry[] {
     switch (o.type) {
       case "reasoning": {
@@ -215,7 +181,6 @@ export namespace OpenAI {
     return [];
   }
 
-  // a recording's words
   export async function transcribe(audio: Blob): Promise<{ text: string }> {
     if (!config.KEYS.openai) {
       throw new Error("Voice needs an OpenAI key");
