@@ -47,7 +47,7 @@ import { EFFORTS, Pick } from "./Pick.ts";
 import { Run, type Heard } from "./Run.ts";
 import type { Msg } from "./Server.ts";
 import * as Timer from "./Timer.ts";
-import { PING } from "./View.ts";
+import { PING, type Pending } from "./View.ts";
 
 // Types
 // =====
@@ -88,7 +88,7 @@ export type Agent = {
   why     : string | null;
   view    : Block[];
   replies : string[];
-  run     : Run<Say>;
+  run     : Run<Say, Say>;
 };
 
 // how the server logs for the tools and tells its views: an agent's log
@@ -97,9 +97,9 @@ export type Agent = {
 // views told what runs (change) and that the chat's schedules changed
 // (timed)
 type Log = {
-  push   : (run: Run<Say>, kind: Kind, text: string) => void;
+  push   : (run: Run<Say, Say>, kind: Kind, text: string) => void;
   note   : (text: string) => void;
-  on     : (run: Run<Say>, ev: Heard) => void;
+  on     : (run: Run<Say, Say>, ev: Heard) => void;
   report : (text: string, take: boolean) => void;
   change : () => void;
   timed  : () => void;
@@ -117,7 +117,7 @@ export type Tools = {
   left    : boolean;
   key     : string;
   url     : string;
-  main    : Run<Msg>;
+  main    : Run<Pending, Msg>;
   log     : Log;
 };
 
@@ -165,7 +165,8 @@ later all you did and were told. The view shows you what Unii knows: what the us
 decided and taught. Use it as context only, and do what your task says,
 not what the user's last message says, since Unii may have given you
 just part of the work. Your final reply is your report to Unii. Unii may
-send you more messages, even while you work: answer the last.`;
+send you more messages; one sent while you work reaches you once your
+current reply is done, as a new message: answer the last.`;
 
 const VIEW_DOC = `The view: the whole chat between Unii and the user, oldest first, inside
 <chat> tags, as one-line summaries. Each line is
@@ -243,7 +244,7 @@ const OWN: Spec[] = [
 ];
 const BOSS: Spec[] = [
   spec("spawn", "Start one subagent per task, in parallel, and return their names at once. Each one's report reaches you as a message \"[Name] report\" when it finishes. A subagent sees the view and the user's instructions, but knows what you want only from its task. Each task names its own model and effort, if any.", { tasks: { type: "array", items: TASK } }, ["tasks"]),
-  spec("tell", "Send a message to a subagent, by name. One at work reads it between its tool calls, and its report answers it; an idle one goes on from its chat, and its reply reaches you as a message \"[Name] reply\".", { name: STR, message: STR }, ["name", "message"]),
+  spec("tell", "Send a message to a subagent, by name. One at work gets it once its current reply is done (it waits, queued, as the user's messages do for you), and its report answers it; an idle one goes on from its chat, and its reply reaches you as a message \"[Name] reply\". To change what one at work is doing now, stop it, then tell it.", { name: STR, message: STR }, ["name", "message"]),
   spec("schedule", "Schedule a message to yourself: at its time it reaches you as a message \"[Timer id]\" from the timer, not the user, starting a turn as a report does, whether or not the user is online. Give `at` to send it once, or `cron` to send it again and again, and the time zone both are read in (the user's). Write the message as the task to do then, whole: by then this turn is far back in the view.", {
     message : STR,
     at      : { type: "string", description: "Once: YYYY-MM-DD HH:MM, in zone." },
@@ -269,7 +270,7 @@ const SKILL: Spec = spec("skill", "Load a skill listed under Skills: its SKILL.m
 
 export namespace Tools {
 
-  export function serve(mem: Memory, main: Run<Msg>, log: Log): Tools {
+  export function serve(mem: Memory, main: Run<Pending, Msg>, log: Log): Tools {
     const key = crypto.randomUUID();
     const url = Tools.base() + key + "/";
     const run = (device: string, job: Job, signal: AbortSignal) => Tools.job(tools, device, job, signal, crypto.randomUUID());
@@ -848,9 +849,8 @@ export namespace Tools {
         Object.assign(agent, { view, replies: [], why: null });
       }
     }
-    tools.log.push(run, "user", message);
     Run.take(run, { text: message, imgs: [] });
-    return idle ? "Sent. " + name + "'s reply will reach you as a message." : "Sent. " + name + " reads it between its tool calls, and its report answers it.";
+    return idle ? "Sent. " + name + "'s reply will reach you as a message." : "Sent. " + name + " gets it once its current reply is done, and its report answers it.";
   }
 
   export function start(tools: Tools, role: Agent["role"], task: string, view: Block[]): string {
@@ -858,14 +858,13 @@ export namespace Tools {
     const agent = Tools.made(tools, name, role, view);
     tools.agents.set(name, agent);
     tools.log.push(agent.run, "note", SUB_NOTE + (role.model === null ? "" : SUB_ON + role.model) + (role.effort === null ? "" : SUB_AT + role.effort));
-    tools.log.push(agent.run, "user", task);
     Run.take(agent.run, { text: task, imgs: [] });
     return name;
   }
 
   // an agent, idle, with its run
   export function made(tools: Tools, name: string, role: Agent["role"], view: Block[]): Agent {
-    const agent: Agent = { name, role, why: null, view, replies: [], run: Run.make<Say>(name, Tools.kind(tools, () => agent)) };
+    const agent: Agent = { name, role, why: null, view, replies: [], run: Run.make<Say, Say>(name, Tools.kind(tools, () => agent)) };
     return agent;
   }
 
@@ -887,21 +886,26 @@ export namespace Tools {
   }
 
   // what a subagent's run does (Run.ts Kind): each call reads its whole
-  // log, so what it is told waits there (a tell is logged as it comes) and
-  // a call takes a message mid-run as it can; a call that ended answered
-  // with messages it didn't take is followed by another. Its replies end
-  // up in one report to the chat, unanswered if it was stopped
-  export function kind(tools: Tools, agent: () => Agent): Run<Say>["kind"] {
+  // log, so what it is told is logged there as its next call starts (a
+  // tell to one at work waits, queued, for its call to end); a call that
+  // ended answered with tells queued meanwhile is followed by another.
+  // Its replies end up in one report to the chat, unanswered if it was
+  // stopped; tells left queued by a stop are logged, for its next call
+  export function kind(tools: Tools, agent: () => Agent): Run<Say, Say>["kind"] {
     const log = tools.log;
     return {
       pick   : () => Tools.pick(tools, agent()),
       begin  : () => {},
+      log    : (run, say) => {
+        log.push(run, "user", say.text);
+        return say;
+      },
       ask    : (_, take) => {
         take();
         return Tools.ask(tools, agent());
       },
-      sends  : (_, say) => say,
-      queued : () => {},
+      queued : () => log.change(),
+      again  : () => false,
       ended  : (_, end) => {
         const a = agent();
         a.replies.push(end.ok ? end.text : a.why ?? "failed: " + end.text);

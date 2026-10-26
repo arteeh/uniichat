@@ -3,9 +3,9 @@
 // claude-api, openai-api and openai-sub in Unii's own loop; a Wire
 // (Anthropic.ts, OpenAI.ts, ChatGPT.ts) shapes requests and reads
 // streams. Each step sends every
-// item and streams one output; tool calls run in order, a message sent
-// mid-run follows the next results, and the call ends at a step with no
-// tools and nothing sent. A request goes again, TRIES times at most (a
+// item and streams one output; tool calls run in order, and the call
+// ends at a step with no tools (a message sent meanwhile waits for the
+// next call: Run.ts). A request goes again, TRIES times at most (a
 // probe's first once: AskAI.ts DOWN), after its retry-after or a
 // doubling wait, for a passing reason (`busy`: no connection, a retry
 // status unless SPENT, a stream error, cut short or silent for the
@@ -34,7 +34,7 @@
 // user's). A stop ends the call at once, its request cut. A request takes
 // its place in single flight (AskAI.wait).
 
-import { AskAI, type Ask, type Block, type Flight, type Try, type End, type Event, type Img, type Kind, type Say } from "./AskAI.ts";
+import { AskAI, type Ask, type Block, type Flight, type Try, type End, type Event, type Img, type Kind } from "./AskAI.ts";
 import { Anthropic } from "./Anthropic.ts";
 import { OpenAI } from "./OpenAI.ts";
 import { ChatGPT } from "./ChatGPT.ts";
@@ -50,12 +50,10 @@ export type Out = { text: string; fail: boolean; imgs?: Img[] };
 
 export type Tool = Spec;
 
-// a running call: the messages sent mid-run not taken yet, its usage
-// limits (Limit.ts)
+// a running call, and its usage limits (Limit.ts)
 type Doing = {
   ask   : Ask;
   on    : (ev: Event) => void;
-  sent  : Say[];
   abort : AbortController;
   end   : End;
   limit : Limit;
@@ -167,11 +165,8 @@ export namespace Agent {
   export function ask(ask: Ask, on: (ev: Event) => void): Try {
     const end = AskAI.end("");
     const abort = new AbortController();
-    const run: Doing = { ask, on, sent: [], abort, end, limit: Limit.make(ask, on, abort.signal) };
-    const send = (say: Say) => {
-      run.sent.push(say);
-      run.limit.poke();
-    };
+    const run: Doing = { ask, on, abort, end, limit: Limit.make(ask, on, abort.signal) };
+    const wake = () => run.limit.poke();
     const stop = () => {
       end.text = "stopped";
       run.abort.abort();
@@ -188,11 +183,10 @@ export namespace Agent {
       } catch (err: any) {
         end.text ||= err.message;
       }
-      end.ok   = end.ok && !run.abort.signal.aborted;
-      end.left = run.sent;
+      end.ok = end.ok && !run.abort.signal.aborted;
       return end;
     })();
-    return { send, stop, done };
+    return { wake, stop, done };
   }
 
   export async function loop<S>(wire: Wire<S>, run: Doing): Promise<void> {
@@ -243,26 +237,12 @@ export namespace Agent {
       if (signal.aborted) {
         return;
       }
-      const says = run.sent.splice(0);
-      const replies = step.entries.filter((e) => e.kind === "unii");
-      const text = replies.map((e) => e.text).join("\n\n");
-      if (backs.length === 0 && says.length === 0) {
+      if (backs.length === 0) {
         end.ok   = true;
-        end.text = text;
+        end.text = step.entries.filter((e) => e.kind === "unii").map((e) => e.text).join("\n\n");
         return;
       }
-      end.acted ||= says.length > 0;
-      for (const say of says) {
-        on({ $: "Entry", kind: "user", text: say.text });
-      }
-      if (backs.length > 0) {
-        items.push({ $: "Back", backs });
-      }
-      if (says.length > 0) {
-        const parts = says.filter((say) => say.text !== "").map((say) => ({ text: say.text, mark: false }));
-        const imgs = says.flatMap((say) => say.imgs);
-        items.push({ $: "User", parts, imgs });
-      }
+      items.push({ $: "Back", backs });
     }
   }
 

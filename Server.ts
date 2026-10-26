@@ -8,9 +8,9 @@
 // (Chat.apply). A device (Device.ts) joins by a socket of its own, naming
 // itself; the agent's tools reach it (Tools.ts) until it quits.
 //
-// One turn at a time. A message is logged as it arrives; the running call
-// takes it between tool calls if it goes whole beside its view, else the
-// next call does, on the chat's pick (Pick.ts). The chat stays open while
+// One turn at a time. A message that arrives while one runs is queued
+// (drawn so, kept) till it ends, then logged as the next turn starts, on
+// the chat's pick (Pick.ts): the same for every vendor (Run.ts). The chat stays open while
 // the server runs. A stop or crash cuts all: a start resumes what ran
 // (Chat.resume), told so. Its schedules come at their time, viewed or not
 // (Chat.ring).
@@ -39,7 +39,7 @@ import { Run, type Heard } from "./Run.ts";
 import * as Service from "./Service.ts";
 import * as Timer from "./Timer.ts";
 import { PROMPTS, SEARCHES, Tools } from "./Tools.ts";
-import { ACTIVE, FRAME, IDLE, IMAGES, live_push, MEDIA, PING, QUIT, SUMMARIES, TICK, TURN, WIRE, type Answer, type Live, type Part, type Server as Out, type Sums, type Wait } from "./View.ts";
+import { ACTIVE, FRAME, IDLE, IMAGES, live_push, MEDIA, PING, QUIT, SUMMARIES, TICK, TURN, WIRE, type Answer, type Live, type Part, type Pending, type Queued, type Server as Out, type Sums, type Wait } from "./View.ts";
 import * as config from "./Config.ts";
 import hello_md from "./hello.md" with { type: "text" };
 import app_js from "./web/app.js" with { type: "file" };
@@ -70,7 +70,7 @@ type Body = { fh: fs.promises.FileHandle; size: number };
 export type Msg = { id: number; end: number };
 
 // Unii's turn's run, or a subagent's (Run.ts)
-type Talk = Run<Msg> | Run<Say>;
+type Talk = Run<Pending, Msg> | Run<Say, Say>;
 
 // what the agent saw at its last call: the view before message `from`,
 // then every message from it on
@@ -103,7 +103,7 @@ type Chat = {
   pick  : Pick;
   socks : Set<Sock>;
   acts  : Map<string, Promise<Answer>>;
-  main  : Run<Msg>;
+  main  : Run<Pending, Msg>;
   model : string;
   check : Check | null;
   asked : boolean;
@@ -163,6 +163,9 @@ const SPARE      = 2 ** 30;
 const TIMER_TEXT = 200;
 const RING       = 60000;
 const WAKE       = 60000;
+
+// a message queued as views get it (Chat.state: drawn till it is logged)
+const QUEUED_TEXT = 4000;
 
 // the acts with a body (Chat.post)
 const BODIES     = ["say", "import", "voice"];
@@ -281,15 +284,16 @@ export namespace Chat {
   // Main.start). One that fails to open throws, and the server ends
   export function open(): Chat {
     const mem = Memory.load(CHAT, () => ({ system: Tools.prompt("compact"), searches: 0, server: "" }), Owner.act_put);
-    // Unii's turn (Run.ts): a message the running call takes now if it
-    // goes whole beside its view, else the next call does (a goal check
-    // running, whose answer it drops, stops)
-    const main = Run.make<Msg>(TURN, {
+    // Unii's turn (Run.ts): a message queued is logged as its call starts
+    // (Chat.posted); one queued stops a goal check running, whose answer
+    // it drops; one of the user's left queued by a stop is the next turn
+    const main = Run.make<Pending, Msg>(TURN, {
       pick   : () => chat.pick,
       begin  : () => Chat.begin(chat),
+      log    : (_, post) => Chat.writing(chat, async () => Chat.posted(chat, post)),
       ask    : (_, take) => Chat.call(chat, take),
-      sends  : (_, msg) => (Memory.whole(mem, msg.id) === msg.id ? Memory.say(mem, msg.id, msg.end) : null),
-      queued : () => chat.check?.call.stop(),
+      queued : (run) => Chat.queued(chat, run),
+      again  : (post) => post.kind === "user",
       ended  : (_, end) => Chat.ended(chat, end),
       failed : (_, why) => Chat.failed(chat, why),
       ending : () => Chat.ending(chat),
@@ -350,9 +354,14 @@ export namespace Chat {
     return { ...Pick.ask(chat.pick), system, searches: 0, server: "" };
   }
 
-  // a message (its body: its images, sizes given, then its text), logged
-  // and taken
+  // a message (its body: its images, sizes given, then its text) taken
+  // for the turn (Run.take): logged at once if no turn runs (answered
+  // then), else queued till the turn ends (kept, and drawn so). One sent
+  // again while queued is that one
   export async function say(chat: Chat, id: string, sizes: number[], body: Body): Promise<Answer> {
+    if (chat.main.queue.some((x) => x.q.act === id)) {
+      return {};
+    }
     const images: string[] = [];
     let at = 0;
     for (const size of sizes) {
@@ -363,7 +372,9 @@ export namespace Chat {
       images.push(name);
       at += size;
     }
-    await Chat.writing(chat, async () => Run.take(chat.main, await Chat.text(chat, body, at, images, id)));
+    const text = (await Chat.read(body, at, body.size - at)).toString("utf8");
+    const pics = [...images, ...await Chat.pictured(chat, text, images)];
+    await Run.take(chat.main, { kind: "user", text, images: pics, act: id });
     return {};
   }
 
@@ -374,20 +385,28 @@ export namespace Chat {
     return buf.subarray(0, got.bytesRead);
   }
 
-  // a body's text from byte `at`, logged as the user's message, a read
-  // at a time, the last with the images and the act's record
-  export async function text(chat: Chat, body: Body, at: number, images: string[], act: string): Promise<Msg> {
-    // its first page's index, once written: the tool calls its push writes
-    // first (Chat.flush) are no part of it
+  // a message queued for the turn, logged as its call starts (Run.ts):
+  // the user's in pages, the last with its images and its act's record
+  // (so it is done once: Chat.apply); a report, a timer's or a note whole
+  export function posted(chat: Chat, post: Pending): Msg {
+    const pages = post.kind === "user" ? clip_pages(post.text) : [post.text];
     let id = -1;
-    let all = "";
-    for await (const [pages, more] of Chat.pieces(body, at, clip_pages)) {
-      all += pages.join("");
-      const pics = more ? [] : [...images, ...await Chat.pictured(chat, all, images)];
-      const msg = Chat.push(chat, chat.main, "user", pages.join(""), pics, more, more ? undefined : act);
+    pages.forEach((page, k) => {
+      const last = k === pages.length - 1;
+      const msg = Chat.push(chat, chat.main, post.kind, page, last ? post.images : [], !last, last ? post.act : undefined);
       id = id < 0 ? msg.id : id;
-    }
+    });
     return { id, end: chat.mem.count };
+  }
+
+  // what is queued for the turn changed (Run.ts): kept with the chat (so
+  // it outlives a restart: Chat.resume), told to every view; one queued
+  // stops a goal check running, whose answer it drops
+  export function queued(chat: Chat, run: Run<Pending, Msg>): void {
+    chat.check?.call.stop();
+    chat.mem.queue = run.queue.map((x) => x.q);
+    Memory.save(chat.mem);
+    Chat.all(chat, Chat.state(chat));
   }
 
   // the images of the media store a message's text shows (pasted:
@@ -560,7 +579,7 @@ export namespace Chat {
       Chat.all(chat, { $: "note", text: end.note });
     }
     const goal = chat.mem.goal;
-    if (end.ok && !halt.signal.aborted && main.wait.length === 0 && goal !== null) {
+    if (end.ok && !halt.signal.aborted && main.queue.length === 0 && goal !== null) {
       return Chat.checked(chat, Chat.check(chat, goal), halt);
     }
     return !halt.signal.aborted;
@@ -596,7 +615,7 @@ export namespace Chat {
     halt.signal.addEventListener("abort", () => call.stop(), { once: true });
     const end = await call.done;
     const mem = chat.mem;
-    const on = !halt.signal.aborted && mem.goal === goal && chat.main.wait.length === 0;
+    const on = !halt.signal.aborted && mem.goal === goal && chat.main.queue.length === 0;
     chat.check = null;
     chat.main.limit = null;
     if (on && !end.ok) {
@@ -606,7 +625,7 @@ export namespace Chat {
       Memory.save(mem);
       Chat.note(chat, "Goal met.");
     } else if (on) {
-      await Chat.writing(chat, async () => Run.take(chat.main, Chat.push(chat, chat.main, "user", GOAL_NO)));
+      void Run.take(chat.main, { kind: "user", text: GOAL_NO, images: [] });
     }
     return !halt.signal.aborted;
   }
@@ -708,8 +727,8 @@ export namespace Chat {
   }
 
   // what a call of main's or an agent's tells, as it comes: logged, kept
-  // on its run, told to every view. A message the call took was logged as
-  // it came. As a call ends, its tool calls left without a result are
+  // on its run, told to every view (a call takes no message: Run.ts). As
+  // a call ends, its tool calls left without a result are
   // logged and what streams is cleared
   export function on(chat: Chat, run: Talk, ev: Heard): void {
     const name = run === chat.main ? undefined : run.name;
@@ -814,7 +833,7 @@ export namespace Chat {
     const kind = ev.$ === "Entry" ? ev.kind : "";
     const step = kind === "tool" ? 1 : kind === "echo" ? -1 : 0;
     chat.open = ev.$ === "Delta" ? 0 : Math.max(0, chat.open + step);
-    const asked = (kind === "echo" || kind === "user") && chat.open === 0;
+    const asked = kind === "echo" && chat.open === 0;
     if (asked !== chat.asked) {
       chat.asked = asked;
       Chat.change(chat);
@@ -827,14 +846,16 @@ export namespace Chat {
     Chat.all(chat, { $: "live", agent: run === chat.main ? undefined : run.name, live });
   }
 
-  // an agent's report, once it ends: a turn of its own if taken (not
-  // stopped). It is logged as a post is, between the chat's other logging
+  // an agent's report, once it ends: taken for the turn as a message is
+  // (queued while one runs: Run.take), unless it was stopped: then logged
+  // as a post is, between the chat's other logging
   export function report(chat: Chat, text: string, take: boolean): void {
+    if (take) {
+      void Run.take(chat.main, { kind: "work", text, images: [] });
+      return Chat.change(chat);
+    }
     Chat.hold(chat, () => {
-      const msg = Chat.push(chat, chat.main, "work", text);
-      if (take) {
-        Run.take(chat.main, msg);
-      }
+      Chat.push(chat, chat.main, "work", text);
       Chat.change(chat);
     });
   }
@@ -1070,25 +1091,27 @@ export namespace Chat {
   }
 
   // the work a restart cut goes on, told so: each agent, and Unii's turn
-  // by a note (none for a chat ended meanwhile)
+  // by a note (none for a chat ended meanwhile; logged alone if only
+  // agents were cut); then what was queued for the turn (Memory `queue`)
   export async function resume(chat: Chat, work: string[]): Promise<void> {
-    if (work.length === 0) {
-      return;
-    }
     const text = Tools.restarted(work);
-    const msg = Chat.push(chat, chat.main, "note", text);
-    await Promise.all(work.map((w) => (w === TURN ? Run.take(chat.main, msg) : Tools.tell(chat.tools, w, text))));
+    if (work.length > 0 && !work.includes(TURN)) {
+      Chat.push(chat, chat.main, "note", text);
+    }
+    const posts: Pending[] = [...(work.includes(TURN) ? [{ kind: "note" as const, text, images: [] }] : []), ...chat.mem.queue];
+    posts.forEach((post) => void Run.take(chat.main, post));
+    await Promise.all(work.filter((w) => w !== TURN).map((w) => Tools.tell(chat.tools, w, text)));
   }
 
   // Timers
   // ------
   // The chat's schedules (Timer.ts) live in its view.json, so they
   // outlive a restart. One timer is set for the first due, at most WAKE
-  // ahead; then each schedule due is logged as the timer's report "[Timer
-  // id]", taken as an agent's is; then each moves on to its next time, or
-  // ends, saved. Coming is an act (its id: the schedule's and its time),
-  // recorded with the message, so a crash before the save brings it
-  // again only to find it done: each time comes once. A time that passed
+  // ahead; then each schedule due comes as the timer's report "[Timer
+  // id]", taken as an agent's is (queued while a turn runs), and each
+  // moves on to its next time, or ends, saved with what is queued. Coming
+  // is an act (its id: the schedule's and its time), recorded with the
+  // message as it is logged, or kept queued, so each time comes once. A time that passed
   // while no server ran comes as the next starts, late, saying when it
   // was due; a cron that passed many times comes once. Under SPARE free
   // disk, or a write failing, they wait, tried again after RING.
@@ -1119,11 +1142,13 @@ export namespace Chat {
           return Chat.timed(chat, true);
         }
         if (dues.length > 0) {
-          const fresh = dues.filter((t) => Owner.act_get("timer " + t.id + " " + t.at) === null);
-          const msgs = fresh.map((t) => Chat.push(chat, chat.main, "work", Timer.timer_say(t, at), [], false, "timer " + t.id + " " + t.at));
+          const act = (t: Timer.Timer) => "timer " + t.id + " " + t.at;
+          const fresh = dues.filter((t) => Owner.act_get(act(t)) === null && !chat.main.queue.some((x) => x.q.act === act(t)));
           mem.timers = mem.timers.flatMap((t) => (dues.includes(t) ? (Timer.timer_after(t, at) ?? []) : [t]));
+          fresh.forEach((t) => void Run.take(chat.main, { kind: "work", text: Timer.timer_say(t, at), images: [], act: act(t) }));
+          // the timers moved on and their messages queued, kept as one
+          mem.queue = chat.main.queue.map((x) => x.q);
           Memory.save(mem);
-          msgs.forEach((msg) => Run.take(chat.main, msg));
         }
         Chat.timed(chat);
       } catch (err: any) {
@@ -1195,14 +1220,20 @@ export namespace Chat {
     const room = Chat.room(chat);
     const size = chat.mem.talk === null ? 0 : Memory.talk_size(chat.mem);
     const talk = chat.mem.talk === null ? null : { from: chat.mem.talk, used: Math.min(1, size / room), size, room };
-    // the calls waiting for a usage limit, by TURN or agent name
+    // the calls waiting for a usage limit, and the messages queued, by
+    // TURN or agent name
     const limits: Record<string, Parked> = {};
+    const queue: Record<string, Queued[]> = {};
+    const shown = (text: string): string => (text.length > QUEUED_TEXT ? text.slice(0, QUEUED_TEXT) + "…" : text);
     for (const run of [chat.main, ...[...chat.tools.agents.values()].map((a) => a.run)]) {
       if (run.limit !== null) {
         limits[run.name] = run.limit;
       }
+      if (run.queue.length > 0) {
+        queue[run.name] = run.queue.map(({ q }) => ({ kind: "kind" in q ? q.kind : "user", text: shown(q.text) }));
+      }
     }
-    return { $: "state", busy: chat.main.busy, wait: Chat.waits(chat), agents, runs, pick: chat.pick, ...config.OFFER, importing, limits, sums: Chat.sums(chat), again: chat.mem.again, timers, mcp, talk, build: BUILD, site: config.SITE };
+    return { $: "state", busy: chat.main.busy, wait: Chat.waits(chat), agents, runs, pick: chat.pick, ...config.OFFER, importing, limits, queue, sums: Chat.sums(chat), again: chat.mem.again, timers, mcp, talk, build: BUILD, site: config.SITE };
   }
 
   // the summaries the call waits on, done and in all (View Sums)

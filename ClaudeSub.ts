@@ -10,8 +10,8 @@
 // our tools over MCP (the chat's URL, Tools.ts, set over Claude Code's
 // pipe: never on its command line) and web search, always; Claude Code's
 // own tools, settings, skills, memory and compaction off. It runs the
-// tool loop; we log what it streams. A message sent mid-run goes in once
-// its turn ends. Not signed in, the call ends as one its vendor can't
+// tool loop; we log what it streams. A message sent meanwhile waits for
+// the next call (Run.ts). Not signed in, the call ends as one its vendor can't
 // be asked for here (no stop, as with no API key), saying how to sign in.
 // An error Claude Code ends a turn with (past its own retries) is the
 // vendor's, as at the other vendors (Agent.ts): logged, the user told
@@ -29,8 +29,7 @@
 // Usage limits are handled as for every vendor (Limit.ts). Claude Code
 // tells one by a rate_limit_event "rejected", saying when it resets, then
 // a reply with error rate_limit. After the wait, a call that ran no tool
-// of ours (nor took a message) asks again in a new Claude Code; one that
-// did keeps its Claude Code, idle, and is told to go on (ON): its
+// of ours asks again in a new Claude Code; one that did keeps its Claude Code, idle, and is told to go on (ON): its
 // conversation as it was, tool results in, so no tool runs again. Usage
 // billed past the plan (isUsingOverage: extra usage) is a limit too: the
 // turn is interrupted at once (an answer already whole is kept: it is
@@ -41,7 +40,7 @@ import * as child from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import type { Options, Query, SDKMessage, SDKRateLimitInfo, SDKUserMessage, SpawnOptions } from "@anthropic-ai/claude-agent-sdk";
-import { AskAI, type Ask, type End, type Event, type Img, type Say, type Try } from "./AskAI.ts";
+import { AskAI, type Ask, type End, type Event, type Img, type Try } from "./AskAI.ts";
 import { Agent, BUSY, TOO_LONG, type Emit } from "./Agent.ts";
 import { Anthropic } from "./Anthropic.ts";
 import { LIMIT, Limit, type Off } from "./Limit.ts";
@@ -263,30 +262,25 @@ export namespace ClaudeSub {
     process.exitCode = await run.exited;
   }
 
-  // a call (ClaudeSub.run); a message sent or a stop ends a wait for a
-  // usage limit
+  // a call (ClaudeSub.run); a wake or a stop ends a wait for a usage
+  // limit
   export function ask(ask: Ask, on: (ev: Event) => void): Try {
     const end = AskAI.end("");
-    const sent: Say[] = [];
     const abort = new AbortController();
     const limit = Limit.make(ask, on, abort.signal);
-    const send = (say: Say) => {
-      sent.push(say);
-      limit.poke();
-    };
+    const wake = () => limit.poke();
     const stop = () => {
       end.text = "stopped";
       abort.abort();
     };
-    const done = ClaudeSub.run(ask, on, sent, abort.signal, limit).then(
+    const done = ClaudeSub.run(ask, on, abort.signal, limit).then(
       (out) => abort.signal.aborted || Object.assign(end, out),
       (err) => (end.text ||= err.message),
     ).then(() => {
-      end.ok   = end.ok && !abort.signal.aborted;
-      end.left = sent;
+      end.ok = end.ok && !abort.signal.aborted;
       return end;
     });
-    return { send, stop, done };
+    return { wake, stop, done };
   }
 
   // what a call's Claude Code starts with; builtin: Claude Code's tools
@@ -473,7 +467,7 @@ export namespace ClaudeSub {
   // anything came out is tried once more. A binary's copy gone since
   // (removed by hand) is written out again. A patient call's failures are
   // logged as it waits to ask again (Memory.heard), not here
-  export async function run(ask: Ask, on: (ev: Event) => void, sent: Say[], signal: AbortSignal, limit: Limit): Promise<Partial<End>> {
+  export async function run(ask: Ask, on: (ev: Event) => void, signal: AbortSignal, limit: Limit): Promise<Partial<End>> {
     let bin = await ClaudeSub.bin();
     if (!fs.existsSync(bin)) {
       LOADED.bin = null;
@@ -518,13 +512,11 @@ export namespace ClaudeSub {
           const blocks = ask.blocks.filter((b) => b.text !== "");
           code.box.put(blocks.map((b) => b.text), ask.imgs ?? [], blocks.slice(0, -1).findLastIndex((b) => b.mark));
         } else if (limit.n > 0) {
-          const says = sent.splice(0);
-          says.forEach((say) => log({ $: "Entry", kind: "user", text: say.text }));
-          code.box.put([ON, ...says.map((say) => say.text).filter((t) => t !== "")], says.flatMap((say) => say.imgs));
+          code.box.put([ON], []);
         }
         let got: Out | null;
         try {
-          got = await ClaudeSub.turn(code, ask, emit, log, sent, signal, acted, () => (seen = []));
+          got = await ClaudeSub.turn(code, ask, emit, log, signal, acted, () => (seen = []));
         } catch (err) {
           if (!(err instanceof Died) || said || signal.aborted || tries > 0) {
             throw err;
@@ -558,11 +550,11 @@ export namespace ClaudeSub {
     }
   }
 
-  // a turn read to its result (null: stopped); a tool of ours run, or a
-  // message sent taken, marks the call `acted`. At usage billed past the
-  // plan the turn is interrupted: its end a limit, unless its answer came
-  // whole (paid already) with no message to take (another request)
-  export async function turn(code: Code, ask: Ask, emit: Emit, log: (ev: Event) => void, sent: Say[], signal: AbortSignal, acted: { v: boolean }, fresh: () => void): Promise<Out | null> {
+  // a turn read to its result (null: stopped); a tool of ours run marks
+  // the call `acted`. At usage billed past the plan the turn is
+  // interrupted: its end a limit, unless its answer came whole (paid
+  // already)
+  export async function turn(code: Code, ask: Ask, emit: Emit, log: (ev: Event) => void, signal: AbortSignal, acted: { v: boolean }, fresh: () => void): Promise<Out | null> {
     const stopped = new Promise<"stop">((ok) => (signal.aborted ? ok("stop") : signal.addEventListener("abort", () => ok("stop"), { once: true })));
     let info: SDKRateLimitInfo | null = null;
     let hit = false;
@@ -611,8 +603,7 @@ export namespace ClaudeSub {
       }
       const ok = msg.subtype === "success" && !msg.is_error;
       const why = msg.subtype === "success" ? msg.result : msg.errors.join("; ");
-      if ((!ok && (hit || over || info?.status === "rejected")) || (over && sent.length > 0)) {
-        acted.v ||= ok;
+      if (!ok && (hit || over || info?.status === "rejected")) {
         return { limit: { until: info && ClaudeSub.reset(info), text: why } };
       }
       if (!ok) {
@@ -622,13 +613,7 @@ export namespace ClaudeSub {
         }
         return { text: BUSY, why: said, stop: "down", off: err !== undefined && OFF.includes(err), long: TOO_LONG.test(why) };
       }
-      const says = sent.splice(0);
-      if (says.length === 0) {
-        return { ok: true, text: msg.result.trim() };
-      }
-      acted.v = true;
-      says.forEach((say) => log({ $: "Entry", kind: "user", text: say.text }));
-      code.box.put(says.map((say) => say.text).filter((t) => t !== ""), says.flatMap((say) => say.imgs));
+      return { ok: true, text: msg.result.trim() };
     }
   }
 

@@ -27,6 +27,15 @@ export type Part = [number, number];
 // (Memory.ts Pair)
 export type Entry = { kind: Kind; text: string; date?: string; images?: string[]; of?: string; tool?: string };
 
+// a message queued for Unii's turn or a subagent (Run.ts), not logged
+// yet: as the views draw it, at the bottom, marked queued (view_tail)
+export type Queued = { kind: Kind; text: string };
+
+// one for Unii's turn as the server keeps it (Memory `queue`, so it
+// outlives a restart): its images (the media store's names) and its
+// act's id (Server.ts Chat.act), logged with it
+export type Pending = Queued & { images: string[]; act?: string };
+
 // what a result is of: its call's tool as logged ("": not known), and
 // whether it stands apart from its call (something came between them:
 // Server.ts Chat.flush), so it names its tool ("↳ shell result")
@@ -64,8 +73,9 @@ export type Sums = { done: number; total: number };
 // agents: those at work; runs: what each runs on (Tools.shown);
 // vendors, models, profiles: those offered;
 // limits: the calls waiting for a usage
-// limit, by TURN or agent name; sums: the summaries a turn waits on
-// (null: none); again: how the chat's summaries last
+// limit, by TURN or agent name; queue: the messages queued for each, not
+// logged yet (each text's head), by TURN or agent name; sums: the
+// summaries a turn waits on (null: none); again: how the chat's summaries last
 // failed, waiting to ask again (Memory `again`); timers: the chat's schedules, each
 // message's head; talk: conversation mode (null: standard); build: the
 // web app's (main.ts renew); site: the server's address (config site:
@@ -82,6 +92,7 @@ export type State = {
   profiles? : Record<string, Fall[]>;
   importing : Progress | null;
   limits    : Record<string, Parked>;
+  queue     : Record<string, Queued[]>;
   sums      : Sums | null;
   again     : Again | null;
   timers    : Timer[];
@@ -261,6 +272,9 @@ const SUMS = "compressing earlier messages…";
 // under the messages sent while offline, still kept to send
 const UNSENT = "Sends once connected.";
 
+// under the messages queued for Unii's turn or an agent (State `queue`)
+const QUEUED = "Queued: it goes in as this turn ends.";
+
 // the kinds an image may be, each by its mark at a byte of its first HEAD
 const MARKS: Array<[string, number, string]> = [
   ["image/png", 0, "\x89PNG"],
@@ -361,6 +375,7 @@ export function view_new(): View {
     models    : LABELS,
     importing : null,
     limits    : {},
+    queue     : {},
     sums      : null,
     again     : null,
     timers    : [],
@@ -593,14 +608,17 @@ export function view_tail(v: View, live = view_stream(v)): Row[] {
   const load = v.page === null && v.importing !== null ? [Cap(progress_show(v.importing))] : [];
   const said = v.page === null && !v.up ? v.out.flatMap((p) => entry_rows(null, "user", p.said)) : [];
   const kept = said.length > 0 ? [...said, Cap(UNSENT)] : [];
-  const limit = v.limits[v.page === null ? TURN : v.page.name];
+  const name = v.page === null ? TURN : v.page.name;
+  const queued = (v.queue[name] ?? []).flatMap((q) => entry_rows(null, q.kind, q.text));
+  const after = [...(queued.length > 0 ? [...queued, Cap(QUEUED)] : []), ...kept, ...load];
+  const limit = v.limits[name];
   if (limit !== undefined) {
-    return [...rows, Cap(limit_show(limit)), ...kept, ...load];
+    return [...rows, Cap(limit_show(limit)), ...after];
   }
   if (v.page !== null || rows.length > 0 || v.wait === "") {
-    return [...rows, ...kept, ...load];
+    return [...rows, ...after];
   }
-  return [Cap(v.wait === SUMMARIES ? sums_show(v.sums, v.again) : "waiting for " + v.wait + "…"), ...kept, ...load];
+  return [Cap(v.wait === SUMMARIES ? sums_show(v.sums, v.again) : "waiting for " + v.wait + "…"), ...after];
 }
 
 // summaries a turn waits on, how many are done, and why they don't come

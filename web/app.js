@@ -1985,6 +1985,7 @@ var NOTICE = 3 * 60 * 60 * 1000;
 var WAIT = "compressing…";
 var SUMS = "compressing earlier messages…";
 var UNSENT = "Sends once connected.";
+var QUEUED = "Queued: it goes in as this turn ends.";
 var MEDIA2 = MEDIA;
 var MEDIA_AS2 = MEDIA_AS;
 var STORED = /^[0-9a-f]{16}\.([a-z0-9]{1,10})$/;
@@ -2033,6 +2034,7 @@ function view_new() {
     models: LABELS,
     importing: null,
     limits: {},
+    queue: {},
     sums: null,
     again: null,
     timers: [],
@@ -2245,14 +2247,17 @@ function view_tail(v, live = view_stream(v)) {
   const load = v.page === null && v.importing !== null ? [Cap(progress_show(v.importing))] : [];
   const said = v.page === null && !v.up ? v.out.flatMap((p) => entry_rows(null, "user", p.said)) : [];
   const kept = said.length > 0 ? [...said, Cap(UNSENT)] : [];
-  const limit = v.limits[v.page === null ? TURN : v.page.name];
+  const name = v.page === null ? TURN : v.page.name;
+  const queued = (v.queue[name] ?? []).flatMap((q) => entry_rows(null, q.kind, q.text));
+  const after = [...queued.length > 0 ? [...queued, Cap(QUEUED)] : [], ...kept, ...load];
+  const limit = v.limits[name];
   if (limit !== undefined) {
-    return [...rows, Cap(limit_show(limit)), ...kept, ...load];
+    return [...rows, Cap(limit_show(limit)), ...after];
   }
   if (v.page !== null || rows.length > 0 || v.wait === "") {
-    return [...rows, ...kept, ...load];
+    return [...rows, ...after];
   }
-  return [Cap(v.wait === SUMMARIES ? sums_show(v.sums, v.again) : "waiting for " + v.wait + "…"), ...kept, ...load];
+  return [Cap(v.wait === SUMMARIES ? sums_show(v.sums, v.again) : "waiting for " + v.wait + "…"), ...after];
 }
 function sums_show(sums, again, now = Date.now()) {
   const head = sums === null ? SUMS : SUMS.replace(/…$/, "") + ": " + sums.done + " of " + sums.total;

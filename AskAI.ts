@@ -1,11 +1,12 @@
 // AskAI
 // =====
 // One way to call a model: a system prompt and a user message in;
-// Deltas (live pieces) and an Entry per finished message out. send()
-// hands the agent a message at its next chance (it ends a wait for a
-// usage limit too: Limit.ts), stop() aborts, `left` holds those never
-// taken. Every vendor is an API run in our loop (Agent.ts) but
-// claude-sub, run in Claude Code's (ClaudeSub.ts).
+// Deltas (live pieces) and an Entry per finished message out. A call
+// takes no message once it runs (a message sent meanwhile waits for the
+// next: Run.ts); wake() ends its wait for a usage limit, if it waits
+// (a message queued for its run: Limit.ts); stop() aborts. Every vendor
+// is an API run in our loop (Agent.ts) but claude-sub, run in Claude
+// Code's (ClaudeSub.ts).
 //
 // A patient call (a summary's) asks again till a try is answered or we
 // end it (a stop): an outage only delays it, and no summary is made of a
@@ -26,8 +27,7 @@
 // Fallback: a call on a profile (Pick.ts) runs on its pick, then on each
 // of the profile's models (Pick.falls); one on a model alone has none.
 // A try whose vendor is out for every call (End.off: busy past its
-// tries, the account refused) and that ran no tool nor took a message
-// (End.acted) goes on with the next pick, as does one its vendor can't
+// tries, the account refused) and that ran no tool (End.acted) goes on with the next pick, as does one its vendor can't
 // be asked for here (no stop: no key, not signed in); a patient one, out
 // of picks, asks again from the first after AGAIN. A pick out is skipped
 // for COOL (the last one is asked anyway), then asked by one request till
@@ -127,8 +127,8 @@ export type Event =
 // answered, so the failure is its input's doing, a refusal or a stop
 // reason; asked again, it fails alike), we (`lost`: a stop), the vendor
 // (`down`; off: out for every call, not this request alone), or none
-// (our setup threw); acted: it ran a tool or took a message sent mid-run,
-// which another try would do again; until: when the vendor's refusal lifts, if it said (ms since 1970);
+// (our setup threw); acted: it ran a tool, which another try would run
+// again; until: when the vendor's refusal lifts, if it said (ms since 1970);
 // long: the vendor refused it as too long for the model (Agent.TOO_LONG);
 // why: the vendor's own words for a failure `text` says only as BUSY;
 // limits: it ended at a usage limit (Limit.off), the usage limits
@@ -137,7 +137,6 @@ export type End = {
   ok     : boolean;
   text   : string;
   why?   : string;
-  left   : Say[];
   note?  : string;
   stop?  : "fail" | "lost" | "down";
   off?   : boolean;
@@ -149,7 +148,7 @@ export type End = {
 
 // one try at a vendor
 export type Try = {
-  send : (say: Say) => void;
+  wake : () => void;
   stop : () => void;
   done : Promise<End>;
 };
@@ -197,13 +196,13 @@ export namespace AskAI {
   // a call: its tries, one after another (a patient one's, a fallback's)
   export function ask(ask: Ask, on: (ev: Event) => void): Call {
     const halt = new AbortController();
-    const send = (say: Say) => call.send(say);
+    const wake = () => call.wake();
     const stop = () => {
       halt.abort();
       call.stop();
     };
     const { promise, resolve } = Promise.withResolvers<End>();
-    const out: Call = { send, stop, done: promise };
+    const out: Call = { wake, stop, done: promise };
     let picks = AskAI.falls(ask);
     // why each pick failed or was skipped, this call
     let whys: (string | null)[] = picks.map(() => null);
@@ -272,7 +271,6 @@ export namespace AskAI {
         k = skip(next ? k + 1 : 0);
         limits = limited && picks[k] === left ? end.limits! : 0;
         call = go();
-        end.left.forEach(send);
         end = await call.done;
       }
     };
@@ -316,15 +314,13 @@ export namespace AskAI {
     try {
       return ask.vendor === "claude-sub" ? ClaudeSub.ask(ask, on) : Agent.ask(ask, on);
     } catch (err: any) {
-      const end = AskAI.end(err.message);
-      const send = (say: Say) => end.left.push(say);
-      return { send, stop: () => {}, done: Promise.resolve(end) };
+      return { wake: () => {}, stop: () => {}, done: Promise.resolve(AskAI.end(err.message)) };
     }
   }
 
   // a call's end, before it ends: failed, saying `text`
   export function end(text: string): End {
-    return { ok: false, text, left: [] };
+    return { ok: false, text };
   }
 
   // the first of picks from k on not skipped (DOWN), else the last

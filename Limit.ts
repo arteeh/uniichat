@@ -16,15 +16,16 @@
 //
 // A wait of LONG or more parks the call: a Limit event tells the views
 // till when, their live line while it lasts (no thought, no note: #49).
-// A shorter wait reads as the service being busy, each time. A stop, a message sent mid-run or a
-// resume ends the wait: the call asks once more and, still limited, waits
-// again, saying nothing more.
+// A shorter wait reads as the service being busy, each time. A stop, a
+// wake (a message queued for its run: Run.take) or a resume ends the
+// wait: the call asks once more and, still limited, waits again, saying
+// nothing more.
 //
 // At a long limit a call ends instead of waiting (an Off, which its vendor
 // turns into a `down` end):
 // - a subagent's (Ask `agent`), whether it ran tools or not: its report
 //   names the vendor, the model and the reset;
-// - one that did nothing yet (ran no tool, took no message) and has a
+// - one that did nothing yet (ran no tool) and has a
 //   fallback to go on to (AskAI.ts), or picks again as it asks again (a
 //   summary's `repick`, so a compactor changed meanwhile counts).
 //
@@ -52,7 +53,7 @@ import { Machine } from "./Machine.ts";
 
 // one call's usage limits: what it asks, where it tells what it does, its
 // stop; n: the limits in a row (its vendor counts each one it hits);
-// poke: ends its wait now (a message sent)
+// poke: ends its wait now (a wake: a message queued for its run)
 export type Limit = {
   ask    : Ask;
   on     : (ev: Event) => void;

@@ -4,19 +4,23 @@
 // subagent's (named by its name), with one way in and one loop for both.
 //
 // A message for it (the user's, a report, a timer's, a tell, a restart's
-// note) goes in by Run.take: to the running call, if its kind lets the
-// call take it now (between tool calls), else to `wait`. A run not
-// running starts its loop, which makes one call after another while
-// messages wait: each call takes all of them (`sent`); those its call
-// never took (End.left) go back to wait for the next. A stop (Run.stop)
-// cuts the running call and ends the loop.
+// note) goes in by Run.take, and is queued: never handed to a call that
+// runs (#46). A run not running starts its loop, which logs what is
+// queued (each message gets its place in the log only now, so it sits
+// right before the reply to it), then makes one call taking all of it,
+// and again while more was queued meanwhile. A message queued for a call
+// that waits for a usage limit wakes it to ask again (Call.wake), no
+// more. A stop (Run.stop) cuts the running call and ends the loop; what
+// was queued is logged then, and goes on as the next turn if its kind
+// says so (Kind.again: main's, a message of the user's: Stop, then send).
 //
 // What differs between the two kinds is its Kind: how a call is asked
 // (main: the view, summaries waited on, devices, the goal check;
-// a subagent: its log), what an end means, and what is logged as the
-// loop ends (main: why it was stopped; a subagent: its report).
+// a subagent: its log), how a message is logged, what an end means, and
+// what is logged as the loop ends (main: why it was stopped; a subagent:
+// its report).
 
-import { AskAI, type Ask, type Call, type End, type Event, type Parked, type Say } from "./AskAI.ts";
+import { AskAI, type Ask, type Call, type End, type Event, type Parked } from "./AskAI.ts";
 import type { Pick } from "./Pick.ts";
 import type { Live } from "./View.ts";
 
@@ -33,20 +37,25 @@ export type Waiting = { text: string; tool: string; logged: boolean; started: bo
 // (logged as such: the tool calls left unanswered written, live cleared)
 export type Heard = Event | { $: "Ended" };
 
-// a conversation (M: its messages: main's are logged messages, a
-// subagent's what it is told). busy: its loop runs (going); sent: handed
-// to the running call; wait: waiting for the next call; halt: its stop
-// (renewed as its loop starts, and main's per call); calls: its tool
-// calls awaiting their results, by id, in the order they started
-// (Chat.on); limit: its call waits for a usage limit (Limit.park); fell:
-// the fallback its calls run on (Chat.ran), forgotten as a pick is picked
-export type Run<M> = {
+// a message queued, not logged yet (Q), and what tells its taker it is
+// queued or logged (Run.take)
+export type Queued<Q> = { q: Q; done: () => void };
+
+// a conversation (Q: a message for it as it comes, M: as logged: main's
+// are logged messages, a subagent's what it is told). busy: its loop runs
+// (going); queue: those waiting to be logged as its next call starts;
+// wait: logged, for the next call; halt: its stop (renewed as its loop
+// starts, and main's per call); calls: its tool calls awaiting their
+// results, by id, in the order they started (Chat.on); limit: its call
+// waits for a usage limit (Limit.park); fell: the fallback its calls run
+// on (Chat.ran), forgotten as a pick is picked
+export type Run<Q, M> = {
   name  : string;
-  kind  : Kind<M>;
+  kind  : Kind<Q, M>;
   busy  : boolean;
   going : Promise<void>;
   call  : Call | null;
-  sent  : M[];
+  queue : Queued<Q>[];
   wait  : M[];
   halt  : AbortController;
   live  : Live[];
@@ -58,26 +67,27 @@ export type Run<M> = {
 // what only one kind of run does:
 // - pick: what its calls run on;
 // - begin: its loop starts;
+// - log: a message queued logged, as its call starts;
 // - ask: its next call (take() hands it the messages waiting), at once
 //   or once ready (main waits for summaries); null: the loop ends;
-// - sends: what the running call takes of a message now (null: it waits
-//   for the next call);
-// - queued: a message waits for the next call;
+// - queued: its queue changed (the views told; main's kept);
+// - again: a message left queued as its loop ends goes on as a turn;
 // - ended: a call's end; false: the loop ends;
 // - failed: the loop threw (why);
 // - ending: the loop ends, still busy; finish: it ended, idle;
 // - on: what its calls tell (Server.ts Chat.on), change: the views told
-export type Kind<M> = {
+export type Kind<Q, M> = {
   pick   : () => Pick;
-  begin  : (run: Run<M>) => void;
-  ask    : (run: Run<M>, take: () => M[]) => Ask | null | Promise<Ask | null>;
-  sends  : (run: Run<M>, msg: M) => Say | null;
-  queued : (run: Run<M>) => void;
-  ended  : (run: Run<M>, end: End) => boolean | Promise<boolean>;
-  failed : (run: Run<M>, why: string) => void;
-  ending : (run: Run<M>) => void;
-  finish : (run: Run<M>) => void;
-  on     : (run: Run<M>, ev: Heard) => void;
+  begin  : (run: Run<Q, M>) => void;
+  log    : (run: Run<Q, M>, q: Q) => M | Promise<M>;
+  ask    : (run: Run<Q, M>, take: () => M[]) => Ask | null | Promise<Ask | null>;
+  queued : (run: Run<Q, M>) => void;
+  again  : (q: Q) => boolean;
+  ended  : (run: Run<Q, M>, end: End) => boolean | Promise<boolean>;
+  failed : (run: Run<Q, M>, why: string) => void;
+  ending : (run: Run<Q, M>) => void;
+  finish : (run: Run<Q, M>) => void;
+  on     : (run: Run<Q, M>, ev: Heard) => void;
   change : () => void;
 };
 
@@ -86,38 +96,42 @@ export type Kind<M> = {
 
 export namespace Run {
 
-  export function make<M>(name: string, kind: Kind<M>): Run<M> {
-    return { name, kind, busy: false, going: Promise.resolve(), call: null, sent: [], wait: [], halt: new AbortController(), live: [], calls: new Map(), limit: null, fell: null };
+  export function make<Q, M>(name: string, kind: Kind<Q, M>): Run<Q, M> {
+    return { name, kind, busy: false, going: Promise.resolve(), call: null, queue: [], wait: [], halt: new AbortController(), live: [], calls: new Map(), limit: null, fell: null };
   }
 
-  // THE way in: a message to the running call, if it takes it now, else
-  // waiting for the next, the loop started if it doesn't run
-  export function take<M>(run: Run<M>, msg: M): void {
-    const call = run.call;
-    const say = call === null ? null : run.kind.sends(run, msg);
-    if (call !== null && say !== null) {
-      run.sent.push(msg);
-      call.send(say);
-      return;
-    }
-    run.wait.push(msg);
-    run.kind.queued(run);
+  // THE way in: a message queued, the loop started if it doesn't run
+  // (which logs it at once). Done as it is queued behind a running loop
+  // (the views told: kind.queued; a call waiting for a usage limit
+  // woken), or as its loop logged it
+  export function take<Q, M>(run: Run<Q, M>, q: Q): Promise<void> {
+    const { promise, resolve } = Promise.withResolvers<void>();
+    run.queue.push({ q, done: resolve });
     if (!run.busy) {
       run.going = Run.loop(run);
+      return promise;
     }
+    resolve();
+    run.kind.queued(run);
+    run.call?.wake();
+    return promise;
   }
 
-  // THE loop: a call while messages wait, each taking all of them; those
-  // its call didn't take wait for the next. A throw ends it (kind.failed)
-  export async function loop<M>(run: Run<M>): Promise<void> {
+  // THE loop: what is queued logged, a call taking it all, and again
+  // while more was queued meanwhile. A throw ends it (kind.failed); what
+  // is left queued as it ends is logged, and starts it again if its kind
+  // says so
+  export async function loop<Q, M>(run: Run<Q, M>): Promise<void> {
     const kind = run.kind;
     run.busy = true;
     run.halt = new AbortController();
-    kind.begin(run);
+    let again = false;
     try {
+      await Run.logs(run);
+      kind.begin(run);
       for (let go = true; go && run.wait.length > 0; ) {
         // one asked at once is started at once: nothing comes between
-        const asked = kind.ask(run, () => (run.sent = run.wait.splice(0)));
+        const asked = kind.ask(run, () => run.wait.splice(0));
         const ask = asked instanceof Promise ? await asked : asked;
         if (ask === null || run.halt.signal.aborted) {
           break;
@@ -127,24 +141,50 @@ export namespace Run {
         const end = await call.done;
         run.call = null;
         kind.on(run, { $: "Ended" });
-        run.wait.unshift(...run.sent.slice(run.sent.length - end.left.length));
         go = await kind.ended(run, end);
+        if (go) {
+          await Run.logs(run);
+        }
       }
     } catch (err: any) {
       kind.failed(run, String(err?.message ?? err));
     } finally {
       kind.ending(run);
       run.call = null;
-      run.sent = [];
-      run.wait = [];
+      const left = await Run.logs(run).catch((err) => (kind.failed(run, String(err?.message ?? err)), []));
+      again = left.some(kind.again);
+      run.wait = again ? run.wait : [];
       run.busy = false;
       kind.finish(run);
     }
+    if (again) {
+      run.going = Run.loop(run);
+    }
+  }
+
+  // what is queued logged, one by one in order, to wait for the next
+  // call; those logged
+  export async function logs<Q, M>(run: Run<Q, M>): Promise<Q[]> {
+    const logged: Q[] = [];
+    while (run.queue.length > 0) {
+      const { q, done } = run.queue[0];
+      // (one logged at once, as a subagent's, gives way to nothing)
+      const got = run.kind.log(run, q);
+      const msg = got instanceof Promise ? await got : got;
+      run.queue.shift();
+      run.wait.push(msg);
+      logged.push(q);
+      done();
+    }
+    if (logged.length > 0) {
+      run.kind.queued(run);
+    }
+    return logged;
   }
 
   // the run stopped: its call cut, its loop ended (why: main's note of
   // it, Chat.ending)
-  export function stop<M>(run: Run<M>, why: string | null): void {
+  export function stop<Q, M>(run: Run<Q, M>, why: string | null): void {
     run.halt.abort(why);
     run.call?.stop();
   }
