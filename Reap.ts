@@ -15,18 +15,11 @@
 import { dlopen, FFIType } from "bun:ffi";
 import * as fs from "node:fs";
 
-// Constants
-// =========
-
 const TICK    = 2000;
 const WNOHANG = 1;
 
-// Reap
-// ====
-
 export namespace Reap {
 
-  // the reaping, every TICK, if this is PID 1 on Linux
   export function start(): void {
     if (process.platform !== "linux" || process.pid !== 1) {
       return;
@@ -40,7 +33,6 @@ export namespace Reap {
     setInterval(() => (last = Reap.tick(wait, last)), TICK).unref();
   }
 
-  // one reaping (last: the zombies at the one before): the zombies left
   export function tick(wait: (pid: number) => void, last: Set<number>, proc = "/proc"): Set<number> {
     const now = Reap.zombies(process.pid, proc);
     const due = now.filter((pid) => last.has(pid));
@@ -50,7 +42,6 @@ export namespace Reap {
     return new Set(now.filter((pid) => !reap.includes(pid)));
   }
 
-  // the zombies whose parent is `ppid`
   export function zombies(ppid: number, proc = "/proc"): number[] {
     const found: number[] = [];
     for (const name of fs.readdirSync(proc)) {
@@ -63,7 +54,7 @@ export namespace Reap {
         if (state === "Z" && Number(parent) === ppid) {
           found.push(Number(name));
         }
-      } catch {} // it ended as we looked
+      } catch {}
     }
     return found;
   }
@@ -79,7 +70,7 @@ export namespace Reap {
             pids.add(Number(pid[1]));
           }
         }
-      } catch {} // closed as we looked
+      } catch {}
     }
     return pids;
   }

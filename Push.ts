@@ -17,79 +17,50 @@ import * as net from "node:net";
 import * as config from "./Config.ts";
 import { write_whole } from "./Write.ts";
 
-// Types
-// =====
-
-// a browser's subscription: where its push service takes its messages,
-// its key (an uncompressed P-256 point) and its secret, base64url
 export type Sub = { endpoint: string; p256dh: string; auth: string };
 
-// the server's key pair: its private key as a JWK (vapid.json), and its
-// public point (65 bytes, base64url), as browsers take it
 export type Keys = { jwk: JsonWebKey; public: string };
-
-// Constants
-// =========
 
 const FILE   = config.DIR + "/vapid.json";
 
 // a record's size (RFC 8188): one record holds any message sent here
 const RS     = 4096;
 
-// how long a push service keeps a message for a browser that is off (s)
 const TTL    = 24 * 60 * 60;
 
 // how long a request's signature holds (s; RFC 8292 caps it at 24 h)
 const AGE    = 12 * 60 * 60;
 
-// how long a push service may take to answer (ms)
 const ANSWER = 30 * 1000;
 
 // the most an endpoint's URL may be (Chrome's, Firefox's, Apple's are
 // under 500)
 const URL_MAX = 2048;
 
-// where no push may go, so a signed-in user can't make the server post
-// into its own network: loopback, private, link-local (and so cloud
-// metadata), CGNAT (Tailscale), multicast, reserved; IPv4-mapped IPv6
-// addresses are checked as IPv4
 const INSIDE = new net.BlockList();
 for (const cidr of ["0.0.0.0/8", "10.0.0.0/8", "100.64.0.0/10", "127.0.0.0/8", "169.254.0.0/16", "172.16.0.0/12", "192.0.0.0/24", "192.168.0.0/16", "198.18.0.0/15", "224.0.0.0/3", "::/127", "fc00::/7", "fe80::/10", "ff00::/8"]) {
   const [ip, bits] = cidr.split("/");
   INSIDE.addSubnet(ip, Number(bits), net.isIPv6(ip) ? "ipv6" : "ipv4");
 }
 
-// how much of a message a push shows
 const GIST = 200;
 
-// how long a view saying its page is in use (View.ACTIVE) counts: no
-// push goes out meanwhile, nor later for what came then
 export const ACTIVE_MS = 60 * 1000;
-
-// Globals
-// =======
 
 // the connection to APNs, kept open as Apple asks, and the token its
 // requests carry, signed again past 40 minutes (Apple takes 20 to 60)
 const PUSH = { link: null as http2.ClientHttp2Session | null, jwt: "", at: 0, by: "" };
 const PUSH_AGE = 40 * 60 * 1000;
 
-// the key pair read (null: vapid.json is broken, so no web push)
 let KEYS: Keys | null | undefined;
-
-// Push
-// ====
 
 export namespace Push {
 
-  // a turn's last message, to every phone and browser of the owner's
   export function notify(db: Database, text: string): void {
     Push.phones(db, text);
     Push.browsers(db, text);
   }
 
-  // the start of a message, to every phone (a push token goes with its
-  // sign-in); a phone APNs no longer knows is forgotten
   export function phones(db: Database, text: string): void {
     if (!config.APNS || !config.KEYS.apns) {
       return;
@@ -115,14 +86,10 @@ export namespace Push {
     }
   }
 
-  // what a push shows of a message: its start, on one line
   export function gist(text: string): string {
     return text.replace(/\s+/g, " ").slice(0, GIST);
   }
 
-  // the start of a message, to every browser that turned notifications on
-  // (sw.js shows it); one its push service no longer knows (404, 410) is
-  // forgotten
   export function browsers(db: Database, text: string): void {
         const subs = db.query("select endpoint, p256dh, auth from web_pushes").all() as Sub[];
     const body = JSON.stringify({ text: Push.gist(text) });
@@ -137,7 +104,6 @@ export namespace Push {
     }
   }
 
-  // the connection to APNs, opened again if it closed
   export function apns(): http2.ClientHttp2Session {
     if (PUSH.link === null || PUSH.link.closed || PUSH.link.destroyed) {
       const link = (PUSH.link = http2.connect("https://api.push.apple.com"));
@@ -147,9 +113,6 @@ export namespace Push {
     return PUSH.link!;
   }
 
-  // the token pushes go with: the team's, signed by the key config.APNS
-  // names; signed again if old, or if the key, its id or the team changed
-  // since (the settings page sets them: Settings.ts)
   export function apns_jwt(): string {
     const by = crypto.createHash("sha256").update(config.APNS + "\0" + config.APPLE + "\0" + config.KEYS.apns).digest("hex");
     if (Date.now() - PUSH.at > PUSH_AGE || PUSH.by !== by) {
@@ -166,9 +129,6 @@ export namespace Push {
   }
 
 
-  // the server's key pair, read, or made at the first start (Server.ts);
-  // null, logged, if vapid.json isn't one: made anew,
-  // it would silence every browser
   export function keys(): Keys | null {
     if (KEYS !== undefined) {
       return KEYS;
@@ -189,9 +149,6 @@ export namespace Push {
     return KEYS;
   }
 
-  // a subscription as a browser gives it (PushSubscription.toJSON), if
-  // whole and sound: an https endpoint, a key on the curve, a 16-byte
-  // secret
   export function sub_read(json: any): Sub | null {
     const endpoint = String(json?.endpoint ?? "");
     const p256dh = String(json?.keys?.p256dh ?? "");
@@ -205,15 +162,12 @@ export namespace Push {
     return { endpoint, p256dh, auth };
   }
 
-  // whether an endpoint's host is, or resolves to, an address INSIDE (a
-  // name that doesn't resolve isn't: a push to it fails anyway)
   export async function inside(endpoint: string): Promise<boolean> {
     const host = new URL(endpoint).hostname.replace(/^\[|\]$/g, "");
     const ips = await dns.promises.lookup(host, { all: true }).catch(() => []);
     return ips.some((ip) => INSIDE.check(ip.address, ip.family === 6 ? "ipv6" : "ipv4"));
   }
 
-  // a public key's point as a key object (null: not a P-256 point)
   export function point(b64: string): crypto.KeyObject | null {
     const raw = Buffer.from(b64, "base64url");
     if (raw.length !== 65 || raw[0] !== 4) {
@@ -226,9 +180,6 @@ export namespace Push {
       return null;
     }
   }
-
-  // Encryption
-  // ----------
 
   // a message encrypted to a browser (RFC 8291 3.4, RFC 8188 2): the
   // salt, the record size, the sender's one-off public key, then the one
@@ -258,9 +209,6 @@ export namespace Push {
     return ecdh;
   }
 
-  // Sending
-  // -------
-
   // a request's Authorization (RFC 8292): a token for the endpoint's
   // origin, signed with the server's key, and that key
   export function vapid(endpoint: string, keys: Keys, now: number = Date.now()): string {
@@ -272,8 +220,6 @@ export namespace Push {
     return "vapid t=" + head + "." + sig.toString("base64url") + ", k=" + keys.public;
   }
 
-  // who a push service may write to about this server's pushes: its
-  // site, if https, else a mailto at its host
   export function subject(): string {
     return config.SITE.startsWith("https:") ? config.SITE : "mailto:noreply@" + new URL(config.SITE).hostname;
   }

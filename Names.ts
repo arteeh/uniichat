@@ -1,11 +1,3 @@
-// Names
-// =====
-// An agent's name: a common adjective and noun, capitalized, joined
-// (FireAnt; older ones Fire-Ant): 16,384; one taken is drawn again.
-
-// Constants
-// =========
-
 const ADJS = `
 red blue green yellow orange purple pink brown black white gray silver golden
 amber azure bronze copper jade lemon lime mint navy peach plum ruby violet
@@ -33,11 +25,7 @@ banana bagel cookie mango melon muffin noodle pancake pepper potato pretzel
 radish taco waffle
 `.split(/\s+/).filter(Boolean);
 
-// any name, old or new, and no other word (GitHub)
 export const NAME = "(?:" + ADJS.map(name_word).join("|") + ")-?(?:" + NOUNS.map(name_word).join("|") + ")";
-
-// Names
-// =====
 
 export function name_random(): string {
   const adj  = ADJS[Math.floor(Math.random() * ADJS.length)];

@@ -1,27 +1,3 @@
-// Mcp
-// ===
-// The user's MCP servers (README), whose tools the master and its
-// subagents get beside unii's own (Tools.ts), each named
-// "<device>_<server>__<tool>", on every vendor. Each is in a device's own
-// config.json, as it told (Tools.servers), and runs on that device: each
-// message a job of it (Mcp.device, Mcp.here). unii serve runs none
-// itself. There, a server is a program (stdio: a JSON-RPC message a line
-// each way) or a URL the device reaches (streamable HTTP: a POST each,
-// answered as JSON or an event stream). The servers change
-// as devices come, go and edit theirs (Mcp.sync), between turns only
-// (Tools.apply).
-// Each chat runs its own (one user's never see another's), started by
-// the first listing or call, ended as the chat closes, moves (a call
-// running finishes first) or turns it off. One that fails to start, dies
-// or times out fails its call saying why; each agent's next listing
-// gives it the notes it hasn't heard (Mcp.heard), for the request it
-// builds. Only a why the user can act on (a server that won't start) is
-// also a note in the chat; the rest (its device isn't open, it died and
-// starts again at the next call) only the model is told. Tools left out
-// (a name too long, say) go to the log and the chat. A dead one starts again at the next call; one that
-// failed to start rests LIMITS.again first. While a server's device
-// isn't open, its tools are left out.
-
 import * as os from "node:os";
 import type { Out } from "./Agent.ts";
 import type { Img } from "./AskAI.ts";
@@ -29,11 +5,6 @@ import { clip } from "./Clip.ts";
 import type * as config from "./Config.ts";
 import { Machine, type Job, type Spec } from "./Machine.ts";
 
-// Types
-// =====
-
-// a link to a server: a request's result (a throw: why none), a
-// notification sent, its end; why it is dead (null: it lives)
 type Link = {
   ask   : (method: string, params: object, signal: AbortSignal) => Promise<any>;
   tell  : (method: string, params: object, signal?: AbortSignal) => Promise<void>;
@@ -41,14 +12,6 @@ type Link = {
   dead  : () => string | null;
 };
 
-// a chat's server: its config; its start or listing running or done (a
-// string: why it has no tools); why its last start failed, and when it
-// may be tried again; its link; the server's name of each tool by the
-// model's; whether it said its tools changed; the note of why it has no
-// tools (null: it works), and whether the chat showed it; what each
-// agent last heard of it; the tools
-// last told left out; the calls running; gone: it ends as its last call
-// does (the chat closed)
 export type Server = {
   conf  : config.McpServer;
   up    : Promise<Spec[] | string> | null;
@@ -64,58 +27,31 @@ export type Server = {
   gone  : boolean;
 };
 
-// a chat's servers, by name, how it is told of them, how it runs a job
-// on a device (Tools.job), and whether a device is open (Tools.open)
 export type Run = (device: string, job: Job, signal: AbortSignal) => Promise<Out>;
 export type Servers = { all: Map<string, Server>; note: (text: string) => void; run: Run; open: (device: string) => boolean };
 
-// Constants
-// =========
-
-// start: how long a server may take to run, initialize and list its
-// tools (an npx's first run downloads it); again: how long one that
-// failed to start rests; kill: how long a program ended has to exit
-// before its process group is killed; msg: the most characters a
-// message from a server may have; img: the most bytes of an image in a
-// result (the vendors' limit)
 export const LIMITS = { start: 60e3, again: 30e3, kill: 3e3, msg: 16 * 2 ** 20, img: 5 * 2 ** 20 };
 
-// why an HTTP link is dead whose session its server ended (Mcp.call
-// begins a new one)
 const EXPIRED = "ended its session (HTTP 404)";
 
 const VERSION = "2025-06-18";
 const INIT    = { protocolVersion: VERSION, capabilities: {}, clientInfo: { name: "unii", version: "1" } };
 
-// what a program's stderr shows of why it ended, at most
 const TAIL = 1000;
 
-// the variables of unii's a program gets (as the MCP SDK's client
-// passes, Windows' too: without SYSTEMROOT, say, most programs there
-// fail), beside its own `env`: no key, no other server's secret
-// (Machine.WIN not imported: Machine imports this, so on a device it
-// isn't set yet as this loads)
 const WIN = process.platform === "win32";
 const PASS = WIN
   ? ["APPDATA", "HOMEDRIVE", "HOMEPATH", "LOCALAPPDATA", "PATH", "PROCESSOR_ARCHITECTURE", "SYSTEMDRIVE", "SYSTEMROOT", "TEMP", "USERNAME", "USERPROFILE", "PROGRAMFILES"]
   : ["HOME", "LOGNAME", "PATH", "SHELL", "TERM", "USER", "LANG", "LC_ALL", "LC_CTYPE", "TZ", "TMPDIR"];
 
-// on a device, the programs it runs for chats (Mcp.here), by their
-// link's key; whether each said its tools changed since its last answer
 const HERE = new Map<string, { link: Link; changed: boolean }>();
-
-// Mcp
-// ===
 
 export namespace Mcp {
 
-  // a chat's servers: none till its devices tell theirs (Mcp.sync)
   export function servers(note: (text: string) => void, run: Run, open: (device: string) => boolean): Servers {
     return { all: new Map(), note, run, open };
   }
 
-  // the chat's servers made `confs`: one gone or changed ends as its last
-  // call does, a new one waits for its first listing or call
   export function sync(servers: Servers, confs: config.McpServer[]): void {
     const want = new Map(confs.map((conf) => [conf.name, conf]));
     for (const [name, s] of servers.all) {
@@ -134,16 +70,12 @@ export namespace Mcp {
     }
   }
 
-  // the tools of the servers not `off`, each started if it isn't
   export async function list(servers: Servers, off: string[]): Promise<Spec[]> {
     const on = [...servers.all.values()].filter((s) => !s.gone && !off.includes(s.conf.name));
     const lists = await Promise.all(on.map((s) => Mcp.start(servers, s)));
     return lists.flatMap((list) => (typeof list === "string" ? [] : list));
   }
 
-  // the notes of the servers not `off` that agent `who` hasn't heard: why
-  // one has no tools, or that it works again; viewed: only those the chat
-  // showed (in the view a call reads: the rest its listing tells)
   export function heard(servers: Servers, off: string[], who: string, viewed = false): string[] {
     const notes: string[] = [];
     for (const s of servers.all.values()) {
@@ -156,8 +88,6 @@ export namespace Mcp {
     return notes;
   }
 
-  // a server's tools: started (anew if its link died), listed again if
-  // it said they changed; else why none, told
   export async function start(servers: Servers, s: Server): Promise<Spec[] | string> {
     if (!servers.open(s.conf.device)) {
       Mcp.close(s);
@@ -199,8 +129,6 @@ export namespace Mcp {
     return got;
   }
 
-  // a server run on its device and initialized, its tools listed, within
-  // LIMITS.start; else why not. Once up, its link dying is told
   export async function open(servers: Servers, s: Server): Promise<Spec[] | string> {
     const timer = AbortSignal.timeout(LIMITS.start);
     const changed = () => (s.stale = true);
@@ -268,8 +196,6 @@ export namespace Mcp {
     return { ...obj, type: "object", properties: is(obj.properties) ? obj.properties : {} };
   }
 
-  // why a server has no tools, if it is new: told to the model (heard),
-  // and to the chat too if `show` (the user can act on it)
   export function tell(servers: Servers, s: Server, why: string, show: boolean): void {
     const text = "MCP server " + s.conf.name + " " + why + ".";
     if (text !== s.said) {
@@ -281,24 +207,18 @@ export namespace Mcp {
     }
   }
 
-  // a note to the chat; none once it closed
   export function say(servers: Servers, s: Server, text: string): void {
     if (!s.gone) {
       servers.note(text);
     }
   }
 
-  // the server whose tool the model calls `name` ("<server>__<tool>"), if
-  // it is on: it might not have listed its tools in this process yet
   export function find(servers: Servers, off: string[], name: string): Server | null {
     const at = name.indexOf("__");
     const s = at > 0 ? servers.all.get(name.slice(0, at)) : undefined;
     return s !== undefined && !s.gone && !off.includes(s.conf.name) ? s : null;
   }
 
-  // a tool call, cancelled at a stop or its server's timeout; its server
-  // started first if it isn't running. A session the HTTP server ended
-  // (404) is begun again and the call sent again, once
   export async function call(servers: Servers, s: Server, name: string, args: object, signal: AbortSignal): Promise<Out> {
     const head = "MCP server " + s.conf.name + " ";
     const fail = (text: string): Out => ({ text, fail: true });
@@ -341,9 +261,6 @@ export namespace Mcp {
     }
   }
 
-  // a tool's result as unii's: its text (a resource's too, other parts
-  // named; structured content if nothing else), cut to CAP; its images
-  // the vendors take
   export function out(got: any): Out {
     const texts: string[] = [];
     const imgs: Img[] = [];
@@ -368,7 +285,6 @@ export namespace Mcp {
     return { text: text.text(), fail: got?.isError === true, imgs };
   }
 
-  // a server ended (turned off, dead): its calls running fail
   export function close(s: Server): void {
     const link = s.link;
     s.link = null;
@@ -386,7 +302,6 @@ export namespace Mcp {
     return String(err?.message ?? err);
   }
 
-  // a server's request answered: ping; none else is asked for
   export function answer(msg: any): object {
     if (msg.method === "ping") {
       return { jsonrpc: "2.0", id: msg.id, result: {} };
@@ -394,8 +309,6 @@ export namespace Mcp {
     return { jsonrpc: "2.0", id: msg.id, error: { code: -32601, message: "unii offers no " + msg.method } };
   }
 
-  // a stream's text, a piece at a time; the stream let go once the
-  // reader stops
   export async function* texts(stream: ReadableStream<Uint8Array>): AsyncGenerator<string> {
     const reader = stream.getReader();
     const text = new TextDecoder();
@@ -408,13 +321,6 @@ export namespace Mcp {
     }
   }
 
-  // Links
-  // -----
-
-  // a program in its own process group (on Windows, which has none, its
-  // tree, no window of its own), a JSON-RPC message a line; its stderr's
-  // tail says why it ended. It gets PASS and its own env; a line past
-  // LIMITS.msg ends it
   export function stdio(conf: config.McpServer, changed: () => void, died: (why: string) => void): Link {
     const env = Object.fromEntries(PASS.flatMap((k) => (process.env[k] === undefined ? [] : [[k, process.env[k]!]])));
     const proc = Bun.spawn([conf.command, ...conf.args], { cwd: conf.cwd || undefined, env: { ...env, ...conf.env }, stdin: "pipe", stdout: "pipe", stderr: "pipe", detached: !WIN, windowsHide: true });
@@ -454,7 +360,6 @@ export namespace Mcp {
         msg.error === undefined ? w.ok(msg.result) : w.no(new Error(msg.error?.message ?? JSON.stringify(msg.error)));
       }
     };
-    // its stdin closed, its group told to end, then killed
     const end = () => {
       if (!ended) {
         ended = true;
@@ -522,10 +427,6 @@ export namespace Mcp {
     return { ask, tell, close, dead: () => dead };
   }
 
-  // a program run on a device: each message a job "mcp" of it
-  // (Mcp.here runs it there), keyed to this link; a device not open
-  // fails the message; one whose program died (or whose unii restarted)
-  // says why, and the link is dead
   export function device(conf: config.McpServer, run: Run, changed: () => void, died: (why: string) => void): Link {
     const key = crypto.randomUUID();
     const job = (input: object): Job => ({ name: "mcp", input: { key, ...input }, cwd: "" });
@@ -565,11 +466,6 @@ export namespace Mcp {
     return { ask, tell, close, dead: () => dead };
   }
 
-  // on a device, a message of a chat's server (Mcp.device) to the program
-  // it runs here (Mcp.stdio) or the URL it reaches from here (Mcp.http):
-  // initialize starts it, its ${VAR}s and `cwd` read here; close ends it.
-  // Answered as JSON: its result or error, why it is dead, whether its
-  // tools changed
   export async function here(input: any, signal: AbortSignal): Promise<Out> {
     const { key, method, params } = input;
     const answer = (got: object): Out => {
@@ -627,19 +523,11 @@ export namespace Mcp {
     }
   }
 
-  // on a device, its socket to the server lost (Device.ts): the programs it
-  // ran for chats end, as no close may come; a chat's next message finds
-  // its program gone, and starts it again
   export function lost(): void {
     HERE.forEach((s) => s.link.close());
     HERE.clear();
   }
 
-  // a URL, each message a POST, its session kept by its header (one the
-  // server ended, HTTP 404, ends the link: EXPIRED); an answer is JSON or
-  // an event stream (the server's requests and notifications in it, then
-  // the answer), at most LIMITS.msg characters. Ended, its requests
-  // running are aborted and its session DELETEd
   export function http(conf: config.McpServer, changed: () => void): Link {
     let session: string | null = null;
     let version: string | null = null;
@@ -663,8 +551,6 @@ export namespace Mcp {
         throw new Error("HTTP " + res.status);
       }
     };
-    // a message: the server's request answered, a change noted; else it,
-    // if it answers `id`
     const heard = (msg: any, id: number): any => {
       if (msg?.method !== undefined && msg.id !== undefined) {
         post(Mcp.answer(msg), AbortSignal.timeout(LIMITS.start)).then((res) => res.body?.cancel(), () => {});
@@ -675,8 +561,6 @@ export namespace Mcp {
       }
       return null;
     };
-    // the answer to `id` in a response: its JSON, or an event stream's,
-    // each event's data lines joined, read till it comes
     const read = async (res: Response, id: number): Promise<any> => {
       const sse = (res.headers.get("content-type") ?? "").includes("text/event-stream");
       const event = (text: string) => {

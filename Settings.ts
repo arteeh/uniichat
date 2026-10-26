@@ -1,34 +1,8 @@
-// Settings
-// ========
-// The settings page's side (web/src/main.ts, /settings), the owner's
-// (Owner.ts): every setting, its value, where it comes from (the environment, config.json, its default) and whether a
-// change applies at once or on a restart; and the keys, each only as
-// set or not, where from, and its last 4 characters: no answer and no
-// log line holds a key. A save is a POST of JSON (which another site's
-// page can't send: a browser asks first, and the server allows it none;
-// Server.ts refuses what another site's page sends at all), naming what
-// it changes (null: back to the default, a key dropped). All of it is
-// checked as a start checks config.json (each pick offered...) and more
-// (the site a URL...), then keys.json and config.json (the keys it
-// doesn't name kept) written and read again (config_reload). A save made on files changed since
-// the page read them (another tab, a hand edit: `version`) is refused,
-// so none undoes another unseen. The profiles (config `profiles`, a
-// JSON object: Pick.ts) are saved whole, checked as a start checks them.
-
 import * as fs from "node:fs";
 import * as config from "./Config.ts";
 import { LABELS } from "./Pick.ts";
 import { write_whole } from "./Write.ts";
 
-// Types
-// =====
-
-// a setting as shown: its value (config.json's or the environment's,
-// as a start reads it now), its default and why it is that (config
-// config_default; "": no why), where it comes from, its
-// variable, when a change applies, whether the page may change it; and
-// one that applies on a restart, what this process runs on if that
-// differs (null: the same)
 export type Row = {
   key     : string;
   value   : string;
@@ -41,52 +15,28 @@ export type Row = {
   running : string | null;
 };
 
-// a key as shown: its name, its variable, where it comes from
-// ("default": unset), its last characters ("": unset, or too short to
-// show any)
 export type Key = { name: string; env: string; from: config.From; tail: string };
 
-// the page: the files' version, the settings, the keys, the profiles
-// (config.json's, by name, each its models in order; null: set by
-// UNII_PROFILES, not shown); why the page can't save (config.json
-// unreadable; null: it can); why no model can be asked (null: one can)
 export type Page = { version: string; settings: Row[]; keys: Key[]; profiles: Record<string, string[]> | null; error: string | null; none: string | null };
 
-// a save's answer: its status and body (refused: why, and the setting
-// or "key.<name>" it is about), what it changed (`saved`), and whether
-// the files may have changed (`wrote`: every process reads them again)
 type Out = { status: number; body: object; saved: string[]; wrote: boolean };
 
-// Constants
-// =========
-
-// a save's largest body; a value's longest (an APNs key's PEM is ~250)
 const BODY  = 2 ** 16;
 const VALUE = 4096;
 const KEY   = 16384;
 
-// the most profiles, models a profile ranks, and characters a name has
 const PROFILES = 50;
 const RANKS    = 20;
 const NAME     = 60;
 
-// a key shows its last TAIL characters, if it has MASK or more (fewer
-// would say too much of it)
 const TAIL = 4;
 const MASK = 20;
 
-// the settings that must look so, past what a start checks: an App ID
-// ("TEAM.bundle"), an APNs key's id
 const APPLE = /^[A-Z0-9]{10}\.[A-Za-z0-9.-]+$/;
 const APNS  = /^[A-Z0-9]{10}$/;
 
-// Settings
-// ========
-
 export namespace Settings {
 
-  // the page, as the files are now: shown and versioned from one reading
-  // of them (config.config_snapshot)
   export function page(): Page {
     let file: Record<string, unknown> = {};
     let keys: Record<string, string> = {};
@@ -120,17 +70,11 @@ export namespace Settings {
     return { version: snap.version, settings, keys: shown, profiles, error, none: config.config_none() };
   }
 
-  // a key's last characters, as shown: its letters and digits only (a
-  // PEM's end is dashes)
   export function tail(key: string): string {
     const plain = key.replace(/[^A-Za-z0-9]/g, "");
     return plain.length >= MASK ? plain.slice(-TAIL) : "";
   }
 
-  // a POST's: the owner's save (Server.ts checked who sends it), made or
-  // refused with nothing changed, and answered with the page as saved.
-  // From the version check to the writes nothing waits, so no other save
-  // in this process runs between them
   export async function save(req: Request): Promise<Out> {
     const refuse = (status: number, error: string, key?: string): Out => ({ status, body: { error, key }, saved: [], wrote: false });
     if (!(req.headers.get("content-type") ?? "").startsWith("application/json")) {
@@ -248,9 +192,6 @@ export namespace Settings {
     return { status: 200, body: { ...Settings.page(), saved }, saved, wrote: saved.length > 0 };
   }
 
-  // profiles as config.json keeps them (a name, trimmed, and its models,
-  // each one line, in order); null: not that, or too many, or two names
-  // the same once trimmed
   export function profiles(x: unknown): Record<string, string[]> | null {
     const all = Object.entries(Settings.record(x));
     if (x === null || typeof x !== "object" || Array.isArray(x) || all.length > PROFILES) {
@@ -268,14 +209,10 @@ export namespace Settings {
     return Object.fromEntries(out);
   }
 
-  // an object's own fields (anything else: none)
   export function record(x: unknown): Record<string, unknown> {
     return x !== null && typeof x === "object" && !Array.isArray(x) ? (x as Record<string, unknown>) : {};
   }
 
-  // why `file` can't be saved (null: it can): what a start refuses; of
-  // the settings `changed`, models none offers, a site that is no
-  // http(s) origin, an App ID or APNs key id that isn't one
   export function check(file: Record<string, unknown>, changed: Set<string>): { error: string; key?: string } | null {
     if (changed.has("vendors") && config.config_value(file, "vendors").trim() === "") {
       return { error: "Offer at least one vendor.", key: "vendors" };

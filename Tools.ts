@@ -1,37 +1,3 @@
-// Tools
-// =====
-// Unii's prompts, tools and agents. Calls get the tools as MCP over one
-// local port, at a URL with the chat's secret and the caller ("main", an
-// agent; a compaction has none).
-// shell, read, write, edit, view_video and show run on the device their
-// `device` field names: a computer running `unii device` (Device.ts), one
-// per sign-in (host, host-2...), listed in each call's message. A name
-// stays its sign-in's while the server runs, so a call meant for one
-// computer never reaches another. A device's links are its sockets: one
-// lost (closed with no QUIT: a network blip, or a device that died) stays
-// GRACE, its jobs waiting, then goes as one that quit does: its jobs fail,
-// and it is no longer open; one of a device that links again from a new
-// process (a restart) goes at once. It is told its
-// jobs' ids as they change, and each job new to it; a job's output is an
-// act (Server.ts). A device's skills (Machine.skills: the user's global
-// ones, ~/.agents/skills), read as a job when it joins and as each turn
-// starts, are listed in each call's message
-// while it is open; the skill tool loads one, as a job too.
-// A subagent has a name and a log; each call
-// gets its context and its whole log, so a told agent goes on even after
-// a restart; its replies reach the chat as one "[Name]" message.
-// The master's schedules (schedule, schedules, unschedule) are kept with
-// its chat, each coming as a "[Timer id]" message (Timer.ts). Its resume
-// wakes every call waiting for a usage limit (Limit.resume), for a user
-// who knows one lifted early.
-// The user's MCP servers (Mcp.ts) add their tools to the master's and its
-// subagents', but those of servers the chat turned off (Memory `off`):
-// each open device's own (Tools.servers), run on it; the server runs
-// none. They change only while nothing runs or as a turn starts with no
-// subagent working (one keeps the servers it started with). The fork has
-// one user, whose every device is: each one's servers reach the chat,
-// unchecked.
-
 import type { Ask, Block, Kind, Say } from "./AskAI.ts";
 import type { Out } from "./Agent.ts";
 import { report_text } from "./Call.ts";
@@ -49,13 +15,6 @@ import type { Msg } from "./Server.ts";
 import * as Timer from "./Timer.ts";
 import { PING, type Pending } from "./View.ts";
 
-// Types
-// =====
-
-// a device: its sign-in (a session's hash), the host it said it is
-// (its name may be host-2...), its links by tab (none: closed), jobs by
-// id, and its skills as last looked at (Tools.look); the MCP servers it
-// told of (Tools.servers), and why some were left out
 type Device = {
   who    : string;
   host   : string;
@@ -67,21 +26,12 @@ type Device = {
   clash  : string;
 };
 
-// a job: the link it runs on, what it runs, its output, what ends it
 type Running = { term: string; job: Job; out: Promise<Out>; end: (out: Out) => void };
 
-// a device's link: how to reach it, whether its socket is open now, its
-// work dir (the user's projects), where its agents' scratch folders are
-// (null: a device from before them, whose are in its work dir), its
-// shell if not a POSIX one
 export type Link = { send: (msg: object) => void; live: () => boolean; work: string; scratch: string | null; shell: string | null };
 
-// a task to spawn, with what it runs on
 export type Spawn = { task: string; role: Agent["role"] };
 
-// a subagent: its model and effort as spawned; at work, the view its
-// calls get, its replies so far, its report if stopped by the stop tool
-// (why), and its run (Run.ts; stopped: its report stays unanswered)
 export type Agent = {
   name    : string;
   role    : { effort: string | null; model: string | null };
@@ -91,11 +41,6 @@ export type Agent = {
   run     : Run<Say, Say>;
 };
 
-// how the server logs for the tools and tells its views: an agent's log
-// (push, on), a note to the chat (as of an MCP server failing), an
-// agent's report (take: a turn of its own; a stopped one's isn't), the
-// views told what runs (change) and that the chat's schedules changed
-// (timed)
 type Log = {
   push   : (run: Run<Say, Say>, kind: Kind, text: string) => void;
   note   : (text: string) => void;
@@ -105,9 +50,6 @@ type Log = {
   timed  : () => void;
 };
 
-// the tools: Unii's turn (its pick, its stop), the chat's MCP servers,
-// those it runs from the next turn (Tools.plug; null: no change), and
-// whether it was told UNII_MCP's servers are left out (Tools.left)
 export type Tools = {
   mem     : Memory;
   devices : Map<string, Device>;
@@ -121,25 +63,15 @@ export type Tools = {
   log     : Log;
 };
 
-// Constants
-// =========
-
-// the most web searches a request of a turn or a subagent runs
 export const SEARCHES = 10;
 
-// how long the stop tool waits for its agent to end (ms)
 const HALT = 5000;
 
-// how long a device's link lost counts as open, waiting to be linked
-// again (ms)
 const GRACE = 3 * PING;
 
-// the chats' tools, by their secret; the server, once one is
 const CHATS = new Map<string, Tools>();
 let HTTP: ReturnType<typeof Bun.serve> | null = null;
 
-// the requests running, by chat, caller, MCP session and JSON-RPC id:
-// what a `notifications/cancelled` for one stops
 const RUNNING = new Map<string, Set<AbortController>>();
 const SESSION = "mcp-session-id";
 
@@ -190,26 +122,19 @@ decision, a past attempt or where a file is, before you act, guess or
 ask. date(id) gives the date and time of message id. zoom("Name") gives
 an agent's whole chat.`;
 
-// an agent's log starts with a note of what it is: SUB_NOTE, and its
-// model and effort if not the configured ones
 const SUB_NOTE   = "subagent";
 const SUB_ON     = " on ";
 const SUB_AT     = " at effort ";
 const SUB_ROLE   = new RegExp("^" + SUB_NOTE + "(?:" + SUB_ON + "(\\S+))?(?:" + SUB_AT + "(\\S+))?$");
 
-// the models a subagent may be given (Tools.call)
 const MODELS = [...new Set(Pick.models(config.OFFER.vendors, config.OFFER.models).map(([, m]) => m.label))];
 
-// a spawn's task: what to do, and its own model and effort, if any
 const TASK = { type: "object", properties: {
   task   : STR,
   model  : { type: "string", enum: MODELS, description: "Its model; by default, the one it'd run on. Set it ONLY when the user asks for that model or vendor in this chat, since another vendor may come with additional costs." },
   effort : { type: "string", enum: EFFORTS, description: "How hard it thinks; by default, as hard as you." },
 }, required: ["task"] };
 
-// the devices: how they work, in the system prompt (DEVICES); those open
-// now, at the start of each call's message (Tools.devices), so one
-// joining or leaving changes a call's tail, never its cached prefix
 const DEVICES = `Devices: the user's computers that run unii's device now, by name, listed
 at the start of each message. Your shell, read, write, edit, view_video and
 show tools run on the one their \`device\` field names. A computer is listed only
@@ -221,23 +146,15 @@ among the user's projects. When you start work in a folder or repository, read
 its AGENTS.md if it has one, and check its \`.agents/skills/\` for a SKILL.md
 that fits the task.`;
 const DEVICES_NONE = "(None is open now.)";
-// where a file of the chat's (/media/<name>, pasted or shown) is
 const MEDIA_AT = "Media and files in the chat, /media/<name>, are the files {dir}<name> on the server's computer.";
 
 const SKILLS = "Skills on the devices open now, by device: when a task matches one's description, load it with the skill tool first, then follow it.";
 
-// how long a device may take to list its skills, in ms: one that takes
-// longer keeps those it listed last
 const LOOK = 3000;
 
-// a subagent's prompt: its part, then the view's and the devices' docs;
-// then, after AGENT_PROMPT, the user prompt if the user wrote one (their
-// instructions are in it; the built-in one holds none, only Unii's turns)
 const SUB = SUB_HEAD + "\n\n" + VIEW_DOC + "\n\n" + DEVICES;
 const AGENT_PROMPT = "Unii's own prompt follows, for the user's instructions in it. Where it speaks to Unii, it speaks of the agent you work for, not of you.";
 
-// the tools of everyone (OWN), the master's (BOSS), those that run on a
-// device (`kit`: Machine.ts's)
 const OWN: Spec[] = [
   spec("zoom", "Open the line id+n of the view into the two lines of n/2 under it; n = 1 gives the message whole. With an agent's name as id, give that agent's whole chat. A long text comes in pages from character at, saying where to go on.", { id: { type: ["integer", "string"] }, n: INT, at: INT }, ["id"]),
   spec("date", "The date and time of message id.", { id: INT }, ["id"]),
@@ -265,8 +182,6 @@ function kit(who: string): Spec[] {
   });
 }
 const SKILL: Spec = spec("skill", "Load a skill listed under Skills: its SKILL.md, with the folder its other files are in on that device (read or run them there with your other tools).", { ...DEVICE, name: STR }, ["device", "name"]);
-// Tools
-// =====
 
 export namespace Tools {
 
@@ -280,7 +195,6 @@ export namespace Tools {
     return tools;
   }
 
-  // this process's tools URL
   export function base(): string {
     HTTP ??= Bun.serve({ port: 0, hostname: "127.0.0.1", idleTimeout: 0, fetch: Tools.fetch });
     return "http://127.0.0.1:" + HTTP.port + "/";
@@ -290,7 +204,6 @@ export namespace Tools {
     return tools.url + who;
   }
 
-  // a prompt as used: its file, else its default
   export function prompt(which: keyof typeof PROMPTS): string {
     return Memory.file_text(PROMPTS[which].file) || PROMPTS[which].def;
   }
@@ -304,15 +217,11 @@ export namespace Tools {
     return { text: "Devices open now:\n" + (lines.length === 0 ? DEVICES_NONE : lines.join("\n")) + "\n" + MEDIA_AT.replace("{dir}", tools.mem.dir + "/docs/media/") + "\n\n", mark: false };
   }
 
-  // after the devices, so a change hits a call's tail, not its cached
-  // prefix
   export function skills(tools: Tools): Block {
     const lines = Tools.opened(tools).flatMap(([name, d]) => d.skills.map((s) => "- " + name + ": " + s.name + ": " + s.description.replace(/\s+/g, " ")));
     return { text: lines.length === 0 ? "" : SKILLS + "\n" + lines.join("\n") + "\n\n", mark: false };
   }
 
-  // each open device's skills, asked as a job; one that fails (a unii
-  // from before skills) has none
   export async function look(tools: Tools, only: string | null = null): Promise<void> {
     const live = Tools.opened(tools).filter(([name, d]) => (only === null || name === only) && [...d.terms.values()].some((t) => t.live()));
     await Promise.all(live.map(async ([name, d]) => {
@@ -337,21 +246,12 @@ export namespace Tools {
     }));
   }
 
-  // the master's agents at work now, at the start of each of its calls'
-  // messages: read from their calls, so the list is never kept apart and
-  // can't drift from the truth; one waiting for a usage limit says so,
-  // till when (UTC), so the master sees it without a turn of its own
   export function at_work(tools: Tools): Block {
     const when = (at: number) => new Date(at).toISOString().slice(0, 16).replace("T", " ") + " UTC";
     const names = Tools.working(tools).map(({ name, run }) => (run.limit === null ? name : name + " (waiting for the usage limit on " + run.limit.vendor + ", " + (run.limit.known ? "resumes " : "tries again ") + when(run.limit.until) + ")"));
     return { text: "Agents at work now: " + (names.length === 0 ? "none." : names.join(", ") + ".") + "\n\n", mark: false };
   }
 
-  // MCP
-  // ---
-
-  // a notification gets no answer; a request dropped, or cancelled (a
-  // `notifications/cancelled` naming it), stops its job
   export async function fetch(req: Request): Promise<Response> {
     const [, key, who, ...rest] = new URL(req.url).pathname.split("/");
     const tools = CHATS.get(key);
@@ -393,7 +293,6 @@ export namespace Tools {
     }
   }
 
-  // null: no such method
   export async function answer(tools: Tools, who: string, method: string, params: any, signal: AbortSignal, id: string): Promise<object | null> {
     switch (method) {
       case "initialize": {
@@ -403,9 +302,6 @@ export namespace Tools {
       case "tools/list": {
         const plugged = Tools.plugged(tools, who);
         const theirs = plugged ? await Mcp.list(tools.mcp, Tools.off(tools)) : [];
-        // the servers' notes `who` hasn't heard, for the request it
-        // builds (Agent.loop); a subagent's kept in its log for its next
-        // ones (the master's are the chat's)
         const notes = plugged ? Mcp.heard(tools.mcp, Tools.off(tools), who) : [];
         const agent = tools.agents.get(who);
         notes.forEach((text) => agent !== undefined && tools.log.push(agent.run, "note", text));
@@ -432,23 +328,18 @@ export namespace Tools {
     return who === "main" ? [...OWN, ...BOSS, ...kit(who), SKILL] : [...OWN, ...kit(who), SKILL];
   }
 
-  // whether `who` gets the MCP servers' tools: the master and subagents
   export function plugged(tools: Tools, who: string): boolean {
     return who === "main" || tools.agents.has(who);
   }
 
-  // the MCP servers the chat turned off
   export function off(tools: Tools): string[] {
     return tools.mem.off ?? [];
   }
 
-  // the MCP server of `who`'s tool `name`, if it is on (named for it: it
-  // need not have listed its tools since it crashed; Mcp.call starts it)
   export function mcp(tools: Tools, who: string, name: string): Server | null {
     return Tools.plugged(tools, who) ? Mcp.find(tools.mcp, Tools.off(tools), name) : null;
   }
 
-  // an MCP server turned off: ended, its calls running failed
   export function unplug(tools: Tools, name: string): void {
     const s = tools.mcp.all.get(name);
     if (s !== undefined) {
@@ -456,7 +347,6 @@ export namespace Tools {
     }
   }
 
-  // id: a job's, if it starts one
   export async function call(tools: Tools, who: string, name: string, args: any, signal: AbortSignal, id: string): Promise<Out> {
     const mem = tools.mem;
     switch (name) {
@@ -508,10 +398,6 @@ export namespace Tools {
     }
   }
 
-  // Schedules
-  // ---------
-
-  // a schedule kept with the chat; else why not
   export function schedule(tools: Tools, timer: Timer.Timer | string): Out {
     const mem = tools.mem;
     if (typeof timer !== "string" && mem.timers.length >= Timer.TIMERS) {
@@ -526,7 +412,6 @@ export namespace Tools {
     return { text: "Scheduled " + timer.id + ": " + Timer.timer_when(timer) + ".", fail: false };
   }
 
-  // false: none such
   export function unschedule(tools: Tools, id: string): boolean {
     const mem = tools.mem;
     const left = mem.timers.filter((t) => t.id !== id);
@@ -539,15 +424,6 @@ export namespace Tools {
     return true;
   }
 
-  // Devices
-  // -------
-
-  // a device's link joins its sign-in's device on host, under the name it
-  // has (a reconnect is the same device, its jobs kept, even if a name
-  // before it was freed since), and is sent its jobs; the device's name.
-  // A new one takes host, else host-2, ...: a name is held by this
-  // sign-in's other devices, and by another sign-in's while that is kept
-  // (a link lost keeps it) or has a live link; else it is taken over
   export function attach(tools: Tools, term: string, host: string, who: string, link: Link, kept: Set<string>): string {
     const own = [...tools.devices].find(([, d]) => d.who === who && d.host === host)?.[0];
     const held = (d: Device | undefined) => d !== undefined && (d.who === who || kept.has(d.who) || [...d.terms.values()].some((t) => t.live()));
@@ -561,9 +437,6 @@ export namespace Tools {
     const d = tools.devices.get(name) ?? { who, host, terms: new Map(), jobs: new Map(), skills: [], mcp: [], why: "", clash: "" };
     d.terms.set(term, link);
     tools.devices.set(name, d);
-    // its other links are a process before this one's (a link is its
-    // process's: its socket opened anew keeps it, Device.ts tab): it
-    // restarted, whether or not their sockets were seen to close yet
     for (const old of [...d.terms.keys()]) {
       if (old !== term) {
         Tools.detach(tools, old, name, "restarted");
@@ -575,8 +448,6 @@ export namespace Tools {
     return name;
   }
 
-  // a link told its jobs' ids (it halts the rest), then each that `fresh`
-  // picks, a message each
   export function sync(d: Device, term: string, fresh: (id: string) => boolean): void {
     const send = d.terms.get(term)?.send ?? (() => {});
     const mine = [...d.jobs].filter(([, j]) => j.term === term);
@@ -584,7 +455,6 @@ export namespace Tools {
     mine.filter(([id]) => fresh(id)).forEach(([id, j]) => send({ $: "job", id, job: j.job }));
   }
 
-  // a link gone (its device quit, or `how` else), its jobs failing so
   export function detach(tools: Tools, term: string, device: string, how = "stopped"): void {
     const d = tools.devices.get(device);
     if (d === undefined || !d.terms.delete(term)) {
@@ -598,11 +468,6 @@ export namespace Tools {
     Tools.plug(tools);
   }
 
-  // a link lost (its socket closed with no QUIT): detached GRACE later,
-  // unless its device linked again on it (its process's socket opened
-  // anew) and that link lives. One gone already (a new process took its
-  // device: attach), or one whose socket opened anew before the old one
-  // was seen to close, is left as it is
   export function lost(tools: Tools, term: string, device: string): void {
     const link = tools.devices.get(device)?.terms.get(term);
     if (link === undefined || link.live()) {
@@ -616,8 +481,6 @@ export namespace Tools {
     Tools.plug(tools);
   }
 
-  // a device gone with its sign-in: its links and jobs end, its name is
-  // free
   export function forget(tools: Tools, device: string): void {
     const d = tools.devices.get(device);
     if (d === undefined) {
@@ -631,10 +494,6 @@ export namespace Tools {
     Tools.plug(tools);
   }
 
-  // the MCP servers a device has in its own config.json (`mcp`, as it
-  // read it: Device.ts), run there, each named <device>_<server>; that
-  // file may be the server's own too (one machine, one ~/.unii). Why one
-  // is left out is told the chat, once
   export function servers(tools: Tools, device: string, mcp: unknown): void {
     const d = tools.devices.get(device);
     if (d === undefined) {
@@ -658,13 +517,6 @@ export namespace Tools {
     Tools.plug(tools);
   }
 
-  // the chat's MCP servers as they are now: each linked device's (one
-  // whose link was lost has none till it is back), run from the next turn
-  // (Tools.apply): never changed in the middle of one; the views told.
-  // Two devices whose names make one prefix (desk_a, desk-a:
-  // config.config_mcp_prefix) would give tools of one name: the first
-  // here with servers keeps it, linked or not (so a name never moves to
-  // the other), the other's are left out, told the chat once
   export function plug(tools: Tools): void {
     const taken = new Map<string, string>();
     const next: config.McpServer[] = [];
@@ -690,9 +542,6 @@ export namespace Tools {
     tools.log.change();
   }
 
-  // UNII_MCP's servers left out (config.MCP_LEFT), told the chat once, as
-  // its first turn here starts (config.json's `mcp` only the log tells:
-  // config.MCP_FILE)
   export function left(tools: Tools): void {
     if (!tools.left && config.MCP_LEFT !== null) {
       tools.left = true;
@@ -700,13 +549,10 @@ export namespace Tools {
     }
   }
 
-  // whether a device has a live link
   export function live(d: Device | undefined): boolean {
     return d !== undefined && [...d.terms.values()].some((t) => t.live());
   }
 
-  // the MCP servers as plugged, as a turn starts with no subagent working
-  // or while nothing works (Server.ts: Chat.begin, Chat.change)
   export function apply(tools: Tools): void {
     if (tools.next !== null) {
       Mcp.sync(tools.mcp, tools.next);
@@ -714,7 +560,6 @@ export namespace Tools {
     }
   }
 
-  // every device whose sign-in isn't kept forgotten
   export function prune(tools: Tools, kept: Set<string>): void {
     for (const [name, d] of [...tools.devices]) {
       if (!kept.has(d.who)) {
@@ -727,19 +572,15 @@ export namespace Tools {
     return [...tools.devices].filter(([, d]) => d.terms.size > 0);
   }
 
-  // else why not
   export function open(tools: Tools, device: string): Device | string {
     const d = tools.devices.get(device);
     const open = Tools.opened(tools).map(([name]) => name).join(", ") || "none";
     if (d === undefined || d.terms.size === 0) {
-      // only the user opens one, so a retry in a loop only keeps the chat
-      // busy: stop and say so instead
       return "No device " + device + " is open (its unii device isn't running). Open: " + open + ". Only the user starts it, so don't retry or wait: end your turn, saying what is left.";
     }
     return d;
   }
 
-  // the job `id` on a device, waited on: started, unless it runs
   export function job(tools: Tools, device: string, job: Job, signal: AbortSignal, id: string): Promise<Out> {
     const run = tools.devices.get(device)?.jobs.get(id) ?? Tools.start_job(tools, device, job, id);
     if (typeof run === "string") {
@@ -750,9 +591,6 @@ export namespace Tools {
     return run.out;
   }
 
-  // a job started on a device's link (the last live one, else the last:
-  // lost, it fails within GRACE unless linked again), told to it; else
-  // why not
   export function start_job(tools: Tools, device: string, job: Job, id: string): Running | string {
     const d = Tools.open(tools, device);
     if (typeof d === "string") {
@@ -765,7 +603,6 @@ export namespace Tools {
     return run;
   }
 
-  // a job kept until it ends, its link told then
   export function track(d: Device, id: string, term: string, job: Job): Running {
     const { promise, resolve } = Promise.withResolvers<Out>();
     const end = (out: Out) => {
@@ -783,13 +620,6 @@ export namespace Tools {
     tools.devices.get(device)?.jobs.get(id)?.end(out);
   }
 
-  // Agents
-  // ------
-
-  // a spawn's tasks, each with its model and effort checked; one bad
-  // fails them all, naming it (a string: why), so none starts. A model or
-  // effort for the whole call (as spawn took them before) is refused, not
-  // ignored, so no task runs on one it wasn't meant to
   export function spawns(args: any): Spawn[] | string {
     if (args.model !== undefined || args.effort !== undefined) {
       return "Give model and effort per task, in each of tasks: { task, model?, effort? }. Nothing started.";
@@ -809,7 +639,6 @@ export namespace Tools {
     return out;
   }
 
-  // each agent named with its model and effort, if given
   export async function spawn(tools: Tools, tasks: Spawn[]): Promise<string> {
     const view = tasks.length === 0 ? "No tasks." : await Tools.view(tools);
     if (typeof view === "string") {
@@ -822,14 +651,10 @@ export namespace Tools {
     return "Started " + names.join(", ") + ". Each one's report will reach you as a message when it finishes.";
   }
 
-  // what the work a restart cut is told as it goes on (Server.ts
-  // Chat.resume)
   export function restarted(work: string[]): string {
     return "The server restarted, cutting " + work.join(", ") + "; nothing was lost: go on.";
   }
 
-  // before: tells it had queued as a restart cut it (Memory `tells`),
-  // logged ahead of the message
   export async function tell(tools: Tools, name: string, message: string, before: string[] = []): Promise<string> {
     const agent = Tools.agent(tools, name);
     if (agent === null) {
@@ -841,12 +666,8 @@ export namespace Tools {
     }
     const run = agent.run;
     if (run.busy && run.halt.signal.aborted) {
-      // being stopped: told once it has ended, so the message isn't lost
-      // in the call that ends
       await run.going.catch(() => {});
     }
-    // an idle one goes on from its log, on the view as it is now (a second
-    // tell meanwhile just queues behind the first)
     const idle = !run.busy;
     if (idle) {
       const view = await Tools.view(tools);
@@ -870,13 +691,11 @@ export namespace Tools {
     return name;
   }
 
-  // an agent, idle, with its run
   export function made(tools: Tools, name: string, role: Agent["role"], view: Block[]): Agent {
     const agent: Agent = { name, role, why: null, view, replies: [], run: Run.make<Say, Say>(name, Tools.kind(tools, () => agent)) };
     return agent;
   }
 
-  // one not of this process is taken back from its log, idle
   export function agent(tools: Tools, name: string): Agent | null {
     const found = tools.agents.get(name) ?? Tools.logged(tools, name);
     if (found !== null) {
@@ -885,7 +704,6 @@ export namespace Tools {
     return found;
   }
 
-  // an agent as its log has it, idle, not taken back (null: none)
   export function logged(tools: Tools, name: string): Agent | null {
     const log = Memory.agent(tools.mem, name);
     const note = log !== null && log.length > 0 && log[0].kind === "note" ? log[0].text : "";
@@ -893,12 +711,6 @@ export namespace Tools {
     return sub === null ? null : Tools.made(tools, name, { effort: sub[2] ?? null, model: sub[1] ?? null }, []);
   }
 
-  // what a subagent's run does (Run.ts Kind): each call reads its whole
-  // log, so what it is told is logged there as its next call starts (a
-  // tell to one at work waits, queued and kept, for its call to end); a call that
-  // ended answered with tells queued meanwhile is followed by another.
-  // Its replies end up in one report to the chat, unanswered if it was
-  // stopped; tells left queued by a stop are logged, for its next call
   export function kind(tools: Tools, agent: () => Agent): Run<Say, Say>["kind"] {
     const log = tools.log;
     return {
@@ -936,8 +748,6 @@ export namespace Tools {
     };
   }
 
-  // an agent's tells queued, kept with the chat (Memory `tells`), so a
-  // restart doesn't lose them (Server.ts Chat.resume)
   export function queued(tools: Tools, run: Run<Say, Say>): void {
     const texts = run.queue.map((x) => x.q.text);
     if (texts.length === 0 && !(run.name in tools.mem.tells)) {
@@ -951,7 +761,6 @@ export namespace Tools {
     Memory.save_queue(tools.mem);
   }
 
-  // a call of an agent, on Tools.pick
   export function ask(tools: Tools, agent: Agent): Ask {
     const log = { text: Memory.agent_show(tools.mem, agent.name), mark: true };
     const server = Tools.at(tools, agent.name);
@@ -962,9 +771,6 @@ export namespace Tools {
     return { ...run, system, blocks, searches: SEARCHES, server, agent: true, who: agent.name };
   }
 
-  // what an agent runs on: config.AGENTS or else the chat's pick, with
-  // the model and effort it was spawned with, if any; a throw if its
-  // model is no longer offered
   export function pick(tools: Tools, agent: Agent): Pick {
     const base = config.AGENTS ?? tools.main.kind.pick();
     const { model, effort } = agent.role;
@@ -975,9 +781,6 @@ export namespace Tools {
     return { ...given, effort: effort ?? given.effort };
   }
 
-  // what an agent's page shows it runs on (Tools.pick): a model it was
-  // spawned with by its name, not the profile it falls back along; null
-  // if no longer offered
   export function shown(tools: Tools, agent: Agent): Pick | null {
     try {
       const { profile, ...pick } = Tools.pick(tools, agent);
@@ -987,7 +790,6 @@ export namespace Tools {
     }
   }
 
-  // a string: why there is none (Memory.settle)
   export async function view(tools: Tools): Promise<Block[] | string> {
     const why = await Memory.settle(tools.mem, tools.mem.count, tools.main.halt.signal);
     return why ?? Memory.view(tools.mem);
@@ -997,17 +799,10 @@ export namespace Tools {
     return [...tools.agents.values()].filter((a) => a.run.busy);
   }
 
-  // those at work that hold the MCP servers they started with: all but
-  // those waiting for a usage limit, which call none meanwhile
   export function holding(tools: Tools): Agent[] {
     return Tools.working(tools).filter((a) => a.run.limit === null);
   }
 
-  // the stop tool: the agent named stopped at once (Tools.stop), its
-  // report saying why and what it was last doing; waited for (up to
-  // HALT), then every process its shells started killed on each open
-  // device (Machine.halt), so the answer says it ended and nothing of it
-  // runs on, or what does. One not at work only has that sweep
   export async function halt(tools: Tools, name: string, why: string): Promise<Out> {
     const agent = Tools.agent(tools, name);
     if (agent === null) {
@@ -1030,8 +825,6 @@ export namespace Tools {
     return { text, fail: !ended || left.length > 0 };
   }
 
-  // every process `name`'s shells started killed on each open device;
-  // what is left, by device (one that didn't answer in HALT, too)
   export async function sweep(tools: Tools, name: string): Promise<string[]> {
     const live = Tools.opened(tools).filter(([, d]) => [...d.terms.values()].some((t) => t.live()));
     const outs = await Promise.all(live.map(async ([device]) => {
@@ -1047,7 +840,6 @@ export namespace Tools {
     return outs.filter((o) => o !== null);
   }
 
-  // every agent at work (name null), or the one named
   export function stop(tools: Tools, name: string | null): void {
     for (const agent of Tools.working(tools).filter((a) => name === null || a.name === name)) {
       Run.stop(agent.run, null);
