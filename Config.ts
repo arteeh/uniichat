@@ -130,6 +130,10 @@ export const KEYS: Record<string, string> = config_keys(keys_read());
 // the sign-ins and keys the defaults last followed (config_follow)
 let FOLLOWED = config_usable().join();
 
+// what runs as config.json and keys.json are read again (config_reload):
+// a patient call's wait, which its pick changed ends (AskAI.nap)
+export const RELOADED = new Set<() => void>();
+
 const MADE = config_make(FILE);
 
 // the values this process started with: what a "restart" setting runs on
@@ -505,6 +509,7 @@ export function config_reload(): void {
   AGENTS = made.agents;
   AFTER = made.after;
   Object.assign(KEYS, keys);
+  RELOADED.forEach((f) => f());
 }
 
 // config.json and keys.json as read at once: their texts (null: none)

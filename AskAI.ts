@@ -13,9 +13,12 @@
 // most), till
 // one is answered or we end it (a stop): an outage only delays it, and no summary is made of a failure that isn't
 // its input's (Memory.ts). Each wait is told (an Again event: why, and
-// when it asks again), and it starts over on its pick as `repick` reads
-// it then, if given (a summary's: the compactor setting, changed
-// meanwhile). A call that yields (an import's summary, naming its
+// when it asks again; then null as it does), and it starts over on its
+// pick as `repick` reads it then, if given (a summary's: the compactor
+// setting, changed meanwhile): a long usage limit ends its try for that
+// (Agent.ends), and its wait ends early as config is read again with
+// another pick, or at a usage limit, as a resume or the vendor's usage
+// cleared wakes it (Agent.wait_limit). A call that yields (an import's summary, naming its
 // import) sends nothing while one that doesn't waits on its busy model,
 // nor while another of its import's does (Agent.ts).
 //
@@ -72,7 +75,10 @@ export type Block = { text: string; mark: boolean; back?: boolean };
 // agent: a subagent's, which a long usage limit ends (after its
 // fallbacks) instead of parking it, its report saying so; talk: a turn's
 // in conversation mode (claude-api caches it an hour: Anthropic.ts);
-// repick: a patient call's pick as it starts over (AskAI.ask)
+// repick: a patient call's pick as it starts over (AskAI.ask), which a
+// long usage limit ends a try for, as a fallback does; limits: the
+// usage limits in a row its last try ended at, on the pick this one
+// asks again (Agent.limit_wait goes on from them)
 export type Ask = Pick & {
   system    : string;
   blocks    : Block[];
@@ -86,6 +92,7 @@ export type Ask = Pick & {
   fallback? : boolean;
   talk?     : boolean;
   repick?   : () => Pick;
+  limits?   : number;
 };
 
 // a prefix cached: until when; while its leader's response has not
@@ -99,8 +106,9 @@ export type Flight = { begun: () => void; end: () => void };
 // epoch), and whether the vendor told it (else it only asks again then)
 export type Parked = { until: number; known: boolean };
 
-// a patient call failing: why (the vendor's words, if it said any), when
-// it asks again (ms since the epoch), whether it waits for a usage limit
+// a patient call failing: why (on what, and the vendor's words if it
+// said any), when it asks again (ms since the epoch), whether it waits
+// for a usage limit
 export type Again = { why: string; until: number; limit: boolean };
 
 // Run: a call with fallbacks answers on `run` (by its model's label),
@@ -110,7 +118,7 @@ export type Event =
   | { $: "Entry"; kind: Kind; text: string; of?: string; queued?: boolean } // of: the tool call it is or answers; queued: a call that runs later, once its Start comes
   | { $: "Start"; of: string }                            // a queued tool call begins (Agent.ts runs a step's calls one by one)
   | { $: "Limit"; limit: Parked | null }                  // waiting for a usage limit, or no longer
-  | { $: "Again"; again: Again }                          // a patient call failed, waiting to ask again
+  | { $: "Again"; again: Again | null }                   // a patient call failed, waiting to ask again, or asking again now
   | { $: "Run"; run: Pick; from: Pick | null; why: string };
 
 // stop: who ended a call that failed (Agent.ts): the model (`fail`: it
@@ -120,7 +128,9 @@ export type Event =
 // (our setup threw); acted: it ran a tool or took a message sent mid-run,
 // which another try would do again; until: when the vendor's refusal lifts, if it said (ms since 1970);
 // long: the vendor refused it as too long for the model (Agent.TOO_LONG);
-// why: the vendor's own words for a failure `text` says only as BUSY
+// why: the vendor's own words for a failure `text` says only as BUSY;
+// limits: it ended at a usage limit (Agent.limit_off), the usage limits
+// in a row
 export type End = {
   ok     : boolean;
   text   : string;
@@ -132,6 +142,7 @@ export type End = {
   acted? : boolean;
   until? : number;
   long?  : boolean;
+  limits?: number;
 };
 
 // one try at a vendor
@@ -189,9 +200,10 @@ export namespace AskAI {
       call.stop();
     };
     const { promise, resolve } = Promise.withResolvers<End>();
-    const out: Call = { send, stop, wake: () => call.wake(), done: promise };
-    const falls = (pick: Pick) => Pick.falls(pick, pick.profile === undefined ? [] : config.OFFER.profiles?.[pick.profile] ?? []);
-    let picks = falls(ask);
+    // a patient call's wait to ask again, which a wake ends too
+    let nap: AbortController | null = null;
+    const out: Call = { send, stop, wake: () => (call.wake(), nap?.abort()), done: promise };
+    let picks = AskAI.falls(ask);
     // why each pick failed or was skipped, this call
     let whys: (string | null)[] = picks.map(() => null);
     const skip = (from: number): number => {
@@ -202,6 +214,9 @@ export namespace AskAI {
       return to;
     };
     let k = skip(0);
+    // the usage limits in a row the last try ended at, if this one asks
+    // its pick again (Ask `limits`)
+    let limits = 0;
     // a try on picks[k], having left the one before it if any
     const go = (): Try => {
       const run = picks[k];
@@ -217,7 +232,7 @@ export namespace AskAI {
       };
       const probe = picks.length > 1 && DOWN.has(AskAI.down_key(run));
       const fallback = k < picks.length - 1;
-      return AskAI.start({ ...ask, ...run, probe, fallback }, hear);
+      return AskAI.start({ ...ask, ...run, probe, fallback, limits }, hear);
     };
     let call = go();
     const run = async (): Promise<End> => {
@@ -233,13 +248,21 @@ export namespace AskAI {
         whys[k] = failed ? end.text : null;
         const next = (off || unset) && end.acted !== true && k < picks.length - 1;
         const wait = failed && !next && ask.patient === true;
+        const left = picks[k];
+        const limited = wait && end.limits !== undefined;
         if (wait) {
           const ms = Math.min(WEEK, Math.max(AGAIN, (end.until ?? 0) - Date.now()));
-          on({ $: "Again", again: { why: end.why ?? end.text, until: Date.now() + ms, limit: false } });
-          await Machine.nap(ms, halt.signal);
-          if (ask.repick !== undefined && !halt.signal.aborted) {
-            picks = falls(ask.repick());
+          const why = left.vendor + ":" + Pick.named(left).model + ": " + (limited ? "usage limit" : end.why ?? end.text);
+          on({ $: "Again", again: { why, until: Date.now() + ms, limit: limited } });
+          await AskAI.nap(ask, picks, limited ? left.vendor : null, ms, (nap = new AbortController()), halt.signal);
+          nap = null;
+          const now = ask.repick === undefined || halt.signal.aborted ? picks : AskAI.falls(ask.repick());
+          if (!AskAI.same(now, picks)) {
+            picks = now;
             whys = picks.map(() => null);
+          }
+          if (!halt.signal.aborted) {
+            on({ $: "Again", again: null });
           }
         }
         if (halt.signal.aborted || (!next && !wait)) {
@@ -247,6 +270,7 @@ export namespace AskAI {
           return failed && all.length > 1 ? { ...end, text: "no model answered; " + all.join("; ") } : end;
         }
         k = skip(next ? k + 1 : 0);
+        limits = limited && picks[k] === left ? end.limits! : 0;
         call = go();
         end.left.forEach(send);
         end = await call.done;
@@ -254,6 +278,36 @@ export namespace AskAI {
     };
     run().then(resolve, (err) => resolve(AskAI.end(String(err?.message ?? err))));
     return out;
+  }
+
+  // what a call on `pick` runs on: it, then its profile's models (Pick.falls)
+  export function falls(pick: Pick): Pick[] {
+    return Pick.falls(pick, pick.profile === undefined ? [] : config.OFFER.profiles?.[pick.profile] ?? []);
+  }
+
+  // whether two calls' picks are the same, in order
+  export function same(a: Pick[], b: Pick[]): boolean {
+    return a.map(Pick.label).join() === b.map(Pick.label).join();
+  }
+
+  // a patient call's wait to ask again, `ms`, till a stop (`signal`), a
+  // wake (`wake`) or, at a usage limit on `vendor` (null: none), a resume
+  // or that vendor's usage read clear (Agent.wait_limit); and, if it picks
+  // again (`repick`), as config is read again with other picks than
+  // `picks` (a compactor changed in Settings counts at once)
+  export async function nap(ask: Ask, picks: Pick[], vendor: Vendor | null, ms: number, wake: AbortController, signal: AbortSignal): Promise<void> {
+    const moved = () => {
+      if (ask.repick !== undefined && !AskAI.same(AskAI.falls(ask.repick()), picks)) {
+        wake.abort();
+      }
+    };
+    config.RELOADED.add(moved);
+    try {
+      const both = AbortSignal.any([signal, wake.signal]);
+      await (vendor === null ? Machine.nap(ms, both) : Agent.wait_limit(vendor, ms, both));
+    } finally {
+      config.RELOADED.delete(moved);
+    }
   }
 
   // one try; a vendor that throws gives a failed one

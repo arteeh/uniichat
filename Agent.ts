@@ -24,7 +24,10 @@
 // clears never asks fast. A wait of LONG or more parks it (Agent.park):
 // a Limit event tells till when, and a message sent, a wake or a stop
 // ends the wait. A call with a fallback (AskAI.ts) that ran no tool yet
-// goes on with it instead, as when its vendor is out (`off`); a
+// goes on with it instead, as when its vendor is out (`off`), as does
+// a patient one that picks again as it asks again (Ask `repick`: a
+// summary's, so a compactor changed meanwhile counts at its next try,
+// AskAI.ts); a
 // subagent's call (Ask `agent`) ends so too, ran tools or not, its end
 // naming the vendor, the model and the reset, so its report tells the
 // chat (a parked subagent waited unseen). claude-sub
@@ -101,7 +104,8 @@ export type Entry = { kind: Kind; text: string; of?: string };
 
 // note: what it did other than asked; off: down for every call (End.off);
 // refusal: the vendor's, if down by one; until: a plan's usage limit's
-// reset, as told (Wire `reset`)
+// reset, as told (Wire `reset`); limits: ended at a usage limit
+// (limit_off), the usage limits in a row (End.limits)
 export type Step = {
   out      : unknown[];
   uses     : Use[];
@@ -112,6 +116,7 @@ export type Step = {
   off?     : boolean;
   refusal? : Refusal;
   until?   : number;
+  limits?  : number;
 };
 
 // a refusal asking again soon won't change (a ChatGPT plan without this
@@ -258,6 +263,7 @@ export namespace Agent {
         end.stop = step.stop;
         end.off = step.off;
         end.until = step.refusal?.until;
+        end.limits = step.limits;
         return;
       }
       items.push({ $: "Turn", out: step.out });
@@ -306,7 +312,10 @@ export namespace Agent {
   // it holds its room (Room): its model's, or its import's, which one
   // request holds at a time while the rest wait on it, so each import
   // has one request at a busy model however many it runs, and imports
-  // share its room alike. k: its busy tries, n: its usage-limit ones
+  // share its room alike. k: its busy tries, n: its usage-limit ones in
+  // a row (a patient call's try going on from those its last try ended
+  // at: Ask `limits`). A patient call's failures are logged as it waits
+  // to ask again (Memory.heard), not here
   export async function step<S>(wire: Wire<S>, run: Run, key: string, make: (max: number) => unknown, items: Item[]): Promise<Step> {
     const signal = run.abort.signal;
     const model = run.ask.model;
@@ -315,7 +324,7 @@ export namespace Agent {
     let asking = false;
     let refused: string | undefined;
     try {
-      for (let k = 0, n = 0; !signal.aborted; ) {
+      for (let k = 0, n = run.ask.limits ?? 0; !signal.aborted; ) {
         await Agent.yielded(run, own, asking);
         const seen: Entry[] = [];
         const token = await Agent.race(Agent.token(wire, key, refused), signal);
@@ -335,7 +344,7 @@ export namespace Agent {
         const limit = step.stop === "limit";
         k += step.stop === "busy" ? 1 : 0;
         n += limit ? 1 : 0;
-        if (step.stop === "down") {
+        if (step.stop === "down" && run.ask.patient !== true) {
           console.error(model + ": " + step.why.slice(0, 300));
         }
         if (!limit && (step.stop !== "busy" || k >= tries)) {
@@ -353,7 +362,7 @@ export namespace Agent {
           const told = step.until ?? Agent.reset(res, now);
           const { ms, known } = Agent.limit_wait(told, n, run.ask.patient ? AGAIN : LIMIT, now);
           if (Agent.ends(run.ask, run.end.acted === true, ms)) {
-            return Agent.limit_off(step, told, run.ask);
+            return Agent.limit_off(step, told, run.ask, n);
           }
           await Agent.park(run, run.on, signal, run.ask.vendor, ms, known);
           continue;
@@ -401,17 +410,10 @@ export namespace Agent {
   // a call waits `ms` for a usage limit of `vendor`'s: one of LONG or
   // more parked (Limit: till when, `known` if the vendor told it), saying
   // so once a call; a shorter one as when busy, each time. A stop, a
-  // message sent, a wake or a resume ends the wait (true: not a stop)
-  export async function park(hold: Hold, on: (ev: Event) => void, signal: AbortSignal, vendor: Vendor, ms: number, known: boolean): Promise<boolean> {
+  // message sent, a wake or a resume ends the wait (Agent.wait_limit)
+  export async function park(hold: Hold, on: (ev: Event) => void, signal: AbortSignal, vendor: Vendor, ms: number, known: boolean): Promise<void> {
     const wake = new AbortController();
-    let woke = false;
-    const end = () => wake.abort();
-    const me = { vendor, poke: () => ((woke = true), end()) };
-    hold.poke = me.poke;
-    signal.addEventListener("abort", end, { once: true });
-    if (signal.aborted) {
-      end();
-    }
+    hold.poke = () => wake.abort();
     const parked = ms >= LONG;
     if (parked) {
       on({ $: "Limit", limit: { until: Date.now() + ms, known } });
@@ -422,35 +424,48 @@ export namespace Agent {
     } else if (!parked) {
       on({ $: "Entry", kind: "mind", text: "The AI service is busy: asking again in " + Math.ceil(ms / 1e3) + " s." });
     }
-    PARKED.add(me);
-    Agent.poll_soon(vendor);
     try {
-      await Machine.nap(ms, wake.signal);
+      await Agent.wait_limit(vendor, ms, AbortSignal.any([signal, wake.signal]));
     } finally {
-      PARKED.delete(me);
-      Agent.poll_off(vendor);
-      signal.removeEventListener("abort", end);
       hold.poke = () => {};
       if (parked) {
         on({ $: "Limit", limit: null });
       }
     }
-    return woke && !signal.aborted;
+  }
+
+  // a wait of `ms` for a usage limit of `vendor`'s, till `signal` aborts
+  // or a resume wakes it (one the usage read clear does: USAGE, read
+  // every POLL while one waits)
+  export async function wait_limit(vendor: Vendor, ms: number, signal: AbortSignal): Promise<void> {
+    const wake = new AbortController();
+    const me = { vendor, poke: () => wake.abort() };
+    PARKED.add(me);
+    Agent.poll_soon(vendor);
+    try {
+      await Machine.nap(ms, AbortSignal.any([signal, wake.signal]));
+    } finally {
+      PARKED.delete(me);
+      Agent.poll_off(vendor);
+    }
   }
 
   // whether a call waiting `ms` for a usage limit ends instead (limit_off):
-  // a subagent's (it reports it), or one with a fallback to go on to that
-  // did nothing yet; a short wait (under LONG) never does
-  export function ends(ask: { agent?: boolean; fallback?: boolean }, acted: boolean, ms: number): boolean {
-    return ms >= LONG && (ask.agent === true || (ask.fallback === true && !acted));
+  // a subagent's (it reports it), or one that did nothing yet with a
+  // fallback to go on to or picking again as it waits to ask again (a
+  // patient one's `repick`: AskAI.ask waits); a short wait (under LONG)
+  // never does
+  export function ends(ask: { agent?: boolean; fallback?: boolean; repick?: unknown }, acted: boolean, ms: number): boolean {
+    return ms >= LONG && (ask.agent === true || ((ask.fallback === true || ask.repick !== undefined) && !acted));
   }
 
-  // a call at a long usage limit, ended for its fallback to go on (off),
-  // or its subagent to report it: on what, and when it resets, if told
-  export function limit_off(step: Step, until: number | null, ask: { vendor: Vendor; model: string }): Step {
+  // a call at a long usage limit, its `n`th in a row, ended for its
+  // fallback to go on (off), its patient call to wait and pick again, or
+  // its subagent to report it: on what, and when it resets, if told
+  export function limit_off(step: Step, until: number | null, ask: { vendor: Vendor; model: string }, n: number): Step {
     const when = until === null ? "reset time unknown" : "resets " + new Date(until).toISOString().slice(0, 16).replace("T", " ") + " UTC";
     const refusal = { why: step.why + "; " + when, say: "usage limit on " + ask.vendor + " (" + ask.model + "), " + when, until: until ?? undefined };
-    return { ...step, stop: "down", off: true, refusal };
+    return { ...step, stop: "down", off: true, refusal, limits: n };
   }
 
   // a limit told (`key`: LIMITS), kept till its reset, or lifted (null)

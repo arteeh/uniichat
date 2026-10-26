@@ -33,7 +33,8 @@
 // saying so once; a wait of LONG or more parks it (a Limit event tells
 // till when), and a message sent, a wake, a resume or a stop ends the
 // wait. One that ran no tool of ours (nor took a message) and has a
-// fallback (AskAI.ts) goes on with it instead, as when its vendor is
+// fallback (AskAI.ts), or picks again as it asks again (a summary's),
+// goes on with it instead, as when its vendor is
 // out; else it asks again in a new Claude Code. One that did keeps its
 // Claude Code, idle, and at the reset is told to go on (ON): its
 // conversation as it was, tool results in, so no tool runs again. Usage
@@ -490,11 +491,14 @@ export namespace ClaudeSub {
   // the call's end: its Claude Code started (a summary's once it has a
   // slot), our MCP server set, its message in, its turn read to its end.
   // Under a usage limit told whose asking would bill extra usage it waits
-  // before asking (a wake or a message sent waits again); at one, it waits for the reset, then asks again (ran no tool: in a
-  // new Claude Code) or goes on (ON); with a fallback, if it ran no tool
-  // and the wait is long, it ends (`off`) for the fallback to go on. One whose Claude Code dies before
+  // before asking (a wake or a message sent waits again); at one, it
+  // waits for the reset, then asks again (ran no tool: in a new Claude
+  // Code) or goes on (ON); with a fallback or a repick, if it ran no tool
+  // and the wait is long, it ends (`off`) for the fallback to go on (or
+  // AskAI to wait and pick again). One whose Claude Code dies before
   // anything came out is tried once more. A binary's copy gone since
-  // (removed by hand) is written out again
+  // (removed by hand) is written out again. A patient call's failures are
+  // logged as it waits to ask again (Memory.heard), not here
   export async function run(ask: Ask, on: (ev: Event) => void, sent: Say[], signal: AbortSignal, wake: Hold): Promise<Partial<End>> {
     let bin = await ClaudeSub.bin();
     if (!fs.existsSync(bin)) {
@@ -520,20 +524,22 @@ export namespace ClaudeSub {
     };
     // a limit's wait, or the call's end if its fallback goes on instead,
     // or it is a subagent's (Agent.ts)
-    const out = (ms: number, until: number | null, why: string): Partial<End> | null => {
+    const out = (ms: number, until: number | null, why: string, n: number): Partial<End> | null => {
       if (!Agent.ends(ask, acted.v, ms)) {
         return null;
       }
-      const r = Agent.limit_off(Agent.fail(why, []), until, ask).refusal!;
-      console.error(ask.model + ": " + r.why.slice(0, 300));
-      return { text: r.say, stop: "down", off: true, acted: acted.v, until: r.until };
+      const r = Agent.limit_off(Agent.fail(why, []), until, ask, n).refusal!;
+      if (ask.patient !== true) {
+        console.error(ask.model + ": " + r.why.slice(0, 300));
+      }
+      return { text: r.say, why: r.why, stop: "down", off: true, acted: acted.v, until: r.until, limits: n };
     };
     try {
-      for (let tries = 0, n = 0; !signal.aborted; ) {
+      for (let tries = 0, n = ask.limits ?? 0; !signal.aborted; ) {
         const until = ClaudeSub.limited();
         if (until !== null) {
           const ms = until - Date.now();
-          const end = out(ms, until, "usage limit");
+          const end = out(ms, until, "usage limit", n);
           if (end !== null) {
             return end;
           }
@@ -581,7 +587,7 @@ export namespace ClaudeSub {
           code = null;
         }
         const { ms, known } = Agent.limit_wait(got.limit.until, n, ask.patient === true ? AGAIN : LIMIT);
-        const end = out(ms, got.limit.until, got.limit.text);
+        const end = out(ms, got.limit.until, got.limit.text, n);
         if (end !== null) {
           return end;
         }
@@ -656,8 +662,11 @@ export namespace ClaudeSub {
         return { limit: { until: info && ClaudeSub.reset(info), text: why } };
       }
       if (!ok) {
-        console.error("claude-sub: " + (err ? err + ": " : "") + (why || msg.subtype).slice(0, 300));
-        return { text: BUSY, why: (err ? err + ": " : "") + (why || msg.subtype), stop: "down", off: err !== undefined && OFF.includes(err), long: TOO_LONG.test(why) };
+        const said = (err ? err + ": " : "") + (why || msg.subtype);
+        if (ask.patient !== true) {
+          console.error("claude-sub: " + said.slice(0, 300));
+        }
+        return { text: BUSY, why: said, stop: "down", off: err !== undefined && OFF.includes(err), long: TOO_LONG.test(why) };
       }
       const says = sent.splice(0);
       if (says.length === 0) {

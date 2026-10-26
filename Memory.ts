@@ -864,26 +864,33 @@ export namespace Memory {
   export function ask(mem: Memory, l: number, i: number, text: string, blocks: Block[]): Call {
     const own = Memory.served(mem, l, i) === "compactor";
     const repick = () => Pick.ask(config.COMPACTOR);
-    return AskAI.ask({ ...mem.share(), ...repick(), blocks, patient: true, repick, yields: own ? undefined : mem.dir }, (ev) => Memory.heard(mem, own, ev));
+    const told: { again: Again | null } = { again: null };
+    return AskAI.ask({ ...mem.share(), ...repick(), blocks, patient: true, repick, yields: own ? undefined : mem.dir }, (ev) => Memory.heard(mem, own, ev, told));
   }
 
-  // a summary's call's event: a failure waiting to ask again (a usage
-  // limit's wait, or a patient retry) logged, each distinct one once in
-  // LOGGED; the chat's (`own`, not an import's) kept as `again` till one
-  // answers, the views' checks run as it changes
-  export function heard(mem: Memory, own: boolean, ev: Event): void {
-    const again = ev.$ === "Again" ? ev.again : ev.$ === "Limit" && ev.limit !== null ? { why: "usage limit", until: ev.limit.until, limit: true } : null;
-    const answered = ev.$ === "Delta" || (ev.$ === "Entry" && ev.kind !== "mind");
-    if (again !== null) {
+  // a summary's call's event: a failure waiting to ask again (Again)
+  // logged, each distinct one once in LOGGED; the chat's (`own`, not an
+  // import's) kept as `again`, till this call asks again (unless another
+  // failed since: `told`, this call's last) or one answers, the views'
+  // checks run as it changes
+  export function heard(mem: Memory, own: boolean, ev: Event, told: { again: Again | null }): void {
+    const failed = ev.$ === "Again" ? ev.again : null;
+    if (failed !== null) {
       const now = Date.now();
-      const line = (own ? "compactor: " : "compactor (import): ") + again.why.slice(0, 300).replace(/\.$/, "");
+      const line = (own ? "compactor: " : "compactor (import): ") + failed.why.slice(0, 300).replace(/\.$/, "");
       FAILED.forEach((at, seen) => now - at >= LOGGED && FAILED.delete(seen));
       if (!FAILED.has(line)) {
         FAILED.set(line, now);
-        console.error(line + "; asking again " + (again.limit ? "at " + new Date(again.until).toISOString().slice(0, 16).replace("T", " ") + " UTC" : "in " + Math.ceil((again.until - now) / 60e3) + " min"));
+        console.error(line + "; asking again " + (failed.limit ? "at " + new Date(failed.until).toISOString().slice(0, 16).replace("T", " ") + " UTC" : "in " + Math.ceil((failed.until - now) / 60e3) + " min"));
       }
     }
-    if (own && (again !== null || (answered && mem.again !== null))) {
+    const answered = ev.$ === "Delta" || (ev.$ === "Entry" && ev.kind !== "mind");
+    const asks = ev.$ === "Again" && failed === null && mem.again === told.again;
+    const again = failed ?? (asks || answered ? null : mem.again);
+    if (ev.$ === "Again") {
+      told.again = failed;
+    }
+    if (own && again !== mem.again) {
       mem.again = again;
       mem.wait.forEach((check) => check());
     }
