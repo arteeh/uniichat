@@ -1,16 +1,3 @@
-// UniiChat's service worker
-// =========================
-// The app's shell (SHELL), kept as last fetched: a page opened while the
-// server is down gets it, and waits there for the server (main.ts
-// boot_me) instead of the browser's error page. The server's answer
-// always comes first, so a deploy shows at once; nothing else (the API,
-// the socket, the chat's pages and images) is ever kept or answered here.
-// A push (Push.ts, Push.browsers) shows the start of a reply, unless a
-// tab of the chat is in front, in place of the one before; a tap opens
-// the chat.
-
-// (named by the web app's build, which the server writes in: a new
-// build's drops the old one's as it starts)
 const CACHE = "unii-shell-{build}";
 const SHELL = ["/", "/app.js", "/style.css", "/favicon.svg", "/mark.svg", "/manifest.webmanifest", "/icon-192.png"];
 const PAGES = ["/", "/settings", "/account", "/tree"];
@@ -27,8 +14,6 @@ self.addEventListener("activate", (ev) => {
   ev.waitUntil(caches.keys().then((keys) => Promise.all(keys.filter((key) => key !== CACHE).map((key) => caches.delete(key)))).then(() => self.clients.claim()));
 });
 
-// the shell's files, and a page of the app (PAGES: all index.html, kept
-// as "/")
 self.addEventListener("fetch", (ev) => {
   const req = ev.request;
   const url = new URL(req.url);
@@ -39,9 +24,6 @@ self.addEventListener("fetch", (ev) => {
   ev.respondWith(fresh(req, page ? "/" : url.pathname));
 });
 
-// the server's answer (never the browser's cache unchecked: a new build
-// shows at once), kept; none, or the server down behind a proxy (5xx),
-// the one kept
 async function fresh(req, key) {
   const cache = await caches.open(CACHE);
   try {
@@ -80,7 +62,6 @@ self.addEventListener("notificationclick", (ev) => {
   ev.waitUntil(open_chat());
 });
 
-// the chat: one of its tabs, in front; else a new one
 async function open_chat() {
   const tabs = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
   const tab = tabs.find((t) => new URL(t.url).origin === location.origin);

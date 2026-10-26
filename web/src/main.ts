@@ -1,20 +1,3 @@
-// UniiChat (the site)
-// ===================
-// The page around View.ts's chat: the server's messages go to
-// View.view_hear, a click's `data-act` (Html.ts) to View.view_act, and
-// both answer what to send back. The page is drawn once a frame, keeping
-// the first row in sight in place, or the bottom while the page is at it;
-// the log's rows only once a message (but a stream's piece) or an act
-// changed them, what streams in a place of its own, so typing, or a reply
-// streaming, touches no row.
-// The markup is index.html's: the header, the chat, the settings page
-// (/settings, once /account) or the memory tree (/tree: Tree.ts), and the
-// footer as the terminal's; a picture opens over them (Viewer.ts). A tab
-// is no device; a signed-out one is told how to sign in (`unii serve
-// link`). The site installs as an app
-// (manifest.webmanifest, sw.js) and may notify (Notifications); in the
-// iOS app (ios/: APP) the app notifies.
-
 import * as Import from "../../Import.ts";
 import { theme_css } from "../../Theme.ts";
 import * as View from "../../View.ts";
@@ -23,57 +6,26 @@ import * as Html from "./Html.ts";
 import * as Tree from "./Tree.ts";
 import * as Viewer from "./Viewer.ts";
 
-// Types
-// =====
-
-// a source the import read (a folder, an export): its sessions, and its
-// files left out as they changed while read
 type Read = { sessions: Import.Session[]; moved: number };
 
-// Constants
-// =========
-
-// the iOS app's bridge (ios/), in its web view only
 const APP = (window as any).webkit?.messageHandlers?.unii ?? null;
 
-// a page with a hover has a keyboard of its own; on a touch screen,
-// Enter types a new line (the arrow sends), and the page never focuses
-// the box itself, which would pop the keyboard up
 const DESK = matchMedia("(hover: hover)");
 
-// a folder without sessions
 const NONE   = "No Claude or ChatGPT chats in that folder. Choose ~/.claude or ~/.codex.";
 
-// the intro's scenes: two lines, then the logo above the name
 const SCENES = `
   <div class="scene"><p>Your entire life.</p><p>One single chat.</p></div>
   <div class="scene"><i class="mark"></i><h1>UniiChat</h1></div>`;
 
-// the chat
 const v = View.view_new();
 
-// the message box (Box.ts)
 const BOX = $<HTMLElement>(".composer .field");
 
-// the files uploading into it, by their item (Uploads)
 const UPS = new Map<HTMLElement, XMLHttpRequest>();
 
-// the import's slider: the first day it takes, in days since 1970, from
-// the first new message's (its left end: all) to today's
 const BACK = $<HTMLInputElement>("#import [name=back]");
 
-// the page's: end: at its bottom; stick: the next draw may keep it;
-// y: its scroll when last scrolled; open: the tool calls and results
-// unfolded, by id (folds); still: the page left where it is at the
-// log's next resize (unfold); build, due, going, since, dirty, saving,
-// gave, back: the web app's build and its reload into another (Renew);
-// after: a message sent while files upload (Uploads);
-// frame: awaited (0: none); rows: the log's rows changed, to draw;
-// found: the sources read, by name; done: sessions imported before; off:
-// left out (Import.Want); step: the import's; away: the chat's scroll as
-// a page (the settings, the tree) was opened over it, kept for its return;
-// used: what the server was last told of this page's use (in_use); at:
-// the path (and hash) route last showed
 const P = {
   rec   : null as MediaRecorder | null,
   shown : "",
@@ -108,14 +60,9 @@ function $<T extends HTMLElement>(sel: string): T {
   return document.querySelector(sel) as T;
 }
 
-// where this browser keeps a fact: "draft", the box's text, for the tab
-// (a reload keeps it); "welcomed", offered the import
 function kept(fact: string): string {
   return "unii." + fact;
 }
-
-// Boot
-// ====
 
 async function boot(): Promise<void> {
   document.head.insertAdjacentHTML("beforeend", `<style>${theme_css()}</style>`);
@@ -123,8 +70,6 @@ async function boot(): Promise<void> {
     navigator.serviceWorker?.register("/sw.js").catch(() => {});
   }
   const tree = location.pathname === TREE ? TREE + (tree_view() ? "#view" : "") : null;
-  // (reloaded with a picture open: its entry, now the chat's, holds the
-  // chat's under it too, so back would do nothing; it steps off it)
   const pic = history.state?.pic != null;
   history.replaceState(null, "", PAGES.includes(location.pathname) ? "/settings" : tree ?? "/");
   if (pic) {
@@ -138,7 +83,6 @@ async function boot(): Promise<void> {
   signed();
   route();
   connect();
-  // (input a person makes: a page scrolling itself, to a reply, is none)
   for (const ev of ["keydown", "pointerdown", "pointermove", "wheel", "touchstart"]) {
     addEventListener(ev, () => in_use(), { capture: true, passive: true });
   }
@@ -154,10 +98,6 @@ async function boot(): Promise<void> {
   addEventListener("pagehide", () => in_use(true));
 }
 
-// whether signed in (null: no, as the server refuses the session);
-// any other answer (a restart, no connection)
-// says nothing of who, so it is asked again, saying so while it lasts (the
-// app opened from sw.js's shell with the server down)
 async function boot_me(): Promise<any> {
   for (let k = 0; ; k++) {
     const res = await fetch("/api/me").catch(() => null);
@@ -174,30 +114,22 @@ async function boot_me(): Promise<any> {
   }
 }
 
-// the settings page's paths, drawn in #account (/account: an older link)
 const PAGES = ["/settings", "/account"];
 
-// the memory tree's path, drawn in #tree (Tree.ts): its TREE, or with
-// #view its VIEW (#VIEW: the old page's link)
 const TREE = "/tree";
 
 function tree_view(): boolean {
   return location.hash.toLowerCase() === "#view";
 }
 
-// a page of one note: how to sign in
 function solo(title: string, sub: string): void {
   document.body.className = "solo";
   document.body.innerHTML = `<main><h1>${title}</h1><p class="sub">${sub}</p></main>`;
 }
 
-// Chat
-// ====
-
 function chat(): void {
   const file = $<HTMLInputElement>("input[type=file]");
   Box.box_new(BOX, { input: typed, files: attach });
-  // (a phone's keyboard down: a reload may be due, and was waiting for it)
   BOX.addEventListener("blur", () => draw(false));
   // never the Enter that ends a composition (Japanese, Chinese: Safari
   // ends it first, so only its keyCode, 229, says so)
@@ -224,7 +156,6 @@ function chat(): void {
   Viewer.viewer_new();
   importer();
   document.ondragover = (ev) => ev.preventDefault();
-  // on an agent's page (no box) a drop is let go: it would wait unseen
   document.ondrop = (ev) => {
     ev.preventDefault();
     if (View.view_typing(v) && (ev.dataTransfer?.files.length ?? 0) > 0) {
@@ -232,18 +163,12 @@ function chat(): void {
     }
   };
   document.onclick = click;
-  // a phone's keyboard up or down: the box's last line stays in sight, if
-  // the caret is there; the page's bottom, if at it
   visualViewport!.onresize = () => {
     if (Box.box_focused() && Box.box_caret()[0] === Box.box_text().length) {
       BOX.scrollTop = BOX.scrollHeight;
     }
     draw(true);
   };
-  // the page leaves its bottom only as it scrolls up (the user's swipe,
-  // wheel, keys or scrollbar: a page that grows or shrinks at its bottom
-  // stays at it); one that grows (the box, a reply, an image) is kept
-  // there
   document.onscroll = () => {
     if (at_end()) {
       P.end = true;
@@ -276,7 +201,6 @@ function chat(): void {
   draw(true);
 }
 
-// the page signed in
 function signed(): void {
   document.body.className = "";
   BOX.dataset.placeholder = View.HINT;
@@ -284,8 +208,6 @@ function signed(): void {
   renewed();
 }
 
-// the box changed: its text kept as the draft; an upload whose item was
-// deleted ends
 function typed(): void {
   sessionStorage.setItem(kept("draft"), Box.box_text());
   for (const [item, xhr] of UPS) {
@@ -297,8 +219,6 @@ function typed(): void {
   draw(true);
 }
 
-// a message sent: never with a file that didn't upload in it (deleted, it
-// may go); with files still uploading, once they are
 function submit(): void {
   if (Box.box_items().some((item) => item.dataset.state === "bad")) {
     P.after = false;
@@ -316,8 +236,6 @@ function submit(): void {
   Box.box_set("");
 }
 
-// a message refused goes back in the box, unless another is in it; the
-// why is a toast
 function back(sent: View.Sent, out: View.Answer): void {
   if (out.error === undefined) {
     return;
@@ -328,24 +246,11 @@ function back(sent: View.Sent, out: View.Answer): void {
   toast(out.error);
 }
 
-// Uploads
-// =======
-// A file pasted, dropped or picked (an image, a video, a sound, a page,
-// any other file) goes to the media store at once (Server.ts /api/media),
-// an item in the box where the caret is (Box.ts) showing it and how far
-// it is; once uploaded, the item is its markdown, ![name](/media/…), or
-// a file that isn't media its link, [name](/media/…). One refused says
-// so on it and in a toast: the message can't be sent till it is deleted.
-// A message sent meanwhile goes as the last upload ends (not if one is
-// refused); an item deleted ends its upload.
-
 const FAILED = "A file in the message didn't upload: delete it (Backspace after it), then send.";
 
 function attach(files: File[]): void {
   for (const file of files) {
     const name = file.name.replace(/[[\]\\\n]/g, "") || "file";
-    // its kind as the store will name it (Memory.media_add): by its
-    // extension; with none, a picture if it says so (its bytes decide)
     const ext = View.media_ext(file.name);
     const kind = ext !== "" ? View.ext_kind(ext) ?? "file" : file.type.startsWith("image/") ? "image" : "file";
     const item = Box.item_new(name, kind === "image" || kind === "video" ? URL.createObjectURL(file) : "", "up", kind, file.size);
@@ -385,7 +290,6 @@ function upload(item: HTMLElement, file: File): void {
   xhr.send(file);
 }
 
-// an upload's answer: the file's name in the store, or why not
 function upload_answer(xhr: XMLHttpRequest): { name: string } | { error: string } {
   let out: unknown = null;
   try {
@@ -408,18 +312,13 @@ function act(a: View.Act): void {
   draw(a.$ === "Send");
 }
 
-// a click on a View.Act, a Copy button, a page (go), a knob or its
-// menu's row (Html.ts), unless it ends a selection dragged in its element
 function click(ev: MouseEvent): void {
   const target = ev.target as HTMLElement;
   const el = target.closest<HTMLElement>("[data-act], [data-copy], [data-go], [data-knob], .choices > button");
   const sel = getSelection();
-  // a picture opens in the page (Viewer.ts); with a key held, as a link
   const pic = Viewer.viewer_pic(target);
   if (pic !== null && !(ev.ctrlKey || ev.metaKey || ev.shiftKey || ev.altKey) && (sel === null || sel.isCollapsed)) {
     ev.preventDefault();
-    // (on a touch screen, the box focused would take the focus back as
-    // the picture closes, and its keyboard pop up)
     if (!DESK.matches) {
       BOX.blur();
     }
@@ -456,10 +355,6 @@ function click(ev: MouseEvent): void {
   }
 }
 
-// a knob's menu, before it opens (the knob's own click opens and closes
-// it): over the knob, its right edge at the knob's (one on the screen's
-// left half, as the mode's: its left edge at the knob's), as tall and
-// wide as the screen has room for (style.css: it scrolls past that)
 function place(knob: HTMLElement): void {
   const menu = $("#pick-" + knob.dataset.knob);
   const box = knob.getBoundingClientRect();
@@ -473,12 +368,8 @@ function place(knob: HTMLElement): void {
   menu.style.maxHeight = box.top - 12 + "px";
 }
 
-// in a knob's menu, the arrows go down and up its rows, Home and End to
-// its ends (Tab too goes through them; Escape, a click out, or Tab out
-// either end closes it)
 function roam(ev: KeyboardEvent): void {
   const menu = (ev.target as HTMLElement).closest<HTMLElement>(".choices");
-  // back to its knob: a click there toggles it, so left() keeps it open
   if (menu !== null && ev.key === "Tab" && ev.shiftKey && ev.target === menu.querySelector("button")) {
     ev.preventDefault();
     menu.hidePopover();
@@ -496,8 +387,6 @@ function roam(ev: KeyboardEvent): void {
   rows[to[ev.key] % n].focus();
 }
 
-// focus tabbed out of a knob's menu closes it; but to its knob, whose
-// click closes it, or to nothing (a tap on a row may not focus it)
 function left(ev: FocusEvent): void {
   const menu = (ev.target as HTMLElement).closest<HTMLElement>(".choices:popover-open");
   const to = ev.relatedTarget as Node | null;
@@ -505,13 +394,6 @@ function left(ev: FocusEvent): void {
     menu.hidePopover();
   }
 }
-
-// Folds
-// =====
-// A tool call or result taller than FOLD of its own lines is long: it
-// shows 8 (style.css), its button and a tap on it unfold it, the button
-// folds it again; unfolded by id (P.open), so a row drawn anew keeps it.
-// Each is measured once as drawn, all again as the width changes.
 
 const FOLD = 10;
 
@@ -535,8 +417,6 @@ function fold_show(msg: HTMLElement, open: boolean): void {
   button.textContent = open ? "Show less" : "Show all";
 }
 
-// its top stays where it is: the page follows its bottom again only if
-// still at it
 function unfold(msg: HTMLElement): void {
   const open = !msg.classList.contains("shown");
   const id = msg.dataset.a ?? "";
@@ -545,16 +425,10 @@ function unfold(msg: HTMLElement): void {
   P.end = false;
   fold_show(msg, open);
   scrollBy(0, msg.getBoundingClientRect().top - top);
-  // (following the chat's end, it still is: the next message pulls the
-  // page down again; this resize leaves it)
   P.end = follow || at_end();
   P.still = follow;
 }
 
-// a page in a message (Html.ts) as tall as its content, measured as it
-// loads and as the window's size changes (all: each again); style.css
-// caps it, and it scrolls inside past that. Nothing runs in it, but its
-// frame is of this site, so this page reads its height
 const FRAMED = new WeakSet<HTMLIFrameElement>();
 
 function frames(all = false): void {
@@ -578,13 +452,6 @@ function copied(button: HTMLElement): void {
   button.innerHTML = Html.CHECK;
   setTimeout(() => (button.innerHTML = Html.SHEETS), 1200);
 }
-
-// Voice
-// =====
-// The mic records (the browser's MediaRecorder: webm, or mp4 where only
-// that is made) until clicked again; the server writes the recording
-// out, paid as the calls, and its words join the box where the cursor
-// is, to edit and send.
 
 async function mic(): Promise<void> {
   if (P.rec !== null) {
@@ -611,8 +478,6 @@ async function mic(): Promise<void> {
   meter(stream, rec);
 }
 
-// While rec records, the box shows its loudness: a bar every 50 ms,
-// scrolling left, and the time so far.
 function meter(stream: MediaStream, rec: MediaRecorder): void {
   const audio = new AudioContext();
   const probe = audio.createAnalyser();
@@ -666,11 +531,6 @@ function heard(out: View.Answer): void {
   Box.box_focus();
 }
 
-// Socket
-// ======
-// View's link; a socket lost opens again, but one that never showed the
-// chat may be a session gone: then the page starts over.
-
 function connect(): void {
   View.link_open(v, {
     open : (query) => new WebSocket(location.origin.replace(/^http/, "ws") + "/ws" + query),
@@ -680,9 +540,6 @@ function connect(): void {
   });
 }
 
-// whether this page is in use (shown and focused; off: leaving it), told
-// the server on each socket, and again while in use at most each
-// USE_PING: no push goes out meanwhile (Server.ts Chat.phone)
 function in_use(off = false): void {
   const on = !off && document.visibilityState === "visible" && document.hasFocus();
   const ws = v.ws;
@@ -703,9 +560,6 @@ async function lost(up: boolean): Promise<boolean> {
   return true;
 }
 
-// a pick changed shows what it is now (a click on a knob moves it). The
-// rows change with what they show: a state (~10/s importing)
-// only by its agents, an agent's page saying whether it runs
 function hear(msg: View.Server): void {
   if (v.ws !== P.used.ws) {
     in_use();
@@ -726,16 +580,6 @@ function hear(msg: View.Server): void {
   import_welcome();
   draw(true);
 }
-
-// Import
-// ======
-// Import History: offered once to a new chat on a computer, and in
-// the menu. A folder picked, or a site's export (a zip), is read for its
-// sessions' heads, each app's list folded (all picked; open it to
-// leave some out); then what it finds, and Import; then its progress,
-// Pause or Resume. All follows from P and
-// a status. A picked file can't be read once it changes, so each is
-// copied as first read.
 
 function importer(): void {
   const form = $<HTMLFormElement>("#import form");
@@ -767,7 +611,6 @@ function importer(): void {
     }
     import_draw("");
   };
-  // drawn once as the read starts (a draw lists every session found)
   dir.onchange = async () => {
     const all = [...(dir.files ?? [])];
     const files = all.filter((f) => Import.import_file(f.webkitRelativePath));
@@ -802,12 +645,10 @@ function importer(): void {
   };
 }
 
-// the progress's button: Pause or Resume
 function import_flow(): void {
   View.link_send(v, { $: "go", on: Boolean(v.importing?.why) }, (out) => out.error && toast(out.error));
 }
 
-// the box, opened by the menu or as a new chat's first step
 async function import_open(first: boolean): Promise<void> {
   $("#menu").hidePopover();
   P.done = await fetch("/api/imported").then((res) => res.json()).catch(() => ({}));
@@ -817,10 +658,6 @@ async function import_open(first: boolean): Promise<void> {
   $("#import").showPopover();
 }
 
-// a source read, its sessions by name; the slider at all again (its left end:
-// the draw's min pulls it up to the first day). Its min goes first: a range
-// keeps its value within its bounds (set under the last min, today with nothing
-// read, it stays at today)
 function import_took(name: string, read: Read, status: string): void {
   P.found.set(name, read);
   BACK.min = "0";
@@ -828,8 +665,6 @@ function import_took(name: string, read: Read, status: string): void {
   import_draw(status);
 }
 
-// a new chat (only its OPENING), on a computer: the box, once on this
-// browser (a reload never asks again), after the intro
 async function import_welcome(): Promise<void> {
   await INTRO;
   const key = kept("welcomed");
@@ -847,8 +682,6 @@ function import_send(): void {
   View.link_send(v, { $: "import", body }, import_sent);
 }
 
-// the box stays open on the import's progress (the answer says whether it
-// still runs: its first progress may come before or after it)
 function import_sent(out: View.Answer): void {
   P.step = out.error !== undefined ? "" : out.going ? "run" : "done";
   if (out.error === undefined) {
@@ -858,7 +691,6 @@ function import_sent(out: View.Answer): void {
   $("#import").showPopover();
 }
 
-// the import the box wants
 function import_plan(): Import.Plan {
   const form = new FormData($<HTMLFormElement>("#import form"));
   const want = { off: [...P.off], since: import_since(), tools: form.has("tools") };
@@ -866,15 +698,10 @@ function import_plan(): Import.Plan {
   return Import.import_plan(found, want, P.done);
 }
 
-// the slider's day, the first one taken ("2026-06-01"; at its left end,
-// all: ""): it runs in days from the first new message's to today
 function import_since(): string {
   return BACK.valueAsNumber > Number(BACK.min) ? new Date(BACK.valueAsNumber * 864e5).toISOString().slice(0, 10) : "";
 }
 
-// an import's progress, in the box and the header, once it is sent or
-// while one runs (from any tab: its step is then "seen", whatever the box
-// showed); at its end the box says so, until closed. Whether it shows.
 function import_bar(): boolean {
   const run = v.importing;
   P.step = run !== null ? "seen" : P.step === "seen" ? "done" : P.step;
@@ -899,7 +726,6 @@ function import_bar(): boolean {
   return going;
 }
 
-// the box as P says, with a status (reading, or why not)
 function import_draw(status: string): void {
   if (import_bar()) {
     return;
@@ -939,13 +765,10 @@ function import_draw(status: string): void {
   import_srcs().forEach((src) => (src.querySelector<HTMLButtonElement>(".pickzip")!.disabled = dir.disabled));
 }
 
-// each app's box (index.html .src, by data-app)
 function import_srcs(): HTMLElement[] {
   return [...document.querySelectorAll<HTMLElement>("#import .src")];
 }
 
-// a picked file as it is now, copied a chunk at a time (the browser keeps
-// the chunks, on disk when large, so the page never holds it whole)
 async function import_copy(file: File): Promise<Blob> {
   const reader = file.stream().getReader();
   const parts: Blob[] = [];
@@ -955,13 +778,6 @@ async function import_copy(file: File): Promise<Blob> {
   return new Blob(parts);
 }
 
-// Drawing
-// =======
-
-// an element's children, one per markup, each made only when no child
-// has its markup: the rest stay as they are, so a fold or a new message
-// touches its own row only, and what is under the mouse, selected or
-// loaded stays (a reply streams into its last row only)
 const MARKUP = new WeakMap<Element, string>();
 
 function markup(el: Element, htmls: string[]): void {
@@ -986,7 +802,6 @@ function markup(el: Element, htmls: string[]): void {
   }
 }
 
-// one markup's element, its markup kept
 function html_parse(html: string): Element {
   const made = document.createElement("template");
   made.innerHTML = html;
@@ -995,7 +810,6 @@ function html_parse(html: string): Element {
   return child;
 }
 
-// draws the page at the next frame; stick: keep the bottom, if at it
 function draw(stick: boolean): void {
   P.stick = P.stick && stick;
   if (P.frame === 0) {
@@ -1006,8 +820,6 @@ function draw(stick: boolean): void {
   }
 }
 
-// a new chat shown opens at its bottom (folded: its top); a page shown
-// (the settings, the tree), only the bars
 function paint(): void {
   if ($("#log").hidden) {
     P.frame = 0;
@@ -1060,25 +872,18 @@ function paint(): void {
   }
 }
 
-// which chat shows (an agent's, folded): one other than last drawn opens
-// anew
 function shown_key(): string {
   return (v.page === null ? "" : v.page.name) + (v.fold === null ? "" : "/fold");
 }
 
-// the page at its bottom
 function at_end(): boolean {
   return innerHeight + scrollY >= document.documentElement.scrollHeight - 1;
 }
 
-// the header's and the footer's parts that change, and the notes, a
-// server's or an act's ("/help is no command", "haiku-5.5 has no fast"),
-// as toasts
 function bars(): void {
   for (const note of v.notes.splice(0)) {
     toast(note);
   }
-  // (after this draw: a page shown is drawn and placed first)
   if (P.due && !P.going && renew_free()) {
     P.going = true;
     setTimeout(renew);
@@ -1095,12 +900,10 @@ function bars(): void {
     $("#timers").hidePopover();
   }
   send.classList.toggle("stop", stop);
-  // an agent's page has no box: messages go to UniiChat
   $(".composer").hidden = !on;
   $<HTMLButtonElement>(".mic").disabled = v.out.some((p) => p.msg.$ === "voice");
   $(".mic").classList.toggle("rec", P.rec !== null);
   $(".composer").classList.toggle("rec", P.rec !== null);
-  // a knob focused (its menu just closed) stays so as its value changes
   const knob = (document.activeElement as HTMLElement | null)?.dataset?.knob;
   markup($("#pick"), Html.pick_html(View.view_fold(v), v.fold === null, View.view_shown(v), v.page === null ? v.talk : undefined));
   if (knob !== undefined) {
@@ -1112,9 +915,6 @@ function bars(): void {
   import_bar();
 }
 
-// the first row in sight with a first message (no row inside it): that
-// message, and where it is on screen. None in sight: the page keeps its
-// scroll, as those rows only grow at its end
 function anchor(): { a: number; top: number } | null {
   for (const r of document.querySelectorAll<HTMLElement>("#log [data-a]")) {
     const box = r.getBoundingClientRect();
@@ -1124,12 +924,6 @@ function anchor(): { a: number; top: number } | null {
   }
   return null;
 }
-
-// Mine
-// ====
-// The button at the top goes up to the user's last message out of
-// sight above, and each press after to the one before it: a reply's
-// thinking, tool calls and output can bury the prompt it answers.
 
 function mine(): void {
   const rows = [...document.querySelectorAll<HTMLElement>("#log .msg.user")];
@@ -1141,16 +935,12 @@ function mine(): void {
   mine_show();
 }
 
-// shown while one of the user's messages is above the screen; the one
-// down (down), while the page is not at its bottom nor kept at it
 function mine_show(): void {
   const first = document.querySelector<HTMLElement>("#log .msg.user");
   $(".mine").hidden = first === null || !mine_above(first);
   $(".down").hidden = P.end || innerHeight + scrollY >= document.documentElement.scrollHeight - 1;
 }
 
-// the button above the pick bar goes down to the page's bottom, which the
-// next draws then keep
 function down(): void {
   scrollTo(0, document.documentElement.scrollHeight);
   P.end = true;
@@ -1161,17 +951,6 @@ function mine_above(el: HTMLElement): boolean {
   return el.getBoundingClientRect().top < $("header").getBoundingClientRect().bottom;
 }
 
-// Settings
-// ========
-// The settings page (Html.account_html), drawn anew each time it is shown
-// and after each act on it: the prompts, this browser's sign-in, then the
-// server's settings (Html.settings_html), drawn anew after each save, which sends only what changed (null: back to the default; a key
-// out), and the version of the files it read, so a save on what changed
-// since is refused. A key typed is sent once and gone from the page as
-// it is drawn again.
-
-// shows the page at path: the chat ("/"), the settings or the tree (its
-// #view too)
 function go(path: string): void {
   if (location.pathname + location.hash !== path) {
     history.pushState(null, "", path);
@@ -1179,9 +958,6 @@ function go(path: string): void {
   route();
 }
 
-// the settings page and the tree keep of the footer only its toasts
-// (style.css); the chat, back from them, is where it was (P.away): at its
-// bottom, kept there
 function route(): void {
   const page = PAGES.includes(location.pathname);
   const tree = location.pathname === TREE;
@@ -1198,7 +974,6 @@ function route(): void {
   P.shown = chat && P.away !== null ? shown_key() : location.pathname;
   if (chat && P.away !== null) {
     P.end = P.away.end;
-    // its rows drawn first (none yet, if the page was reloaded away from it)
     P.rows = true;
     paint();
     scrollTo(0, P.end ? document.documentElement.scrollHeight : P.away.y);
@@ -1216,9 +991,6 @@ function route(): void {
   draw(chat && P.end);
 }
 
-// back or forward: another page shows (route), or the same, a picture
-// opened or closed over it only (Viewer.ts: no page of its own); a
-// reload put off while it showed may go now (bars)
 function popped(): void {
   if (location.pathname + location.hash !== P.at) {
     route();
@@ -1233,7 +1005,6 @@ async function account(): Promise<void> {
   const prompts: View.Prompts | null = got !== null && got.ok ? await got.json().catch(() => null) : null;
   const push = await notify_state().catch(() => null);
   el.innerHTML = Html.account_html(prompts, push);
-  // (drawn anew: nothing on it edited yet)
   P.dirty.clear();
   el.oninput = (ev) => {
     const form = (ev.target as Element).closest("form");
@@ -1261,10 +1032,7 @@ async function account(): Promise<void> {
   settings_draw(page);
 }
 
-// the page's MCP servers, as the chat's state has them (Html.mcp_html);
-// a switch focused stays so as it flips
 function mcp_draw(): void {
-  // (no pick: the chat's state not here yet)
   const box = document.querySelector("#account .mcp");
   if (box === null || v.pick === null) {
     return;
@@ -1280,9 +1048,6 @@ async function signout(): Promise<void> {
   location.href = "/";
 }
 
-// a prompt saved (the user prompt or the compaction prompt), shown as
-// it is now (empty: the default); text typed while it saved is not, and
-// says so
 async function account_prompt(form: HTMLFormElement): Promise<void> {
   const area = form.querySelector("textarea")!;
   const why  = form.querySelector(".why")!;
@@ -1305,16 +1070,6 @@ async function account_prompt(form: HTMLFormElement): Promise<void> {
   draw(false);
 }
 
-// Notifications
-// =============
-// Web Push (Push.ts): turned on on the account page, by a click, as only
-// a click may ask the browser's permission (subscribing asks it), so
-// what subscribing needs (P.push) is read as the page is drawn. On while
-// this browser's subscription is kept for this sign-in
-// (Owner.web_subscribe); signing out ends it.
-
-// null: none to offer (the app notifies by itself; a browser without
-// push, or whose push service fails, as Firefox's with push turned off)
 async function notify_state(): Promise<Html.Notify | null> {
   P.push = null;
   if (APP !== null) {
@@ -1371,8 +1126,6 @@ async function notify(on: boolean): Promise<void> {
   account();
 }
 
-// the browser asked first, at once (the click's); a subscription to
-// another key (the server's keys made anew) is replaced
 async function notify_on(reg: ServiceWorkerRegistration, key: string): Promise<any> {
   const bytes = notify_bytes(key);
   const ask = () => reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: bytes });
@@ -1402,19 +1155,13 @@ function settings_draw(page: any): void {
   const form = $<HTMLFormElement>("#account form.settings");
   const rows = new Map<string, any>(page.settings.map((r: any) => [r.key, r]));
   const unset = new Set<string>();
-  // the profiles as edited (none shown: UNII_PROFILES sets them), each
-  // its name and models in order; drawn anew as one changes, the focus
-  // put back on what it was on
   const profs: Array<[string, string[]]> = Object.entries(page.profiles ?? {});
   const box = form.querySelector<HTMLElement>(".profiles .field");
   const names = () => profs.map(([name]) => name.trim()).filter((name) => name !== "");
-  // a list's items: its boxes checked, or (not shown) its value
   const listed = (key: string) => {
     const boxes = [...form.querySelectorAll<HTMLInputElement>(`input[name="${key}"]`)];
     return boxes.length === 0 ? Html.list(rows.get(key).value) : boxes.filter((b) => b.checked).map((b) => b.value);
   };
-  // the models of the vendors checked shown, each pick's four lists of
-  // what they offer, a vendor checked without a key warned of
   const picks = () => {
     const vendors = listed("vendors");
     form.querySelectorAll<HTMLElement>(".opt[data-vendor]:not([data-vendor=''])").forEach((o) => (o.hidden = !o.dataset.vendor!.split(" ").some((v) => vendors.includes(v))));
@@ -1486,7 +1233,6 @@ function settings_draw(page: any): void {
     box!.closest(".set")!.querySelector(".err")!.textContent = "";
     picks();
   };
-  // a pick on a profile renamed follows it
   const renamed = (was: string, now: string) => {
     for (const key of Html.PICKS) {
       const value = form.querySelector<HTMLInputElement>(`input[name="${key}"]`);
@@ -1525,7 +1271,6 @@ function settings_draw(page: any): void {
       profs[i][0] = name.value;
     }
   });
-  // a model moved by its handle: arrow keys a place up or down
   box?.addEventListener("keydown", (ev) => {
     const grip = (ev.target as HTMLElement).closest<HTMLButtonElement>(".grip");
     if (grip === null || (ev.key !== "ArrowUp" && ev.key !== "ArrowDown")) {
@@ -1540,8 +1285,6 @@ function settings_draw(page: any): void {
       profs_changed(`.grip[data-i="${i}"][data-j="${k}"]`);
     }
   });
-  // or dragged (a mouse, a finger, a pen): its row follows the pointer
-  // among the others, and stays where it is let go
   box?.addEventListener("pointerdown", (ev) => {
     const grip = (ev.target as HTMLElement).closest<HTMLButtonElement>(".grip");
     if (grip === null || ev.button !== 0) {
@@ -1558,7 +1301,6 @@ function settings_draw(page: any): void {
         ol.insertBefore(li, below ?? null);
       }
     };
-    // on the window: a row moved loses its pointer capture
     const up = () => {
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", up);
@@ -1580,13 +1322,10 @@ async function settings_save(form: HTMLFormElement, page: any, unset: Set<string
   const set: Record<string, string | null> = {};
   const keys: Record<string, string | null> = {};
   for (const r of page.settings) {
-    // one not shown isn't sent
     if (form.querySelector(`.set[data-key="${r.key}"]`) === null) {
       continue;
     }
     const field = form.querySelector<HTMLInputElement>(`input[name="${r.key}"]`);
-    // a list changed only if its items did (the boxes' order is no
-    // change: Html.list_changed)
     const now = r.key === "vendors" || r.key === "models" ? Html.list_changed(Html.list(r.value), listed(r.key))?.join(",") ?? r.value : field?.value.trim() ?? r.value;
     if (unset.has(r.key)) {
       set[r.key] = null;
@@ -1604,7 +1343,6 @@ async function settings_save(form: HTMLFormElement, page: any, unset: Set<string
   }
   const why = form.querySelector(".save .why")!;
   form.querySelectorAll(".err").forEach((e) => (e.textContent = ""));
-  // the profiles, sent whole if changed; each named, once, with a model
   let profiles: Record<string, string[]> | undefined;
   if (page.profiles != null) {
     const now = profs.map(([name, list]): [string, string[]] => [name.trim(), list]);
@@ -1637,28 +1375,12 @@ async function settings_save(form: HTMLFormElement, page: any, unset: Set<string
     return;
   }
   const later = (out.saved as string[]).filter((key) => page.settings.find((r: any) => r.key === key)?.apply === "restart");
-  // (drawn anew from what was saved: nothing edited on it now)
   settings_draw(out);
   P.dirty.delete(form);
   P.since = true;
   draw(false);
   toast(later.length === 0 ? "Saved." : "Saved. " + later.join(", ") + " " + (later.length === 1 ? "applies" : "apply") + " once the server restarts.");
 }
-
-// Renew
-// =====
-// The server's web app has another build than this page (after an
-// update): the page reloads into it by itself, once nothing would be
-// lost, keeping what it showed: the box's text and caret, the folds
-// opened, where the chat or the page was scrolled. Never while the mic
-// records, a file uploads, an act awaits its answer, or Import History
-// or a picture (Viewer.ts) is open; on a phone, not while its keyboard
-// is up (the box focused), but as the page is hidden. On the settings
-// page only once a change is saved after the new build came, with
-// nothing else edited and unsaved, or as it is left. Checked again
-// right before reloading. The cached shell is dropped first; at most two
-// reloads per build (the second past the browser's cache too), then one
-// more on each new socket.
 
 function renew_due(build: string | undefined): void {
   if (build === undefined || P.build === "" || build === P.build) {
@@ -1692,7 +1414,6 @@ async function renew(hidden = false): Promise<void> {
   if (tries > 0) {
     await Promise.all(["/", "/app.js", "/style.css", "/sw.js"].map((path) => fetch(path, { cache: "reload" }).catch(() => null)));
   }
-  // (the page may have changed meanwhile)
   if (!P.due || !renew_free(hidden)) {
     P.going = false;
     return;
@@ -1704,7 +1425,6 @@ async function renew(hidden = false): Promise<void> {
   location.reload();
 }
 
-// after a renew, what the page showed before
 function renewed(): void {
   const text = sessionStorage.getItem(kept("back"));
   sessionStorage.removeItem(kept("back"));
@@ -1719,16 +1439,11 @@ function renewed(): void {
   back.open.forEach((id: string) => P.open.add(id));
   P.back = back.at;
   P.away = back.away;
-  // a page (the settings, the tree) back where it was, once drawn that long
   const end = Date.now() + 3000;
   const y = () => back.y !== null && (document.documentElement.scrollHeight >= back.y + innerHeight || Date.now() > end ? scrollTo(0, back.y) : setTimeout(y, 100));
   y();
 }
 
-// Notes
-// =====
-
-// shown 7 s, or till hidden (stay)
 function toast(text: string, stay = false): void {
   const el = $("#toast");
   el.textContent = text;
@@ -1736,12 +1451,6 @@ function toast(text: string, stay = false): void {
   clearTimeout(P.toast);
   P.toast = stay ? 0 : (setTimeout(() => (el.hidden = true), 7000) as unknown as number);
 }
-
-// Intro
-// =====
-// Once per browser (?skip: never), over the page; style.css times it, and
-// its last animation, a click or a key ends it. Played, it is done once
-// gone (INTRO), so no box opens over it.
 
 function intro_play(): Promise<void> {
   const skip = new URLSearchParams(location.search).has("skip");

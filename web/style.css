@@ -1,32 +1,20 @@
-/* UniiChat: black ink on white paper, as the terminal (Theme.ts): what
-   the machine wrote is filled (a block, a summary; a tool call, its
-   result hooked right under it), what a person or Unii said is framed,
-   unfilled. Every color is the palette's below; each kind's look, put
-   in the page at boot (Theme.ts theme_css), on .msg.<kind>: --fg, --it. */
-
-/* The palette. On a device set dark, the same page in light ink on a
-   soft black: fills and rules a step lighter than the page (the light
-   ones a step darker); a box over the page lighter still, as a shadow
-   shows little on the dark; a person's frame gray, as a light line on
-   the dark glares; green, red and purple lighter and calmer, to keep
-   their contrast */
 :root {
-  --ink    : #111111; /* text, frames */
-  --mid    : #5f5f5f; /* secondary text, levels */
-  --soft   : #9a9a9a; /* hints, placeholders */
-  --hair   : #e6e6e6; /* rules */
-  --paper  : #ffffff; /* the page */
-  --lift   : #ffffff; /* a box over the page: a popover, the message box */
-  --block  : #f2f2f2; /* a summary's, a tool's, a button's, code's fill */
-  --hover  : #e8e8e8; /* under the pointer, around the focus */
-  --frame  : #cccccc; /* a call's code's frame, a file's lines', the message box's */
-  --edge   : #111111; /* a person's frame: the user's message, a report */
-  --add    : #1a7f37; /* a diff's line added */
-  --del    : #cf222e; /* a diff's line dropped */
-  --accent : #6d3fd8; /* the name UniiChat in a message */
-  --red    : #b42318; /* deleting the account */
-  --warm   : #e8590c; /* conversation mode's meter, half full */
-  --veil   : rgb(0 0 0 / .3); /* the page behind a box over it */
+  --ink    : #111111;
+  --mid    : #5f5f5f;
+  --soft   : #9a9a9a;
+  --hair   : #e6e6e6;
+  --paper  : #ffffff;
+  --lift   : #ffffff;
+  --block  : #f2f2f2;
+  --hover  : #e8e8e8;
+  --frame  : #cccccc;
+  --edge   : #111111;
+  --add    : #1a7f37;
+  --del    : #cf222e;
+  --accent : #6d3fd8;
+  --red    : #b42318;
+  --warm   : #e8590c;
+  --veil   : rgb(0 0 0 / .3);
   --shadow : 0 1px 2px rgba(0, 0, 0, .05), 0 6px 20px rgba(0, 0, 0, .05);
 }
 @media (prefers-color-scheme: dark) {
@@ -57,58 +45,39 @@
   --brand: "Avenir Next", Avenir, Futura, var(--sans);
   --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
   --col: 740px;
-  --head: 57px; /* the header's height, where an open block's bar sticks */
+  --head: 57px;
 }
 
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
 html { color-scheme: light dark; -webkit-text-size-adjust: 100%; scrollbar-gutter: stable; overflow-anchor: none; }
-/* a column at least the screen's height (the visible part, on a phone),
-   the chat taking what is left: the footer stays at the bottom, also on a
-   subagent's page, which has no message box */
 body { margin: 0; min-height: 100vh; min-height: 100dvh; display: flex; flex-direction: column; background: var(--paper); color: var(--ink); font: 16px/1.55 var(--sans); -webkit-font-smoothing: antialiased; }
 button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; }
 svg { fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
 ::selection { background: var(--ink); color: var(--paper); }
 a { color: inherit; text-underline-offset: 3px; }
-/* no word left alone on a line: all text balanced (every browser keeps
-   it), but the prose of messages (not notes), pretty, and text being
-   typed filling each line */
 body { text-wrap: balance; }
 .msg:not(.note) { text-wrap: pretty; }
 textarea { text-wrap: wrap; }
 
-/* a guest's chat: only the log and the message box; a note alone (the
-   terminal signed in) */
 body.guest :is(.net, .all, .menu, .attach, .mic, #pick, #tabs) { display: none !important; }
 body.solo main { width: min(420px, 100% - 48px); margin: 18vh auto; text-align: center; }
 body.solo h1 { margin: 0; font: 400 46px/1.05 var(--serif); letter-spacing: -.015em; }
 .sub { margin: 18px 0 0; color: var(--mid); font-size: 14.5px; }
 
-/* Header: the logo, then buttons: grey chips, no borders. It and the footer keep clear of a phone's notch and
-   home bar (safe-area insets: the page is drawn under them) */
 header { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; gap: 6px; height: var(--head); padding: 0 max(20px, env(safe-area-inset-right)) 0 max(20px, env(safe-area-inset-left)); background: var(--paper); border-bottom: 1px solid var(--hair); }
 header > :is(button, a) { height: 32px; padding: 0 12px; border-radius: 8px; background: var(--block); font-size: 13.5px; font-weight: 500; }
 header > :is(button, a):hover { background: var(--hover); }
 header > .brand { margin-right: auto; display: flex; align-items: center; gap: 10px; height: auto; padding: 0; background: none; font: 600 20px/1 var(--brand); letter-spacing: -.01em; }
 header > .brand:hover { background: none; }
-/* the logo: its shape (mark.svg, the infinity cut out) filled with the
-   ink, so it follows the theme */
 .mark { display: block; width: 26px; height: 26px; background: var(--ink); -webkit-mask: url(/mark.svg) center / contain no-repeat; }
 header .net { font-size: 13px; color: var(--mid); }
 
-/* Footer: the rule with the pick (a click on a part opens its menu), the
-   images waiting, the message box, the tabs (while agents work), and a
-   guest's consent; over the log, as the header, and as low as it goes,
-   so a phone with its keyboard up still shows the chat; the account
-   page keeps only its toasts, at the screen's foot */
 footer { position: sticky; bottom: 0; z-index: 2; padding: 18px max(20px, env(safe-area-inset-right)) max(14px, env(safe-area-inset-bottom)) max(20px, env(safe-area-inset-left)); background: linear-gradient(transparent, var(--paper) 14px); }
 body:is(.account, .tree) footer { position: fixed; inset: auto 0 0; background: none; pointer-events: none; }
 body:is(.account, .tree) footer > :not(#toast) { display: none; }
 #pick { width: min(var(--col), 100%); margin: 0 auto 6px; display: flex; align-items: center; gap: 6px; font: 12.5px/20px var(--sans); color: var(--mid); }
 #pick .rule { flex: 1; height: 1px; background: var(--hair); margin-right: 4px; }
-/* conversation mode's meter: the rule, as thin, filled to --used, grey, orange from half full
-   (warm), red from 80% (hot); a taller strip (::before) over it takes the hover for its tooltip */
 #pick .rule.meter { --fill: var(--mid); position: relative; background: linear-gradient(to right, var(--fill) var(--used), var(--hair) var(--used)); }
 #pick .rule.meter.warm { --fill: var(--warm); }
 #pick .rule.meter.hot { --fill: var(--del); }
@@ -116,13 +85,10 @@ body:is(.account, .tree) footer > :not(#toast) { display: none; }
 #pick > :is(button, .knob) { padding: 0 6px; border-radius: 6px; }
 #pick > button:hover, #pick > button:has(+ :popover-open) { background: var(--block); color: var(--ink); }
 #pick .dot { color: var(--soft); }
-/* a narrow screen: the knobs closer; the rule (the meter too) stays in their row */
 @media (max-width: 600px) {
   #pick { flex-wrap: wrap; white-space: nowrap; gap: 2px; }
   #pick > :is(button, .knob) { padding: 0 4px; }
 }
-/* a knob's menu (main.ts places it over its knob): a row per value, the
-   pick's checked; a model's vendor over its group */
 #pick .choices { inset: auto; width: max-content; min-width: 150px; padding: 6px; overflow: auto; font: 14px/20px var(--sans); }
 #pick .choices p { margin: 6px 8px 2px; font-size: 12px; color: var(--mid); }
 #pick .choices > button { display: flex; padding: 7px 10px 7px 28px; }
@@ -132,16 +98,8 @@ body:is(.account, .tree) footer > :not(#toast) { display: none; }
 
 .composer { width: min(var(--col), 100%); margin: 0 auto; display: flex; align-items: flex-end; gap: 10px; border: 1px solid var(--frame); border-radius: 24px; padding: 7px 7px 7px 20px; background: var(--lift); box-shadow: var(--shadow); }
 .composer:focus-within { border-color: var(--soft); }
-/* the message box (Box.ts): text as typed, as tall as it is up to 40% of
-   the screen, then it scrolls; its placeholder while it holds nothing */
 .composer .field { position: relative; flex: 1; min-width: 0; outline: 0; color: var(--ink); font: 16px/1.5 var(--sans); padding: 7px 0; max-height: 40vh; overflow-y: auto; white-space: pre-wrap; overflow-wrap: anywhere; text-wrap: wrap; cursor: text; }
 .composer .field.blank::before { content: attr(data-placeholder); position: absolute; color: var(--soft); pointer-events: none; }
-/* an item in it, like a character in the line: a sound's, a page's or a
-   file's tile, one size; a picture or a video's first frame that size
-   till its own is known, then its own aspect ratio, sized by Box.ts
-   (item_fit: 150 px at most), never cropped, stretched or blown up
-   (scale-down), never wider than the box; its note at its foot while it
-   uploads (a bar as far as it is) or was refused */
 .field .item { position: relative; display: inline-block; width: 96px; height: 72px; max-width: 100%; margin: 2px 2px; padding: 0; vertical-align: bottom; overflow: hidden; border: 1px solid var(--hair); border-radius: 8px; background: var(--block); }
 .field .item:has(> :is(img, video)) { box-sizing: content-box; }
 .field .item > :is(img, video) { display: block; width: 100%; height: 100%; object-fit: scale-down; pointer-events: none; }
@@ -156,18 +114,14 @@ body:is(.account, .tree) footer > :not(#toast) { display: none; }
 .send svg, .attach svg, .mic svg { width: 20px; height: 20px; stroke-width: 2; }
 .send { background: var(--ink); color: var(--paper); }
 .send.stop { background: var(--block); color: var(--ink); }
-/* the send button's icons: an arrow, a square (stop) */
 .send:not(.stop) svg + svg, .send.stop svg:first-child { display: none; }
 .send.stop svg { fill: currentColor; stroke-width: 0; width: 16px; height: 16px; }
 .attach { margin-left: -13px; color: var(--mid); }
 .attach:hover { color: var(--ink); background: var(--hover); }
-/* the mic: ink while it records; faint while its words are on their way */
 .mic { margin-right: -6px; color: var(--mid); }
 .mic:hover { color: var(--ink); background: var(--hover); }
 .mic.rec { background: var(--ink); color: var(--paper); }
 .mic:disabled { opacity: .4; cursor: default; }
-/* the voice: while the mic records, the box shows how loud it hears you,
-   newest at the right, and the time so far */
 .composer .voice { display: none; flex: 1; align-items: center; gap: 12px; height: 38px; color: var(--ink); }
 .composer.rec .voice { display: flex; }
 .composer.rec .field { display: none; }
@@ -176,9 +130,6 @@ body:is(.account, .tree) footer > :not(#toast) { display: none; }
    screen's pixel ratio isn't whole, until it pushes the buttons off */
 .voice canvas { flex: 1; width: 0; height: 28px; }
 .voice span { font: 14px var(--mono); color: var(--mid); font-variant-numeric: tabular-nums; }
-/* up to the user's message (main.ts mine): the ☰ button's look, smaller,
-   under the header at the column's right edge; down to the bottom (main.ts
-   down) the same, above the pick bar's right end */
 .mine, .down { width: 30px; height: 26px; display: grid; place-items: center; border-radius: 7px; background: var(--block); }
 .mine { position: fixed; top: calc(var(--head) + 6px); right: max(20px, env(safe-area-inset-right), 50% - var(--col) / 2); }
 .down { position: absolute; bottom: calc(100% - 10px); right: max(20px, env(safe-area-inset-right), 50% - var(--col) / 2); }
@@ -191,13 +142,11 @@ body:is(.account, .tree) footer > :not(#toast) { display: none; }
 #tabs button:hover, #tabs .here { color: var(--ink); }
 #tabs .here { font-weight: 600; }
 
-/* Popovers (the browser's): the menu, Import History */
 [popover] { inset: 60px 20px auto auto; margin: 0; width: 280px; padding: 10px 14px; border: 1px solid var(--hair); border-radius: 14px; color: var(--ink); background: var(--lift); box-shadow: var(--shadow); }
 [popover] p { margin: 8px 0 6px; font-size: 14px; }
 [popover] > :is(button, a) { display: block; width: 100%; padding: 8px 4px; text-align: left; font-size: 14.5px; border-radius: 10px; text-decoration: none; }
 [popover] > :is(button, a):hover { background: var(--hover); }
 #menu { width: 180px; padding: 6px; box-shadow: 0 8px 24px rgb(0 0 0 / .12); }
-/* the schedules: each its time (small, secondary), message and Cancel */
 #timers { width: 340px; max-height: 70vh; overflow: auto; }
 #timers .title { margin-top: 4px; font-weight: 600; }
 #timers ul { margin: 0; padding: 0; list-style: none; }
@@ -206,9 +155,6 @@ body:is(.account, .tree) footer > :not(#toast) { display: none; }
 #timers .text { grid-column: 1; font-size: 14px; overflow-wrap: anywhere; }
 #timers .cancel { grid-row: 1 / 3; grid-column: 2; padding: 5px 10px; border-radius: 8px; background: var(--block); font-size: 13px; }
 #timers .cancel:hover { background: var(--hover); }
-/* Import History (also a new chat's first step): centered over the
-   page. A running
-   import's progress shows in Import History and, small, in the header */
 #import { inset: 0; margin: auto; width: min(440px, 100vw - 40px); height: fit-content; max-height: 85vh; overflow: auto; padding: 14px 20px; }
 #import::backdrop { background: var(--veil); }
 #import .title { font-weight: 600; font-size: 16px; }
@@ -220,8 +166,6 @@ body:is(.account, .tree) footer > :not(#toast) { display: none; }
 #import :is(.found, .guess):empty { display: none; }
 #import .found { font-weight: 500; }
 #import .want { display: flex; flex-wrap: wrap; gap: 8px 16px; margin: 12px 0 0; padding: 0; border: 0; font-size: 13.5px; color: var(--mid); }
-/* the range taken: its first day (left, moved by the ball) and today
-   (right); the bar is ink from the ball to today, what is taken */
 #import .since { flex-basis: 100%; display: flex; justify-content: space-between; flex-wrap: wrap; font: 12.5px var(--mono); color: var(--ink); }
 /* a fieldset is as wide as its widest line unless told min-width 0: a
    long one would widen the box and scroll it sideways */
@@ -231,9 +175,6 @@ body:is(.account, .tree) footer > :not(#toast) { display: none; }
 #import .src .pickzip:hover { background: var(--hover); }
 #import .pick { margin: 8px 0 0; }
 #import .pick summary { cursor: pointer; color: var(--ink); font-weight: 500; }
-/* the session list is a table: day and count in mono, so each column
-   keeps one width, the folder last; a long row scrolls the list
-   sideways, never the box */
 #import .sessions { margin: 6px 0 0; max-height: 150px; overflow: auto; font-size: 12.5px; }
 #import .sessions label { display: flex; align-items: center; gap: 10px; width: max-content; min-width: 100%; white-space: nowrap; }
 #import .sessions input { margin: 0; }
@@ -243,8 +184,6 @@ body:is(.account, .tree) footer > :not(#toast) { display: none; }
 #import .since input::-webkit-slider-thumb { appearance: none; width: 14px; height: 14px; border: 2px solid var(--ink); border-radius: 50%; background: var(--paper); cursor: grab; }
 #import .since input::-moz-range-thumb { width: 10px; height: 10px; border: 2px solid var(--ink); border-radius: 50%; background: var(--paper); cursor: grab; }
 #import .since input::-moz-range-track { background: transparent; }
-/* each line one row, on a phone too: there the box takes nearly the
-   screen's width, its sides and text shrinking with it */
 #import .acts { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; margin: 16px 0 0; }
 #import .acts button { padding: 7px 16px; border-radius: 8px; background: var(--block); font-size: 14px; font-weight: 500; }
 #import .acts button:hover { background: var(--hover); }
@@ -255,9 +194,6 @@ body:is(.account, .tree) footer > :not(#toast) { display: none; }
 #import .two button { min-height: 64px; padding: 10px 16px; font-size: 15px; white-space: normal; }
 #import .acts button { white-space: nowrap; }
 #import button:disabled { opacity: 0.4; cursor: default; }
-/* a progress bar: the box's on the paper, track the block's gray; the
-   header's on a gray button, named with its percent, track darker
-   (paused: its bar mid gray) */
 progress { --track: var(--block); --bar: var(--ink); display: block; width: 100%; height: 6px; margin: 14px 0 6px; appearance: none; border: 0; border-radius: 3px; background: var(--track); overflow: hidden; }
 progress::-webkit-progress-bar { background: var(--track); }
 progress::-webkit-progress-value { background: var(--bar); transition: width .4s; }
@@ -269,18 +205,14 @@ header > .imping { display: flex; flex-direction: column; justify-content: cente
 @media not (pointer: fine) { #import .desk { display: none; } }
 @media (max-width: 420px) { #import .two { grid-template-columns: 1fr; } }
 
-/* The chat */
 #log { width: min(var(--col), 100% - 40px); margin: 0 auto; padding: 24px 0 40px; flex: 1 0 auto; }
 #log > * > * { margin-block: 14px; }
 .cap { font: italic 14.5px var(--serif); color: var(--mid); }
 
-/* a block: one summary, its size on the left */
 .block { display: flex; gap: 12px; padding: 10px 14px; background: var(--block); border-radius: 10px; font: 15px/1.55 var(--serif); cursor: pointer; overflow-wrap: anywhere; }
 .block:hover { background: var(--hover); }
 .block .lv { flex: none; min-width: 38px; font: 600 11.5px/24px var(--sans); color: var(--mid); }
 
-/* an open block: its halves inside a frame; a message open (1x) as it
-   looks whole, its pill beside Copy, shown as Copy is */
 .open { border: 1.25px solid var(--frame); border-radius: 12px; padding: 0 10px 10px; }
 .open > * { margin: 10px 0 0; }
 .open > .fold { position: sticky; top: var(--head); z-index: 1; display: block; width: 100%; padding: 6px 0; text-align: left; font: 600 12px var(--sans); color: var(--mid); background: var(--paper); border-bottom: 1px solid var(--hair); }
@@ -290,75 +222,51 @@ header > .imping { display: flex; flex-direction: column; justify-content: cente
 .open.one > .fold { position: absolute; inset: auto 36px calc(100% + 4px) auto; z-index: 1; width: auto; height: 26px; padding: 0 8px; border: 0; border-radius: 6px; font: 600 11.5px/26px var(--sans); opacity: 0; }
 .open.one > .fold:hover { background: var(--hover); }
 .open.one:hover > .fold { opacity: 1; }
-/* a tall message (Html.ts TALL) folded to its head */
 .msg:has(> .more:not([open])) > .clip { max-height: 20em; overflow: hidden; }
 .more > summary { display: block; margin-top: 6px; font: 13px var(--sans); color: var(--mid); cursor: pointer; }
 .more > summary::after { content: "Show all"; }
 .more[open] > summary::after { content: "Fold"; }
 .more > summary:hover { color: var(--ink); }
-/* a tool call or result taller than about 10 of its lines (main.ts
-   folds: long) shows 8, fading out; a tap on it or Show all unfolds it */
 .msg > .unfold { display: none; }
 .msg.long > .unfold { display: block; margin-top: 4px; font: 13px var(--sans); color: var(--mid); }
 .msg.long > .unfold:hover { color: var(--ink); }
 .msg.long:not(.shown) > .cut { max-height: 8lh; overflow: hidden; cursor: pointer; -webkit-mask-image: linear-gradient(#000 calc(100% - 3lh), transparent); mask-image: linear-gradient(#000 calc(100% - 3lh), transparent); }
 
-/* a message, by kind */
 .msg { position: relative; overflow-wrap: anywhere; font: 17.5px/1.68 var(--serif); color: var(--fg); font-style: var(--it); }
 .msg > :first-child, .msg > .copy + * { margin-top: 0; }
 .msg > :last-child { margin-bottom: 0; }
 .msg p, .msg ul, .msg ol, .msg pre, .msg blockquote { margin: 0 0 .85em; }
 .msg ul, .msg ol { padding-left: 1.3em; }
 .msg li > :is(ul, ol):last-child { margin-bottom: 0; }
-/* a task's item: its box (shown, not clicked) where its bullet was */
 .msg li.task { list-style: none; }
 .msg li.task > input { margin: 0 .45em 0 -1.3em; vertical-align: -.1em; }
 .msg code { font: .82em var(--mono); background: var(--block); border-radius: 5px; padding: .1em .35em; }
-/* code in a message: filled, as the terminal; a call's code (on the
-   call's fill) and a file's lines: framed. A long line wraps, as the
-   rest of a message does: nothing scrolls sideways */
 .msg pre { position: relative; font: 13.5px/1.6 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; background: var(--block); border-radius: 10px; padding: 13px 16px; }
 .msg:is(.tool, .echo) pre, .msg pre.diff { background: none; border: 1.25px solid var(--frame); }
 .msg pre code { font: inherit; background: none; padding: 0; }
 .msg blockquote { padding-left: 1.2em; font: italic 16.5px/1.6 var(--serif); }
 .msg table { border-collapse: collapse; font: 15px/1.45 var(--sans); }
 .msg td, .msg th { text-align: left; padding: 6px 14px 6px 0; border-bottom: 1px solid var(--hair); }
-/* the user's message: a bubble at the right, as wide as its text (the
-   terminal, whose column can't fit one, frames it at the left) */
 .msg.user { margin-left: auto; width: fit-content; max-width: min(82%, 560px); padding: 10px 17px; border: 1.25px solid var(--edge); border-radius: 20px 20px 6px 20px; font: 16px/1.55 var(--sans); }
-/* where the button (main.ts mine) puts a message: under the button (and
-   an open block's bar), with room above for its Copy and fold pill */
 .msg.user { scroll-margin-top: calc(var(--head) + 66px); }
 .msg.work { padding: 14px 20px; border: 1.25px solid var(--edge); border-radius: 14px; font: 16px/1.55 var(--sans); }
-/* who said it, on the frame's top (View row.who) */
 .msg.work::before { content: attr(data-who); position: absolute; left: 14px; top: -.75em; padding: 0 6px; background: var(--paper); font: 600 12px/1.5 var(--sans); color: var(--mid); }
 .msg.note { color: var(--mid); }
 .msg.unii { font: 16px/1.55 var(--sans); }
 .msg.user p, .msg.work p, .msg.echo p { white-space: pre-wrap; }
 .msg.tool, .msg.echo { font: 12.5px/1.5 var(--mono); }
-/* a call: its own fill; a result: its lines bare, framed by their pre
-   (Md.md_output). Thinking bare and unnamed */
 .msg.tool { padding: 9px 14px; background: var(--block); border-radius: 10px; }
 .msg.note[data-who]::before { content: attr(data-who); display: block; font: 700 12px/1.5 var(--sans); font-style: normal; color: var(--soft); }
-/* a result apart from its call that no frame of its own names (a diff
-   alone): its tool, over it, as a frame's name reads (pre .lang) */
 .msg.echo[data-who]::before { content: attr(data-who); display: block; margin: 6px 0 -2px; font: 600 11px var(--sans); color: var(--mid); }
 .msg.mind { color: var(--mid); }
 .msg.tool p, .msg.echo p { margin: 0; }
-/* a tool call's head: its tool's icon, then the call (a command's
-   lines), its device faint at the right */
 .call { margin: 0; font: 12.5px/1.6 var(--mono); color: var(--ink); white-space: pre-wrap; }
 .call .ic { margin-right: 8px; font-size: 15px; }
 .call b { font-weight: 700; }
 .call .on { float: right; margin-left: 1em; color: var(--soft); }
 .msg.echo p + p { margin-top: .85em; }
 .msg:is(.tool, .echo) pre { margin: 6px 0; font: inherit; padding: 6px 10px; border-radius: 6px; }
-/* a file's lines (a read, a diff): framed, its file over them; each
-   line's ink by its mark, kept ones faint, a read's in ink; its number
-   unselectable */
 .msg pre.diff code > span.file { color: var(--ink); }
-/* a wrapped line goes on under its text, its number and mark alone in
-   their column */
 .msg pre.diff code > span { display: block; padding-left: calc(var(--nw) + 3ch); text-indent: calc(-1 * (var(--nw) + 3ch)); }
 .msg pre.diff code > span.file { padding-left: calc(var(--nw) + 1ch); text-indent: calc(-1 * (var(--nw) + 1ch)); }
 .msg pre.diff code > span.gap { padding-left: 0; text-indent: 0; }
@@ -372,26 +280,20 @@ header > .imping { display: flex; flex-direction: column; justify-content: cente
 .msg .name { font: inherit; text-decoration: underline; text-underline-offset: 3px; }
 .msg .name:hover { background: var(--ink); color: var(--paper); }
 
-/* Copy: under a message, and in a code block's corner, on hover */
 .copy { position: absolute; right: 0; bottom: calc(100% + 4px); z-index: 1; display: grid; place-items: center; width: 26px; height: 26px; color: var(--mid); background: var(--paper); border-radius: 6px; opacity: 0; user-select: none; }
 .copy:hover { color: var(--ink); background: var(--hover); }
 .msg pre > .copy { top: 7px; right: 7px; bottom: auto; }
 .msg:hover > .copy, .msg pre:hover > .copy { opacity: 1; }
-/* a touch screen has no hover: Copy always shows, in room of its own (it
-   had covered the next row's first line and a code block's line end) */
 @media (hover: none) {
   .copy, .open.one > .fold { opacity: .6; }
   #log .msg:has(> .copy) { margin-top: 34px; }
   .msg pre:has(> .copy) { padding-right: 40px; }
   .msg pre > .copy { top: 9px; right: 9px; }
 }
-/* a one-line block in a call or result is as tall as its Copy needs */
 .msg:is(.tool, .echo) pre:has(> .copy) { box-sizing: border-box; min-height: 34px; }
 .msg:is(.tool, .echo) pre > .copy { top: 3px; right: 4px; }
 /* a touch browser zooms the page into a field whose font is under 16px */
 @media (hover: none) { input, select { font-size: 16px; } }
-/* a finger needs 44px: small buttons take taps around them (a box
-   centered on each, not drawn), links in small print above and below */
 @media (pointer: coarse) {
   :is(header > :is(button, a), #pick > button, #tabs button, #tree .tab) { position: relative; }
   :is(header > :is(button, a), #pick > button, #tabs button, #tree .tab, .mine, .down, .copy, .open.one > .fold)::after { content: ""; position: absolute; left: 50%; top: 50%; width: max(100%, 44px); height: max(100%, 44px); transform: translate(-50%, -50%); }
@@ -401,13 +303,9 @@ header > .imping { display: flex; flex-direction: column; justify-content: cente
   [popover] > a { padding: 11px 4px; }
 }
 
-/* media in a message (Md's ![](/media/…)): at most about 70% of the
-   window's height, never wider than the message; a sound one row */
 .msg .media { display: block; width: fit-content; max-width: 100%; margin: .4em 0; }
 .msg :is(img, video):is(.media, .media > *) { display: block; max-width: 100%; max-height: 70vh; width: auto; height: auto; border-radius: 8px; }
 .msg audio.media { width: min(100%, 480px); }
-/* a file of the store that isn't media (Html.ts chip_html): a chip, its
-   name and size, downloaded on a click */
 .msg a.file { display: inline-flex; align-items: center; gap: 8px; max-width: 100%; margin: .2em 0; padding: 6px 12px; border: 1px solid var(--frame); border-radius: 10px; background: var(--lift); color: var(--ink); font: 14px/1.4 var(--sans); font-style: normal; text-decoration: none; vertical-align: middle; }
 .msg a.file:hover { background: var(--hover); }
 .msg a.file .fname { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -417,21 +315,12 @@ header > .imping { display: flex; flex-direction: column; justify-content: cente
 /* a page in a bubble as wide as a bubble may be (as wide as its text, a
    frame would be a frame's default 300px) */
 .msg.user:has(iframe.page) { width: min(82%, 560px); }
-/* a page (main.ts frames sizes it): as tall as it is, up to 70% of the
-   window, scrolling inside past that */
 .msg iframe.page { width: 100%; height: 0; max-height: 70vh; border: 1px solid var(--hair); border-radius: 8px; background: var(--paper); color-scheme: light dark; }
 
-/* images: under a message, each a link */
 .pics { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
 .pics img { display: block; height: 120px; max-width: 100%; object-fit: cover; border-radius: 8px; border: 1px solid var(--hair); }
-/* a picture in the chat or the box opens whole in the page (Viewer.ts) */
 :is(.pics, .msg .media) img, .field .item:has(> img) { cursor: zoom-in; }
 
-/* the picture viewer (Viewer.ts): the whole screen, the app's dark theme
-   in either scheme (the phone's bars too); a bar on top, its name,
-   zoom, download and close, clear of a notch; the picture under it on
-   the stage, placed by a transform, zoomed and panned by hand (no
-   browser zoom or scroll there) */
 #viewer { --ink: #e3e3e6; --mid: #a6a6ad; --hover: #37373d; position: fixed; inset: 0; width: 100%; height: 100%; max-width: none; max-height: none; margin: 0; padding: 0; border: 0; flex-direction: column; color: var(--ink); background: #171719; overflow: hidden; overscroll-behavior: contain; touch-action: none; user-select: none; -webkit-user-select: none; text-wrap: wrap; }
 #viewer[open] { display: flex; }
 #viewer::backdrop { background: #171719; }
@@ -453,7 +342,6 @@ header > .imping { display: flex; flex-direction: column; justify-content: cente
 #viewer :is(.prev, .next) svg { width: 24px; height: 24px; stroke-width: 2; }
 #viewer .prev { left: max(8px, env(safe-area-inset-left)); }
 #viewer .next { right: max(8px, env(safe-area-inset-right)); }
-/* on a touch screen a swipe goes to the picture beside */
 @media (hover: none) { #viewer :is(.prev, .next) { display: none; } }
 @media (prefers-reduced-motion: reduce) { #viewer.ease .stage img { transition: none; } }
 
@@ -473,8 +361,6 @@ header > .imping { display: flex; flex-direction: column; justify-content: cente
   #timers { width: auto; }
 }
 
-/* The account page (/account): one column of sections, each a small
-   title over its content; buttons are grey chips (Delete red) */
 #account { width: min(var(--col), 100% - 40px); margin: 0 auto; padding: 18px 0 64px; font-size: 15px; }
 #account .back { display: inline-block; padding: 8px 0; font-size: 14px; color: var(--mid); text-decoration: none; }
 #account .back:hover { color: var(--ink); }
@@ -502,9 +388,6 @@ header > .imping { display: flex; flex-direction: column; justify-content: cente
 #account .chip { min-width: 96px; }
 .item small { display: block; font-size: 13.5px; font-weight: 400; color: var(--mid); overflow-wrap: anywhere; }
 #account .notify:disabled { opacity: .4; cursor: default; }
-/* a prompt's editor (prompt.md, compact.md): its note, its
-   text (16px on touch, as above), then what saving said beside Save
-   (red: refused) */
 .prompt .note { margin: 0 0 10px; font-size: 14px; color: var(--mid); }
 .prompt textarea { display: block; box-sizing: border-box; width: 100%; min-height: 140px; padding: 10px 12px; border: 1px solid var(--frame); border-radius: 9px; background: var(--paper); color: var(--ink); font: 14px/1.5 var(--mono); resize: vertical; }
 @media (hover: none) { .prompt textarea { font-size: 16px; } }
@@ -516,9 +399,6 @@ header > .imping { display: flex; flex-direction: column; justify-content: cente
 #account .foot a { text-decoration: none; }
 #account .foot a:hover { text-decoration: underline; }
 
-/* The intro (main.ts): its two scenes share one grid cell; the first's
-   lines rise .38 s apart, and it fades as the second's logo and name
-   rise; `hold` ends the intro after the last, and `.out` fades it. */
 #intro { position: fixed; inset: 0; z-index: 9; display: grid; place-items: center; background: var(--paper); color: var(--ink); cursor: pointer; transition: opacity .6s ease; animation: hold 3.05s; }
 #intro.out { opacity: 0; pointer-events: none; }
 #intro .scene { grid-area: 1 / 1; display: grid; justify-items: center; gap: 4px; padding: 24px; text-align: center; }
@@ -534,9 +414,6 @@ header > .imping { display: flex; flex-direction: column; justify-content: cente
 @keyframes gone { to { opacity: 0; } }
 @keyframes hold { to { visibility: visible; } }
 
-/* The server's settings, the owner's, at the settings page's bottom: a
-   row a setting or a key, its name over a line about it, its control,
-   where its value comes from; Save sticks to the bottom */
 #account .mcp > .sub { margin: 0; font-size: 13.5px; }
 .owned > .sub { margin: 0 0 14px; padding-top: 22px; border-top: 1px solid var(--hair); font-size: 13.5px; }
 .settings > section > .sub { margin: 0 0 4px; font-size: 13.5px; }
@@ -566,8 +443,6 @@ header > .imping { display: flex; flex-direction: column; justify-content: cente
 .settings .go:hover { background: var(--mid); }
 .settings .go:disabled { opacity: .4; }
 @media (max-width: 600px) { .set .four { grid-template-columns: 1fr 1fr; } }
-/* the profile editor: each profile its name and Delete, its models in
-   order (a handle to drag, its name and vendor, Remove), Add model */
 .profiles .prof { padding: 10px 0; }
 .profiles .prof:first-child { padding-top: 0; }
 .profiles .prof + .prof { border-top: 1px solid var(--hair); }
@@ -585,10 +460,6 @@ header > .imping { display: flex; flex-direction: column; justify-content: cente
 .profiles .pnew { margin-top: 6px; }
 @media (pointer: coarse) { .profiles :is(.grip, .out) { width: 44px; height: 44px; } }
 
-/* The memory tree (/tree, web/src/Tree.ts): under the header its bar
-   (← Chat, the VIEW and TREE tabs, a legend, ‹ ›), then the view or the
-   tree, each scrolling in the screen's height; the footer keeps only its
-   toasts, as on the account page */
 body.tree { height: 100dvh; }
 #tree { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 #tree .top { display: flex; align-items: center; gap: 6px; padding: 10px 20px 0; } #tree .back { padding: 8px 0; margin-right: 6px; font-size: 14px; color: var(--mid); text-decoration: none; } #tree .back:hover { color: var(--ink); }

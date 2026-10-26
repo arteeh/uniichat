@@ -1,10 +1,3 @@
-// Html
-// ====
-// What View.ts draws and Md.ts's tokens, as HTML, every text escaped, one
-// element per row, knob or tab; and the settings page's parts. A click's
-// effect is in the markup: `data-act`, the View.Act it makes;
-// `data-copy`, what Copy copies (main.ts).
-
 import type { Vendor } from "../../AskAI.ts";
 import * as Call from "../../Call.ts";
 import * as Md from "../../Md.ts";
@@ -14,31 +7,18 @@ import * as Theme from "../../Theme.ts";
 import * as Timer from "../../Timer.ts";
 import * as View from "../../View.ts";
 
-// Types
-// =====
-
 // this browser's notifications (main.ts notify_state): off, on, blocked
 // in its settings, or only once on the Home Screen (an iPhone's Safari)
 export type Notify = "off" | "on" | "blocked" | "home";
 
-// Constants
-// =========
-
 const ESC: Record<string, string> = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" };
 
-// a user's message past TALL chars (a line counts 80 or more: a paste)
-// shows its head, but one with media; its `details` unfolds it (style.css)
 const TALL = 4000;
 
-// the Copy button's icons: two sheets, and a check once copied
 export const SHEETS = `<svg viewBox="0 0 16 16" width="15" height="15"><rect x="5.5" y="5.5" width="8" height="8" rx="1.8"/><path d="M10.5 3.5v-.2A1.8 1.8 0 0 0 8.7 1.5H4.3A1.8 1.8 0 0 0 2.5 3.3v4.4a1.8 1.8 0 0 0 1.8 1.8h.2"/></svg>`;
 export const CHECK  = `<svg viewBox="0 0 16 16" width="15" height="15"><path d="M3 8.5l3.2 3L13 4.5"/></svg>`;
 
-// a diff line's class, by its mark
 const MARKS: Record<Md.Line["s"], string> = { " ": "", "-": "del", "+": "add" };
-
-// Show
-// ====
 
 export function esc(s: string): string {
   return s.replace(/[&<>"]/g, (c) => ESC[c]);
@@ -52,8 +32,6 @@ function copy_html(text: string): string {
   return `<button class="copy" data-copy="${esc(text)}" title="Copy">${SHEETS}</button>`;
 }
 
-// a row's markup, made once: a known message's rows are kept (View's
-// whole_rows)
 const MADE = new WeakMap<View.Row, string>();
 
 export function row_html(row: View.Row): string {
@@ -69,7 +47,7 @@ function row_make(row: View.Row): string {
       const text = row.call === null ? esc(row.text) : head_html(row.call, Call.call_line(row.call), "");
       return `<div class="block"${open} data-a="${row.id}"><span class="lv">${row.n}x</span><div>${text}</div></div>`;
     }
-    case "Box": { // a message open (1x) looks as it does whole, its "fold" pill beside Copy
+    case "Box": {
       const shut = act_html({ $: "Shut", id: row.id, n: row.n });
       const one  = row.n === 1 ? " one" : "";
       const rows = row.rows.map(row_html).join("");
@@ -80,10 +58,7 @@ function row_make(row: View.Row): string {
       const copy = copy_html(row.call === null ? row.text : Call.call_text(row.call));
       const body = row.call === null ? row.body.map(block_html).join("") : call_html(row.call);
       const pics = images_html(row.images);
-      // (never one with media in it: media is never folded away)
       const tall = ["user", "work"].includes(row.kind) && row.text.length + 80 * row.text.split("\n").length > TALL && !row.text.includes("](/media/");
-      // a tool call or result folds by its height (main.ts folds), but a
-      // result drawing media (a show call's)
       const media = row.body.some((b) => b.$ === "Para" && b.x.some((s) => s.$ === "Pict"));
       const cut = row.kind === "tool" || (row.kind === "echo" && !media);
       const fold = tall ? `<div class="clip">${body}</div><details class="more"><summary></summary></details>` : cut ? `<div class="cut">${body}</div><button class="unfold" aria-expanded="false">Show all</button>` : body;
@@ -96,14 +71,10 @@ function row_make(row: View.Row): string {
   }
 }
 
-// a tool call: its icon, verb, head and device, over a code block for
-// each other value
 function call_html(c: Call.Call): string {
   return head_html(c, c.head, c.device) + c.blocks.map(block_html).join("");
 }
 
-// a call's head: its emoji (Theme.TOOL) and name, then text ("" device:
-// none shown)
 function head_html(c: Call.Call, text: string, device: string): string {
   const icon  = `<span class="ic">${Theme.tool_glyph(c.name)}</span>`;
   const verb  = c.name === "" ? "" : `<b>${esc(c.name)}</b> `;
@@ -111,7 +82,6 @@ function head_html(c: Call.Call, text: string, device: string): string {
   return `<p class="call">${where}${icon}${verb}${esc(text)}</p>`;
 }
 
-// (a link to its file: a plain click opens it in the page, Viewer.ts)
 function images_html(names: string[]): string {
   const pics = names.map((name) => {
     const url = "/image/" + esc(name);
@@ -120,19 +90,11 @@ function images_html(names: string[]): string {
   return names.length === 0 ? "" : `<div class="pics">${pics.join("")}</div>`;
 }
 
-// the memory modes (the chat's page's mode knob) and their tooltips
 export const MODES: Array<[string, string]> = [
   ["standard", "Each message is summarized for Unii's memory. Cheapest, good for long working sessions."],
   ["conversation", "Messages stay word-for-word in Unii's view until you switch back. Use it for discussions. It costs more per turn."],
 ];
 
-// the line over the message box: fold/unfold and the memory mode (none
-// on an agent's page: talk undefined), a rule, then the pick's knobs,
-// each opening its menu (the browser's popover, placed by main.ts); one
-// without choices (an agent's page) shown only. The mode is a knob too,
-// its menu the two modes. In conversation mode the rule is its meter,
-// as thin: filled as far as its space is, its usual grey turning orange
-// from half full, red from 80%
 export function pick_html(fold: string | null, on: boolean, knobs: View.Knob[], talk?: View.Talk | null): string[] {
   const knob = (move: string, hint: string, text: string, rows: string) => [
     `<button title="${esc(hint)}" data-knob="${move}" popovertarget="pick-${move}" aria-haspopup="menu">${esc(text)}</button>`,
@@ -140,7 +102,6 @@ export function pick_html(fold: string | null, on: boolean, knobs: View.Knob[], 
   ];
   const parts = knobs.map((k) => k.choices.length === 0 ? [`<span class="knob" title="${esc(k.hint)}">${esc(k.text)}</span>`] : knob(k.move, k.hint, k.text, k.choices.map(choice_html).join("")));
   const all = fold === null ? [] : [`<button class="all"${act_html({ $: "Fold", on })}>${esc(fold)}</button>`];
-  // a mode's row, as choice_html's, its tooltip kept
   const mode = ([name, hint]: [string, string], k: number) => {
     const here = (talk != null) === (k === 1);
     return `<button role="menuitemradio" aria-checked="${here}" title="${esc(hint)}"${here ? " autofocus" : act_html({ $: "Talk", on: k === 1 })}>${name}</button>`;
@@ -153,17 +114,12 @@ export function pick_html(fold: string | null, on: boolean, knobs: View.Knob[], 
   return [...all, ...modes, rule, ...parts.flatMap((part, i) => (i === 0 ? part : [`<span class="dot">·</span>`, ...part]))];
 }
 
-// a menu's row: a model's vendor over its first; the pick's marked and
-// focused as the menu opens, its click only closing it
 function choice_html(c: View.Choice): string {
   const head = c.vendor === null ? "" : `<p>${esc(c.vendor)}</p>`;
   const act  = c.here ? " autofocus" : act_html({ $: "Move", move: c.move, to: c.to });
   return `${head}<button role="menuitemradio" aria-checked="${c.here}"${act}>${esc(c.text)}</button>`;
 }
 
-// the settings page's MCP servers (each open device's),
-// a row each, on or off in this chat (its switch flips it); none: where
-// they are set up
 export function mcp_html(plugs: View.Plug[]): string[] {
   const one = (p: View.Plug) => {
     const act = act_html({ $: "Plug", name: p.name });
@@ -181,8 +137,6 @@ export function tabs_html(tabs: View.Tab[]): string[] {
   });
 }
 
-// the chat's schedules (the header's ⏰): each one's time, message and
-// Cancel
 export function timers_html(timers: Timer.Timer[]): string[] {
   return timers.map((t) => {
     const cancel = `<button class="cancel"${act_html({ $: "Unschedule", id: t.id })}>Cancel</button>`;
@@ -190,12 +144,6 @@ export function timers_html(timers: Timer.Timer[]): string[] {
   });
 }
 
-// Settings page
-// =============
-
-// the settings page (/settings, or /account): the prompts (null, unread:
-// a retry); this browser's own acts (notify: its notifications, null:
-// none to offer); then the server's settings (main.ts fills .owned)
 export function account_html(prompts: View.Prompts | null, notify: Notify | null = null): string {
   const item    = (what: string, note: string, act: string) => `<div class="item"><p>${what}${note === "" ? "" : `<small>${note}</small>`}</p>${act}</div>`;
   const acts    = [
@@ -210,13 +158,11 @@ export function account_html(prompts: View.Prompts | null, notify: Notify | null
   return `<a class="back" href="/" data-go="/">← Chat</a><h1>Settings</h1>` + mine + section_html("This browser", acts.join("")) + mcp + `<div class="owned"></div>`;
 }
 
-// a prompt's editor: its note, its text (name: what /api/prompts sets), Save
 function prompt_html(name: string, text: string, note: string): string {
   const area = `<textarea name="${name}" rows="12" spellcheck="false">${esc(text)}</textarea>`;
   return `<form class="prompt"><p class="note">${esc(note)}</p>${area}<div><p class="why"></p><button class="chip">Save</button></div></form>`;
 }
 
-// the account page's notifications item: its note, and its button
 function notify_html(notify: Notify): string {
   const note = {
     off     : "Replies on this device, when UniiChat isn't open.",
@@ -228,18 +174,6 @@ function notify_html(notify: Notify): string {
   return `<div class="item"><p>Notifications<small>${note}</small></p>${button}</div>`;
 }
 
-// Settings
-// ========
-// The owner's part of the settings page (the server's settings:
-// Settings.ts), at its bottom: a row a setting or a key the page may
-// change, each its control (named by its key; a key's "key.<name>"),
-// where its value comes from and when a change applies, a button back
-// to the default (a key: out) if config.json sets it, and a place for
-// why a save was refused. One the page may not change (set by the
-// environment, or a server path or command) isn't shown. main.ts reads
-// the form and fills the picks' lists (picks_html).
-
-// what each setting is, as the page says it: its name, a line about it
 const SETTING: Record<string, [string, string]> = {
   vendors   : ["Vendors", "Whose models the server offers."],
   models    : ["Models", "The models offered, of those vendors."],
@@ -258,10 +192,8 @@ const KEY: Record<string, [string, string]> = {
   apns      : ["APNs key", "The .p8 key the iOS app's pushes are signed with."],
 };
 
-// each vendor's key
 export const VENDOR_KEY: Record<string, string> = { "claude-api": "anthropic", "openai-api": "openai" };
 
-// the settings whose value is a pick (four lists: picks_html)
 export const PICKS = ["pick", "compactor", "agents"];
 
 const GROUPS: Array<[string, string[]]> = [
@@ -285,16 +217,10 @@ export function settings_html(page: Page): string {
   return head + error + none + `<form class="settings" autocomplete="off">` + group(GROUPS[0]) + profiles + keys + group(GROUPS[1]) + save + `</form>`;
 }
 
-// the models the vendors and models checked offer, as "vendor:model"
 export function offered(vendors: string[], models: string[]): string[] {
   return Pick.models(VENDORS.filter((v) => vendors.includes(v)), models).map(([v, m]) => v + ":" + m.label);
 }
 
-// the profile editor (main.ts fills .profiles .field and keeps the
-// list): each profile its name, Delete, its models in order (each a
-// handle to drag, or move by arrow keys, and Remove) and a list to add
-// one of `offered` ("vendor:model", the vendors' and models checked);
-// then Add profile
 export function profiles_html(profiles: Array<[string, string[]]>, offered: string[]): string {
   const model = (m: string, i: number, j: number) => {
     const [vendor = "", label = m, ...rest] = m.split(":");
@@ -338,29 +264,21 @@ function control_html(r: Row): string {
   return `<input id="set-${r.key}" name="${r.key}" value="${esc(r.value)}" placeholder="${esc(r.def)}" spellcheck="false" autocapitalize="off">`;
 }
 
-// a list setting's items
 export function list(text: string): string[] {
   return text.split(",").map((x) => x.trim()).filter((x) => x !== "");
 }
 
-// a list as saved (`was`) and its items checked now (`now`, in the boxes'
-// order): null if the same items (in any order: no change); else the
-// items kept, in their order, then those added, in the boxes'
 export function list_changed(was: string[], now: string[]): string[] | null {
   const same = was.length === now.length && was.every((x) => now.includes(x)) && now.every((x) => was.includes(x));
   return same ? null : [...was.filter((x) => now.includes(x)), ...now.filter((x) => !was.includes(x))];
 }
 
-// a box per item; a model's names the vendors that offer it
-// (`data-vendor`, space-separated: main.ts shows it while one is checked)
 function checks_html(name: string, all: string[], on: string[], vendor: (x: string) => string): string {
   const box = (x: string) => `<label class="opt" data-vendor="${esc(vendor(x))}"><input type="checkbox" name="${name}" value="${esc(x)}"${on.includes(x) ? " checked" : ""}> ${esc(x)}</label>`;
   const odd = on.filter((x) => !all.includes(x));
   return `<div class="opts">${all.map(box).join("")}${odd.map(box).join("")}</div>`;
 }
 
-// where a value comes from, when a change applies, and the button back
-// to the default
 function from_html(r: Row): string {
   const from = r.from === "file" ? "From config.json" : "Default" + (r.why === "" ? "" : ": " + esc(r.why));
   const apply = r.apply === "now" ? "applies at once" : "applies on a restart";
@@ -380,13 +298,6 @@ function key_html(k: Key): string {
   return `<div class="set key" data-key="key.${esc(k.name)}">${label}<div class="field">${field}</div><p class="from">${from}${reset}</p><p class="err"></p></div>`;
 }
 
-// a pick setting's four lists, vendor, model, effort and speed, for
-// `value` (vendor:model:effort:speed): the vendors and the models checked
-// (`vendors`, `models`), the vendor's models, the model's speeds; first
-// `none` (agents: the chat's pick, value ""), which shows the vendor's
-// list only. A part they don't offer shows, said. The profiles' names
-// (`profiles`) follow the vendors in the first list; one picked is
-// the whole value, so no other list shows.
 export function picks_html(key: string, vendors: string[], models: string[], value: string, none: string | null, profiles: string[] = []): string {
   const [vendor = "", model = "", effort = "", speed = ""] = value === "" ? [] : value.split(":");
   const known = (VENDORS as string[]).includes(vendor);
@@ -402,9 +313,6 @@ export function picks_html(key: string, vendors: string[], models: string[], val
   return vendor === "" || profiles.includes(vendor) ? head : head + select("model", "Model", labels, model, null) + select("effort", "Effort", EFFORTS, effort, null) + select("speed", "Speed", speeds, speed, null);
 }
 
-// a pick of its four parts as chosen: a model its vendor lacks gives way
-// to the vendor's first checked, a speed the model lacks to its first, no
-// effort to medium; no vendor: none (""); a profile (`profiles`): its name
 export function pick_mend(parts: string[], models: string[], profiles: string[] = []): string {
   const [vendor = "", model = "", effort = "", speed = ""] = parts;
   if (profiles.includes(vendor)) {
@@ -420,7 +328,6 @@ export function pick_mend(parts: string[], models: string[], profiles: string[] 
   return [vendor, m.label, effort || "medium", m.speeds.includes(speed) ? speed : m.speeds[0]].join(":");
 }
 
-// a section of the settings page: its title, then its markup
 function section_html(title: string, body: string): string {
   return `<section><h2>${esc(title)}</h2>${body}</section>`;
 }
@@ -468,15 +375,10 @@ export function block_html(b: Md.Block): string {
   }
 }
 
-// a list item's blocks; in a tight list its paragraphs bare (lines, not
-// paragraphs spaced apart)
 function item_html(blocks: Md.Block[], tight: boolean): string {
   return blocks.map((b) => (tight && b.$ === "Para" ? spans_html(b.x) : block_html(b))).join("");
 }
 
-// a diff: its file and its lines added and dropped over its lines, each
-// its number, its mark and its text (style.css hangs a wrap after the
-// number); a ⋯ between hunks
 function diff_html(file: string, hunks: Md.Line[][]): string {
   const all   = hunks.flat();
   const nw    = all.reduce((w, l) => Math.max(w, String(l.n).length), 0);
@@ -488,8 +390,6 @@ function diff_html(file: string, hunks: Md.Line[][]): string {
   return `<pre class="diff" style="--nw:${nw}ch">${head}<code>${lines}</code></pre>`;
 }
 
-// a read's lines: framed as a diff is, the lines shown over them, each
-// its number and its text
 function file_html(shown: string, from: number, lines: string[]): string {
   const nw   = String(from + lines.length - 1).length;
   const head = `<span class="lang">${esc(shown)}</span>`;
@@ -497,9 +397,6 @@ function file_html(shown: string, from: number, lines: string[]): string {
   return `<pre class="diff" style="--nw:${nw}ch">${head}<code>${body}</code></pre>`;
 }
 
-// a file of the media store that isn't media (View.store_file): a chip,
-// its name and its size (main.ts sizes, once known), downloaded under
-// its name
 function chip_html(url: string, name: string): string {
   const shown = name.trim() || url.split("/").pop()!;
   return `<a class="file" href="${esc(url)}" download="${esc(shown)}" title="Download ${esc(shown)}"><span class="ic">📎</span><span class="fname">${esc(shown)}</span><small data-of="${esc(url)}"></small></a>`;
@@ -511,7 +408,7 @@ function spans_html(spans: Md.Span[]): string {
 
 function span_html(s: Md.Span): string {
   switch (s.$) {
-    case "Text": { // the name, in the brand's font
+    case "Text": {
       return esc(s.x).replaceAll("UniiChat", `<span class="brand">UniiChat</span>`);
     }
     case "Code": {
@@ -532,7 +429,7 @@ function span_html(s: Md.Span): string {
       }
       return `<a href="${esc(s.k)}"${s.t === "" ? "" : ` title="${esc(s.t)}"`} target="_blank" rel="noopener">${spans_html(s.x)}</a>`;
     }
-    case "Pict": { // a file of the media store inline (an image opens whole: Viewer.ts), a file that isn't media its chip, any other a link
+    case "Pict": {
       const [k, title, kind] = [esc(s.k), s.t === "" ? "" : ` title="${esc(s.t)}"`, View.media_kind(s.k)];
       return kind === "image" ? `<a class="media" href="${k}" target="_blank"><img src="${k}" alt="${esc(s.x)}"${title} loading="lazy"></a>`
         : kind === "video" ? `<video class="media" src="${k}"${title} controls preload="metadata"></video>`

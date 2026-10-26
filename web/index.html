@@ -17,7 +17,6 @@
 <link rel="stylesheet" href="/style.css">
 <script type="module" src="/app.js"></script>
 </head>
-<!-- the page, till web/src/main.ts draws it -->
 <body class="guest">
 <header>
   <button class="brand" data-go="/" data-act='{"$":"Goto","name":null}'><i class="mark"></i><span>UniiChat</span></button>
@@ -28,7 +27,6 @@
 </header>
 <main id="log"><div class="rows"></div><div class="tail"></div></main>
 <main id="account" hidden></main>
-<!-- the memory tree (/tree, web/src/Tree.ts) -->
 <main id="tree" hidden>
   <nav class="top"><a class="back" href="/" data-go="/">← Chat</a><a class="tab" href="/tree#view" data-go="/tree#view" data-tab="VIEW">VIEW</a><a class="tab" href="/tree" data-go="/tree" data-tab="TREE">TREE</a><small class="legend"></small><button class="prev" aria-label="Level below">‹</button><button class="next" aria-label="Level above">›</button></nav>
   <section class="view" tabindex="-1"></section>
@@ -46,12 +44,10 @@
   </form>
   <nav id="tabs"></nav>
 </footer>
-<!-- the chat's schedules, set by Unii's schedule tool (Timer.ts) -->
 <div id="timers" popover>
   <p class="title">Schedules</p>
   <ul></ul>
 </div>
-<!-- a picture seen whole, over the chat (web/src/Viewer.ts) -->
 <dialog id="viewer" aria-label="Picture">
   <div class="bar"><p class="name"></p><span class="zoom"></span><a class="get" title="Download" aria-label="Download"><svg viewBox="0 0 24 24"><path d="M12 4v11M7 10.5l5 5 5-5M5 19.5h14"/></svg></a><button class="shut" type="button" title="Close" aria-label="Close" autofocus><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div>
   <div class="stage"><img alt="" draggable="false"><p class="why" hidden>Could not load this picture.</p><button class="prev" type="button" aria-label="Previous picture" hidden><svg viewBox="0 0 24 24"><path d="M15 6l-6 6 6 6"/></svg></button><button class="next" type="button" aria-label="Next picture" hidden><svg viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></button></div>

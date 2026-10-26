@@ -1,55 +1,17 @@
-// Viewer
-// ======
-// A picture seen whole, over the chat, inside the page (index.html's
-// #viewer, a modal dialog): a plain click or tap on one of the chat's
-// pictures (a message's attachment, a markdown picture, a show result's)
-// or on a picture in the message box opens it (main.ts click); a click
-// with Ctrl, ⌘ or Shift, or the middle button, still opens the file in a
-// new tab, as a link. No new window: on Android an installed app's link
-// into itself opened a second copy of the app, and back closed that.
-// It opens fitted to the screen (never past the picture's own size),
-// its name and a download above it. A pinch or the wheel zooms where it
-// points, a drag pans, a double tap or click goes from fitted to the
-// picture's own size (100%; one fitted at 100% already, 2.5×) and
-// back; fitted, a swipe, ‹ › or the arrow keys go to the chat's picture
-// before or after. It is no page of its own but a history entry over the
-// page shown (the same address, the picture in its state), so back,
-// Escape or ✕ close it, the chat under it untouched; a reload drops it
-// (main.ts boot replaces the state, and steps back off its entry).
-
-// Types
-// =====
-
-// a picture: its url (the original file), its name, and whether it is
-// one of the chat's (log: ‹ › go to its neighbours) or the box's
 export type Pic = { src: string; name: string; log: boolean };
 
-// Constants
-// =========
-
-// the most it zooms, times the picture's own size
 const MAX = 8;
 
-// a tap moves less than SLOP px; a second within DOUBLE ms and NEAR px
-// of the first is a double tap
 const SLOP = 10;
 const DOUBLE = 320;
 const NEAR = 32;
 
-// the chat's pictures, in its order: Html.ts images_html's and .media's
 const PICS = "#log .pics a > img, #log a.media > img";
-
-// Globals
-// =======
 
 let D = document.createElement("dialog");
 let STAGE: HTMLElement = D;
 let IMG = document.createElement("img");
 
-// the picture shown (null: closed), where it was in the chat's list (n),
-// its own size (w, h; 0: not loaded), the scale and offset drawn (s, x,
-// y), the scale that fits it (fit), how far a swipe has it moved aside
-// (swipe), the theme colors the page had before it opened (theme)
 const V = {
   pic   : null as Pic | null,
   n     : -1,
@@ -63,16 +25,9 @@ const V = {
   theme : [] as string[],
 };
 
-// the pointers down on the stage, where each was last; the gesture they
-// make (from its first pointer down to the last up): where and when it
-// began, whether it moved past SLOP or ever had two pointers, whether it
-// began on the picture; the last tap
 const PTS = new Map<number, { x: number; y: number }>();
 let G: { x: number; y: number; t: number; moved: boolean; many: boolean; on: boolean; mouse: boolean } | null = null;
 let TAP: { x: number; y: number; t: number } | null = null;
-
-// Viewer
-// ======
 
 export function viewer_new(): void {
   D = document.querySelector<HTMLDialogElement>("#viewer")!;
@@ -95,13 +50,10 @@ export function viewer_new(): void {
   new ResizeObserver(refit).observe(STAGE);
 }
 
-// whether a picture is open
 export function viewer_on(): boolean {
   return D.open;
 }
 
-// the picture a click on el opens: one of the chat's (its link's file),
-// or a picture in the message box; null: none
 export function viewer_pic(el: Element): Pic | null {
   const link = el.closest<HTMLAnchorElement>("#log a.media, #log .pics a");
   const img = link?.querySelector("img");
@@ -117,9 +69,6 @@ export function viewer_pic(el: Element): Pic | null {
   return null;
 }
 
-// opens pic (clicked: el, which of the chat's pictures it is, the same
-// file may be there twice): a history entry over the page shown (push),
-// or the one back or forward come to already holds it (viewer_sync)
 export function viewer_open(pic: Pic, push = true, el: Element | null = null): void {
   if (push) {
     history.pushState({ pic }, "", location.href);
@@ -130,7 +79,6 @@ export function viewer_open(pic: Pic, push = true, el: Element | null = null): v
     show(pic);
   }
   if (!D.open) {
-    // the phone's bars dark as the viewer (the page's theme colors kept)
     const metas = [...document.querySelectorAll<HTMLMetaElement>("meta[name=theme-color]")];
     V.theme = metas.map((m) => m.content);
     D.showModal();
@@ -138,8 +86,6 @@ export function viewer_open(pic: Pic, push = true, el: Element | null = null): v
   }
 }
 
-// back or forward came to a history entry: it opens the picture its
-// state holds, or closes the one open (main.ts popped)
 export function viewer_sync(): void {
   const pic = history.state?.pic;
   if (typeof pic?.src === "string" && typeof pic.name === "string") {
@@ -149,8 +95,6 @@ export function viewer_sync(): void {
   }
 }
 
-// closed (✕, Escape, a phone's back as the browser closes a dialog, or
-// back to the entry under it): its entry gone too, if still there
 function closed(): void {
   const metas = [...document.querySelectorAll<HTMLMetaElement>("meta[name=theme-color]")];
   metas.forEach((m, k) => (m.content = V.theme[k] ?? m.content));
@@ -163,8 +107,6 @@ function closed(): void {
   }
 }
 
-// pic shown: its name, its file to download, its neighbours' buttons;
-// drawn fitted once loaded
 function show(pic: Pic): void {
   V.pic = pic;
   V.w = V.h = V.swipe = 0;
@@ -184,7 +126,6 @@ function show(pic: Pic): void {
     if (V.pic !== pic) {
       return;
     }
-    // (an SVG without a size of its own: the stage's)
     V.w = IMG.naturalWidth || STAGE.clientWidth;
     V.h = IMG.naturalHeight || STAGE.clientHeight;
     IMG.style.width = V.w + "px";
@@ -206,9 +147,6 @@ function show(pic: Pic): void {
   });
 }
 
-// the chat's pictures, and where the one shown is among them (-1: not
-// there, or a picture of the box's); the chat redrawn since, the same
-// file nearest where it was
 function place(): [Pic[], number] {
   if (V.pic === null || !V.pic.log) {
     return [[], -1];
@@ -221,8 +159,6 @@ function place(): [Pic[], number] {
   return [list, k];
 }
 
-// the picture before (-1) or after (1) in the chat, in place of this one
-// (its history entry too); false: none
 function step(d: number): boolean {
   const [list, k] = place();
   const to = k < 0 ? undefined : list[k + d];
@@ -235,10 +171,6 @@ function step(d: number): boolean {
   return true;
 }
 
-// Zoom
-// ====
-
-// fitted: its own size at most, centered
 function fit(): void {
   V.fit = fit_scale();
   V.s = V.fit;
@@ -246,14 +178,10 @@ function fit(): void {
   draw();
 }
 
-// the scale that fits the picture in the stage, but never past its own
-// size
 function fit_scale(): number {
   return V.w === 0 ? 1 : Math.min(1, STAGE.clientWidth / V.w, STAGE.clientHeight / V.h);
 }
 
-// the stage resized (a phone turned, a window resized): one fitted stays
-// fitted, else it keeps its scale, held in the stage
 function refit(): void {
   if (V.w === 0) {
     return;
@@ -269,8 +197,6 @@ function fitted(): boolean {
   return V.s <= V.fit * 1.001;
 }
 
-// zoomed to s (within fitted and MAX), the point (x, y) of the stage
-// staying where it is
 function zoom_at(x: number, y: number, s: number): void {
   const to = Math.min(Math.max(s, V.fit), Math.max(MAX, V.fit));
   V.x = x - ((x - V.x) * to) / V.s;
@@ -280,8 +206,6 @@ function zoom_at(x: number, y: number, s: number): void {
   draw();
 }
 
-// a side smaller than the stage centered in it; a larger one covering it
-// (no gap at an edge)
 function hold(): void {
   const [w, h] = [V.w * V.s, V.h * V.s];
   const [sw, sh] = [STAGE.clientWidth, STAGE.clientHeight];
@@ -295,34 +219,26 @@ function draw(): void {
   D.querySelector(".zoom")!.textContent = V.w === 0 ? "" : Math.round(V.s * 100) + "%";
 }
 
-// fitted ↔ its own size (one fitted at its own size already: 2.5×), at
-// (x, y)
 function toggle(x: number, y: number): void {
   const big = V.fit < 0.999 ? 1 : V.fit * 2.5;
   ease();
   zoom_at(x, y, fitted() ? big : V.fit);
 }
 
-// the next change drawn eased (a double tap's, a key's, a swipe let go)
 function ease(): void {
   D.classList.add("ease");
   setTimeout(() => D.classList.remove("ease"), 220);
 }
 
-// a point on the screen, on the stage
 function at(x: number, y: number): [number, number] {
   const r = STAGE.getBoundingClientRect();
   return [x - r.left, y - r.top];
 }
 
-// Input
-// =====
-
 function down(ev: PointerEvent): void {
   if ((ev.pointerType === "mouse" && ev.button !== 0) || (ev.target as Element).closest("button") !== null) {
     return;
   }
-  // (a mouse: no text selected, no image dragged)
   ev.preventDefault();
   STAGE.setPointerCapture(ev.pointerId);
   PTS.set(ev.pointerId, { x: ev.clientX, y: ev.clientY });
@@ -334,8 +250,6 @@ function down(ev: PointerEvent): void {
   }
 }
 
-// one pointer pans (fitted, with pictures beside it: swipes); two pinch,
-// zooming about their midpoint as it moves
 function move(ev: PointerEvent): void {
   const was = PTS.get(ev.pointerId);
   if (was === undefined || G === null) {
@@ -373,9 +287,6 @@ function move(ev: PointerEvent): void {
   zoom_at(nx, ny, span === 0 ? V.s : (V.s * Math.hypot(c.x - d.x, c.y - d.y)) / span);
 }
 
-// all pointers up: a swipe far enough goes to the picture beside, else
-// slides back; a tap, unmoved: a second near the first toggles the zoom,
-// a mouse's click beside the picture closes it
 function up(ev: PointerEvent): void {
   if (!PTS.delete(ev.pointerId) || PTS.size > 0) {
     return;
@@ -418,8 +329,6 @@ function wheel(ev: WheelEvent): void {
   zoom_at(...at(ev.clientX, ev.clientY), V.s * Math.exp(-px * (ev.ctrlKey ? 0.01 : 0.002)));
 }
 
-// ← → the picture beside, + − zoom at the middle, 0 fitted; nothing
-// scrolls the chat under it (Escape: the dialog's own)
 function key(ev: KeyboardEvent): void {
   if (ev.ctrlKey || ev.metaKey || ev.altKey) {
     return;
@@ -469,10 +378,6 @@ function key(ev: KeyboardEvent): void {
   ev.preventDefault();
 }
 
-// Names
-// =====
-
-// a url's last part (as written, if its escapes are broken)
 function base(src: string): string {
   const last = src.split(/[?#]/)[0].split("/").pop() ?? "";
   try {
@@ -482,8 +387,6 @@ function base(src: string): string {
   }
 }
 
-// the name it downloads as: its own, with its file's extension if it
-// has none (a picture named in markdown as "chart")
 function file_name(pic: Pic): string {
   const ext = /\.([a-z0-9]{1,10})$/i.exec(base(pic.src))?.[1];
   return ext === undefined || /\.[a-z0-9]{1,10}$/i.test(pic.name) ? pic.name : pic.name + "." + ext;
