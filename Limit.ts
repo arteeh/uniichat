@@ -11,8 +11,8 @@
 // queued for its run) or a resume ends the wait, and it asks again. It
 // ends instead (an Off) only if it ran no tool yet and has a fallback or
 // a repick. A subagent's waits as Unii's turn does, and as the turn
-// has messages queued it waits till they are taken (STAGGERED), so a
-// "stop it" among them comes first.
+// has messages queued it waits till the turn has answered them
+// (ANSWERING), so a "stop it" among them comes first.
 //
 // Under a limit where asking would bill (claude-sub's extra usage:
 // LIMITS) a call waits before asking at all (Limit.guard). A sub whose
@@ -56,12 +56,13 @@ export const LIMIT = 1800e3;
 export const POLL = 300e3;
 
 // the longest a subagent woken from a usage limit waits for Unii's turn
-// to take its messages queued, looking every STAGGER_LOOK
+// to answer its messages queued, looking every STAGGER_LOOK
 export const STAGGER      = 600e3;
 export const STAGGER_LOOK = 1e3;
 
-// whether Unii's turn has messages queued (Server.ts sets it: Limit.staggered)
-let STAGGERED: () => boolean = () => false;
+// Unii's turn: whether it has messages queued, and whether it runs
+// (Server.ts sets it: Limit.answering)
+let ANSWERING: () => { queued: boolean; busy: boolean } = () => ({ queued: false, busy: false });
 
 // the limits told under which asking would bill (claude-sub's extra
 // usage, one per account: ClaudeSub.note), till their reset, by key: they
@@ -128,9 +129,9 @@ export namespace Limit {
     return ms >= LONG && (ask.fallback === true || ask.repick !== undefined) && !acted;
   }
 
-  // what tells whether Unii's turn has messages queued (STAGGERED)
-  export function staggered(queued: () => boolean): void {
-    STAGGERED = queued;
+  // what tells whether Unii's turn has messages queued or runs (ANSWERING)
+  export function answering(turn: () => { queued: boolean; busy: boolean }): void {
+    ANSWERING = turn;
   }
 
   // a call ended at a long limit, its `n`th in a row: on what, and when it
@@ -145,7 +146,7 @@ export namespace Limit {
   // ends); a shorter one says it as when busy, each time. A stop, a poke
   // or a resume ends the wait; a subagent's parked one that ends but by a
   // stop or a poke while Unii's turn has messages queued goes on till
-  // the turn takes them (up to STAGGER)
+  // the turn that answers them ends (up to STAGGER)
   export async function park(l: Limit, ms: number, known: boolean): Promise<void> {
     const wake = new AbortController();
     l.poke = () => wake.abort();
@@ -160,10 +161,11 @@ export namespace Limit {
     const until = AbortSignal.any([l.signal, wake.signal]);
     try {
       await Limit.wait(vendor, ms, until);
-      if (parked && l.ask.agent === true && !until.aborted && STAGGERED()) {
+      if (parked && l.ask.agent === true && !until.aborted && ANSWERING().queued) {
         const end = Date.now() + STAGGER;
+        const answering = () => ANSWERING().queued || ANSWERING().busy;
         l.on({ $: "Limit", limit: { until: end, known: false, vendor } });
-        while (!until.aborted && STAGGERED() && Date.now() < end) {
+        while (!until.aborted && answering() && Date.now() < end) {
           await Machine.nap(STAGGER_LOOK, until);
         }
       }

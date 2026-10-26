@@ -288,8 +288,8 @@ export namespace Chat {
     // what ran as it was cut, read before anything saves what runs now
     const cut = mem.work;
     // a subagent woken from a usage limit while the turn has messages
-    // queued waits till it has taken them (Limit.park)
-    Limit.staggered(() => chat.main.queue.length > 0);
+    // queued waits till the turn has answered them (Limit.park)
+    Limit.answering(() => ({ queued: chat.main.queue.length > 0, busy: chat.main.busy }));
     // Unii's turn (Run.ts): a message queued is logged as its call starts
     // (Chat.posted); one queued stops a goal check running, whose answer
     // it drops; one of the user's left queued by a stop is the next turn

@@ -75,7 +75,7 @@ export type Block = { text: string; mark: boolean; back?: boolean };
 // first request goes once (its pick is DOWN); fallback: a pick follows
 // its own, which a long usage-limit wait goes on with instead (Limit.ends);
 // agent: a subagent's, which waits at a usage limit as Unii's turn does
-// (after its fallbacks), woken once the turn has taken its messages
+// (after its fallbacks), woken once the turn has answered its messages
 // queued (Limit.park); talk: a turn's
 // in conversation mode (claude-api marks a block further back too:
 // Anthropic.ts);
