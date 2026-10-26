@@ -84,7 +84,8 @@ type View = { parts: Part[]; size: number; batch: boolean; high: number };
 type Sum = Part & { kind: Served };
 type Served = "compactor" | "import";
 
-// what a compaction's call takes but its blocks (Server.ts share)
+// what a call takes but its blocks (Server.ts share); a compaction's,
+// `share`, but its pick too: the compactor's alone (Memory.ask)
 export type Share = Omit<Ask, "blocks">;
 
 // what an upload to the media store may write (Memory.media_add; Server.ts
@@ -144,7 +145,7 @@ export type Memory = {
   hold   : Array<string | null>;
   done   : boolean;
   wait   : Set<() => void>;
-  share  : () => Share;
+  share  : () => Omit<Share, keyof Pick>;
   made?  : (l: number, i: number) => void;
   acted  : (id: string, ans: object) => void;
 };

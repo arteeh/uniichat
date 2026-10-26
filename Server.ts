@@ -282,7 +282,7 @@ export namespace Chat {
   // the chat, opened at the start (the one before, if any, resumed by
   // Main.start). One that fails to open throws, and the server ends
   export function open(): Chat {
-    const mem = Memory.load(CHAT, () => Chat.share(chat, Tools.prompt("compact")), Owner.act_put);
+    const mem = Memory.load(CHAT, () => ({ system: Tools.prompt("compact"), searches: 0, server: "" }), Owner.act_put);
     const tools = Tools.serve(mem, {
       push   : (agent, kind, text) => Chat.push(chat, agent, kind, text),
       note   : (text) => Chat.note(chat, text),
@@ -321,11 +321,11 @@ export namespace Chat {
     return chat;
   }
 
-  // what a call of the chat starts with: its system prompt, the user
-  // prompt (a turn's) or the compaction prompt (a summary's, which gets
-  // nothing else). A summary gets no tools: one it called, ours or the
-  // API's own (web search brings code execution), sent its whole input
-  // again
+  // what a call of the chat starts with: its pick and system prompt. A
+  // summary's takes nothing of the chat's pick (Memory.ask: the
+  // compactor's, profile and all) and gets no tools: one it called, ours
+  // or the API's own (web search brings code execution), sent its whole
+  // input again (Chat.open)
   export function share(chat: Chat, system: string): Share {
     return { ...Pick.ask(chat.pick), system, searches: 0, server: "" };
   }
