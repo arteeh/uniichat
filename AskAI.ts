@@ -77,7 +77,8 @@ export type Block = { text: string; mark: boolean; back?: boolean };
 // agent: a subagent's, which waits at a usage limit as Unii's turn does
 // (after its fallbacks), woken a little later than it when the turn has
 // messages queued (Limit.park); talk: a turn's
-// in conversation mode (claude-api caches it an hour: Anthropic.ts);
+// in conversation mode (claude-api marks a block further back too:
+// Anthropic.ts);
 // repick: a patient call's pick as it starts over (AskAI.ask), which a
 // long usage limit ends a try for, as a fallback does; limits: the
 // usage limits in a row its last try ended at, on the pick this one
@@ -172,10 +173,10 @@ const WEEK = 7 * 86400e3;
 
 // how long a vendor keeps a cache entry unused, in ms, as single flight
 // counts it (openai-sub's backend tells none: the shorter guess).
-// claude-sub's Claude Code marks every entry for an hour (ClaudeSub.ts
-// ENV and its own mark, HOUR)
+// claude-api's and claude-sub's marks are all an hour's (Anthropic.ts
+// HOUR; Claude Code's own by ClaudeSub.ts ENV, ours by its HOUR)
 export const TTL: Record<Vendor, number> = {
-  "claude-api" : 300e3,
+  "claude-api" : 3600e3,
   "openai-api" : 1800e3,
   "openai-sub" : 300e3,
   "claude-sub" : 3600e3,
