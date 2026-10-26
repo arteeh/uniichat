@@ -19,9 +19,9 @@ Features
 - **All your computers.** Run `unii device` on a machine and the agent
   can run commands and edit files there.
 - **Subagents** do the grunt work in the background and report back.
-- **Goals and imports.** `/goal` keeps it working until something is
-  done. It can also import your Claude Code and Codex sessions, or the
-  websites' exports.
+- **Goals.** `/goal` keeps UniiChat working until something is done.
+- **Don't start from scratch.** Import past conversations from either
+  Claude Code, Codex or another UniiChat instance into your memory tree.
 
 What this fork adds:
 
