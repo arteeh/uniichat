@@ -60,7 +60,7 @@ import icon_apple from "./web/apple-touch-icon.png" with { type: "file" };
 // a socket: its sign-in (hashed), its query's fields, a device's name
 // (null: a view), the parts it was shown (Chat.teach), when its view last
 // said its page is in use (View.ACTIVE; 0: not)
-type Sock = ServerWebSocket<{ who: string; tab: string; wire: string | null; host: string | null; work: string; shell: string | null; device: string | null; seen: Set<string>; active: number }>;
+type Sock = ServerWebSocket<{ who: string; tab: string; wire: string | null; host: string | null; work: string; scratch: string | null; shell: string | null; device: string | null; seen: Set<string>; active: number }>;
 
 // a body: its file, its size so far
 type Body = { fh: fs.promises.FileHandle; size: number };
@@ -1252,7 +1252,7 @@ export namespace Chat {
   // a view joins on the chat as it is now; a device is attached (told
   // its name if its host's was taken)
   export function join(chat: Chat, sock: Sock): void {
-    const { tab, host, work, shell } = sock.data;
+    const { tab, host, work, scratch, shell } = sock.data;
     chat.socks.add(sock);
     if (host === null) {
       Chat.send(sock, Chat.state(chat));
@@ -1260,7 +1260,7 @@ export namespace Chat {
       Chat.send(sock, { $: "live", live: chat.main.live });
       return;
     }
-    const link = { send: (msg: object) => Chat.send(sock, msg), live: () => chat.socks.has(sock), work, shell };
+    const link = { send: (msg: object) => Chat.send(sock, msg), live: () => chat.socks.has(sock), work, scratch, shell };
     sock.data.device = Tools.attach(chat.tools, tab, host, sock.data.who, link, Owner.kept());
     if (sock.data.device !== host) {
       Chat.send(sock, { $: "note", text: host + " was taken: Unii calls this computer " + sock.data.device + "." });
@@ -1876,7 +1876,7 @@ export namespace Main {
       if (p === "/ws") {
         const q    = new URL(req.url).searchParams;
         const who  = Owner.hash(Owner.token(req));
-        const data = { who, tab: q.get("tab") ?? "", wire: q.get("wire"), host: q.get("device"), work: q.get("work") ?? "~/.unii/work", shell: q.get("shell") === "PowerShell" ? "PowerShell" : null, device: null, seen: new Set<string>(), active: 0 };
+        const data = { who, tab: q.get("tab") ?? "", wire: q.get("wire"), host: q.get("device"), work: q.get("work") ?? "~/.unii/work", scratch: q.get("scratch"), shell: q.get("shell") === "PowerShell" ? "PowerShell" : null, device: null, seen: new Set<string>(), active: 0 };
         return server.upgrade(req, { data }) ? undefined : new Response("upgrade failed", { status: 400 });
       }
       return await Main.page(Main.chat, p, req);

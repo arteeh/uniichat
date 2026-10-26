@@ -3,12 +3,14 @@
 // `unii device [url]`: this computer as a device of a unii server, on
 // its own, with no terminal open (`unii device -d` runs it as a
 // background service: Service.ts). The agent's tools (Machine.ts) and its
-// own MCP servers (Mcp.here) run here as jobs, each in its
-// agent's dir under the work dir, till done or halted; all they left
+// own MCP servers (Mcp.here) run here as jobs, each in its agent's
+// scratch folder (Machine.SCRATCH, never in the work dir), till done or
+// halted; all they left
 // running dies as the device stops. Its file is device.json (Client.ts):
 // the server, its sign-in, its name as the agent sees it (default: on
 // macOS its local host name, Bonjour's, else the host's) and its work
-// dir (default ~/.unii/work). It signs in once (the owner confirms it in
+// dir, the user's projects, which unii never writes in on its own
+// (default ~/.unii/work). It signs in once (the owner confirms it in
 // a browser), then holds one socket to the server, opened again as one
 // is lost. A job's output is an act ({ $: "out" }), kept till answered
 // and sent again on the next socket, which the server does once.
@@ -21,7 +23,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import * as Client from "./Client.ts";
-import { Machine, WIN, type Job } from "./Machine.ts";
+import { Machine, SCRATCH, WIN, type Job } from "./Machine.ts";
 import { Mcp } from "./Mcp.ts";
 import { FRAME, media_kind, PING, QUIT, RETRY, TICK, WIRE } from "./View.ts";
 
@@ -62,7 +64,7 @@ export async function signin(given: string | undefined): Promise<{ url: string; 
 export async function run(given: string | undefined): Promise<void> {
   const { url, token, name, work } = await signin(given);
   console.log("unii device " + name + " on " + url + ", work dir " + work);
-  const query = "?tab=" + crypto.randomUUID() + "&wire=" + WIRE + "&device=" + encodeURIComponent(name) + "&work=" + encodeURIComponent(work) + (WIN ? "&shell=PowerShell" : "");
+  const query = "?tab=" + crypto.randomUUID() + "&wire=" + WIRE + "&device=" + encodeURIComponent(name) + "&work=" + encodeURIComponent(work) + "&scratch=" + encodeURIComponent(SCRATCH) + (WIN ? "&shell=PowerShell" : "");
   const jobs = new Map<string, AbortController>();
   const outs = new Map<string, object>();
   let ws: WebSocket | null = null;
@@ -125,7 +127,7 @@ export async function run(given: string | undefined): Promise<void> {
   const job = async (id: string, job: Job) => {
     const abort = new AbortController();
     jobs.set(id, abort);
-    const out  = job.name === "show" ? await show(job, work, url, token, abort.signal) : await Machine.run(job, work, abort.signal);
+    const out  = job.name === "show" ? await show(job, url, token, abort.signal) : await Machine.run(job, abort.signal);
     const size = Buffer.byteLength(JSON.stringify(out));
     const most = FRAME - 1024;
     const big  = { text: "The output, " + size + " bytes, is over the " + most + " a tool may send.", fail: true };
@@ -157,8 +159,8 @@ export async function run(given: string | undefined): Promise<void> {
 // show: each file streamed to the server's media store (Memory.media_add),
 // its markdown line answered (one that isn't media, a link: downloaded);
 // one it refuses, why
-async function show(job: Job, work: string, url: string, token: string, signal: AbortSignal): Promise<{ text: string; fail: boolean }> {
-  const cwd = Machine.agent_dir(work, job.cwd);
+async function show(job: Job, url: string, token: string, signal: AbortSignal): Promise<{ text: string; fail: boolean }> {
+  const cwd = Machine.agent_dir(job.cwd);
   const lines: string[] = [];
   let fail = false;
   for (const p of [job.input.paths ?? []].flat().map(String)) {

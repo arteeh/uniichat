@@ -1,11 +1,13 @@
 // Machine
 // =======
 // The tools that touch a device: shell, read, write, edit, view_video,
-// show (TOOLS; show is the device's own, as it posts to the server), run by a device (Device.ts) as Jobs, each in its agent's dir
-// under the device's work dir. A stop kills the job's shell and its
-// process group. The stop tool's halt job kills all an agent's shells
-// left (UNII_AGENT); as the device quits, end() kills every
-// shell's group (SHELLS), and any process marked UNII_RUN that left it.
+// show (TOOLS; show is the device's own, as it posts to the server), run
+// by a device (Device.ts) as Jobs, each in its agent's scratch folder
+// (SCRATCH/<agent>: never in the work dir, the user's projects). A stop
+// kills the job's shell and its process group. The stop tool's halt job
+// kills all an agent's shells left (UNII_AGENT); as the device quits,
+// end() kills every shell's group (SHELLS), and any process marked
+// UNII_RUN that left it.
 // A file changed (write over one, edit) answers as a unified diff (Diff),
 // which both views draw as one (Md.ts). read shows an image file as an
 // image; view_video, frames of a video on one sheet (ffmpeg's).
@@ -24,7 +26,7 @@ import { FIT, HEAD, IMAGE, image_kind, PIXELS } from "./View.ts";
 // =====
 
 // a tool call to run here: its tool, its input, its agent's name (its
-// folder under the device's work dir: Machine.agent_dir)
+// scratch folder: Machine.agent_dir)
 export type Job = { name: string; input: any; cwd: string };
 
 // a tool as the vendors see it: its name, what it does, its input's
@@ -94,6 +96,10 @@ const REORDER = 16;
 // the smallest side of a frame on a sheet, in px
 const CELL = 16;
 
+// where each agent's scratch folder is, by its name: in the unii dir
+// ($UNII_DIR, else ~/.unii), on Windows too
+export const SCRATCH = (process.env.UNII_DIR ?? "~/.unii").replace(/[\\/]+$/, "") + "/scratch";
+
 // a shell call's timeout, in seconds: the least and the most
 const TIMEOUT = [1, 3600];
 
@@ -123,15 +129,15 @@ export function spec(name: string, info: string, fields: object, need: string[])
 
 export namespace Machine {
 
-  // the folder an agent's relative paths resolve in: <work>/<agent>, `~/`
-  // in the work dir read as the home dir
-  export function agent_dir(work: string, agent: string): string {
-    const root = work.startsWith("~/") ? os.homedir() + work.slice(1) : work;
+  // the folder an agent's relative paths resolve in, its scratch folder:
+  // SCRATCH/<agent>, `~` read as the home dir
+  export function agent_dir(agent: string): string {
+    const root = SCRATCH.replace(/^~(?=[\\/]|$)/, os.homedir());
     return path.join(root, path.basename(agent));
   }
 
-  export async function run(job: Job, work: string, signal: AbortSignal): Promise<Out> {
-    const cwd = Machine.agent_dir(work, job.cwd);
+  export async function run(job: Job, signal: AbortSignal): Promise<Out> {
+    const cwd = Machine.agent_dir(job.cwd);
     const input = job.input;
     const file = path.resolve(cwd, String(input.path));
     try {
@@ -169,10 +175,10 @@ export namespace Machine {
           return await Mcp.here(input, signal);
         }
         case "skills": {
-          return { text: JSON.stringify(Machine.skills(os.homedir(), cwd)), fail: false };
+          return { text: JSON.stringify(Machine.skills(os.homedir())), fail: false };
         }
         case "skill": {
-          return Machine.skill(os.homedir(), cwd, String(input.name));
+          return Machine.skill(os.homedir(), String(input.name));
         }
         case "halt": {
           const left = await Machine.halt(String(input.agent));
@@ -563,12 +569,13 @@ export namespace Machine {
   // Skills
   // ------
 
-  // Agent Skills (<name>/SKILL.md) in ~/.agents/skills, then in
-  // <dir>/.agents/skills: a name found twice keeps the user's; one that
-  // can't be read or lacks a valid name and description is left out
-  export function skills(home: string, dir: string): Skill[] {
+  // Agent Skills (<name>/SKILL.md) in ~/.agents/skills, the user's
+  // global ones only (a repo's are read as its AGENTS.md is: prompt.txt):
+  // one that can't be read or lacks a valid name and description is left
+  // out
+  export function skills(home: string): Skill[] {
     const found = new Map<string, Skill>();
-    for (const root of [home + "/.agents/skills", dir + "/.agents/skills"]) {
+    for (const root of [home + "/.agents/skills"]) {
       let names: string[] = [];
       try {
         names = fs.readdirSync(root).sort();
@@ -588,8 +595,8 @@ export namespace Machine {
     return [...found.values()];
   }
 
-  export function skill(home: string, dir: string, name: string): Out {
-    const skill = Machine.skills(home, dir).find((s) => s.name === name);
+  export function skill(home: string, name: string): Out {
+    const skill = Machine.skills(home).find((s) => s.name === name);
     if (skill === undefined) {
       return { text: "No skill " + name + " here.", fail: true };
     }

@@ -13,8 +13,9 @@
 // and it is no longer open; one of a device that links again from a new
 // process (a restart) goes at once. It is told its
 // jobs' ids as they change, and each job new to it; a job's output is an
-// act (Server.ts). A device's skills (Machine.skills), read as a job when
-// it joins and as each turn starts, are listed in each call's message
+// act (Server.ts). A device's skills (Machine.skills: the user's global
+// ones, ~/.agents/skills), read as a job when it joins and as each turn
+// starts, are listed in each call's message
 // while it is open; the skill tool loads one, as a job too.
 // A subagent has a name and a log; each call
 // gets its context and its whole log, so a told agent goes on even after
@@ -70,8 +71,10 @@ type Device = {
 type Running = { term: string; job: Job; out: Promise<Out>; end: (out: Out) => void };
 
 // a device's link: how to reach it, whether its socket is open now, its
-// work dir, its shell if not a POSIX one
-export type Link = { send: (msg: object) => void; live: () => boolean; work: string; shell: string | null };
+// work dir (the user's projects), where its agents' scratch folders are
+// (null: a device from before them, whose are in its work dir), its
+// shell if not a POSIX one
+export type Link = { send: (msg: object) => void; live: () => boolean; work: string; scratch: string | null; shell: string | null };
 
 // a task to spawn, with what it runs on
 export type Spawn = { task: string; role: Agent["role"] };
@@ -210,7 +213,12 @@ const DEVICES = `Devices: the user's computers that run unii's device now, by na
 at the start of each message. Your shell, read, write, edit, view_video and
 show tools run on the one their \`device\` field names. A computer is listed only
 while its device runs, and leaves the list when it stops: a task that needs
-one not listed can't be done now, so tell the user it isn't available.`;
+one not listed can't be done now, so tell the user it isn't available. Each
+names its work dir, where the user's projects are, and its scratch dir, which
+holds your own folder: put your scratch files and git worktrees there, never
+among the user's projects. When you start work in a folder or repository, read
+its AGENTS.md if it has one, and check its \`.agents/skills/\` for a SKILL.md
+that fits the task.`;
 const DEVICES_NONE = "(None is open now.)";
 // where a file of the chat's (/media/<name>, pasted or shown) is
 const MEDIA_AT = "Media and files in the chat, /media/<name>, are the files {dir}<name> on the server's computer.";
@@ -244,14 +252,14 @@ const BOSS: Spec[] = [
   }, ["message", "zone"]),
   spec("schedules", "List the chat's schedules: id, when each comes next, its message.", {}, []),
   spec("unschedule", "Cancel a schedule, by its id.", { id: STR }, ["id"]),
-  spec("stop", "Stop a subagent at once, by name, whatever it is doing (mid-call, waiting on a usage limit, running a tool on a device: that job is cancelled). Others keep running. Its report says it was stopped; its chat and work dir stay, so a later tell resumes it.", { name: STR, why: { type: "string", description: "Why, for its report." } }, ["name"]),
+  spec("stop", "Stop a subagent at once, by name, whatever it is doing (mid-call, waiting on a usage limit, running a tool on a device: that job is cancelled). Others keep running. Its report says it was stopped; its chat and scratch folder stay, so a later tell resumes it.", { name: STR, why: { type: "string", description: "Why, for its report." } }, ["name"]),
   spec("resume", "Wake every call on this server waiting for an AI service's usage limit (your turn, summaries), when the user says a limit was reset early. Each asks again once; one still limited waits again. A subagent at a usage limit ends and reports it instead: tell it to go on.", {}, []),
 ];
 const DEVICE = { device: { type: "string", description: "The name of the device to run on, one listed under Devices." } };
 function kit(who: string): Spec[] {
   return TOOLS.map((t) => {
     const schema = t.schema as { properties: object; required: string[] };
-    const info = t.info + " It runs on the device named, in <work>/" + who + ", <work> being the work dir Devices lists for it.";
+    const info = t.info + " It runs on the device named; a relative path is in <scratch>/" + who + ", your scratch folder there, <scratch> being the scratch dir Devices lists for it.";
     return spec(t.name, info, { ...DEVICE, ...schema.properties }, ["device", ...schema.required]);
   });
 }
@@ -288,8 +296,9 @@ export namespace Tools {
 
   export function devices(tools: Tools): Block {
     const work  = (d: Device) => [...d.terms.values()][0]?.work;
+    const temp  = (d: Device) => [...d.terms.values()][0]?.scratch ?? work(d);
     const shell = (d: Device) => [...d.terms.values()][0]?.shell;
-    const line  = ([name, d]: [string, Device]) => "- " + name + ", work dir " + work(d) + (shell(d) ? ", shell " + shell(d) + " (stopping the device does not kill a process a call left running after its shell ended)" : "");
+    const line  = ([name, d]: [string, Device]) => "- " + name + ", work dir " + work(d) + " (the user's projects), scratch dir " + temp(d) + (shell(d) ? ", shell " + shell(d) + " (stopping the device does not kill a process a call left running after its shell ended)" : "");
     const lines = Tools.opened(tools).map(line);
     return { text: "Devices open now:\n" + (lines.length === 0 ? DEVICES_NONE : lines.join("\n")) + "\n" + MEDIA_AT.replace("{dir}", tools.mem.dir + "/docs/media/") + "\n\n", mark: false };
   }
