@@ -3,24 +3,25 @@
 // One way to call a model: a system prompt and a user message in;
 // Deltas (live pieces) and an Entry per finished message out. send()
 // hands the agent a message at its next chance, stop() aborts, wake()
-// ends a wait for a usage limit (Agent.park), `left` holds those never
+// ends a wait for a usage limit (Limit.ts), `left` holds those never
 // taken. Every vendor is an API run in our loop (Agent.ts) but
-// claude-sub, run in Claude Code's (ClaudeSub.ts). A patient call (a
-// summary's) asks again, AGAIN after each try nothing answered (the
-// vendor down or refusing it, as when the API key's credit is gone; our
-// setup failing) or, if the vendor said when its refusal lifts (`until`:
-// a usage limit a fallback went past: Agent.limit_off), then (a week at
-// most), till
-// one is answered or we end it (a stop): an outage only delays it, and no summary is made of a failure that isn't
-// its input's (Memory.ts). Each wait is told (an Again event: why, and
-// when it asks again; then null as it does), and it starts over on its
-// pick as `repick` reads it then, if given (a summary's: the compactor
-// setting, changed meanwhile): a long usage limit ends its try for that
-// (Agent.ends), and its wait ends early as config is read again with
-// another pick, or at a usage limit, as a resume or the vendor's usage
-// cleared wakes it (Agent.wait_limit). A call that yields (an import's summary, naming its
-// import) sends nothing while one that doesn't waits on its busy model,
-// nor while another of its import's does (Agent.ts).
+// claude-sub, run in Claude Code's (ClaudeSub.ts).
+//
+// A patient call (a summary's) asks again till a try is answered or we
+// end it (a stop): an outage only delays it, and no summary is made of a
+// failure that isn't its input's (Memory.ts). It waits AGAIN after each
+// try nothing answered (the vendor down or refusing it, as when the API
+// key's credit is gone; our setup failing), or, if the vendor said when
+// its refusal lifts (`until`: a long usage limit, Limit.off), till then
+// (a week at most). Each wait is told (an Again event: why, and when it
+// asks again; then null as it does). It starts over on its pick as
+// `repick` reads it then, if given (a summary's: the compactor setting,
+// changed meanwhile), which is why a long usage limit ends its try
+// (Limit.ends). Its wait ends early as config is read again with another
+// pick, or, at a usage limit, as a resume or the vendor's usage cleared
+// wakes it (Limit.wait). A call that yields (an import's summary, naming
+// its import) sends nothing while one that doesn't waits on its busy
+// model, nor while another of its import's does (Agent.ts).
 //
 // Fallback: a call on a profile (Pick.ts) runs on its pick, then on each
 // of the profile's models (Pick.falls); one on a model alone has none.
@@ -44,6 +45,7 @@
 import { Agent } from "./Agent.ts";
 import { ClaudeSub } from "./ClaudeSub.ts";
 import { stream_lines } from "./Clip.ts";
+import { Limit } from "./Limit.ts";
 import { Machine } from "./Machine.ts";
 import { Pick } from "./Pick.ts";
 import * as config from "./Config.ts";
@@ -71,14 +73,14 @@ export type Block = { text: string; mark: boolean; back?: boolean };
 
 // searches: the most web searches it runs (0: no web tools); probe: its
 // first request goes once (its pick is DOWN); fallback: a pick follows
-// its own, which a long usage-limit wait goes on with instead (Agent.step);
+// its own, which a long usage-limit wait goes on with instead (Limit.ends);
 // agent: a subagent's, which a long usage limit ends (after its
 // fallbacks) instead of parking it, its report saying so; talk: a turn's
 // in conversation mode (claude-api caches it an hour: Anthropic.ts);
 // repick: a patient call's pick as it starts over (AskAI.ask), which a
 // long usage limit ends a try for, as a fallback does; limits: the
 // usage limits in a row its last try ended at, on the pick this one
-// asks again (Agent.limit_wait goes on from them)
+// asks again (Limit.wait_for goes on from them)
 export type Ask = Pick & {
   system    : string;
   blocks    : Block[];
@@ -129,7 +131,7 @@ export type Event =
 // which another try would do again; until: when the vendor's refusal lifts, if it said (ms since 1970);
 // long: the vendor refused it as too long for the model (Agent.TOO_LONG);
 // why: the vendor's own words for a failure `text` says only as BUSY;
-// limits: it ended at a usage limit (Agent.limit_off), the usage limits
+// limits: it ended at a usage limit (Limit.off), the usage limits
 // in a row
 export type End = {
   ok     : boolean;
@@ -292,7 +294,7 @@ export namespace AskAI {
 
   // a patient call's wait to ask again, `ms`, till a stop (`signal`), a
   // wake (`wake`) or, at a usage limit on `vendor` (null: none), a resume
-  // or that vendor's usage read clear (Agent.wait_limit); and, if it picks
+  // or that vendor's usage read clear (Limit.wait); and, if it picks
   // again (`repick`), as config is read again with other picks than
   // `picks` (a compactor changed in Settings counts at once)
   export async function nap(ask: Ask, picks: Pick[], vendor: Vendor | null, ms: number, wake: AbortController, signal: AbortSignal): Promise<void> {
@@ -304,7 +306,7 @@ export namespace AskAI {
     config.RELOADED.add(moved);
     try {
       const both = AbortSignal.any([signal, wake.signal]);
-      await (vendor === null ? Machine.nap(ms, both) : Agent.wait_limit(vendor, ms, both));
+      await (vendor === null ? Machine.nap(ms, both) : Limit.wait(vendor, ms, both));
     } finally {
       config.RELOADED.delete(moved);
     }

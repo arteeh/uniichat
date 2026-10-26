@@ -18,29 +18,8 @@
 // waiting on it, so imports share what room is left alike, however many
 // requests each runs.
 // A usage limit (a 429 but OpenAI's insufficient_quota, or a rate-limit
-// stream error) never ends a call: it asks again at the reset the vendor
-// tells, else after a doubling wait up to LIMIT (a patient call's:
-// AGAIN); from TRIES on, at least that doubling, so one that never
-// clears never asks fast. A wait of LONG or more parks it (Agent.park):
-// a Limit event tells till when, and a message sent, a wake or a stop
-// ends the wait. A call with a fallback (AskAI.ts) that ran no tool yet
-// goes on with it instead, as when its vendor is out (`off`), as does
-// a patient one that picks again as it asks again (Ask `repick`: a
-// summary's, so a compactor changed meanwhile counts at its next try,
-// AskAI.ts); a
-// subagent's call (Ask `agent`) ends so too, ran tools or not, its end
-// naming the vendor, the model and the reset, so its report tells the
-// chat (a parked subagent waited unseen). claude-sub
-// waits alike, in Claude Code's loop (ClaudeSub.ts), on the same code:
-// what it says, its waits, the polls, resume. Every call asks: the
-// service's answer is the truth, a reset told only times the wait and
-// says when (but claude-sub's under extra usage: LIMITS). Limits
-// may lift early (the plan resets them, or its user spends a banked
-// reset): while a call waits on a sub whose usage can be read without
-// asking a model (USAGE: openai-sub's) it is read every POLL, and the
-// calls waiting on it wake as it clears; `resume` (the master's tool)
-// wakes every call waiting. One woken asks once; still limited, it
-// waits again, saying nothing more.
+// stream error) is counted and handed to Limit.ts, which waits (then the
+// request asks again) or ends the call, as it does for every vendor.
 // A busy model is logged as its first request asks again and as its
 // last is done, never each try (a storm logged ~600 lines a second).
 // A call ends answered
@@ -55,10 +34,11 @@
 // user's). A stop ends the call at once, its request cut. A request takes
 // its place in single flight (AskAI.wait).
 
-import { AGAIN, AskAI, type Ask, type Block, type Flight, type Try, type End, type Event, type Img, type Kind, type Say, type Vendor } from "./AskAI.ts";
+import { AskAI, type Ask, type Block, type Flight, type Try, type End, type Event, type Img, type Kind, type Say } from "./AskAI.ts";
 import { Anthropic } from "./Anthropic.ts";
 import { OpenAI } from "./OpenAI.ts";
 import { ChatGPT } from "./ChatGPT.ts";
+import { Limit } from "./Limit.ts";
 import { live_push } from "./View.ts";
 import { Machine, type Spec } from "./Machine.ts";
 import * as config from "./Config.ts";
@@ -70,17 +50,15 @@ export type Out = { text: string; fail: boolean; imgs?: Img[] };
 
 export type Tool = Spec;
 
-// what a call waiting for a usage limit holds: what ends the wait (a
-// message was sent, a wake), and whether it said it waits
-export type Hold = { poke: () => void; said: boolean };
-
-// a running call: the messages sent mid-run not taken yet
-type Run = Hold & {
+// a running call: the messages sent mid-run not taken yet, its usage
+// limits (Limit.ts)
+type Doing = {
   ask   : Ask;
   on    : (ev: Event) => void;
   sent  : Say[];
   abort : AbortController;
   end   : End;
+  limit : Limit;
 };
 
 export type Back = { id: string; out: Out };
@@ -105,7 +83,7 @@ export type Entry = { kind: Kind; text: string; of?: string };
 // note: what it did other than asked; off: down for every call (End.off);
 // refusal: the vendor's, if down by one; until: a plan's usage limit's
 // reset, as told (Wire `reset`); limits: ended at a usage limit
-// (limit_off), the usage limits in a row (End.limits)
+// (Limit.off), the usage limits in a row (End.limits)
 export type Step = {
   out      : unknown[];
   uses     : Use[];
@@ -120,7 +98,7 @@ export type Step = {
 };
 
 // a refusal asking again soon won't change (a ChatGPT plan without this
-// use; a long usage limit a fallback goes on past: Agent.limit_off): why
+// use; a long usage limit a fallback goes on past: Limit.off): why
 // (logged), what the user reads, and when it lifts, if told (ms since
 // 1970)
 export type Refusal = { why: string; say: string; until?: number };
@@ -170,27 +148,6 @@ export const BUSY  = "the AI service is busy or unavailable right now";
 // conversation mode ends on it (Server.ts)
 export const TOO_LONG = /prompt is too long|context.length|context (limit|window)|model_context_window_exceeded|too many (input )?tokens/i;
 
-// a usage limit's waits: from how long one parks its call, and the
-// longest it waits between tries when no reset is told
-export const LONG  = 60e3;
-export const LIMIT = 1800e3;
-
-// how often a sub's usage is read while a call waits on its limit
-export const POLL = 300e3;
-
-// the usage limits told asking under which would bill (claude-sub's
-// extra usage, one per account: ClaudeSub.note), till their reset, by
-// vendor: they keep a call from asking (ClaudeSub.limited)
-const LIMITS = new Map<string, number>();
-
-// the calls waiting for a usage limit, by vendor: what wakes each
-const PARKED = new Set<{ vendor: Vendor; poke: () => void }>();
-
-// the subs whose usage is read without asking a model: whether their
-// limit cleared (null: can't tell now); the reads due, by vendor
-const USAGE: Partial<Record<Vendor, () => Promise<boolean | null>>> = { "openai-sub": () => ChatGPT.clear() };
-const POLLS = new Map<Vendor, Timer>();
-
 // the rooms held or waited on, by model, or model and import (Agent.step)
 const ROOMS = new Map<string, Room>();
 
@@ -209,10 +166,11 @@ export namespace Agent {
 
   export function ask(ask: Ask, on: (ev: Event) => void): Try {
     const end = AskAI.end("");
-    const run: Run = { ask, on, sent: [], abort: new AbortController(), end, poke: () => {}, said: false };
+    const abort = new AbortController();
+    const run: Doing = { ask, on, sent: [], abort, end, limit: Limit.make(ask, on, abort.signal) };
     const send = (say: Say) => {
       run.sent.push(say);
-      run.poke();
+      run.limit.poke();
     };
     const stop = () => {
       end.text = "stopped";
@@ -234,10 +192,10 @@ export namespace Agent {
       end.left = run.sent;
       return end;
     })();
-    return { send, stop, wake: () => run.poke(), done };
+    return { send, stop, wake: () => run.limit.poke(), done };
   }
 
-  export async function loop<S>(wire: Wire<S>, run: Run): Promise<void> {
+  export async function loop<S>(wire: Wire<S>, run: Doing): Promise<void> {
     const { ask, on, end } = run;
     const signal = run.abort.signal;
     const key = wire.auth ? "" : config.KEYS[wire.key];
@@ -312,11 +270,11 @@ export namespace Agent {
   // it holds its room (Room): its model's, or its import's, which one
   // request holds at a time while the rest wait on it, so each import
   // has one request at a busy model however many it runs, and imports
-  // share its room alike. k: its busy tries, n: its usage-limit ones in
-  // a row (a patient call's try going on from those its last try ended
-  // at: Ask `limits`). A patient call's failures are logged as it waits
-  // to ask again (Memory.heard), not here
-  export async function step<S>(wire: Wire<S>, run: Run, key: string, make: (max: number) => unknown, items: Item[]): Promise<Step> {
+  // share its room alike. k: its busy tries; its usage-limit ones in a
+  // row are the Limit's `n` (a patient call's try going on from those its
+  // last try ended at: Ask `limits`). A patient call's failures are
+  // logged as it waits to ask again (Memory.heard), not here
+  export async function step<S>(wire: Wire<S>, run: Doing, key: string, make: (max: number) => unknown, items: Item[]): Promise<Step> {
     const signal = run.abort.signal;
     const model = run.ask.model;
     const own = run.ask.yields === undefined ? model : model + " " + run.ask.yields;
@@ -324,7 +282,8 @@ export namespace Agent {
     let asking = false;
     let refused: string | undefined;
     try {
-      for (let k = 0, n = run.ask.limits ?? 0; !signal.aborted; ) {
+      run.limit.n = run.ask.limits ?? 0;
+      for (let k = 0; !signal.aborted; ) {
         await Agent.yielded(run, own, asking);
         const seen: Entry[] = [];
         const token = await Agent.race(Agent.token(wire, key, refused), signal);
@@ -343,7 +302,7 @@ export namespace Agent {
         }
         const limit = step.stop === "limit";
         k += step.stop === "busy" ? 1 : 0;
-        n += limit ? 1 : 0;
+        run.limit.n += limit ? 1 : 0;
         if (step.stop === "down" && run.ask.patient !== true) {
           console.error(model + ": " + step.why.slice(0, 300));
         }
@@ -358,13 +317,10 @@ export namespace Agent {
           asking = true;
         }
         if (limit) {
-          const now = Date.now();
-          const told = step.until ?? Agent.reset(res, now);
-          const { ms, known } = Agent.limit_wait(told, n, run.ask.patient ? AGAIN : LIMIT, now);
-          if (Agent.ends(run.ask, run.end.acted === true, ms)) {
-            return Agent.limit_off(step, told, run.ask, n);
+          const off = await Limit.hit(run.limit, step.until ?? Agent.reset(res, Date.now()), run.end.acted === true, step.why);
+          if (off !== null) {
+            return { ...step, stop: "down", off: true, refusal: { why: off.why, say: off.say, until: off.until }, limits: off.limits };
           }
-          await Agent.park(run, run.on, signal, run.ask.vendor, ms, known);
           continue;
         }
         const after = Number(res?.headers.get("retry-after") ?? "");
@@ -396,156 +352,6 @@ export namespace Agent {
 
   // Usage limits
   // ------------
-
-  // how long a call waits at its `n`th usage limit in a row: till the
-  // reset told (from TRIES on, at least the doubling), else a doubling
-  // up to `pace`; known: it waits for the reset told
-  export function limit_wait(told: number | null, n: number, pace: number, now = Date.now()): { ms: number; known: boolean } {
-    const back = Math.min(2 ** n * 1e3, pace);
-    const left = told === null ? 0 : told - now;
-    const ms = Math.min(2 ** 31 - 1, left <= 0 ? back : n < TRIES ? left : Math.max(left, back));
-    return { ms, known: left > 0 && ms === left };
-  }
-
-  // a call waits `ms` for a usage limit of `vendor`'s: one of LONG or
-  // more parked (Limit: till when, `known` if the vendor told it), saying
-  // so once a call; a shorter one as when busy, each time. A stop, a
-  // message sent, a wake or a resume ends the wait (Agent.wait_limit)
-  export async function park(hold: Hold, on: (ev: Event) => void, signal: AbortSignal, vendor: Vendor, ms: number, known: boolean): Promise<void> {
-    const wake = new AbortController();
-    hold.poke = () => wake.abort();
-    const parked = ms >= LONG;
-    if (parked) {
-      on({ $: "Limit", limit: { until: Date.now() + ms, known } });
-    }
-    if (parked && !hold.said) {
-      hold.said = true;
-      on({ $: "Entry", kind: "mind", text: "The AI service reached a usage limit: asking again in " + Agent.span(ms) + "." });
-    } else if (!parked) {
-      on({ $: "Entry", kind: "mind", text: "The AI service is busy: asking again in " + Math.ceil(ms / 1e3) + " s." });
-    }
-    try {
-      await Agent.wait_limit(vendor, ms, AbortSignal.any([signal, wake.signal]));
-    } finally {
-      hold.poke = () => {};
-      if (parked) {
-        on({ $: "Limit", limit: null });
-      }
-    }
-  }
-
-  // a wait of `ms` for a usage limit of `vendor`'s, till `signal` aborts
-  // or a resume wakes it (one the usage read clear does: USAGE, read
-  // every POLL while one waits)
-  export async function wait_limit(vendor: Vendor, ms: number, signal: AbortSignal): Promise<void> {
-    const wake = new AbortController();
-    const me = { vendor, poke: () => wake.abort() };
-    PARKED.add(me);
-    Agent.poll_soon(vendor);
-    try {
-      await Machine.nap(ms, AbortSignal.any([signal, wake.signal]));
-    } finally {
-      PARKED.delete(me);
-      Agent.poll_off(vendor);
-    }
-  }
-
-  // whether a call waiting `ms` for a usage limit ends instead (limit_off):
-  // a subagent's (it reports it), or one that did nothing yet with a
-  // fallback to go on to or picking again as it waits to ask again (a
-  // patient one's `repick`: AskAI.ask waits); a short wait (under LONG)
-  // never does
-  export function ends(ask: { agent?: boolean; fallback?: boolean; repick?: unknown }, acted: boolean, ms: number): boolean {
-    return ms >= LONG && (ask.agent === true || ((ask.fallback === true || ask.repick !== undefined) && !acted));
-  }
-
-  // a call at a long usage limit, its `n`th in a row, ended for its
-  // fallback to go on (off), its patient call to wait and pick again, or
-  // its subagent to report it: on what, and when it resets, if told
-  export function limit_off(step: Step, until: number | null, ask: { vendor: Vendor; model: string }, n: number): Step {
-    const when = until === null ? "reset time unknown" : "resets " + new Date(until).toISOString().slice(0, 16).replace("T", " ") + " UTC";
-    const refusal = { why: step.why + "; " + when, say: "usage limit on " + ask.vendor + " (" + ask.model + "), " + when, until: until ?? undefined };
-    return { ...step, stop: "down", off: true, refusal, limits: n };
-  }
-
-  // a limit told (`key`: LIMITS), kept till its reset, or lifted (null)
-  export function note(key: string, until: number | null): void {
-    if (until !== null && until > Date.now()) {
-      LIMITS.set(key, until);
-    } else {
-      LIMITS.delete(key);
-    }
-  }
-
-  // the latest reset of the limits remembered of `keys` (null: none)
-  export function under(keys: string[]): number | null {
-    const now = Date.now();
-    const told = keys.map((k) => LIMITS.get(k) ?? 0).filter((until) => until > now);
-    return told.length > 0 ? Math.max(...told) : null;
-  }
-
-  // the limits remembered forgotten: `vendor`'s, or all
-  export function forget(vendor?: Vendor): void {
-    for (const key of [...LIMITS.keys()]) {
-      if (vendor === undefined || key === vendor || key.startsWith(vendor + " ")) {
-        LIMITS.delete(key);
-      }
-    }
-  }
-
-  // every call waiting for a usage limit (`vendor`'s, or any) woken: each
-  // asks once, and one still limited waits again; how many woke. One
-  // under a limit asking past would bill (claude-sub's extra usage,
-  // LIMITS, which a wake leaves) waits on: no wake spends money
-  export function resume(vendor?: Vendor): number {
-    const woken = [...PARKED].filter((p) => vendor === undefined || p.vendor === vendor);
-    woken.forEach((p) => p.poke());
-    return woken.length;
-  }
-
-  // `vendor`'s usage read in POLL, if it can be and no read is due
-  export function poll_soon(vendor: Vendor): void {
-    if (USAGE[vendor] === undefined || POLLS.has(vendor)) {
-      return;
-    }
-    const timer = setTimeout(() => {
-      POLLS.delete(vendor);
-      void Agent.poll(vendor);
-    }, POLL);
-    timer.unref?.();
-    POLLS.set(vendor, timer);
-  }
-
-  // `vendor`'s usage read due cancelled once no call waits for it
-  export function poll_off(vendor: Vendor): void {
-    if (![...PARKED].some((p) => p.vendor === vendor)) {
-      clearTimeout(POLLS.get(vendor));
-      POLLS.delete(vendor);
-    }
-  }
-
-  // `vendor`'s usage read, if a call still waits for it: its limit
-  // cleared, its calls waiting wake (resume); else, while one waits, it
-  // is read again in POLL. Its token got counts in READING, as a call's
-  // (Agent.token)
-  export async function poll(vendor: Vendor): Promise<boolean> {
-    if (![...PARKED].some((p) => p.vendor === vendor)) {
-      return false;
-    }
-    const clear = await (USAGE[vendor]?.() ?? Promise.resolve(null)).catch(() => null);
-    if (clear === true) {
-      Agent.resume(vendor);
-    } else if ([...PARKED].some((p) => p.vendor === vendor)) {
-      Agent.poll_soon(vendor);
-    }
-    return clear === true;
-  }
-
-  // a wait as people read it: "5 min", "3 h 20 min"
-  export function span(ms: number): string {
-    const min = Math.max(1, Math.round(ms / 60e3));
-    return min < 60 ? min + " min" : Math.floor(min / 60) + " h" + (min % 60 > 0 ? " " + (min % 60) + " min" : "");
-  }
 
   // when a usage limit resets, as the vendor tells it (ms since the epoch;
   // null: not told, past, or too far for a timer): its retry-after
@@ -614,7 +420,7 @@ export namespace Agent {
 
   // a request that yields waits while a request that doesn't holds its
   // model's room, and while another holds its import's
-  export async function yielded(run: Run, own: string, asking: boolean): Promise<void> {
+  export async function yielded(run: Doing, own: string, asking: boolean): Promise<void> {
     const keys = run.ask.yields === undefined ? [] : asking ? [run.ask.model] : [run.ask.model, own];
     for (;;) {
       const room = keys.map((key) => ROOMS.get(key)).find((room) => (room?.busy ?? 0) > 0);
@@ -627,7 +433,7 @@ export namespace Agent {
 
   // one request, in single flight (AskAI.wait): its response, if any,
   // and step
-  export async function request<S>(wire: Wire<S>, run: Run, key: string, body: unknown, seen: Entry[]): Promise<{ res: Response | null; step: Step }> {
+  export async function request<S>(wire: Wire<S>, run: Doing, key: string, body: unknown, seen: Entry[]): Promise<{ res: Response | null; step: Step }> {
     const flight = await AskAI.wait(run.ask);
     if (run.abort.signal.aborted) {
       flight.end();
@@ -636,7 +442,7 @@ export namespace Agent {
     return Agent.send(wire, run, key, body, flight, seen);
   }
 
-  export async function send<S>(wire: Wire<S>, run: Run, key: string, body: unknown, flight: Flight, seen: Entry[]): Promise<{ res: Response | null; step: Step }> {
+  export async function send<S>(wire: Wire<S>, run: Doing, key: string, body: unknown, flight: Flight, seen: Entry[]): Promise<{ res: Response | null; step: Step }> {
     const idle = new AbortController();
     const timer = setTimeout(() => idle.abort(new Error("no word from the API in " + wire.idle / 1e3 + " s")), wire.idle);
     const st = wire.start(run.ask);
@@ -694,7 +500,7 @@ export namespace Agent {
 
   // seen: what streamed, as told to the call (none once it stopped); st:
   // what it read; begun: its response began (Flight)
-  export async function stream<S>(wire: Wire<S>, run: Run, body: ReadableStream<Uint8Array>, timer: Timer, seen: Entry[], st: S, begun: () => void): Promise<Step> {
+  export async function stream<S>(wire: Wire<S>, run: Doing, body: ReadableStream<Uint8Array>, timer: Timer, seen: Entry[], st: S, begun: () => void): Promise<Step> {
     const ask = run.ask;
     const on: Emit = (kind, text, fresh) => {
       if (!run.abort.signal.aborted) {
@@ -745,7 +551,7 @@ export namespace Agent {
   // Tools
   // -----
 
-  export async function use(run: Run, tools: Tool[], use: Use): Promise<Out> {
+  export async function use(run: Doing, tools: Tool[], use: Use): Promise<Out> {
     if (!tools.some((t) => t.name === use.name)) {
       return { text: "No tool " + use.name + ".", fail: true };
     }
@@ -762,7 +568,7 @@ export namespace Agent {
   }
 
   // the call's tools, and the notes their listing gave it (Tools.answer)
-  export async function server(run: Run): Promise<{ tools: Tool[]; notes: string[] }> {
+  export async function server(run: Doing): Promise<{ tools: Tool[]; notes: string[] }> {
     if (!run.ask.server) {
       return { tools: [], notes: [] };
     }
@@ -771,14 +577,14 @@ export namespace Agent {
     return { tools, notes: Array.isArray(list.notes) ? list.notes.map(String) : [] };
   }
 
-  export async function call(run: Run, name: string, input: unknown): Promise<Out> {
+  export async function call(run: Doing, name: string, input: unknown): Promise<Out> {
     const res = await Agent.rpc(run, "tools/call", { name, arguments: input });
     const pics = res.content.filter((part: any) => part.type === "image");
     const imgs = pics.map((part: any) => ({ type: part.mimeType, data: part.data }));
     return { text: AskAI.show(res.content), fail: res.isError === true, imgs };
   }
 
-  export async function rpc(run: Run, method: string, params: unknown): Promise<any> {
+  export async function rpc(run: Doing, method: string, params: unknown): Promise<any> {
     const res = await fetch(run.ask.server, {
       method  : "POST",
       headers : { "content-type": "application/json" },

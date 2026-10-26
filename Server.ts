@@ -775,7 +775,7 @@ export namespace Chat {
     Chat.live(chat, agent, Chat.waiting(at));
   }
 
-  // the turn (TURN) or agent named waits for a usage limit (Agent.park),
+  // the turn (TURN) or agent named waits for a usage limit (Limit.park),
   // or no longer (null), told to every view
   export function limit(chat: Chat, name: string, limit: Parked | null): void {
     if (limit === null) {

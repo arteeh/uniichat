@@ -21,7 +21,7 @@
 // a restart; its replies reach the chat as one "[Name]" message.
 // The master's schedules (schedule, schedules, unschedule) are kept with
 // its chat, each coming as a "[Timer id]" message (Timer.ts). Its resume
-// wakes every call waiting for a usage limit (Agent.resume), for a user
+// wakes every call waiting for a usage limit (Limit.resume), for a user
 // who knows one lifted early.
 // The user's MCP servers (Mcp.ts) add their tools to the master's and its
 // subagents', but those of servers the chat turned off (Memory `off`):
@@ -32,10 +32,11 @@
 // unchecked.
 
 import { AskAI, type Ask, type Block, type Call, type Event, type Kind } from "./AskAI.ts";
-import { Agent, type Out } from "./Agent.ts";
+import type { Out } from "./Agent.ts";
 import { report_text } from "./Call.ts";
 import { clip_page } from "./Clip.ts";
 import * as config from "./Config.ts";
+import { Limit } from "./Limit.ts";
 import { INT, STR, TOOLS, spec, type Job, type Skill, type Spec } from "./Machine.ts";
 import { Mcp, type Server, type Servers } from "./Mcp.ts";
 import { Memory } from "./Memory.ts";
@@ -495,7 +496,7 @@ export namespace Tools {
         return await Tools.halt(tools, String(args.name), args.why === undefined ? "" : String(args.why));
       }
       case "resume": {
-        const n = Agent.resume();
+        const n = Limit.resume();
         return { text: n === 0 ? "No call was waiting for a usage limit." : "Woke " + n + " call" + (n === 1 ? "" : "s") + " waiting for a usage limit; any still limited waits again.", fail: false };
       }
       case "skill": {
