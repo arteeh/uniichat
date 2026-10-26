@@ -103,7 +103,10 @@ type End = [number, number];
 type Kept = { parts: Array<[number, number]>; batch: boolean };
 
 // view.json: the chat's view, the compactions' (none: the chat's)
-type Saved = Kept & { seen?: Kept; main: End; tree: End; pick: object | null; goal?: string | null; work?: string[]; timers?: Timer[]; queue?: Pending[]; off?: string[]; talk?: number | null };
+type Saved = Kept & { seen?: Kept; main: End; tree: End; pick: object | null; goal?: string | null; work?: string[]; timers?: Timer[]; off?: string[]; talk?: number | null };
+
+// queue.json: the messages queued, Unii's turn's and each subagent's
+type Queues = { main: Pending[]; agents: Record<string, string[]> };
 
 // fds: files read lately, open, oldest first; count: the pages logged
 // whole; open: those after, not whole yet; pick: the chat's, as last set;
@@ -112,8 +115,9 @@ type Saved = Kept & { seen?: Kept; main: End; tree: End; pick: object | null; go
 // talk: conversation mode's first message (null: off), talked: the
 // bytes of its lines known for good, by message;
 // work: what ran, as last saved; timers: its schedules, by when due
-// (Server.ts Chat.ring); queue: the messages queued for Unii's turn, not
-// logged yet (Run.ts), as last saved; nodes: the texts of the views' nodes
+// (Server.ts Chat.ring); queue, tells: the messages queued for Unii's
+// turn and the tells for each subagent, not logged yet (Run.ts), as last
+// saved (queue.json, Memory.save_queue); nodes: the texts of the views' nodes
 // built and of those above them, by slot; agents: their logs' lengths;
 // view: the chat's view; seen: the compactions'; ready: the nodes not
 // built whose halves are, by side and level, in order; ends: how far
@@ -137,6 +141,7 @@ export type Memory = {
   work   : string[];
   timers : Timer[];
   queue  : Pending[];
+  tells  : Record<string, string[]>;
   nodes  : Map<number, string>;
   agents : Map<string, number>;
   view   : View;
@@ -228,7 +233,7 @@ export namespace Memory {
 
   export function load(dir: string, share: Memory["share"], acted: Memory["acted"] = () => {}): Memory {
     const mem: Memory = {
-      dir, fds: new Map(), count: 0, open: 0, pick: null, goal: null, off: [], talk: null, talked: new Map(), work: [], timers: [], queue: [], nodes: new Map(), agents: new Map(), ready: [[], []], ends: { main: [0, 0], tree: [0, 0] },
+      dir, fds: new Map(), count: 0, open: 0, pick: null, goal: null, off: [], talk: null, talked: new Map(), work: [], timers: [], queue: [], tells: {}, nodes: new Map(), agents: new Map(), ready: [[], []], ends: { main: [0, 0], tree: [0, 0] },
       view: { parts: [], size: 0, batch: false, high: HIGH }, seen: { parts: [], size: 0, batch: false, high: config.COMPACTOR_CONTEXT },
       busy: new Map(), sides: new Map(), calls: new Map(), hold: [null, "paused"], done: false, wait: new Set(), share, acted, again: null,
     };
@@ -239,7 +244,9 @@ export namespace Memory {
     mem.talk = saved?.talk ?? null;
     mem.work = saved?.work ?? [];
     mem.timers = saved?.timers ?? [];
-    mem.queue = saved?.queue ?? [];
+    const queues = Memory.queues(dir);
+    mem.queue = queues.main;
+    mem.tells = queues.agents;
     mem.ends.main = Memory.index(mem, "main", saved?.main ?? [0, 0]);
     mem.ends.tree = Memory.index(mem, "tree", saved?.tree ?? [0, 0]);
     mem.count = fs.statSync(dir + "/main.index").size / SLOT;
@@ -275,7 +282,26 @@ export namespace Memory {
   export function save(mem: Memory): void {
     const file = mem.dir + "/view.json";
     const [chat, seen] = [mem.view, mem.seen].map((view): Kept => ({ parts: view.parts.map((part) => [part.l, part.i]), batch: view.batch }));
-    fs.writeFileSync(file + ".new", JSON.stringify({ ...chat, seen, pick: mem.pick, goal: mem.goal, off: mem.off, talk: mem.talk, work: mem.work, timers: mem.timers, queue: mem.queue, ...mem.ends }));
+    fs.writeFileSync(file + ".new", JSON.stringify({ ...chat, seen, pick: mem.pick, goal: mem.goal, off: mem.off, talk: mem.talk, work: mem.work, timers: mem.timers, ...mem.ends }));
+    move_over(file + ".new", file);
+    Disk.wrote(file);
+  }
+
+  // queue.json; none (or unreadable): nothing queued
+  export function queues(dir: string): Queues {
+    try {
+      const got = JSON.parse(fs.readFileSync(dir + "/queue.json", "utf8"));
+      return { main: got.main ?? [], agents: got.agents ?? {} };
+    } catch {
+      return { main: [], agents: {} };
+    }
+  }
+
+  // apart from view.json, which is written far more often, so a long
+  // message queued is written only as the queues change
+  export function save_queue(mem: Memory): void {
+    const file = mem.dir + "/queue.json";
+    fs.writeFileSync(file + ".new", JSON.stringify({ main: mem.queue, agents: mem.tells }));
     move_over(file + ".new", file);
     Disk.wrote(file);
   }

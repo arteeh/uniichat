@@ -416,7 +416,7 @@ export namespace Chat {
   export function queued(chat: Chat, run: Run<Pending, Msg>): void {
     chat.check?.call.stop();
     chat.mem.queue = run.queue.map((x) => x.q);
-    Memory.save(chat.mem);
+    Memory.save_queue(chat.mem);
     Chat.all(chat, Chat.state(chat));
   }
 
@@ -1157,8 +1157,10 @@ export namespace Chat {
           const fresh = dues.filter((t) => Owner.act_get(act(t)) === null && !chat.main.queue.some((x) => x.q.act === act(t)));
           mem.timers = mem.timers.flatMap((t) => (dues.includes(t) ? (Timer.timer_after(t, at) ?? []) : [t]));
           fresh.forEach((t) => void Run.take(chat.main, { kind: "work", text: Timer.timer_say(t, at), images: [], act: act(t) }));
-          // the timers moved on and their messages queued, kept as one
+          // their messages kept queued before the timers move on, so a
+          // crash between the two brings none twice (`fresh`) nor loses one
           mem.queue = chat.main.queue.map((x) => x.q);
+          Memory.save_queue(mem);
           Memory.save(mem);
         }
         Chat.timed(chat);
