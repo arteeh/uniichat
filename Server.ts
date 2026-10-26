@@ -1116,7 +1116,9 @@ export namespace Chat {
     if (agents.length > 0 && !work.includes(TURN)) {
       Chat.push(chat, chat.main, "note", text);
     }
-    const posts: Pending[] = [...(work.includes(TURN) ? [{ kind: "note" as const, text, images: [] }] : []), ...chat.mem.queue];
+    // one logged (its act recorded) before a crash cut the queue's save is done
+    const queued = chat.mem.queue.filter((post) => post.act === undefined || Owner.act_get(post.act) === null);
+    const posts: Pending[] = [...(work.includes(TURN) ? [{ kind: "note" as const, text, images: [] }] : []), ...queued];
     posts.forEach((post) => void Run.take(chat.main, post));
     await Promise.all(agents.map((w) => Tools.tell(chat.tools, w, text, tells[w] ?? [])));
   }
