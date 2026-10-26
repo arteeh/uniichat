@@ -1,20 +1,3 @@
-// UniiChat for iOS
-// ================
-// The site (Site.swift) in a web view, and what only an app does there:
-//
-// - Notifications: once signed in, the app asks to notify, and gives the
-//   server its phone's push token (/api/push); the server pushes each
-//   turn's last message (Push.ts). iOS shows none while the app is open.
-// - Sign-in links open the app (universal links: the server's
-//   apple-app-site-association names /auth), signing in its web view.
-// - The mic dictates (the site's own recorder; iOS asks once).
-// - A download (Export Memory, a file, a picture's) goes to the share
-//   sheet; the site's prompt() is an alert.
-// - The bridge (`unii`, web/src/main.ts) tells the page it is in the app,
-//   which notifies by itself (no Web Push there).
-//
-// Any page off the site opens in Safari. The share extension is Share/.
-
 import SwiftUI
 import UserNotifications
 import WebKit
@@ -46,7 +29,6 @@ struct Web: UIViewRepresentable {
 
 }
 
-// the phone's push token, given to the server
 @MainActor
 final class Phone: NSObject, UIApplicationDelegate {
 
@@ -57,9 +39,6 @@ final class Phone: NSObject, UIApplicationDelegate {
 
 }
 
-// Page
-// ====
-
 @MainActor
 final class Page: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessageHandler, WKDownloadDelegate {
 
@@ -67,7 +46,6 @@ final class Page: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessageH
 
   let web: WKWebView
 
-  // where the download being written goes
   var saved: URL? = nil
 
   override init() {
@@ -81,8 +59,6 @@ final class Page: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessageH
     web.load(URLRequest(url: Site.url))
   }
 
-  // the page loaded: its sign-in kept for requests and the extension;
-  // signed in, the push token asked for (iOS asks the user once)
   func webView(_ web: WKWebView, didFinish nav: WKNavigation!) {
     Task {
       let cookies = await web.configuration.websiteDataStore.httpCookieStore.allCookies()
@@ -95,8 +71,6 @@ final class Page: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessageH
     }
   }
 
-  // the site's pages stay; any other opens outside; a link to download
-  // (`download`) is downloaded, never shown in place of the app's page
   func webView(_ web: WKWebView, decidePolicyFor act: WKNavigationAction) async -> WKNavigationActionPolicy {
     guard let url = act.request.url else {
       return .cancel
@@ -132,12 +106,7 @@ final class Page: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessageH
     type == .microphone ? .grant : .deny
   }
 
-  // the bridge: there, so the page knows it is in the app; it is sent
-  // nothing
   func userContentController(_ ucc: WKUserContentController, didReceive msg: WKScriptMessage) {}
-
-  // Download
-  // --------
 
   func webView(_ web: WKWebView, decidePolicyFor res: WKNavigationResponse) async -> WKNavigationResponsePolicy {
     let disposition = (res.response as? HTTPURLResponse)?.value(forHTTPHeaderField: "Content-Disposition") ?? ""
@@ -173,16 +142,12 @@ final class Page: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessageH
     say("The download failed: " + error.localizedDescription)
   }
 
-  // Alerts
-  // ------
-
   func say(_ text: String) {
     let alert = UIAlertController(title: nil, message: text, preferredStyle: .alert)
     alert.addAction(UIAlertAction(title: "OK", style: .default))
     show(alert)
   }
 
-  // over whatever is shown
   func show(_ vc: UIViewController) {
     var top = web.window?.rootViewController
     while let next = top?.presentedViewController {

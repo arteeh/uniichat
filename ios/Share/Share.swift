@@ -1,12 +1,3 @@
-// Share
-// =====
-// UniiChat in the share sheet: a page, a text or images shared go to
-// the chat as one message, under a note typed above them: one post to
-// /api/act, the site's say act (its id made once, so a Send tapped again
-// is taken once; its images, sizes given, then its text), with the app's
-// sign-in (Site.swift). An image the server doesn't read (a photo's
-// HEIC) goes as a JPEG.
-
 import ImageIO
 import SwiftUI
 import UIKit
@@ -72,7 +63,6 @@ struct Compose: View {
 
 }
 
-// the message posted; nil, or why not
 func send(_ items: [NSItemProvider], _ note: String, _ id: String) async -> String? {
   var lines = [note]
   var body = Data()
@@ -94,7 +84,6 @@ func send(_ items: [NSItemProvider], _ note: String, _ id: String) async -> Stri
   return await Site.call("/api/act?$=say&id=" + id + "&sizes=" + sizes.joined(separator: ","), body)["error"] as? String
 }
 
-// an image's bytes: as they are if the server reads its kind, else a JPEG
 func image(_ item: NSItemProvider) async -> Data? {
   let read: [UTType] = [.png, .jpeg, .gif, .webP]
   let kind = read.first { item.hasItemConformingToTypeIdentifier($0.identifier) }
