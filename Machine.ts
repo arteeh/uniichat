@@ -144,8 +144,9 @@ export namespace Machine {
       fs.mkdirSync(cwd, { recursive: true });
       switch (job.name) {
         case "shell": {
-          const secs = input.timeout === undefined || input.timeout === null || input.timeout === "" ? NaN : Number(input.timeout);
-          if (!(secs >= TIMEOUT[0] && secs <= TIMEOUT[1])) {
+          const t = input.timeout;
+          const secs = typeof t === "number" || (typeof t === "string" && t.trim() !== "") ? Number(t) : NaN;
+          if (!(Number.isInteger(secs) && secs >= TIMEOUT[0] && secs <= TIMEOUT[1])) {
             return { text: "shell needs timeout: the seconds to wait for the command, a whole number from " + TIMEOUT[0] + " to " + TIMEOUT[1] + " (then the call returns, leaving it running). Nothing was run.", fail: true };
           }
           return await Machine.shell(cwd, String(input.command), secs * 1e3, signal);
@@ -575,21 +576,20 @@ export namespace Machine {
   // out
   export function skills(home: string): Skill[] {
     const found = new Map<string, Skill>();
-    for (const root of [home + "/.agents/skills"]) {
-      let names: string[] = [];
+    const root = home + "/.agents/skills";
+    let names: string[] = [];
+    try {
+      names = fs.readdirSync(root).sort();
+    } catch {}
+    for (const name of names) {
+      const file = path.join(root, name, "SKILL.md");
+      let head: any = null;
       try {
-        names = fs.readdirSync(root).sort();
+        head = skill_head(file);
       } catch {}
-      for (const name of names) {
-        const file = path.join(root, name, "SKILL.md");
-        let head: any = null;
-        try {
-          head = skill_head(file);
-        } catch {}
-        const ok = typeof head?.name === "string" && /^[a-z0-9-]{1,64}$/.test(head.name) && typeof head.description === "string" && head.description.trim() !== "";
-        if (ok && !found.has(head.name)) {
-          found.set(head.name, { name: head.name, description: head.description.trim().slice(0, 1024), dir: path.dirname(file) });
-        }
+      const ok = typeof head?.name === "string" && /^[a-z0-9-]{1,64}$/.test(head.name) && typeof head.description === "string" && head.description.trim() !== "";
+      if (ok && !found.has(head.name)) {
+        found.set(head.name, { name: head.name, description: head.description.trim().slice(0, 1024), dir: path.dirname(file) });
       }
     }
     return [...found.values()];
