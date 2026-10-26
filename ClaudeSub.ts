@@ -27,8 +27,7 @@
 // (Memory.ts starts up to JOBS), a chat's summaries ahead of imports'.
 //
 // A usage limit never ends a call, as with the other vendors, on their
-// code (Agent.ts: its waits, what it says, the limits remembered,
-// resume). Claude Code tells it (a rate_limit_event "rejected", saying
+// code (Agent.ts: its waits, what it says, resume). Claude Code tells it (a rate_limit_event "rejected", saying
 // when it resets; then a reply with error rate_limit); the call waits
 // for that reset (if not told, a doubling wait up to LIMIT), its thought
 // saying so once; a wait of LONG or more parks it (a Limit event tells
@@ -465,20 +464,19 @@ export namespace ClaudeSub {
     return typeof at === "number" && at > 0 ? (at < 1e12 ? at * 1e3 : at) : null;
   }
 
-  // a limit told, kept till its reset, or lifted (Agent.note): the
+  // a limit told asking under which would bill (extra usage on), kept
+  // till its reset (LIMIT if not told), or lifted (Agent.note): the
   // account's, one whatever its kind (rateLimitType: five-hour, weekly,
-  // a model's). One whose reset isn't told is kept LIMIT if asking under
-  // it bills (extra usage on), else not (the call's doubling waits pace it)
+  // a model's). One that wouldn't bill isn't kept: the next call asks
   export function note(info: SDKRateLimitInfo): void {
     const bills = info.isUsingOverage === true || info.overageStatus === "allowed" || info.overageStatus === "allowed_warning";
-    const until = ClaudeSub.reset(info) ?? (bills ? Date.now() + LIMIT : null);
     const on = info.status === "rejected" || info.isUsingOverage === true;
-    Agent.note("claude-sub", on ? until : null, bills);
+    Agent.note("claude-sub", on && bills ? ClaudeSub.reset(info) ?? Date.now() + LIMIT : null);
   }
 
   // the reset of the limit told asking under which would bill (null: none)
   export function limited(): number | null {
-    return Agent.under(["claude-sub"], true);
+    return Agent.under(["claude-sub"]);
   }
 
   // the limits told forgotten (for tests)

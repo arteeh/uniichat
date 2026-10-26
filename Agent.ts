@@ -173,10 +173,10 @@ export const LIMIT = 1800e3;
 // how often a sub's usage is read while a call waits on its limit
 export const POLL = 300e3;
 
-// the usage limits told, till their reset, by vendor ("claude-sub": one
-// per account), and whether asking under one would bill (claude-sub's
-// extra usage): only those keep a call from asking (ClaudeSub.limited)
-const LIMITS = new Map<string, { until: number; bills: boolean }>();
+// the usage limits told asking under which would bill (claude-sub's
+// extra usage, one per account: ClaudeSub.note), till their reset, by
+// vendor: they keep a call from asking (ClaudeSub.limited)
+const LIMITS = new Map<string, number>();
 
 // the calls waiting for a usage limit, by vendor: what wakes each
 const PARKED = new Set<{ vendor: Vendor; poke: () => void }>();
@@ -454,38 +454,35 @@ export namespace Agent {
   }
 
   // a limit told (`key`: LIMITS), kept till its reset, or lifted (null)
-  export function note(key: string, until: number | null, bills = false): void {
+  export function note(key: string, until: number | null): void {
     if (until !== null && until > Date.now()) {
-      LIMITS.set(key, { until, bills });
+      LIMITS.set(key, until);
     } else {
       LIMITS.delete(key);
     }
   }
 
-  // the latest reset of the limits remembered of `keys` (null: none);
-  // billing: only those asking under would bill
-  export function under(keys: string[], billing: boolean): number | null {
+  // the latest reset of the limits remembered of `keys` (null: none)
+  export function under(keys: string[]): number | null {
     const now = Date.now();
-    const told = keys.map((k) => LIMITS.get(k)).filter((l) => l !== undefined && l.until > now && (l.bills || !billing));
-    return told.length > 0 ? Math.max(...told.map((l) => l!.until)) : null;
+    const told = keys.map((k) => LIMITS.get(k) ?? 0).filter((until) => until > now);
+    return told.length > 0 ? Math.max(...told) : null;
   }
 
-  // the limits remembered forgotten: `vendor`'s, or all; but those
-  // asking under would bill, if `bills` is false
-  export function forget(vendor?: Vendor, bills = true): void {
-    for (const [key, l] of [...LIMITS]) {
-      if ((vendor === undefined || key === vendor || key.startsWith(vendor + " ")) && (bills || !l.bills)) {
+  // the limits remembered forgotten: `vendor`'s, or all
+  export function forget(vendor?: Vendor): void {
+    for (const key of [...LIMITS.keys()]) {
+      if (vendor === undefined || key === vendor || key.startsWith(vendor + " ")) {
         LIMITS.delete(key);
       }
     }
   }
 
-  // every call waiting for a usage limit (`vendor`'s, or any) woken, its
-  // limits remembered forgotten: each asks once, and one still limited
-  // waits again; how many woke. One under a limit asking past would bill
-  // (claude-sub's extra usage) waits on: no wake spends money
+  // every call waiting for a usage limit (`vendor`'s, or any) woken: each
+  // asks once, and one still limited waits again; how many woke. One
+  // under a limit asking past would bill (claude-sub's extra usage,
+  // LIMITS, which a wake leaves) waits on: no wake spends money
   export function resume(vendor?: Vendor): number {
-    Agent.forget(vendor, false);
     const woken = [...PARKED].filter((p) => vendor === undefined || p.vendor === vendor);
     woken.forEach((p) => p.poke());
     return woken.length;
