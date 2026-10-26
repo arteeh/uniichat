@@ -3921,7 +3921,7 @@ function show(pic) {
   IMG.classList.add("wait");
   IMG.alt = pic.name;
   IMG.src = pic.src;
-  IMG.decode().then(() => {
+  const loaded = () => {
     if (V.pic !== pic) {
       return;
     }
@@ -3931,8 +3931,14 @@ function show(pic) {
     IMG.style.height = V.h + "px";
     IMG.classList.remove("wait");
     fit();
-  }, () => {
-    if (V.pic === pic) {
+  };
+  IMG.decode().then(loaded, () => {
+    if (V.pic !== pic) {
+      return;
+    }
+    if (IMG.complete && IMG.naturalWidth > 0) {
+      loaded();
+    } else {
       D.querySelector(".why").hidden = false;
     }
   });
@@ -4001,7 +4007,7 @@ function draw() {
   D.querySelector(".zoom").textContent = V.w === 0 ? "" : Math.round(V.s * 100) + "%";
 }
 function toggle(x, y) {
-  const big = V.fit < 0.8 ? 1 : V.fit * 2.5;
+  const big = V.fit < 0.999 ? 1 : V.fit * 2.5;
   ease();
   zoom_at(x, y, fitted() ? big : V.fit);
 }
@@ -4214,7 +4220,11 @@ async function boot() {
     navigator.serviceWorker?.register("/sw.js").catch(() => {});
   }
   const tree = location.pathname === TREE ? TREE + (tree_view() ? "#view" : "") : null;
+  const pic = history.state?.pic != null;
   history.replaceState(null, "", PAGES.includes(location.pathname) ? "/settings" : tree ?? "/");
+  if (pic) {
+    history.back();
+  }
   if (await boot_me() === null) {
     solo("Sign in", "This UniiChat server is private. On the computer it runs on, run <code>unii serve link</code> and open the link it prints here.");
     return;
@@ -4441,6 +4451,9 @@ function click(ev) {
   const pic = viewer_pic(target);
   if (pic !== null && !(ev.ctrlKey || ev.metaKey || ev.shiftKey || ev.altKey) && (sel === null || sel.isCollapsed)) {
     ev.preventDefault();
+    if (!DESK.matches) {
+      BOX2.blur();
+    }
     viewer_open(pic, true, target);
     return;
   }

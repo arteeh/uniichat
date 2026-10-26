@@ -8,8 +8,8 @@
 // - Sign-in links open the app (universal links: the server's
 //   apple-app-site-association names /auth), signing in its web view.
 // - The mic dictates (the site's own recorder; iOS asks once).
-// - Export Memory's download goes to the share sheet; the site's prompt()
-//   is an alert.
+// - A download (Export Memory, a file, a picture's) goes to the share
+//   sheet; the site's prompt() is an alert.
 // - The bridge (`unii`, web/src/main.ts) tells the page it is in the app,
 //   which notifies by itself (no Web Push there).
 //
@@ -95,10 +95,14 @@ final class Page: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessageH
     }
   }
 
-  // the site's pages stay; any other opens outside
+  // the site's pages stay; any other opens outside; a link to download
+  // (`download`) is downloaded, never shown in place of the app's page
   func webView(_ web: WKWebView, decidePolicyFor act: WKNavigationAction) async -> WKNavigationActionPolicy {
     guard let url = act.request.url else {
       return .cancel
+    }
+    if act.shouldPerformDownload {
+      return .download
     }
     if url.host == Site.url.host || ["about", "blob", "data"].contains(url.scheme) {
       return .allow
@@ -141,6 +145,10 @@ final class Page: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessageH
   }
 
   func webView(_ web: WKWebView, navigationResponse: WKNavigationResponse, didBecome download: WKDownload) {
+    download.delegate = self
+  }
+
+  func webView(_ web: WKWebView, navigationAction: WKNavigationAction, didBecome download: WKDownload) {
     download.delegate = self
   }
 

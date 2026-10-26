@@ -123,7 +123,13 @@ async function boot(): Promise<void> {
     navigator.serviceWorker?.register("/sw.js").catch(() => {});
   }
   const tree = location.pathname === TREE ? TREE + (tree_view() ? "#view" : "") : null;
+  // (reloaded with a picture open: its entry, now the chat's, holds the
+  // chat's under it too, so back would do nothing; it steps off it)
+  const pic = history.state?.pic != null;
   history.replaceState(null, "", PAGES.includes(location.pathname) ? "/settings" : tree ?? "/");
+  if (pic) {
+    history.back();
+  }
   if (await boot_me() === null) {
     solo("Sign in", "This UniiChat server is private. On the computer it runs on, run <code>unii serve link</code> and open the link it prints here.");
     return;
@@ -412,6 +418,11 @@ function click(ev: MouseEvent): void {
   const pic = Viewer.viewer_pic(target);
   if (pic !== null && !(ev.ctrlKey || ev.metaKey || ev.shiftKey || ev.altKey) && (sel === null || sel.isCollapsed)) {
     ev.preventDefault();
+    // (on a touch screen, the box focused would take the focus back as
+    // the picture closes, and its keyboard pop up)
+    if (!DESK.matches) {
+      BOX.blur();
+    }
     Viewer.viewer_open(pic, true, target);
     return;
   }

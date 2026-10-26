@@ -10,12 +10,12 @@
 // It opens fitted to the screen (never past the picture's own size),
 // its name and a download above it. A pinch or the wheel zooms where it
 // points, a drag pans, a double tap or click goes from fitted to the
-// picture's own size (100%: a picture smaller than that, 2.5×) and
+// picture's own size (100%; one fitted at 100% already, 2.5×) and
 // back; fitted, a swipe, ‹ › or the arrow keys go to the chat's picture
 // before or after. It is no page of its own but a history entry over the
 // page shown (the same address, the picture in its state), so back,
 // Escape or ✕ close it, the chat under it untouched; a reload drops it
-// (main.ts boot replaces the state).
+// (main.ts boot replaces the state, and steps back off its entry).
 
 // Types
 // =====
@@ -180,7 +180,7 @@ function show(pic: Pic): void {
   IMG.classList.add("wait");
   IMG.alt = pic.name;
   IMG.src = pic.src;
-  IMG.decode().then(() => {
+  const loaded = () => {
     if (V.pic !== pic) {
       return;
     }
@@ -191,8 +191,16 @@ function show(pic: Pic): void {
     IMG.style.height = V.h + "px";
     IMG.classList.remove("wait");
     fit();
-  }, () => {
-    if (V.pic === pic) {
+  };
+  // (decode may refuse a picture that did load, as WebKit does some
+  // SVGs and very large ones: then it is shown as it is)
+  IMG.decode().then(loaded, () => {
+    if (V.pic !== pic) {
+      return;
+    }
+    if (IMG.complete && IMG.naturalWidth > 0) {
+      loaded();
+    } else {
       D.querySelector<HTMLElement>(".why")!.hidden = false;
     }
   });
@@ -287,9 +295,10 @@ function draw(): void {
   D.querySelector(".zoom")!.textContent = V.w === 0 ? "" : Math.round(V.s * 100) + "%";
 }
 
-// fitted ↔ its own size (one smaller than the stage: 2.5×), at (x, y)
+// fitted ↔ its own size (one fitted at its own size already: 2.5×), at
+// (x, y)
 function toggle(x: number, y: number): void {
-  const big = V.fit < 0.8 ? 1 : V.fit * 2.5;
+  const big = V.fit < 0.999 ? 1 : V.fit * 2.5;
   ease();
   zoom_at(x, y, fitted() ? big : V.fit);
 }
