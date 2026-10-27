@@ -1,14 +1,26 @@
+import { err_why } from "../../Err.ts";
 import * as Import from "../../Import.ts";
+import { get, text_of } from "../../Json.ts";
+import type { Page, Row } from "../../Settings.ts";
 import { theme_css } from "../../Theme.ts";
 import * as View from "../../View.ts";
 import * as Box from "./Box.ts";
+import { find, must } from "./Dom.ts";
 import * as Html from "./Html.ts";
 import * as Tree from "./Tree.ts";
 import * as Viewer from "./Viewer.ts";
 
 type Read = { sessions: Import.Session[]; moved: number };
 
-const APP = (window as any).webkit?.messageHandlers?.unii ?? null;
+// what a reload keeps, in sessionStorage
+type Back = { at: { a: number; top: number } | null; y: number | null; away: { y: number; end: boolean } | null; caret: [number, number]; focus: boolean; open: string[] };
+
+declare global {
+  // the iOS app's bridge to its web view
+  interface Window { webkit?: { messageHandlers?: { unii?: { postMessage: (msg: unknown) => void } } } }
+}
+
+const APP = window.webkit?.messageHandlers?.unii ?? null;
 
 const DESK = matchMedia("(hover: hover)");
 
@@ -20,11 +32,11 @@ const SCENES = `
 
 const v = View.view_new();
 
-const BOX = $<HTMLElement>(".composer .field");
+const BOX = $(".composer .field", HTMLElement);
 
 const UPS = new Map<HTMLElement, XMLHttpRequest>();
 
-const BACK = $<HTMLInputElement>("#import [name=back]");
+const BACK = $("#import [name=back]", HTMLInputElement);
 
 const P = {
   rec   : null as MediaRecorder | null,
@@ -56,8 +68,10 @@ const P = {
   at    : "",
 };
 
-function $<T extends HTMLElement>(sel: string): T {
-  return document.querySelector(sel) as T;
+function $(sel: string): HTMLElement;
+function $<T extends HTMLElement>(sel: string, type: { new (): T; prototype: T }): T;
+function $(sel: string, type: { new (): HTMLElement; prototype: HTMLElement } = HTMLElement): HTMLElement {
+  return find(document, sel, type);
 }
 
 function kept(fact: string): string {
@@ -70,7 +84,8 @@ async function boot(): Promise<void> {
     navigator.serviceWorker?.register("/sw.js").catch(() => {});
   }
   const tree = location.pathname === TREE ? TREE + (tree_view() ? "#view" : "") : null;
-  const pic = history.state?.pic != null;
+  const state: unknown = history.state;
+  const pic = get(state, "pic") != null;
   history.replaceState(null, "", PAGES.includes(location.pathname) ? "/settings" : tree ?? "/");
   if (pic) {
     history.back();
@@ -91,14 +106,14 @@ async function boot(): Promise<void> {
     in_use();
     if (document.hidden && P.due && !P.going && renew_free(true)) {
       P.going = true;
-      renew(true);
+      void renew(true);
     }
   });
   addEventListener("blur", () => in_use(true));
   addEventListener("pagehide", () => in_use(true));
 }
 
-async function boot_me(): Promise<any> {
+async function boot_me(): Promise<unknown> {
   for (let k = 0; ; k++) {
     const res = await fetch("/api/me").catch(() => null);
     if (res?.status === 200 || res?.status === 401) {
@@ -128,7 +143,7 @@ function solo(title: string, sub: string): void {
 }
 
 function chat(): void {
-  const file = $<HTMLInputElement>("input[type=file]");
+  const file = $("input[type=file]", HTMLInputElement);
   Box.box_new(BOX, { input: typed, files: attach });
   BOX.addEventListener("blur", () => draw(false));
   // never the Enter that ends a composition (Japanese, Chinese: Safari
@@ -163,7 +178,7 @@ function chat(): void {
     }
   };
   document.onclick = click;
-  visualViewport!.onresize = () => {
+  must(visualViewport, "visualViewport").onresize = () => {
     if (Box.box_focused() && Box.box_caret()[0] === Box.box_text().length) {
       BOX.scrollTop = BOX.scrollHeight;
     }
@@ -327,7 +342,7 @@ function click(ev: MouseEvent): void {
   }
   const cut = target.closest(".unfold") ?? (el === null && target.closest("a") === null ? target.closest(".msg.long:not(.shown) > .cut") : null);
   if (cut !== null && (sel === null || sel.isCollapsed)) {
-    unfold(cut.parentElement!);
+    unfold(must(cut.parentElement, "the cut's message"));
     return;
   }
   if (el === null || (sel !== null && !sel.isCollapsed && el.contains(sel.focusNode))) {
@@ -348,7 +363,7 @@ function click(ev: MouseEvent): void {
     go(path ?? "/");
   }
   if (a !== undefined) {
-    act(JSON.parse(a));
+    act(JSON.parse(a) as View.Act);
   }
   if (text !== undefined) {
     navigator.clipboard.writeText(text).then(() => copied(el), () => toast("Could not copy."));
@@ -401,7 +416,7 @@ let measured = new WeakSet<Element>();
 
 function folds(): void {
   for (const cut of document.querySelectorAll<HTMLElement>("#log .msg > .cut")) {
-    const msg = cut.parentElement!;
+    const msg = must(cut.parentElement, "the cut's message");
     if (!measured.has(msg)) {
       measured.add(msg);
       msg.classList.toggle("long", cut.scrollHeight > FOLD * parseFloat(getComputedStyle(cut).lineHeight));
@@ -412,7 +427,7 @@ function folds(): void {
 
 function fold_show(msg: HTMLElement, open: boolean): void {
   msg.classList.toggle("shown", open);
-  const button = msg.querySelector(":scope > .unfold")!;
+  const button = must(msg.querySelector(":scope > .unfold"), "the message's unfold");
   button.setAttribute("aria-expanded", String(open));
   button.textContent = open ? "Show less" : "Show all";
 }
@@ -483,13 +498,13 @@ function meter(stream: MediaStream, rec: MediaRecorder): void {
   const probe = audio.createAnalyser();
   audio.createMediaStreamSource(stream).connect(probe);
   const buf = new Uint8Array(probe.fftSize);
-  const canvas = $<HTMLCanvasElement>(".voice canvas");
-  const pen = canvas.getContext("2d")!;
+  const canvas = $(".voice canvas", HTMLCanvasElement);
+  const pen = must(canvas.getContext("2d"), "a 2d canvas");
   const levels: number[] = [];
   const start = performance.now();
   const frame = (now: number): void => {
     if (P.rec !== rec) {
-      audio.close();
+      void audio.close();
       return;
     }
     probe.getByteTimeDomainData(buf);
@@ -534,7 +549,8 @@ function heard(out: View.Answer): void {
 function connect(): void {
   View.link_open(v, {
     open : (query) => new WebSocket(location.origin.replace(/^http/, "ws") + "/ws" + query),
-    post : (path, body) => fetch(path, { method: "POST", body }),
+    // the page's acts send Blobs; an async iterable is the terminal's
+    post : (path, body) => fetch(path, { method: "POST", body: body as BodyInit }),
     hear : hear,
     lost : lost,
   });
@@ -577,19 +593,20 @@ function hear(msg: View.Server): void {
   if (msg.$ === "state") {
     renew_due(msg.build);
   }
-  import_welcome();
+  void import_welcome();
   draw(true);
 }
 
 function importer(): void {
-  const form = $<HTMLFormElement>("#import form");
-  const dir  = $<HTMLInputElement>("#import [name=dir]");
-  $(".imp").onclick = () => import_open(false);
-  const zip  = $<HTMLInputElement>("#import [name=zip]");
+  const form = $("#import form", HTMLFormElement);
+  const dir  = $("#import [name=dir]", HTMLInputElement);
+  $(".imp").onclick = () => void import_open(false);
+  const zip  = $("#import [name=zip]", HTMLInputElement);
   $(".pickdir").onclick = () => dir.click();
   for (const src of import_srcs()) {
-    src.querySelector<HTMLButtonElement>(".pickzip")!.onclick = () => zip.click();
-    src.querySelector<HTMLButtonElement>(".pickzip")!.title = "From the website: " + Import.EXPORTS[src.dataset.app!] + ", which emails you a zip.";
+    const pick = find(src, ".pickzip", HTMLButtonElement);
+    pick.onclick = () => zip.click();
+    pick.title = "From the website: " + Import.EXPORTS[src.dataset.app ?? ""] + ", which emails you a zip.";
   }
   $(".into").onclick = () => {
     P.step = "";
@@ -599,7 +616,7 @@ function importer(): void {
   $("#import .prog .sub").textContent = Import.MIDWAY;
   $("#import .flow").onclick = import_flow;
   $("#import").ontoggle = (ev) => {
-    if ((ev as ToggleEvent).newState === "closed") {
+    if (ev.newState === "closed") {
       P.step = P.step === "start" || P.step === "done" ? "" : P.step;
     }
     import_draw("");
@@ -651,7 +668,7 @@ function import_flow(): void {
 
 async function import_open(first: boolean): Promise<void> {
   $("#menu").hidePopover();
-  P.done = await fetch("/api/imported").then((res) => res.json()).catch(() => ({}));
+  P.done = (await fetch("/api/imported").then((res) => res.json()).catch(() => ({}))) as Import.Done;
   $("#import form .skip").textContent = first ? "Start fresh" : "Close";
   P.step = first ? "start" : P.step === "done" ? "" : P.step;
   import_draw("");
@@ -670,7 +687,7 @@ async function import_welcome(): Promise<void> {
   const key = kept("welcomed");
   if (localStorage.getItem(key) === null && v.pick !== null && v.parts.length === View.OPENING && v.importing === null && DESK.matches) {
     localStorage.setItem(key, "1");
-    import_open(true);
+    void import_open(true);
   }
 }
 
@@ -692,7 +709,7 @@ function import_sent(out: View.Answer): void {
 }
 
 function import_plan(): Import.Plan {
-  const form = new FormData($<HTMLFormElement>("#import form"));
+  const form = new FormData($("#import form", HTMLFormElement));
   const want = { off: [...P.off], since: import_since(), tools: form.has("tools") };
   const found = [...P.found.values()].flatMap((read) => read.sessions);
   return Import.import_plan(found, want, P.done);
@@ -714,15 +731,15 @@ function import_bar(): boolean {
   $("#import form").hidden = going || P.step === "start";
   $("#import .prog").hidden = !going;
   $("#import .prog .title").textContent = done ? "Memory tree built" : "Building your memory tree";
-  $<HTMLProgressElement>("#import progress").value = part;
-  $<HTMLProgressElement>(".imping progress").value = part;
+  $("#import progress", HTMLProgressElement).value = part;
+  $(".imping progress", HTMLProgressElement).value = part;
   $(".imping").hidden = run === null;
   $(".imping").classList.toggle("why", why);
   $(".imping span").textContent = why ? "Import paused" : "Building memory";
   $(".imping").title = $("#import .pct").textContent = said;
   $("#import .prog .sub").hidden = why || done;
   $("#import .flow").textContent = why ? "Resume" : "Pause";
-  $<HTMLButtonElement>("#import .flow").hidden = run === null;
+  $("#import .flow", HTMLButtonElement).hidden = run === null;
   return going;
 }
 
@@ -747,22 +764,22 @@ function import_draw(status: string): void {
   $("#import .tools").hidden = !sessions.some((s) => s.heads.some((m) => m.kind === "tool" || m.kind === "echo"));
   $("#import .found").textContent = found + moved;
   for (const src of import_srcs()) {
-    const list  = src.querySelector(".sessions")!;
+    const list  = must(src.querySelector(".sessions"), "#import .sessions");
     const shown = plan.sessions.filter((s) => s.app === src.dataset.app);
     markup(list, shown.map((s) => `<label title="${Html.esc(s.where + ", " + Import.import_count(s.heads.length, ""))}"><input type="checkbox" name="session" value="${Html.esc(Import.import_id(s))}">${Import.import_cells(s).map((c) => `<span>${Html.esc(c)}</span>`).join("")}</label>`));
     list.querySelectorAll("input").forEach((box) => (box.checked = !P.off.has(box.value)));
     const on = shown.filter((s) => !P.off.has(Import.import_id(s))).length;
-    src.querySelector<HTMLElement>(".pick")!.hidden = shown.length === 0;
-    src.querySelector(".pick summary")!.textContent = (on < shown.length ? on + " of " : shown.length > 1 ? "All " : "") + shown.length + (shown.length === 1 ? " session" : " sessions") + " picked · choose";
+    find(src, ".pick", HTMLElement).hidden = shown.length === 0;
+    must(src.querySelector(".pick summary"), "#import .pick summary").textContent = (on < shown.length ? on + " of " : shown.length > 1 ? "All " : "") + shown.length + (shown.length === 1 ? " session" : " sessions") + " picked · choose";
   }
   $("#import .guess").textContent = status;
-  const [go, dir] = [$<HTMLButtonElement>("#import .go"), $<HTMLButtonElement>(".pickdir")];
+  const [go, dir] = [$("#import .go", HTMLButtonElement), $(".pickdir", HTMLButtonElement)];
   go.hidden = msgs === 0;
   go.disabled = status.startsWith("Reading");
   dir.textContent = msgs > 0 ? "Add a folder" : "Choose folder";
   dir.classList.toggle("alt", msgs > 0);
   dir.disabled = go.disabled;
-  import_srcs().forEach((src) => (src.querySelector<HTMLButtonElement>(".pickzip")!.disabled = dir.disabled));
+  import_srcs().forEach((src) => (find(src, ".pickzip", HTMLButtonElement).disabled = dir.disabled));
 }
 
 function import_srcs(): HTMLElement[] {
@@ -781,9 +798,9 @@ async function import_copy(file: File): Promise<Blob> {
 const MARKUP = new WeakMap<Element, string>();
 
 function markup(el: Element, htmls: string[]): void {
-  const had = new Map<string, Element[]>();
+  const had = new Map<string | undefined, Element[]>();
   for (const child of el.children) {
-    const html = MARKUP.get(child)!;
+    const html = MARKUP.get(child);
     const same = had.get(html) ?? [];
     same.push(child);
     had.set(html, same);
@@ -805,7 +822,7 @@ function markup(el: Element, htmls: string[]): void {
 function html_parse(html: string): Element {
   const made = document.createElement("template");
   made.innerHTML = html;
-  const child = made.content.firstElementChild!;
+  const child = must(made.content.firstElementChild, "an element in " + html.slice(0, 40));
   MARKUP.set(child, html);
   return child;
 }
@@ -886,12 +903,12 @@ function bars(): void {
   }
   if (P.due && !P.going && renew_free()) {
     P.going = true;
-    setTimeout(renew);
+    setTimeout(() => void renew());
   }
   const on = View.view_typing(v);
   const stop = on && v.busy && Box.box_blank();
   const tabs = View.view_tabs(v);
-  const send = $<HTMLButtonElement>(".send");
+  const send = $(".send", HTMLButtonElement);
   $(".net").hidden = v.up;
   $(".timers").hidden = v.timers.length === 0;
   $(".timers span").textContent = String(v.timers.length);
@@ -901,7 +918,7 @@ function bars(): void {
   }
   send.classList.toggle("stop", stop);
   $(".composer").hidden = !on;
-  $<HTMLButtonElement>(".mic").disabled = v.out.some((p) => p.msg.$ === "voice");
+  $(".mic", HTMLButtonElement).disabled = v.out.some((p) => p.msg.$ === "voice");
   $(".mic").classList.toggle("rec", P.rec !== null);
   $(".composer").classList.toggle("rec", P.rec !== null);
   const knob = (document.activeElement as HTMLElement | null)?.dataset?.knob;
@@ -981,7 +998,7 @@ function route(): void {
     P.away = null;
   }
   if (page) {
-    account();
+    void account();
   }
   if (tree) {
     Tree.tree_show(tree_view() ? "VIEW" : "TREE");
@@ -1002,7 +1019,7 @@ function popped(): void {
 async function account(): Promise<void> {
   const el = $("#account");
   const [got, set] = await Promise.all([fetch("/api/prompts").catch(() => null), fetch("/api/settings").catch(() => null)]);
-  const prompts: View.Prompts | null = got !== null && got.ok ? await got.json().catch(() => null) : null;
+  const prompts = got !== null && got.ok ? ((await got.json().catch(() => null)) as View.Prompts | null) : null;
   const push = await notify_state().catch(() => null);
   el.innerHTML = Html.account_html(prompts, push);
   P.dirty.clear();
@@ -1014,17 +1031,17 @@ async function account(): Promise<void> {
   };
   el.querySelectorAll<HTMLFormElement>("form.prompt").forEach((form) => (form.onsubmit = (ev) => {
     ev.preventDefault();
-    account_prompt(form);
+    void account_prompt(form);
   }));
   mcp_draw();
-  el.querySelectorAll<HTMLButtonElement>(".retry").forEach((retry) => (retry.onclick = () => account()));
-  $("#account .out").onclick = signout;
+  el.querySelectorAll<HTMLButtonElement>(".retry").forEach((retry) => (retry.onclick = () => void account()));
+  $("#account .out").onclick = () => void signout();
   const bell = document.querySelector<HTMLButtonElement>("#account .notify");
   bell?.addEventListener("click", () => {
     bell.disabled = true;
-    notify(push !== "on");
+    void notify(push !== "on");
   });
-  const page = set?.ok ? await set.json().catch(() => null) : null;
+  const page = set?.ok ? ((await set.json().catch(() => null)) as Page | null) : null;
   if (page === null) {
     $("#account .owned").innerHTML = `<p class="sub">Could not read the server's settings. Try again in a moment.</p>`;
     return;
@@ -1037,7 +1054,8 @@ function mcp_draw(): void {
   if (box === null || v.pick === null) {
     return;
   }
-  const on = box.contains(document.activeElement) ? document.activeElement!.getAttribute("aria-label") : null;
+  const active = document.activeElement;
+  const on = active !== null && box.contains(active) ? active.getAttribute("aria-label") : null;
   markup(box, Html.mcp_html(v.mcp));
   [...box.querySelectorAll<HTMLElement>("[role=switch]")].find((b) => b.getAttribute("aria-label") === on)?.focus();
 }
@@ -1049,19 +1067,20 @@ async function signout(): Promise<void> {
 }
 
 async function account_prompt(form: HTMLFormElement): Promise<void> {
-  const area = form.querySelector("textarea")!;
-  const why  = form.querySelector(".why")!;
-  const save = form.querySelector("button")!;
+  const area = find(form, "textarea", HTMLTextAreaElement);
+  const why  = must(form.querySelector(".why"), "the prompt's why");
+  const save = find(form, "button", HTMLButtonElement);
   const sent = area.value;
   save.disabled = true;
   P.saving++;
   const out = await View.post("/api/prompts", { [area.name]: sent });
   P.saving--;
   save.disabled = false;
+  const saved = get(out[area.name], "text");
   if (out.error === undefined && area.value === sent) {
-    area.value = out[area.name]?.text ?? sent;
+    area.value = text_of(saved, sent);
   }
-  why.textContent = out.error ?? (area.value === out[area.name]?.text ? "Saved." : "Not saved yet: Save again.");
+  why.textContent = text_of(out.error, area.value === saved ? "Saved." : "Not saved yet: Save again.");
   form.classList.toggle("bad", out.error !== undefined);
   if (out.error === undefined && area.value === sent) {
     P.dirty.delete(form);
@@ -1086,7 +1105,7 @@ async function notify_state(): Promise<Html.Notify | null> {
   const sub = await notify_sub();
   const query = sub === null ? "" : "?endpoint=" + encodeURIComponent(sub.endpoint);
   const res = await fetch("/api/webpush" + query).catch(() => null);
-  const out = res?.ok ? await res.json() : null;
+  const out = res?.ok ? ((await res.json()) as { key: string | null; on: boolean }) : null;
   if (reg === undefined || out === null || out.key === null) {
     return null;
   }
@@ -1118,20 +1137,20 @@ async function notify(on: boolean): Promise<void> {
   const what = on ? "on" : "off";
   try {
     const out = on ? await notify_on(push.reg, push.key) : await notify_off(push.reg);
-    toast(out.error ?? "Notifications are " + what + ".");
-  } catch (err: any) {
+    toast(text_of(out.error, "Notifications are " + what + "."));
+  } catch (err) {
     const denied = typeof Notification !== "undefined" && Notification.permission === "denied";
-    toast(denied ? "Notifications are blocked in this browser's settings." : "Could not turn notifications " + what + ": " + (err?.message ?? err));
+    toast(denied ? "Notifications are blocked in this browser's settings." : "Could not turn notifications " + what + ": " + err_why(err));
   }
-  account();
+  void account();
 }
 
-async function notify_on(reg: ServiceWorkerRegistration, key: string): Promise<any> {
+async function notify_on(reg: ServiceWorkerRegistration, key: string): Promise<Record<string, unknown>> {
   const bytes = notify_bytes(key);
   const ask = () => reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: bytes });
-  const sub = await ask().catch(async (err) => {
+  const sub = await ask().catch(async (err: unknown) => {
     const old = await reg.pushManager.getSubscription();
-    if (old === null || err?.name !== "InvalidStateError") {
+    if (old === null || get(err, "name") !== "InvalidStateError") {
       throw err;
     }
     await old.unsubscribe();
@@ -1140,7 +1159,7 @@ async function notify_on(reg: ServiceWorkerRegistration, key: string): Promise<a
   return View.post("/api/webpush", sub.toJSON());
 }
 
-async function notify_off(reg: ServiceWorkerRegistration): Promise<any> {
+async function notify_off(reg: ServiceWorkerRegistration): Promise<Record<string, unknown>> {
   const sub = await reg.pushManager.getSubscription();
   if (sub !== null) {
     const headers = { "content-type": "application/json" };
@@ -1150,24 +1169,24 @@ async function notify_off(reg: ServiceWorkerRegistration): Promise<any> {
   return {};
 }
 
-function settings_draw(page: any): void {
+function settings_draw(page: Page): void {
   $("#account .owned").innerHTML = Html.settings_html(page);
-  const form = $<HTMLFormElement>("#account form.settings");
-  const rows = new Map<string, any>(page.settings.map((r: any) => [r.key, r]));
+  const form = $("#account form.settings", HTMLFormElement);
+  const rows = new Map<string, Row>(page.settings.map((r) => [r.key, r]));
   const unset = new Set<string>();
-  const profs: Array<[string, string[]]> = Object.entries(page.profiles ?? {});
+  const profs = Object.entries(page.profiles ?? {});
   const box = form.querySelector<HTMLElement>(".profiles .field");
   const names = () => profs.map(([name]) => name.trim()).filter((name) => name !== "");
   const listed = (key: string) => {
     const boxes = [...form.querySelectorAll<HTMLInputElement>(`input[name="${key}"]`)];
-    return boxes.length === 0 ? Html.list(rows.get(key).value) : boxes.filter((b) => b.checked).map((b) => b.value);
+    return boxes.length === 0 ? Html.list(rows.get(key)?.value ?? "") : boxes.filter((b) => b.checked).map((b) => b.value);
   };
   const picks = () => {
     const vendors = listed("vendors");
-    form.querySelectorAll<HTMLElement>(".opt[data-vendor]:not([data-vendor=''])").forEach((o) => (o.hidden = !o.dataset.vendor!.split(" ").some((v) => vendors.includes(v))));
+    form.querySelectorAll<HTMLElement>(".opt[data-vendor]:not([data-vendor=''])").forEach((o) => (o.hidden = !(o.dataset.vendor ?? "").split(" ").some((v) => vendors.includes(v))));
     for (const key of Html.PICKS) {
       const value = form.querySelector<HTMLInputElement>(`input[name="${key}"]`);
-      const four = value?.parentElement!.querySelector<HTMLElement>(".four");
+      const four = value?.parentElement?.querySelector<HTMLElement>(".four");
       if (value && four) {
         const focus = (document.activeElement as HTMLSelectElement | null)?.name;
         four.innerHTML = Html.picks_html(key, vendors, listed("models"), value.value, key === "agents" ? "The chat's pick" : null, names());
@@ -1176,7 +1195,7 @@ function settings_draw(page: any): void {
     }
     const keyless = vendors.filter((v) => {
       const name = Html.VENDOR_KEY[v];
-      const key = page.keys.find((k: any) => k.name === name);
+      const key = page.keys.find((k) => k.name === name);
       const typed = form.querySelector<HTMLInputElement>(`[name="key.${name}"]`)?.value.trim() ?? "";
       return key !== undefined && (key.from === "default" || unset.has("key." + name)) && typed === "";
     });
@@ -1190,9 +1209,9 @@ function settings_draw(page: any): void {
     if (el === null) {
       return;
     }
-    unset.delete(el.dataset.key!);
+    unset.delete(el.dataset.key ?? "");
     el.classList.remove("unset");
-    el.querySelector(".err")!.textContent = "";
+    must(el.querySelector(".err"), "the setting's err").textContent = "";
     const value = el.querySelector<HTMLInputElement>("input[type=hidden]");
     if (value !== null) {
       value.value = Html.pick_mend([...el.querySelectorAll("select")].map((s) => s.value), listed("models"), names());
@@ -1207,20 +1226,20 @@ function settings_draw(page: any): void {
     if (btn === null) {
       return;
     }
-    const el = btn.closest<HTMLElement>(".set")!;
-    const key = el.dataset.key!;
+    const el = must(btn.closest<HTMLElement>(".set"), "the reset's setting");
+    const key = el.dataset.key ?? "";
     const r = rows.get(key);
-    el.querySelectorAll<HTMLInputElement>("input[type=checkbox]").forEach((b) => (b.checked = Html.list(r.def).includes(b.value)));
+    el.querySelectorAll<HTMLInputElement>("input[type=checkbox]").forEach((b) => (b.checked = Html.list(r?.def ?? "").includes(b.value)));
     el.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>("input:not([type=checkbox]), textarea").forEach((i) => (i.value = r?.def ?? ""));
     picks();
     unset.add(key);
     el.classList.add("unset");
     btn.hidden = true;
-    el.querySelector(".from")!.insertAdjacentText("beforeend", key.startsWith("key.") ? " · removed once saved" : " · the default once saved");
+    must(el.querySelector(".from"), "the setting's from").insertAdjacentText("beforeend", key.startsWith("key.") ? " · removed once saved" : " · the default once saved");
   };
   form.onsubmit = (ev) => {
     ev.preventDefault();
-    settings_save(form, page, unset, listed, profs);
+    void settings_save(form, page, unset, listed, profs);
   };
   const profs_draw = (focus?: string) => {
     if (box !== null) {
@@ -1230,7 +1249,7 @@ function settings_draw(page: any): void {
   };
   const profs_changed = (focus: string) => {
     profs_draw(focus);
-    box!.closest(".set")!.querySelector(".err")!.textContent = "";
+    must(box?.closest(".set")?.querySelector(".err"), "the profiles' err").textContent = "";
     picks();
   };
   const renamed = (was: string, now: string) => {
@@ -1291,8 +1310,8 @@ function settings_draw(page: any): void {
       return;
     }
     ev.preventDefault();
-    const li = grip.closest("li")!;
-    const ol = li.parentElement!;
+    const li = must(grip.closest("li"), "the grip's row");
+    const ol = must(li.parentElement, "the grip's list");
     const [i, from] = [Number(grip.dataset.i), Number(grip.dataset.j)];
     li.classList.add("drag");
     const move = (e: PointerEvent) => {
@@ -1318,7 +1337,7 @@ function settings_draw(page: any): void {
   picks();
 }
 
-async function settings_save(form: HTMLFormElement, page: any, unset: Set<string>, listed: (key: string) => string[], profs: Array<[string, string[]]>): Promise<void> {
+async function settings_save(form: HTMLFormElement, page: Page, unset: Set<string>, listed: (key: string) => string[], profs: Array<[string, string[]]>): Promise<void> {
   const set: Record<string, string | null> = {};
   const keys: Record<string, string | null> = {};
   for (const r of page.settings) {
@@ -1341,7 +1360,7 @@ async function settings_save(form: HTMLFormElement, page: any, unset: Set<string
       keys[k.name] = typed;
     }
   }
-  const why = form.querySelector(".save .why")!;
+  const why = must(form.querySelector(".save .why"), "the save's why");
   form.querySelectorAll(".err").forEach((e) => (e.textContent = ""));
   let profiles: Record<string, string[]> | undefined;
   if (page.profiles != null) {
@@ -1349,8 +1368,8 @@ async function settings_save(form: HTMLFormElement, page: any, unset: Set<string
     const all = now.map(([name]) => name);
     const bad = all.includes("") ? "Name each profile." : all.some((name, k) => all.indexOf(name) !== k) ? "Two profiles have the same name." : now.some(([, list]) => list.length === 0) ? "Add a model to each profile." : null;
     if (bad !== null) {
-      const at = form.querySelector<HTMLElement>(".profiles")!;
-      at.querySelector(".err")!.textContent = bad;
+      const at = find(form, ".profiles", HTMLElement);
+      must(at.querySelector(".err"), "the profiles' err").textContent = bad;
       at.scrollIntoView({ block: "center" });
       return;
     }
@@ -1361,7 +1380,7 @@ async function settings_save(form: HTMLFormElement, page: any, unset: Set<string
     why.textContent = "Nothing changed.";
     return;
   }
-  const go = form.querySelector<HTMLButtonElement>(".go")!;
+  const go = find(form, ".go", HTMLButtonElement);
   go.disabled = true;
   why.textContent = "";
   P.saving++;
@@ -1369,13 +1388,15 @@ async function settings_save(form: HTMLFormElement, page: any, unset: Set<string
   P.saving--;
   go.disabled = false;
   if (!out.ok) {
-    const at = out.key === undefined ? null : form.querySelector<HTMLElement>(`.set[data-key="${out.key}"]`);
-    (at?.querySelector(".err") ?? why).textContent = out.error ?? "Could not save.";
+    const at = out.key === undefined ? null : form.querySelector<HTMLElement>(`.set[data-key="${text_of(out.key, "null")}"]`);
+    (at?.querySelector(".err") ?? why).textContent = text_of(out.error, "Could not save.");
     (at ?? why).scrollIntoView({ block: "center" });
     return;
   }
-  const later = (out.saved as string[]).filter((key) => page.settings.find((r: any) => r.key === key)?.apply === "restart");
-  settings_draw(out);
+  // the server's answer to a save: its settings page, and the keys saved
+  const done = out as Page & { saved: string[] };
+  const later = done.saved.filter((key) => page.settings.find((r) => r.key === key)?.apply === "restart");
+  settings_draw(done);
   P.dirty.delete(form);
   P.since = true;
   draw(false);
@@ -1410,7 +1431,7 @@ async function renew(hidden = false): Promise<void> {
   const tries = was === v.build ? Number(n) : 0;
   const store = isSecureContext && "caches" in window ? window.caches : null;
   const keys = (await store?.keys().catch(() => [])) ?? [];
-  await Promise.all(keys.filter((k) => k.startsWith("unii-shell")).map((k) => store?.delete(k)));
+  await Promise.all(store === null ? [] : keys.filter((k) => k.startsWith("unii-shell")).map((k) => store.delete(k)));
   if (tries > 0) {
     await Promise.all(["/", "/app.js", "/style.css", "/sw.js"].map((path) => fetch(path, { cache: "reload" }).catch(() => null)));
   }
@@ -1419,7 +1440,7 @@ async function renew(hidden = false): Promise<void> {
     return;
   }
   const chat = !$("#log").hidden;
-  const back = { at: chat && !P.end ? anchor() : null, y: chat ? null : scrollY, away: P.away, caret: Box.box_caret(), focus: Box.box_focused(), open: [...P.open] };
+  const back: Back = { at: chat && !P.end ? anchor() : null, y: chat ? null : scrollY, away: P.away, caret: Box.box_caret(), focus: Box.box_focused(), open: [...P.open] };
   sessionStorage.setItem(kept("back"), JSON.stringify(back));
   sessionStorage.setItem(kept("build"), (v.build ?? "") + " " + (tries + 1));
   location.reload();
@@ -1428,7 +1449,7 @@ async function renew(hidden = false): Promise<void> {
 function renewed(): void {
   const text = sessionStorage.getItem(kept("back"));
   sessionStorage.removeItem(kept("back"));
-  const back = text === null ? null : JSON.parse(text);
+  const back = text === null ? null : (JSON.parse(text) as Back | null);
   if (back === null) {
     return;
   }
@@ -1436,11 +1457,20 @@ function renewed(): void {
     Box.box_focus();
   }
   Box.box_place(back.caret[0], back.caret[1]);
-  back.open.forEach((id: string) => P.open.add(id));
+  back.open.forEach((id) => P.open.add(id));
   P.back = back.at;
   P.away = back.away;
   const end = Date.now() + 3000;
-  const y = () => back.y !== null && (document.documentElement.scrollHeight >= back.y + innerHeight || Date.now() > end ? scrollTo(0, back.y) : setTimeout(y, 100));
+  const y = () => {
+    const to = back.y;
+    if (to !== null) {
+      if (document.documentElement.scrollHeight >= to + innerHeight || Date.now() > end) {
+        scrollTo(0, to);
+      } else {
+        setTimeout(y, 100);
+      }
+    }
+  };
   y();
 }
 
@@ -1485,4 +1515,4 @@ function intro_play(): Promise<void> {
 }
 
 const INTRO = intro_play();
-boot();
+void boot();

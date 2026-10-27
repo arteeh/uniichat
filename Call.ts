@@ -1,3 +1,4 @@
+import { get, list, rec, text_of } from "./Json.ts";
 import type * as Md from "./Md.ts";
 
 export type Call = { name: string; head: string; device: string; blocks: Md.Code[] };
@@ -15,17 +16,17 @@ const MCP = /^mcp__.+?__/;
 const THEIRS = /^(?:([A-Za-z0-9-]+)_)?([A-Za-z0-9-]+(?:_[A-Za-z0-9-]+)*)__(.+)$/;
 
 const READS = new Map<string, (x: Input) => Shown>([
-  ["shell",    (x) => ({ head: String(x.command ?? ""), blocks: [] })],
-  ["read",     (x) => ({ head: String(x.path ?? "") + lines_show(x.offset, x.limit), blocks: [] })],
-  ["write",    (x) => ({ head: String(x.path ?? ""), blocks: [] })],
-  ["view_video", (x) => ({ head: String(x.path ?? "") + range_show(x.start, x.end, x.unit) + (x.step === undefined ? "" : " every " + x.step), blocks: [] })],
+  ["shell",    (x) => ({ head: text_of(x.command), blocks: [] })],
+  ["read",     (x) => ({ head: text_of(x.path) + lines_show(x.offset, x.limit), blocks: [] })],
+  ["write",    (x) => ({ head: text_of(x.path), blocks: [] })],
+  ["view_video", (x) => ({ head: text_of(x.path) + range_show(x.start, x.end, x.unit) + (x.step === undefined ? "" : " every " + text_of(x.step, "null")), blocks: [] })],
   ["edit",     (x) => (Array.isArray(x.edits) ? { head: edits_files(x.edits), blocks: [] } : input_shown(x))],
-  ["zoom",     (x) => ({ head: msg_show(x.id, x.n) + (x.at === undefined ? "" : " from char " + x.at), blocks: [] })],
+  ["zoom",     (x) => ({ head: msg_show(x.id, x.n) + (x.at === undefined ? "" : " from char " + text_of(x.at, "null")), blocks: [] })],
   ["date",     (x) => ({ head: msg_show(x.id, 1), blocks: [] })],
-  ["spawn",    (x) => ({ head: tasks_show(x.tasks, x.model, x.effort), blocks: (Array.isArray(x.tasks) ? x.tasks : []).flatMap(task_block) })],
-  ["tell",     (x) => ({ head: String(x.name ?? ""), blocks: text_block(x.message) })],
+  ["spawn",    (x) => ({ head: tasks_show(x.tasks, x.model, x.effort), blocks: list(x.tasks).flatMap(task_block) })],
+  ["tell",     (x) => ({ head: text_of(x.name), blocks: text_block(x.message) })],
   ["computer", (x) => ({ head: "", blocks: text_block(x.task) })],
-  ["schedule", (x) => ({ head: (x.cron === undefined ? String(x.at ?? "") : "cron " + x.cron) + " " + String(x.zone ?? ""), blocks: text_block(x.message) })],
+  ["schedule", (x) => ({ head: (x.cron === undefined ? text_of(x.at) : "cron " + text_of(x.cron, "null")) + " " + text_of(x.zone), blocks: text_block(x.message) })],
 ]);
 
 export type Report = { name: string; text: string };
@@ -96,21 +97,21 @@ function text_block(x: unknown): Md.Code[] {
 
 function msg_show(id: unknown, n: unknown): string {
   const many = typeof n === "number" && n > 1 ? "+" + n : "";
-  return typeof id === "number" ? "#" + id + many : String(id ?? "");
+  return typeof id === "number" ? "#" + id + many : text_of(id);
 }
 
 function tasks_show(tasks: unknown, model: unknown, effort: unknown): string {
-  const list = Array.isArray(tasks) ? tasks : [];
-  const knobs = [...new Set([knobs_show(model, effort), ...list.map((t) => knobs_show(t?.model, t?.effort))])].filter((k) => k !== "").map((k) => " · " + k).join("");
-  return list.length + (list.length === 1 ? " agent" : " agents") + knobs;
+  const all = list(tasks);
+  const knobs = [...new Set([knobs_show(model, effort), ...all.map((t) => knobs_show(get(t, "model"), get(t, "effort")))])].filter((k) => k !== "").map((k) => " · " + k).join("");
+  return all.length + (all.length === 1 ? " agent" : " agents") + knobs;
 }
 
 function knobs_show(model: unknown, effort: unknown): string {
   return [model, effort].filter((k) => typeof k === "string").join(" ");
 }
 
-function task_block(t: any): Md.Code[] {
-  return typeof t === "string" ? text_block(t) : text_block(t?.task).map((b) => ({ ...b, k: knobs_show(t.model, t.effort) }));
+function task_block(t: unknown): Md.Code[] {
+  return typeof t === "string" ? text_block(t) : text_block(get(t, "task")).map((b) => ({ ...b, k: knobs_show(get(t, "model"), get(t, "effort")) }));
 }
 
 function lines_show(offset: unknown, limit: unknown): string {
@@ -121,11 +122,11 @@ function lines_show(offset: unknown, limit: unknown): string {
 
 function range_show(start: unknown, end: unknown, unit: unknown): string {
   const s = unit === "second" ? "s" : "";
-  return start === undefined && end === undefined ? "" : " " + (start ?? 0) + s + "-" + (end ?? "") + (end === undefined ? "" : s);
+  return start === undefined && end === undefined ? "" : " " + text_of(start, "0") + s + "-" + text_of(end) + (end === undefined ? "" : s);
 }
 
 function edits_files(edits: unknown[]): string {
-  const paths = edits.map((e: any) => e?.path).filter((p) => typeof p === "string");
+  const paths = edits.map((e) => get(e, "path")).filter((p) => typeof p === "string");
   return [...new Set(paths)].join(", ");
 }
 
@@ -157,8 +158,8 @@ function input_parse(text: string): Record<string, unknown> | null {
 
 function object_parse(text: string): Record<string, unknown> | null {
   try {
-    const x = JSON.parse(text);
-    return typeof x === "object" && x !== null && !Array.isArray(x) ? x : null;
+    const x: unknown = JSON.parse(text);
+    return rec(x) ? x : null;
   } catch {
     return null;
   }

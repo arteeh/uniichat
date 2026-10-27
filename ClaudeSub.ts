@@ -9,6 +9,8 @@ import { LIMIT, Limit, type Off } from "./Limit.ts";
 import { Machine } from "./Machine.ts";
 import { live_push, type Live } from "./View.ts";
 import * as config from "./Config.ts";
+import { err_why } from "./Err.ts";
+import { get, text_of } from "./Json.ts";
 
 const DIR = config.CLAUDE_SUB;
 
@@ -72,7 +74,7 @@ const SLOTS = { busy: 0, waits: [] as Wait[], n: 0 };
 export namespace ClaudeSub {
 
   export function bin(): Promise<string> {
-    LOADED.bin ??= ClaudeSub.find().catch((err) => {
+    LOADED.bin ??= ClaudeSub.find().catch((err: unknown) => {
       LOADED.bin = null;
       throw err;
     });
@@ -109,7 +111,11 @@ export namespace ClaudeSub {
       ClaudeSub.prune(path.dirname(path.dirname(out)), path.basename(path.dirname(out)));
       return out;
     } finally {
-      was === undefined ? delete process.env.CLAUDE_CODE_TMPDIR : (process.env.CLAUDE_CODE_TMPDIR = was);
+      if (was === undefined) {
+        delete process.env.CLAUDE_CODE_TMPDIR;
+      } else {
+        process.env.CLAUDE_CODE_TMPDIR = was;
+      }
     }
   }
 
@@ -140,7 +146,7 @@ export namespace ClaudeSub {
   }
 
   export function sdk(): Promise<Sdk> {
-    LOADED.sdk ??= import("@anthropic-ai/claude-agent-sdk").catch((err) => {
+    LOADED.sdk ??= import("@anthropic-ai/claude-agent-sdk").catch((err: unknown) => {
       LOADED.sdk = null;
       throw err;
     });
@@ -160,7 +166,7 @@ export namespace ClaudeSub {
       const run = Bun.spawn([await ClaudeSub.bin(), "auth", "status"], { env: ClaudeSub.env(), stdio: ["ignore", "pipe", "inherit"] });
       const out = await new Response(run.stdout).text();
       await run.exited;
-      let st: any = null;
+      let st: unknown = null;
       try {
         st = JSON.parse(out);
       } catch {
@@ -168,9 +174,10 @@ export namespace ClaudeSub {
         process.exitCode = run.exitCode ?? 1;
         return;
       }
-      const plan = st?.subscriptionType ? " (" + st.subscriptionType + " plan)" : "";
-      console.log(st?.loggedIn ? "Signed in to Claude as " + (st.email ?? "an account") + plan + "; sign-in in " + DIR + "." : "Not signed in to Claude.");
-      process.exitCode = st?.loggedIn ? 0 : 1;
+      const type = get(st, "subscriptionType");
+      const plan = type ? " (" + text_of(type) + " plan)" : "";
+      console.log(get(st, "loggedIn") ? "Signed in to Claude as " + text_of(get(st, "email"), "an account") + plan + "; sign-in in " + DIR + "." : "Not signed in to Claude.");
+      process.exitCode = get(st, "loggedIn") ? 0 : 1;
       return;
     }
     const cmd = args.includes("logout") ? ["logout"] : ["login", "--claudeai"];
@@ -189,7 +196,7 @@ export namespace ClaudeSub {
     };
     const done = ClaudeSub.run(ask, on, abort.signal, limit).then(
       (out) => abort.signal.aborted || Object.assign(end, out),
-      (err) => (end.text ||= err.message),
+      (err: unknown) => (end.text ||= err_why(err)),
     ).then(() => {
       end.ok = end.ok && !abort.signal.aborted;
       return end;
@@ -230,7 +237,7 @@ export namespace ClaudeSub {
     };
   }
 
-  export function mcp(server: string): Record<string, any> {
+  export function mcp(server: string): Parameters<Query["setMcpServers"]>[0] {
     return server ? { unii: { type: "http", url: server, alwaysLoad: true, timeout: 1e8 } } : {};
   }
 
@@ -253,9 +260,13 @@ export namespace ClaudeSub {
 
   export function grant(): void {
     SLOTS.waits.sort((a, b) => Number(a.imp) - Number(b.imp) || a.n - b.n);
-    while (SLOTS.busy < SUMS && SLOTS.waits.length > 0) {
+    while (SLOTS.busy < SUMS) {
+      const wait = SLOTS.waits.shift();
+      if (wait === undefined) {
+        return;
+      }
       SLOTS.busy += 1;
-      SLOTS.waits.shift()!.go();
+      wait.go();
     }
   }
 
@@ -269,7 +280,7 @@ export namespace ClaudeSub {
     let gone = () => {};
     const exit = new Promise<void>((ok) => (gone = ok));
     if (held) {
-      exit.then(ClaudeSub.free);
+      void exit.then(ClaudeSub.free);
     }
     const code = { box, proc: null, exit, gone } as Omit<Code, "q"> as Code;
     const spawn = (o: SpawnOptions) => {
@@ -301,8 +312,8 @@ export namespace ClaudeSub {
   }
 
   export function read(code: Code): Promise<IteratorResult<SDKMessage>> {
-    const next = code.q.next().catch((err) => {
-      throw new Died(err?.message ?? String(err));
+    const next = code.q.next().catch((err: unknown) => {
+      throw new Died(err_why(err));
     });
     next.catch(() => {});
     return next;
@@ -452,7 +463,7 @@ export namespace ClaudeSub {
       }
       if (msg.type === "assistant" && msg.error === undefined) {
         Anthropic.entries(msg.message.content).forEach((e) => log({ $: "Entry", ...e }));
-        acted.v ||= msg.message.content.some((b: any) => b.type === "tool_use" && !WEB.includes(b.name));
+        acted.v ||= msg.message.content.some((b) => b.type === "tool_use" && !WEB.includes(b.name));
         fresh();
       }
       if (msg.type === "assistant" && msg.error === "authentication_failed") {
@@ -492,9 +503,9 @@ export namespace ClaudeSub {
     }
   }
 
-  export function backs(content: any[]): Array<{ kind: "echo"; text: string; of: string }> {
-    const results = content.filter((b) => b.type === "tool_result");
-    return results.map((b) => ({ kind: "echo", text: (b.is_error ? "error: " : "") + (AskAI.show(b.content) || "(no output)"), of: b.tool_use_id }));
+  export function backs(content: unknown[]): Array<{ kind: "echo"; text: string; of: string }> {
+    const results = content.filter((b) => get(b, "type") === "tool_result");
+    return results.map((b) => ({ kind: "echo", text: (get(b, "is_error") ? "error: " : "") + (AskAI.show(get(b, "content")) || "(no output)"), of: text_of(get(b, "tool_use_id")) }));
   }
 
   // the messages Claude Code reads, as they come; closed: it ends. A put's
@@ -507,19 +518,20 @@ export namespace ClaudeSub {
     const queue: SDKUserMessage[] = [];
     let wake = () => {};
     let shut = false;
-    const push = (content: any) => {
-      queue.push({ type: "user", message: { role: "user", content }, parent_tool_use_id: null });
+    // the SDK's types take only four image types; MCP servers may send others, which the API refuses
+    const push = (content: unknown[]) => {
+      queue.push({ type: "user", message: { role: "user", content: content as Exclude<SDKUserMessage["message"]["content"], string> }, parent_tool_use_id: null });
       wake();
     };
-    const put = (texts: string[], imgs: Img[], mark = -1) => push(Anthropic.content(texts, imgs).map((b: any, k) => (k === mark ? { ...b, cache_control: HOUR } : b)));
+    const put = (texts: string[], imgs: Img[], mark = -1) => push(Anthropic.content(texts, imgs).map((b, k) => (k === mark ? { ...b, cache_control: HOUR } : b)));
     const close = () => {
       shut = true;
       wake();
     };
     async function* read(): AsyncGenerator<SDKUserMessage> {
       for (;;) {
-        while (queue.length > 0) {
-          yield queue.shift()!;
+        for (let next = queue.shift(); next !== undefined; next = queue.shift()) {
+          yield next;
         }
         if (shut) {
           return;

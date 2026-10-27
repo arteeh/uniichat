@@ -2,15 +2,22 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import type { Ask } from "./AskAI.ts";
 import type { Emit, Item, Refusal, Tool, Wire } from "./Agent.ts";
-import { OpenAI, type State } from "./OpenAI.ts";
+import { OpenAI, type Event, type Output, type State } from "./OpenAI.ts";
 import * as config from "./Config.ts";
+import { err_why } from "./Err.ts";
+import { get, str, text_of } from "./Json.ts";
 import { write_whole } from "./Write.ts";
 
 export type Tokens = { id_token: string; access_token: string; refresh_token: string; account_id: string };
 
 export type Auth = { auth_mode: "chatgpt"; OPENAI_API_KEY: null; tokens: Tokens; last_refresh: string };
 
-type Sub = State & { items: any[] };
+type Sub = State & { items: Output[] };
+
+// an OpenAI sign-in token's payload, as far as it is read here
+type Claims = { exp?: unknown; email?: string; "https://api.openai.com/auth"?: { chatgpt_account_id?: string; chatgpt_plan_type?: string } };
+
+type Got = { id_token?: string; access_token?: string; refresh_token?: string };
 
 const CLIENT    = "app_EMoamEEZ73f0CkXaXp7hrann";
 const ISSUER    = config.config_get("chatgpt_issuer", "https://auth.openai.com").replace(/\/$/, "");
@@ -39,17 +46,17 @@ let REFRESHING: Promise<Auth> | null = null;
 
 export namespace ChatGPT {
 
-  export function claims(jwt: string): any {
+  export function claims(jwt: string): Claims {
     try {
-      return JSON.parse(Buffer.from(jwt.split(".")[1], "base64url").toString("utf8")) ?? {};
+      return (JSON.parse(Buffer.from(jwt.split(".")[1], "base64url").toString("utf8")) as Claims | null) ?? {};
     } catch {
       return {};
     }
   }
 
-  export function json(text: string): any {
+  export function json(text: string): unknown {
     try {
-      return JSON.parse(text) ?? {};
+      return (JSON.parse(text) as unknown) ?? {};
     } catch {
       return {};
     }
@@ -59,11 +66,12 @@ export namespace ChatGPT {
     if (!fs.existsSync(config.CHATGPT)) {
       return null;
     }
-    const auth = JSON.parse(fs.readFileSync(config.CHATGPT, "utf8"));
-    if (typeof auth?.tokens?.access_token !== "string" || typeof auth.tokens.refresh_token !== "string") {
+    const auth: unknown = JSON.parse(fs.readFileSync(config.CHATGPT, "utf8"));
+    const tokens = get(auth, "tokens");
+    if (typeof get(tokens, "access_token") !== "string" || typeof get(tokens, "refresh_token") !== "string") {
       throw new Error(config.CHATGPT + " holds no ChatGPT sign-in");
     }
-    return auth;
+    return auth as Auth;
   }
 
   export function save(auth: Auth): void {
@@ -71,12 +79,16 @@ export namespace ChatGPT {
     write_whole(config.CHATGPT, JSON.stringify(auth, null, 2) + "\n");
   }
 
-  export function auth(got: any, old?: Tokens): Auth {
+  export function got(x: unknown): Got {
+    return { id_token: str(get(x, "id_token")), access_token: str(get(x, "access_token")), refresh_token: str(get(x, "refresh_token")) };
+  }
+
+  export function auth(got: Got, old?: Tokens): Auth {
     const id_token = got.id_token ?? old?.id_token ?? "";
     const tokens: Tokens = {
       id_token,
-      access_token  : got.access_token,
-      refresh_token : got.refresh_token ?? old?.refresh_token,
+      access_token  : got.access_token ?? "",
+      refresh_token : got.refresh_token ?? old?.refresh_token ?? "",
       account_id    : ChatGPT.claims(id_token)[CLAIMS]?.chatgpt_account_id ?? old?.account_id ?? "",
     };
     return { auth_mode: "chatgpt", OPENAI_API_KEY: null, tokens, last_refresh: new Date().toISOString() };
@@ -121,12 +133,13 @@ export namespace ChatGPT {
         signal  : AbortSignal.timeout(REQUEST),
       });
       text = await res.text();
-    } catch (err: any) {
-      throw ChatGPT.busy(err.message);
+    } catch (err) {
+      throw ChatGPT.busy(err_why(err));
     }
     const body = ChatGPT.json(text);
     if (!res.ok) {
-      const code = String(typeof body.error === "string" ? body.error : body.error?.code ?? body.code ?? "").toLowerCase();
+      const error = get(body, "error");
+      const code = (typeof error === "string" ? error : text_of(get(error, "code") ?? get(body, "code"))).toLowerCase();
       if (res.status !== 401 && !GONE.includes(code)) {
         throw ChatGPT.busy("HTTP " + res.status);
       }
@@ -141,10 +154,10 @@ export namespace ChatGPT {
       }
       throw new Error("openai-sub's sign-in has expired or was revoked (" + (code || "HTTP " + res.status) + "): " + SIGN_IN);
     }
-    if (typeof body.access_token !== "string") {
+    if (typeof get(body, "access_token") !== "string") {
       throw ChatGPT.busy("no access token");
     }
-    const auth = ChatGPT.auth(body, old.tokens);
+    const auth = ChatGPT.auth(ChatGPT.got(body), old.tokens);
     const now = newer();
     if (now !== null) {
       return now;
@@ -160,7 +173,7 @@ export namespace ChatGPT {
     if (!res.ok) {
       throw new Error("ChatGPT sign-in failed: HTTP " + res.status + ": " + text.slice(0, 300));
     }
-    const auth = ChatGPT.auth(JSON.parse(text));
+    const auth = ChatGPT.auth(ChatGPT.got(JSON.parse(text)));
     ChatGPT.save(auth);
     return auth;
   }
@@ -174,15 +187,15 @@ export namespace ChatGPT {
       const off = res.status === 404 ? " (device code sign-in is off for this account: allow it in ChatGPT's security settings)" : "";
       throw new Error("ChatGPT device code request failed: HTTP " + res.status + off);
     }
-    const got = await res.json();
-    const code = got.user_code ?? got.usercode;
-    const every = Math.max(1, Number(got.interval) || 5) * 1000;
+    const got: unknown = await res.json();
+    const code = String(get(got, "user_code") ?? get(got, "usercode"));
+    const every = Math.max(1, Number(get(got, "interval")) || 5) * 1000;
     show(ISSUER + "/codex/device", code);
     for (const end = Date.now() + wait; Date.now() < end; await Bun.sleep(Math.min(every, end - Date.now()))) {
-      const poll = await post("/token", { device_auth_id: got.device_auth_id, user_code: code }).catch(() => null);
+      const poll = await post("/token", { device_auth_id: get(got, "device_auth_id"), user_code: code }).catch(() => null);
       if (poll?.ok) {
-        const ok = await poll.json();
-        return ChatGPT.exchange(ok.authorization_code, ISSUER + "/deviceauth/callback", ok.code_verifier);
+        const ok: unknown = await poll.json();
+        return ChatGPT.exchange(String(get(ok, "authorization_code")), ISSUER + "/deviceauth/callback", String(get(ok, "code_verifier")));
       }
       if (poll !== null && poll.status !== 403 && poll.status !== 404 && poll.status < 500) {
         throw new Error("ChatGPT device sign-in failed: HTTP " + poll.status);
@@ -231,7 +244,7 @@ export namespace ChatGPT {
   // the system prompt as `instructions` (the backend requires it), no
   // max_output_tokens, cache breakpoints nor tool-call cap
   export function body(ask: Ask, items: Item[], tools: Tool[], max: number): unknown {
-    const api: any = OpenAI.body({ ...ask, speed: "slow" }, items, tools, max);
+    const api = OpenAI.body({ ...ask, speed: "slow" }, items, tools, max);
     return {
       model               : api.model,
       instructions        : ask.system,
@@ -248,11 +261,12 @@ export namespace ChatGPT {
     };
   }
 
-  export function unmark(item: any): any {
-    if (item.role !== "user" || !Array.isArray(item.content)) {
+  export function unmark(item: unknown): unknown {
+    const content = get(item, "content");
+    if (get(item, "role") !== "user" || !Array.isArray(content)) {
       return item;
     }
-    return { ...item, content: item.content.map(({ prompt_cache_breakpoint, ...part }: any) => part) };
+    return Object.assign({}, item, { content: content.map((part: unknown) => Object.assign({}, part, { prompt_cache_breakpoint: undefined })) });
   }
 
   export function headers(token: string): Record<string, string> {
@@ -268,34 +282,37 @@ export namespace ChatGPT {
 
   // one stream event, as OpenAI.read takes it; the backend's last
   // response holds no output, so its output is the items streamed
-  export function read(st: Sub, ev: any, on: Emit): boolean {
-    if (ev.type === "response.output_item.done") {
+  export function read(st: Sub, ev: Event, on: Emit): boolean {
+    if (ev.type === "response.output_item.done" && ev.item !== undefined) {
       st.items[ev.output_index ?? st.items.length] = ev.item;
     }
     const end = OpenAI.read(st, ev, on);
-    if (end && st.res !== null && !(st.res.output?.length > 0)) {
+    if (end && st.res !== null && !((st.res.output?.length ?? 0) > 0)) {
       st.res = { ...st.res, output: st.items.filter(Boolean) };
     }
     return end;
   }
 
   export function refusal(res: Response, text: string): Refusal | null {
-    const err = ChatGPT.json(text).error ?? {};
-    const kind = [err.type, err.code].find((k) => typeof k === "string" && Object.hasOwn(LIMITS, k));
-    if (res.status !== 429 || kind === undefined) {
+    const err = get(ChatGPT.json(text), "error") ?? {};
+    const kind = [get(err, "type"), get(err, "code")].find((k) => typeof k === "string" && Object.hasOwn(LIMITS, k));
+    if (res.status !== 429 || typeof kind !== "string") {
       return null;
     }
-    const plan = typeof err.plan_type === "string" && /^[a-z0-9_]{1,20}$/.test(err.plan_type) ? " (" + err.plan_type + ")" : "";
-    const why = "ChatGPT " + kind + plan + ": " + String(err.message ?? "").slice(0, 300);
+    const type = get(err, "plan_type");
+    const plan = typeof type === "string" && /^[a-z0-9_]{1,20}$/.test(type) ? " (" + type + ")" : "";
+    const why = "ChatGPT " + kind + plan + ": " + text_of(get(err, "message")).slice(0, 300);
     return { why, say: "the ChatGPT plan" + plan + " this server runs on " + LIMITS[kind] };
   }
 
   export function reset(res: Response, text: string): number | null {
-    const err = ChatGPT.json(text).error ?? {};
-    if (res.status !== 429 || ![err.type, err.code].includes("usage_limit_reached")) {
+    const err = get(ChatGPT.json(text), "error") ?? {};
+    if (res.status !== 429 || ![get(err, "type"), get(err, "code")].includes("usage_limit_reached")) {
       return null;
     }
-    const at = typeof err.resets_at === "number" ? err.resets_at * 1000 : typeof err.resets_in_seconds === "number" ? Date.now() + err.resets_in_seconds * 1000 : 0;
+    const resets_at = get(err, "resets_at");
+    const resets_in = get(err, "resets_in_seconds");
+    const at = typeof resets_at === "number" ? resets_at * 1000 : typeof resets_in === "number" ? Date.now() + resets_in * 1000 : 0;
     return at > Date.now() && at - Date.now() < 2 ** 31 ? at : null;
   }
 
@@ -305,11 +322,12 @@ export namespace ChatGPT {
   export async function clear(): Promise<boolean | null> {
     const { authorization, "chatgpt-account-id": account, originator } = ChatGPT.headers(await ChatGPT.token());
     const res = await fetch(USAGE, { headers: { authorization, "chatgpt-account-id": account, originator }, signal: AbortSignal.timeout(REQUEST) });
-    const limit = res.ok ? ChatGPT.json(await res.text()).rate_limit : null;
-    return typeof limit?.allowed === "boolean" ? limit.allowed && limit.limit_reached !== true : null;
+    const limit = res.ok ? get(ChatGPT.json(await res.text()), "rate_limit") : null;
+    const allowed = get(limit, "allowed");
+    return typeof allowed === "boolean" ? allowed && get(limit, "limit_reached") !== true : null;
   }
 
-  export const wire: Wire<Sub> = {
+  export const wire: Wire<Sub, Event> = {
     key     : "",
     idle    : 1200e3,
     url     : RESPONSES,
@@ -328,8 +346,8 @@ export namespace ChatGPT {
 }
 
 if (import.meta.main) {
-  await ChatGPT.cli(process.argv.slice(2)).catch((err) => {
-    console.error(err.message);
+  await ChatGPT.cli(process.argv.slice(2)).catch((err: unknown) => {
+    console.error(err_why(err));
     process.exit(1);
   });
 }

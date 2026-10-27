@@ -3,6 +3,8 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import type { Vendor } from "./AskAI.ts";
+import { err_code, err_why } from "./Err.ts";
+import { get, list as items, rec, text_of } from "./Json.ts";
 import { EFFORTS, LABELS, VENDORS, Pick, type Fall, type Offer } from "./Pick.ts";
 
 export type Setting = { key: string; def: string; apply: "now" | "restart"; web: boolean };
@@ -202,8 +204,8 @@ export function config_follow(): boolean {
   try {
     config_reload();
     return true;
-  } catch (err: any) {
-    console.error("unii: the sign-ins changed, but " + (err?.message ?? err));
+  } catch (err) {
+    console.error("unii: the sign-ins changed, but " + err_why(err));
     return false;
   }
 }
@@ -213,7 +215,7 @@ function config_env_value(key: string): string | undefined {
 }
 
 function config_str(x: unknown): string | undefined {
-  return x === undefined || x === null ? undefined : String(x);
+  return x === undefined || x === null ? undefined : text_of(x);
 }
 
 export function config_key_from(name: string, kept: Record<string, string>): From {
@@ -237,7 +239,7 @@ export function config_file_of(text: string | null): Record<string, unknown> {
     return {};
   }
   const json = config_json(FILE_PATH, text);
-  if (json === null || typeof json !== "object" || Array.isArray(json)) {
+  if (!rec(json)) {
     throw new Error("config: config.json is no JSON object");
   }
   return json;
@@ -246,21 +248,21 @@ export function config_file_of(text: string | null): Record<string, unknown> {
 export function config_text(file: string): string | null {
   try {
     return fs.readFileSync(file, "utf8");
-  } catch (err: any) {
-    if (err?.code === "ENOENT") {
+  } catch (err) {
+    if (err_code(err) === "ENOENT") {
       return null;
     }
-    throw new Error("config: " + path.basename(file) + " can't be read (" + (err?.code ?? err) + ")");
+    throw new Error("config: " + path.basename(file) + " can't be read (" + (err_code(err) ?? String(err)) + ")");
   }
 }
 
 // a file's JSON, of its text; an Error names the file (keys.json's,
 // nothing more: a parser's message may quote what it read)
-function config_json(file: string, text: string): any {
+function config_json(file: string, text: string): unknown {
   try {
-    return JSON.parse(text);
-  } catch (err: any) {
-    const why = file === KEYS_PATH ? "" : " (" + (err?.message ?? err) + ")";
+    return JSON.parse(text) as unknown;
+  } catch (err) {
+    const why = file === KEYS_PATH ? "" : " (" + err_why(err) + ")";
     throw new Error("config: " + path.basename(file) + " is no JSON" + why);
   }
 }
@@ -301,15 +303,15 @@ function config_run(key: string, text: string, offer: Offer): Pick {
 
 export function config_profiles(file: Record<string, unknown>, offer: Offer): Record<string, Fall[]> {
   const env = process.env.UNII_PROFILES;
-  const all: any = env === undefined ? file.profiles ?? {} : JSON.parse(env);
-  if (all === null || typeof all !== "object" || Array.isArray(all)) {
+  const all: unknown = env === undefined ? file.profiles ?? {} : JSON.parse(env);
+  if (!rec(all)) {
     throw new Error("config: profiles is no object of names, each a list of models");
   }
-  return Object.fromEntries(Object.entries(all).map(([name, list]: [string, any]) => {
+  return Object.fromEntries(Object.entries(all).map(([name, list]) => {
     if (name.trim() === "" || name.includes(":") || LABELS.includes(name) || !Array.isArray(list) || list.length === 0) {
       throw new Error("config: profile " + JSON.stringify(name) + " is no name (none of a model, no \":\") with a list of models");
     }
-    return [name, list.map((f) => config_fall(name, String(f).trim(), offer))];
+    return [name, items(list).map((f) => config_fall(name, String(f).trim(), offer))];
   }));
 }
 
@@ -345,43 +347,43 @@ function config_mcp_some(raw: unknown): boolean {
       return true;
     }
   }
-  const all: any = (raw as any)?.mcpServers ?? raw;
+  const all = get(raw, "mcpServers") ?? raw;
   return typeof all === "object" && all !== null && Object.keys(all).length > 0;
 }
 
 export function config_mcp(raw: unknown, device: string, notes: string[] = []): McpServer[] {
-  const all: any = (raw as any)?.mcpServers ?? raw;
-  if (typeof all !== "object" || all === null || Array.isArray(all)) {
+  const all = get(raw, "mcpServers") ?? raw;
+  if (!rec(all)) {
     throw new Error("config: mcp must be an object of servers by name");
   }
   return Object.entries(all).flatMap(([name, server]) => {
     try {
       return [config_server(name, server, device)];
-    } catch (err: any) {
-      notes.push(err.message.replace(/^config: /, "") + ", so it is left out");
+    } catch (err) {
+      notes.push(err_why(err).replace(/^config: /, "") + ", so it is left out");
       return [];
     }
   });
 }
 
-function config_server(name: string, s: any, device: string): McpServer {
+function config_server(name: string, s: unknown, device: string): McpServer {
   const bad = (why: string) => new Error("config: mcp server " + JSON.stringify(name) + " " + why);
   const strs = (list: unknown, what: string): string[] => {
     if (list !== undefined && (!Array.isArray(list) || list.some((x) => typeof x !== "string"))) {
       throw bad("needs " + what + " as a list of strings");
     }
-    return (list ?? []) as string[];
+    return items(list).map(String);
   };
   const map = (obj: unknown, what: string): Record<string, string> => {
     if (obj !== undefined && (typeof obj !== "object" || obj === null || Array.isArray(obj) || Object.values(obj).some((x) => typeof x !== "string"))) {
       throw bad("needs " + what + " as an object of strings");
     }
-    return { ...(obj ?? {}) } as Record<string, string>;
+    return Object.fromEntries(Object.entries(rec(obj) ? obj : {}).map(([k, v]) => [k, String(v)]));
   };
   if (!/^[A-Za-z0-9-]+(_[A-Za-z0-9-]+)*$/.test(name)) {
     throw bad("needs a name of letters, digits, - and single _s inside (its tools are named <server>__<tool>)");
   }
-  if (typeof s !== "object" || s === null || Array.isArray(s)) {
+  if (!rec(s)) {
     throw bad("must be an object");
   }
   const type = s.type ?? (s.url === undefined ? "stdio" : "http");
@@ -397,7 +399,7 @@ function config_server(name: string, s: any, device: string): McpServer {
     if (typeof s.command !== "string" || s.command === "" || (s.cwd !== undefined && typeof s.cwd !== "string")) {
       throw bad("needs a command (and cwd, if any, as a string)");
     }
-    return { ...server, command: s.command, args: strs(s.args, "args"), env: map(s.env, "env"), cwd: s.cwd ?? "" };
+    return { ...server, command: s.command, args: strs(s.args, "args"), env: map(s.env, "env"), cwd: typeof s.cwd === "string" ? s.cwd : "" };
   }
   if (type === "http") {
     if (typeof s.url !== "string" || s.url === "") {
@@ -452,8 +454,11 @@ export function keys_of(text: string | null): Record<string, string> {
     return {};
   }
   const json = config_json(KEYS_PATH, text);
-  const keys = json !== null && typeof json === "object" && !Array.isArray(json) ? json : {};
-  return Object.fromEntries(Object.keys(VARS).filter((name) => typeof keys[name] === "string" && keys[name] !== "").map((name) => [name, keys[name]]));
+  const keys = rec(json) ? json : {};
+  return Object.fromEntries(Object.keys(VARS).flatMap((name) => {
+    const key = keys[name];
+    return typeof key === "string" && key !== "" ? [[name, key]] : [];
+  }));
 }
 
 export function keys_text(keys: Record<string, string>): string | null {

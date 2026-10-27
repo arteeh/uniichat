@@ -14,6 +14,8 @@ import { Run, type Heard } from "./Run.ts";
 import type { Msg } from "./Server.ts";
 import * as Timer from "./Timer.ts";
 import { PING, type Pending } from "./View.ts";
+import { err_why } from "./Err.ts";
+import { get, list as items, rec, text_of } from "./Json.ts";
 
 type Device = {
   who    : string;
@@ -238,7 +240,7 @@ export namespace Tools {
       clearTimeout(timer);
       if (!late) {
         try {
-          d.skills = out.fail ? [] : JSON.parse(out.text);
+          d.skills = out.fail ? [] : (JSON.parse(out.text) as Skill[]);
         } catch {
           d.skills = [];
         }
@@ -256,17 +258,18 @@ export namespace Tools {
     const [, key, who, ...rest] = new URL(req.url).pathname.split("/");
     const tools = CHATS.get(key);
     const caller = who === "main" || tools?.agents.has(who);
-    const msg = await req.json().catch(() => ({}));
+    const msg: unknown = await req.json().catch(() => ({}));
+    const [asked, method, params] = [get(msg, "id"), get(msg, "method"), get(msg, "params")];
     const id = crypto.randomUUID();
     const session = req.headers.get(SESSION) ?? "";
     const scope = [key, who, session].join("/") + "/";
-    if (msg.id === undefined && msg.method === "notifications/cancelled" && msg.params?.requestId !== undefined) {
-      RUNNING.get(scope + JSON.stringify(msg.params.requestId))?.forEach((c) => c.abort());
+    if (asked === undefined && method === "notifications/cancelled" && get(params, "requestId") !== undefined) {
+      RUNNING.get(scope + JSON.stringify(get(params, "requestId")))?.forEach((c) => c.abort());
     }
     const cancel = new AbortController();
     const signal = AbortSignal.any([req.signal, cancel.signal]);
-    const name = scope + JSON.stringify(msg.id);
-    if (msg.id !== undefined) {
+    const name = scope + JSON.stringify(asked);
+    if (asked !== undefined) {
       RUNNING.set(name, (RUNNING.get(name) ?? new Set()).add(cancel));
     }
     try {
@@ -276,15 +279,15 @@ export namespace Tools {
       if (req.method !== "POST") {
         return new Response(null, { status: 405 });
       }
-      if (msg.id === undefined) {
+      if (asked === undefined) {
         return new Response(null, { status: 202 });
       }
-      const no = { error: { code: -32601, message: "no method " + msg.method } };
-      const out = await Tools.answer(tools, who, msg.method, msg.params ?? {}, signal, id).then(
+      const no = { error: { code: -32601, message: "no method " + String(method) } };
+      const out = await Tools.answer(tools, who, String(method), rec(params) ? params : {}, signal, id).then(
         (result) => (result === null ? no : { result }),
-        (err) => ({ error: { code: -32603, message: String(err?.message ?? err) } }),
+        (err: unknown) => ({ error: { code: -32603, message: err_why(err) } }),
       );
-      return Response.json({ jsonrpc: "2.0", id: msg.id, ...out });
+      return Response.json({ jsonrpc: "2.0", id: asked, ...out });
     } finally {
       const set = RUNNING.get(name);
       if (set?.delete(cancel) && set.size === 0) {
@@ -293,7 +296,7 @@ export namespace Tools {
     }
   }
 
-  export async function answer(tools: Tools, who: string, method: string, params: any, signal: AbortSignal, id: string): Promise<object | null> {
+  export async function answer(tools: Tools, who: string, method: string, params: Record<string, unknown>, signal: AbortSignal, id: string): Promise<object | null> {
     switch (method) {
       case "initialize": {
         const protocolVersion = params.protocolVersion ?? "2025-06-18";
@@ -309,7 +312,7 @@ export namespace Tools {
       }
       case "tools/call": {
         const name = String(params.name);
-        const args = params.arguments ?? {};
+        const args = rec(params.arguments) ? params.arguments : {};
         const has = Tools.list(who).some((t) => t.name === name);
         const mcp = has ? null : Tools.mcp(tools, who, name);
         const no: Out = { text: "No tool " + name + ".", fail: true };
@@ -347,7 +350,7 @@ export namespace Tools {
     }
   }
 
-  export async function call(tools: Tools, who: string, name: string, args: any, signal: AbortSignal, id: string): Promise<Out> {
+  export async function call(tools: Tools, who: string, name: string, args: Record<string, unknown>, signal: AbortSignal, id: string): Promise<Out> {
     const mem = tools.mem;
     switch (name) {
       case "zoom": {
@@ -382,7 +385,7 @@ export namespace Tools {
         return Tools.unschedule(tools, id) ? { text: "Cancelled " + id + ".", fail: false } : { text: "No schedule " + id + ".", fail: true };
       }
       case "stop": {
-        return await Tools.halt(tools, String(args.name), args.why === undefined ? "" : String(args.why));
+        return await Tools.halt(tools, String(args.name), args.why === undefined ? "" : text_of(args.why, "null"));
       }
       case "resume": {
         const n = Limit.resume();
@@ -434,7 +437,7 @@ export namespace Tools {
     if (own === undefined) {
       Tools.forget(tools, name);
     }
-    const d = tools.devices.get(name) ?? { who, host, terms: new Map(), jobs: new Map(), skills: [], mcp: [], why: "", clash: "" };
+    const d: Device = tools.devices.get(name) ?? { who, host, terms: new Map(), jobs: new Map(), skills: [], mcp: [], why: "", clash: "" };
     d.terms.set(term, link);
     tools.devices.set(name, d);
     for (const old of [...d.terms.keys()]) {
@@ -443,7 +446,7 @@ export namespace Tools {
       }
     }
     Tools.sync(d, term, () => true);
-    Tools.look(tools, name);
+    void Tools.look(tools, name);
     Tools.plug(tools);
     return name;
   }
@@ -502,9 +505,9 @@ export namespace Tools {
     const notes: string[] = [];
     try {
       d.mcp = config.config_mcp(mcp, device, notes);
-    } catch (err: any) {
+    } catch (err) {
       d.mcp = [];
-      notes.push(String(err?.message ?? err).replace(/^config: /, ""));
+      notes.push(err_why(err).replace(/^config: /, ""));
     }
     const why = notes.join("; ");
     if (why !== d.why) {
@@ -597,7 +600,7 @@ export namespace Tools {
       return d;
     }
     const terms = [...d.terms];
-    const [term] = terms.filter(([, t]) => t.live()).at(-1) ?? terms.at(-1)!;
+    const [term] = terms.filter(([, t]) => t.live()).at(-1) ?? terms[terms.length - 1];
     const run = Tools.track(d, id, term, job);
     Tools.sync(d, term, (x) => x === id);
     return run;
@@ -616,20 +619,29 @@ export namespace Tools {
     return run;
   }
 
+  // a job's result as a device sends it
+  export function out(x: unknown): Out {
+    const imgs = items(get(x, "imgs")).flatMap((img) => {
+      const [type, data] = [get(img, "type"), get(img, "data")];
+      return typeof type === "string" && typeof data === "string" ? [{ type, data }] : [];
+    });
+    return { text: text_of(get(x, "text")), fail: get(x, "fail") === true, ...(get(x, "imgs") === undefined ? {} : { imgs }) };
+  }
+
   export function done(tools: Tools, device: string, id: string, out: Out): void {
     tools.devices.get(device)?.jobs.get(id)?.end(out);
   }
 
-  export function spawns(args: any): Spawn[] | string {
+  export function spawns(args: Record<string, unknown>): Spawn[] | string {
     if (args.model !== undefined || args.effort !== undefined) {
       return "Give model and effort per task, in each of tasks: { task, model?, effort? }. Nothing started.";
     }
     const out: Spawn[] = [];
-    for (const [k, t] of (Array.isArray(args.tasks) ? args.tasks : []).entries()) {
-      const x = typeof t === "string" ? { task: t } : t ?? {};
+    for (const [k, t] of items(args.tasks).entries()) {
+      const x: Record<string, unknown> = typeof t === "string" ? { task: t } : rec(t) ? t : {};
       const task = typeof x.task === "string" ? x.task : "";
-      const model = x.model === undefined ? null : String(x.model);
-      const effort = x.effort === undefined ? null : String(x.effort);
+      const model = x.model === undefined ? null : text_of(x.model, "null");
+      const effort = x.effort === undefined ? null : text_of(x.effort, "null");
       const bad = task === "" ? "no task text" : model !== null && !MODELS.includes(model) ? "no model " + model + "; one of " + MODELS.join(", ") : effort !== null && !EFFORTS.includes(effort) ? "no effort " + effort + "; one of " + EFFORTS.join(", ") : null;
       if (bad !== null) {
         return "Task " + (k + 1) + (task === "" ? "" : " (" + JSON.stringify(task.length > 60 ? task.slice(0, 60) + "…" : task) + ")") + ": " + bad + ". Nothing started.";
@@ -678,7 +690,7 @@ export namespace Tools {
         Object.assign(agent, { view, replies: [], why: null });
       }
     }
-    Run.takes(run, [...before, message].map((text) => ({ text, imgs: [] })));
+    void Run.takes(run, [...before, message].map((text) => ({ text, imgs: [] })));
     return idle ? "Sent. " + name + "'s reply will reach you as a message." : "Sent. " + name + " gets it once its current reply is done, and its report answers it.";
   }
 
@@ -687,7 +699,7 @@ export namespace Tools {
     const agent = Tools.made(tools, name, role, view);
     tools.agents.set(name, agent);
     tools.log.push(agent.run, "note", SUB_NOTE + (role.model === null ? "" : SUB_ON + role.model) + (role.effort === null ? "" : SUB_AT + role.effort));
-    Run.take(agent.run, { text: task, imgs: [] });
+    void Run.take(agent.run, { text: task, imgs: [] });
     return name;
   }
 

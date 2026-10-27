@@ -1,3 +1,6 @@
+import { get } from "../../Json.ts";
+import { find, must } from "./Dom.ts";
+
 export type Pic = { src: string; name: string; log: boolean };
 
 const MAX = 8;
@@ -30,13 +33,13 @@ let G: { x: number; y: number; t: number; moved: boolean; many: boolean; on: boo
 let TAP: { x: number; y: number; t: number } | null = null;
 
 export function viewer_new(): void {
-  D = document.querySelector<HTMLDialogElement>("#viewer")!;
-  STAGE = D.querySelector<HTMLElement>(".stage")!;
-  IMG = STAGE.querySelector("img")!;
+  D = find(document, "#viewer", HTMLDialogElement);
+  STAGE = find(D, ".stage", HTMLElement);
+  IMG = find(STAGE, "img", HTMLImageElement);
   D.addEventListener("close", closed);
-  D.querySelector<HTMLElement>(".shut")!.onclick = () => D.close();
-  D.querySelector<HTMLElement>(".prev")!.onclick = () => step(-1);
-  D.querySelector<HTMLElement>(".next")!.onclick = () => step(1);
+  find(D, ".shut", HTMLElement).onclick = () => D.close();
+  find(D, ".prev", HTMLElement).onclick = () => step(-1);
+  find(D, ".next", HTMLElement).onclick = () => step(1);
   D.addEventListener("keydown", key);
   D.addEventListener("wheel", wheel, { passive: false });
   STAGE.addEventListener("pointerdown", down);
@@ -87,9 +90,11 @@ export function viewer_open(pic: Pic, push = true, el: Element | null = null): v
 }
 
 export function viewer_sync(): void {
-  const pic = history.state?.pic;
-  if (typeof pic?.src === "string" && typeof pic.name === "string") {
-    viewer_open({ src: pic.src, name: pic.name, log: pic.log === true }, false);
+  const state: unknown = history.state;
+  const pic = get(state, "pic");
+  const [src, name] = [get(pic, "src"), get(pic, "name")];
+  if (typeof src === "string" && typeof name === "string") {
+    viewer_open({ src, name, log: get(pic, "log") === true }, false);
   } else if (D.open) {
     D.close();
   }
@@ -102,7 +107,8 @@ function closed(): void {
   PTS.clear();
   G = TAP = null;
   IMG.removeAttribute("src");
-  if (history.state?.pic != null) {
+  const state: unknown = history.state;
+  if (get(state, "pic") != null) {
     history.back();
   }
 }
@@ -110,15 +116,15 @@ function closed(): void {
 function show(pic: Pic): void {
   V.pic = pic;
   V.w = V.h = V.swipe = 0;
-  D.querySelector(".name")!.textContent = pic.name;
-  D.querySelector(".zoom")!.textContent = "";
-  const get = D.querySelector<HTMLAnchorElement>(".get")!;
+  must(D.querySelector(".name"), ".name").textContent = pic.name;
+  must(D.querySelector(".zoom"), ".zoom").textContent = "";
+  const get = find(D, ".get", HTMLAnchorElement);
   get.href = pic.src;
   get.download = file_name(pic);
   const [list, k] = place();
-  D.querySelector<HTMLElement>(".prev")!.hidden = k <= 0;
-  D.querySelector<HTMLElement>(".next")!.hidden = k < 0 || k >= list.length - 1;
-  D.querySelector<HTMLElement>(".why")!.hidden = true;
+  find(D, ".prev", HTMLElement).hidden = k <= 0;
+  find(D, ".next", HTMLElement).hidden = k < 0 || k >= list.length - 1;
+  find(D, ".why", HTMLElement).hidden = true;
   IMG.classList.add("wait");
   IMG.alt = pic.name;
   IMG.src = pic.src;
@@ -142,7 +148,7 @@ function show(pic: Pic): void {
     if (IMG.complete && IMG.naturalWidth > 0) {
       loaded();
     } else {
-      D.querySelector<HTMLElement>(".why")!.hidden = false;
+      find(D, ".why", HTMLElement).hidden = false;
     }
   });
 }
@@ -151,7 +157,7 @@ function place(): [Pic[], number] {
   if (V.pic === null || !V.pic.log) {
     return [[], -1];
   }
-  const list = [...document.querySelectorAll<HTMLImageElement>(PICS)].map((img) => viewer_pic(img)!);
+  const list = [...document.querySelectorAll<HTMLImageElement>(PICS)].flatMap((img) => viewer_pic(img) ?? []);
   const src = V.pic.src;
   const at = list.flatMap((p, k) => (p.src === src ? [k] : []));
   const k = at.reduce((best, k) => (best < 0 || Math.abs(k - V.n) < Math.abs(best - V.n) ? k : best), -1);
@@ -216,7 +222,7 @@ function hold(): void {
 function draw(): void {
   IMG.style.transform = `translate(${V.x + V.swipe}px, ${V.y}px) scale(${V.s})`;
   D.classList.toggle("big", !fitted());
-  D.querySelector(".zoom")!.textContent = V.w === 0 ? "" : Math.round(V.s * 100) + "%";
+  must(D.querySelector(".zoom"), ".zoom").textContent = V.w === 0 ? "" : Math.round(V.s * 100) + "%";
 }
 
 function toggle(x: number, y: number): void {

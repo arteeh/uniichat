@@ -1,5 +1,6 @@
 import type { Kind } from "./AskAI.ts";
 import { clip_pages, stream_lines } from "./Clip.ts";
+import { get, list, text_of } from "./Json.ts";
 
 export type Msg = { kind: Kind; text: string; date: string; more?: boolean };
 
@@ -44,6 +45,35 @@ const INJECTED = /^(<[a-z_]+[ >]|# AGENTS\.md)/;
 
 const SKIP = /^(<command-|<local-command|\[Request interrupted)/;
 
+// what the exports and the session logs hold, as far as they are read here
+type Block = { type?: string; text?: unknown; name?: string; input?: unknown; content?: unknown };
+
+type GptMsg = { author?: { role?: string }; recipient?: string; content: { content_type?: string; parts?: unknown[]; text?: unknown }; metadata?: { is_visually_hidden_from_conversation?: boolean }; create_time?: unknown };
+
+type Chat = {
+  mapping?       : Record<string, { parent?: string; message?: GptMsg | null } | undefined>;
+  current_node?  : string;
+  create_time?   : unknown;
+  chat_messages? : { created_at?: unknown; sender?: string; content?: unknown; text?: unknown; attachments?: { file_name?: string }[]; files?: { file_name?: string }[] }[];
+  created_at?    : unknown;
+  title?         : string;
+  name?          : string;
+};
+
+type Codex = { type?: string; role?: string; content?: { text?: string }[]; name?: string; arguments?: string; input?: unknown; action?: { command?: unknown }; output?: unknown; source?: { subagent?: unknown; internal?: unknown }; cwd?: unknown };
+
+type Line = {
+  type?             : string;
+  timestamp?        : unknown;
+  isMeta?           : boolean;
+  isSidechain?      : boolean;
+  isCompactSummary? : boolean;
+  message?          : { content?: unknown };
+  cwd?              : string;
+  attachment?       : { type?: string; prompt?: unknown };
+  payload?          : Codex;
+};
+
 export function import_file(path: string): boolean {
   const session = /(^|\/)(projects|sessions|archived_sessions)\//.test(path);
   return session && path.endsWith(".jsonl") && !path.includes("subagents/");
@@ -69,15 +99,15 @@ export async function* import_read(s: Session): AsyncGenerator<Msg> {
   }
 }
 
-function line_log(s: Session, j: any, last: string): Msg[] {
+function line_log(s: Session, j: Line, last: string): Msg[] {
   s.app ||= j.type === "session_meta" ? "ChatGPT" : "Claude";
   return s.app === "ChatGPT" ? line_codex(s, j, last) : line_claude(s, j, last);
 }
 
 function line_msgs(s: Session, line: string, last: string): Msg[] {
   try {
-    const j = JSON.parse(line);
-    return s.form === "msgs" ? [j] : line_log(s, j, last);
+    const j: unknown = JSON.parse(line);
+    return s.form === "msgs" ? [j as Msg] : line_log(s, j as Line, last);
   } catch {
     return [];
   }
@@ -198,47 +228,50 @@ export async function import_export(file: Blob): Promise<Session[]> {
   if (json === null) {
     throw new Error("No conversations.json in the zip.");
   }
-  const chats = await json.text().then(JSON.parse).catch(() => null);
-  if (!Array.isArray(chats) || !chats.every((chat) => chat?.mapping !== undefined || Array.isArray(chat?.chat_messages))) {
+  const chats: unknown = await json.text().then((text) => JSON.parse(text) as unknown).catch(() => null);
+  if (!Array.isArray(chats) || !chats.every((chat: unknown) => get(chat, "mapping") !== undefined || Array.isArray(get(chat, "chat_messages")))) {
     throw new Error(NOT_EXPORT);
   }
-  const sessions = await Promise.all(chats.map(chat_session));
+  const sessions = await Promise.all(list(chats).map((chat) => chat_session(chat as Chat)));
   return sessions.filter((s) => s !== null);
 }
 
-function chat_session(chat: any): Promise<Session | null> {
-  const [app, msgs] = chat.mapping ? ["ChatGPT", chat_openai(chat)] : ["Claude", chat_claude(chat)];
+function chat_session(chat: Chat): Promise<Session | null> {
+  const [app, msgs] = chat.mapping ? ["ChatGPT", chat_openai(chat, chat.mapping)] : ["Claude", chat_claude(chat)];
   const file = new Blob(msgs.map((m) => JSON.stringify(m) + "\n"));
-  return import_session(file, "msgs", app, 'chat "' + String(chat.title ?? chat.name ?? "") + '"');
+  return import_session(file, "msgs", app, 'chat "' + (chat.title ?? chat.name ?? "") + '"');
 }
 
 // a ChatGPT chat's messages: its thread shown, current_node up to the
 // root (an edit or a retry leaves its old branch); a person's say,
 // ChatGPT's, what it sent a tool (recipient) as a call, a tool's output
 // as an echo; never thoughts, nor a hidden one
-function chat_openai(chat: any): Msg[] {
-  const nodes: any[] = [];
-  for (let id = chat.current_node; id; id = chat.mapping[id]?.parent) {
-    nodes.unshift(chat.mapping[id]?.message);
+function chat_openai(chat: Chat, mapping: NonNullable<Chat["mapping"]>): Msg[] {
+  const nodes: (GptMsg | null | undefined)[] = [];
+  for (let id = chat.current_node; id; id = mapping[id]?.parent) {
+    nodes.unshift(mapping[id]?.message);
   }
   let date = import_date(chat.create_time, "");
   return nodes.flatMap((m) => {
-    const role = m?.author?.role;
-    const type = String(m?.content?.content_type);
+    if (m === null || m === undefined) {
+      return [];
+    }
+    const role = m.author?.role;
+    const type = String(m.content.content_type);
     const kind = role === "user" ? "user" : role === "assistant" ? (m.recipient === "all" ? "unii" : "tool") : role === "tool" ? "echo" : null;
     const skip = kind === null || m.metadata?.is_visually_hidden_from_conversation === true || type === "thoughts" || type === "reasoning_recap";
-    date = import_date(m?.create_time, date);
-    return skip ? [] : msgs_of(kind, (kind === "tool" ? m.recipient + " " : "") + parts_text(m.content.parts ?? [m.content.text]), date);
+    date = import_date(m.create_time, date);
+    return skip ? [] : msgs_of(kind, (kind === "tool" ? String(m.recipient) + " " : "") + parts_text(m.content.parts ?? [m.content.text]), date);
   });
 }
 
-function chat_claude(chat: any): Msg[] {
+function chat_claude(chat: Chat): Msg[] {
   let date = import_date(chat.created_at, "");
-  return (chat.chat_messages ?? []).flatMap((m: any) => {
+  return (chat.chat_messages ?? []).flatMap((m) => {
     date = import_date(m.created_at, date);
     const kind   = m.sender === "human" ? "user" : "unii";
-    const blocks = Array.isArray(m.content) ? m.content : [{ type: "text", text: String(m.text ?? "") }];
-    const files  = [...(m.attachments ?? []), ...(m.files ?? [])].map((f: any) => ({ type: "text", text: "[file " + f.file_name + "]" }));
+    const blocks: Block[] = Array.isArray(m.content) ? (m.content as Block[]) : [{ type: "text", text: text_of(m.text) }];
+    const files  = [...(m.attachments ?? []), ...(m.files ?? [])].map((f) => ({ type: "text", text: "[file " + String(f.file_name) + "]" }));
     return blocks_msgs(kind, [...blocks, ...files], date);
   });
 }
@@ -288,45 +321,45 @@ function zip_sizes(dir: DataView, p: number): number[] {
   return short.map((n) => (n === 0xffffffff ? Number(dir.getBigUint64(x + 4 + 8 * k++, true)) : n));
 }
 
-function line_claude(s: Session, j: any, last: string): Msg[] {
+function line_claude(s: Session, j: Line, last: string): Msg[] {
   const date = import_date(j.timestamp, last);
   const own  = (j.type === "user" || j.type === "assistant") && !j.isMeta && !j.isSidechain && !j.isCompactSummary;
   const content = j.message?.content;
-  const blocks = !own ? [] : typeof content === "string" ? [{ type: "text", text: content }] : Array.isArray(content) ? content : [];
+  const blocks: Block[] = !own ? [] : typeof content === "string" ? [{ type: "text", text: content }] : Array.isArray(content) ? (content as Block[]) : [];
   s.where ||= j.cwd ? "session in " + j.cwd : "";
   if (j.type === "attachment" && j.attachment?.type === "queued_command") {
-    return msgs_of("user", String(j.attachment.prompt ?? ""), date);
+    return msgs_of("user", text_of(j.attachment.prompt), date);
   }
   return blocks_msgs(j.type === "user" ? "user" : "unii", blocks, date);
 }
 
-function blocks_msgs(kind: Kind, blocks: any[], date: string): Msg[] {
-  const say   = blocks.filter((b) => b.type === "image" || (b.type === "text" && !SKIP.test(b.text)));
-  const tools = blocks.flatMap((b) => b.type === "tool_use" ? msgs_of("tool", b.name + " " + JSON.stringify(b.input), date) : b.type === "tool_result" ? msgs_of("echo", parts_text(b.content), date) : []);
+function blocks_msgs(kind: Kind, blocks: Block[], date: string): Msg[] {
+  const say   = blocks.filter((b) => b.type === "image" || (b.type === "text" && !SKIP.test(String(b.text))));
+  const tools = blocks.flatMap((b) => b.type === "tool_use" ? msgs_of("tool", String(b.name) + " " + JSON.stringify(b.input), date) : b.type === "tool_result" ? msgs_of("echo", parts_text(b.content), date) : []);
   return [...msgs_of(kind, parts_text(say), date), ...tools];
 }
 
-function line_codex(s: Session, j: any, last: string): Msg[] {
+function line_codex(s: Session, j: Line, last: string): Msg[] {
   const p    = j.payload ?? {};
   const date = import_date(j.timestamp, last);
   if (j.type === "session_meta") {
-    s.where = p.source?.subagent ?? p.source?.internal ? "" : "session in " + String(p.cwd ?? "");
+    s.where = (p.source?.subagent ?? p.source?.internal) ? "" : "session in " + text_of(p.cwd);
   }
   return j.type === "response_item" && s.where !== "" ? item_codex(p, date) : [];
 }
 
-function item_codex(p: any, date: string): Msg[] {
+function item_codex(p: Codex, date: string): Msg[] {
   switch (p.type) {
     case "message": {
       const kind  = p.role === "user" ? "user" : p.role === "assistant" ? "unii" : null;
-      const parts = (p.content ?? []).filter((c: any) => !INJECTED.test(c.text ?? ""));
+      const parts = (p.content ?? []).filter((c) => !INJECTED.test(c.text ?? ""));
       return kind === null ? [] : msgs_of(kind, parts_text(parts), date);
     }
     case "function_call": {
-      return msgs_of("tool", p.name + " " + p.arguments, date);
+      return msgs_of("tool", String(p.name) + " " + String(p.arguments), date);
     }
     case "custom_tool_call": {
-      return msgs_of("tool", p.name + " " + JSON.stringify({ input: p.input }), date);
+      return msgs_of("tool", String(p.name) + " " + JSON.stringify({ input: p.input }), date);
     }
     case "local_shell_call": {
       return msgs_of("tool", "shell " + JSON.stringify({ command: p.action?.command }), date);
@@ -349,10 +382,12 @@ function msgs_of(kind: Kind, text: string, date: string): Msg[] {
   return pages.map((page, k) => ({ kind, text: page, date, more: k < pages.length - 1 }));
 }
 
-function parts_text(content: any): string {
+function parts_text(content: unknown): string {
   if (typeof content === "string") {
     return content;
   }
-  const parts = Array.isArray(content) ? content : [];
-  return parts.map((c: any) => typeof c === "string" ? c : typeof c.text === "string" ? c.text : String(c.type ?? c.content_type).includes("image") ? "[image]" : "").join("\n");
+  return list(content).map((c) => {
+    const text = get(c, "text");
+    return typeof c === "string" ? c : typeof text === "string" ? text : String(get(c, "type") ?? get(c, "content_type")).includes("image") ? "[image]" : "";
+  }).join("\n");
 }

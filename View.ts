@@ -4,6 +4,8 @@ import * as Md from "./Md.ts";
 import { LABELS, type Fall, type Move, Pick } from "./Pick.ts";
 import { GLYPH, WHO } from "./Theme.ts";
 import type { Timer } from "./Timer.ts";
+import type { Job } from "./Machine.ts";
+import { rec } from "./Json.ts";
 
 export type Part = [number, number];
 
@@ -89,14 +91,17 @@ export type Server =
   | ({ $: "state" } & State)
   | { $: "agent"; name: string; found: boolean; pick?: Pick | null }
   | { $: "note"; text: string }
+  | { $: "error"; text: string }
   | ({ $: "ack"; id: string } & Answer)
   | { $: "jobs"; ids: string[] }
-  | { $: "job"; id: string; job: unknown };
+  | { $: "job"; id: string; job: Job };
 
 export type Sent = { text: string; images?: Blob[] };
 
 export type Answer = { error?: string; status?: number; text?: string; going?: boolean };
-export type Body   = () => any;
+// Bun's fetch takes an async iterable too (the terminal's import)
+export type Upload = BodyInit | AsyncIterable<string>;
+export type Body   = () => Upload | Promise<Upload>;
 
 export type Client =
   | { $: "say"; sizes: number[]; body: Body }
@@ -118,7 +123,7 @@ export type Post = { msg: Client & { id: string }; ws: WebSocket | null; done: (
 
 export type Link = {
   open : (query: string) => WebSocket;
-  post : (path: string, body: any) => Promise<Response>;
+  post : (path: string, body: Upload) => Promise<Response>;
   hear : (msg: Server) => void;
   lost : (up: boolean) => Promise<boolean>;
 };
@@ -610,7 +615,11 @@ function view_live(v: View, agent: string | undefined): Live[] | null {
 export function link_open(v: View, link: Link): void {
   const ws   = link.open("?tab=" + v.tab + "&wire=" + WIRE);
   let heard  = Date.now();
-  const tick = setInterval(() => Date.now() - heard > PING && drop(), PING / 2);
+  const tick = setInterval(() => {
+    if (Date.now() - heard > PING) {
+      void drop();
+    }
+  }, PING / 2);
   async function drop(): Promise<void> {
     const up = v.up;
     ws.onmessage = null;
@@ -626,21 +635,22 @@ export function link_open(v: View, link: Link): void {
     for (const post of v.up && v.ws === ws ? v.out.filter((p) => p.ws !== ws) : []) {
       post.ws = ws;
       if ("body" in post.msg) {
-        upload(post);
+        void upload(post, post.msg);
       } else {
         ws.send(JSON.stringify(post.msg));
       }
     }
   }
-  async function upload(post: Post): Promise<void> {
-    const { body, ...rest } = post.msg as any;
+  async function upload(post: Post, msg: Extract<Post["msg"], { body: Body }>): Promise<void> {
+    const { body, ...rest } = msg;
     const query = Object.entries(rest).map(([k, x]) => k + "=" + encodeURIComponent(String(x)));
     const res = await link.post("/api/act?" + query.join("&"), await body()).catch(() => null);
-    const out = await res?.json().catch(() => null);
+    // the server's answer to the act
+    const out = (await res?.json().catch(() => null)) as Answer | null | undefined;
     if (out != null) {
       link.hear({ $: "ack", id: post.msg.id, ...out });
     } else if (post.ws === ws && v.ws === ws) {
-      drop();
+      void drop();
     }
   }
   [v.ws, v.flush] = [ws, flush];
@@ -649,7 +659,7 @@ export function link_open(v: View, link: Link): void {
     if (ev.data === TICK) {
       return;
     }
-    const msg = JSON.parse(String(ev.data));
+    const msg = JSON.parse(String(ev.data)) as Server;
     const join = msg.$ === "view" && !v.up;
     if (join) {
       v.up = true;
@@ -661,7 +671,7 @@ export function link_open(v: View, link: Link): void {
       flush();
     }
   };
-  ws.onclose = () => drop();
+  ws.onclose = () => void drop();
 }
 
 export function link_send(v: View, msg: Client, done = (a: Answer) => link_note(v, a), said = ""): void {
@@ -682,11 +692,11 @@ export function link_note(v: View, a: Answer): void {
   }
 }
 
-export async function post(url: string, body: object, auth: Record<string, string> = {}): Promise<any> {
+export async function post(url: string, body: object, auth: Record<string, string> = {}): Promise<Record<string, unknown>> {
   const headers = { ...auth, "content-type": "application/json" };
   const res = await fetch(url, { method: "POST", headers, body: JSON.stringify(body) }).catch(() => null);
-  const out = res === null ? { error: "Can't reach the server." } : await res.json().catch(() => (res.ok ? {} : { error: "HTTP " + res.status }));
-  return { ...out, ok: res?.ok === true, status: res?.status ?? 0 };
+  const out: unknown = res === null ? { error: "Can't reach the server." } : await res.json().catch(() => (res.ok ? {} : { error: "HTTP " + res.status }));
+  return { ...(rec(out) ? out : {}), ok: res?.ok === true, status: res?.status ?? 0 };
 }
 
 export function block_name(id: number, n: number): string {

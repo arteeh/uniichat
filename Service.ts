@@ -1,6 +1,7 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { err_code } from "./Err.ts";
 
 export type Part = "serve" | "device";
 
@@ -44,7 +45,10 @@ export function command(): string[] {
 }
 
 export async function start(part: Part, args: string[]): Promise<void> {
-  const dirs = Object.fromEntries(DIRS.flatMap((k) => (process.env[k] ? [[k, path.resolve(k === "UNII_DIR" ? DATA : process.env[k]!)]] : [])));
+  const dirs = Object.fromEntries(DIRS.flatMap((k) => {
+    const v = process.env[k];
+    return v ? [[k, path.resolve(k === "UNII_DIR" ? DATA : v)]] : [];
+  }));
   if (part === "device") {
     alone();
   }
@@ -166,7 +170,7 @@ async function linux_start(part: Part, args: string[], env: Record<string, strin
   }
 }
 
-async function linux_stop(part: Part): Promise<void> {
+function linux_stop(part: Part): void {
   const n = name(part);
   linux_check(part);
   if (!fs.existsSync(unit(part))) {
@@ -207,7 +211,7 @@ function plist(part: Part): string {
 
 async function mac_start(part: Part, args: string[], env: Record<string, string>): Promise<void> {
   const n = name(part);
-  const job = "gui/" + process.getuid!() + "/" + n;
+  const job = "gui/" + uid() + "/" + n;
   const file = plist(part);
   const was = read(file);
   const loaded = run(["launchctl", "print", job]).code === 0;
@@ -241,7 +245,7 @@ async function mac_start(part: Part, args: string[], env: Record<string, string>
   if (loaded && was === text) {
     run(["launchctl", "kickstart", "-k", job]);
   } else {
-    const again = (loaded ? "launchctl bootout '" + job + "' 2>/dev/null; " : "") + "launchctl bootstrap gui/" + process.getuid!() + " '" + file.replace(/'/g, "'\\''") + "'";
+    const again = (loaded ? "launchctl bootout '" + job + "' 2>/dev/null; " : "") + "launchctl bootstrap gui/" + uid() + " '" + file.replace(/'/g, "'\\''") + "'";
     await Bun.spawn(["/bin/sh", "-c", again], { detached: true, stdio: ["ignore", "inherit", "inherit"] }).exited;
   }
   step("LaunchAgent started");
@@ -250,7 +254,7 @@ async function mac_start(part: Part, args: string[], env: Record<string, string>
   say(part, now, "the LaunchAgent " + n + ", started at login");
 }
 
-async function mac_stop(part: Part): Promise<void> {
+function mac_stop(part: Part): void {
   const n = name(part);
   const file = plist(part);
   const was = read(file);
@@ -264,7 +268,7 @@ async function mac_stop(part: Part): Promise<void> {
   const step = clock(part, "stop");
   fs.rmSync(file);
   fs.rmSync(LOGS + "/" + part + ".up", { force: true });
-  run(["launchctl", "bootout", "gui/" + process.getuid!() + "/" + n]);
+  run(["launchctl", "bootout", "gui/" + uid() + "/" + n]);
   step("LaunchAgent removed");
   console.log("unii " + part + " stopped: its background service " + n + " is removed.");
 }
@@ -453,7 +457,7 @@ async function lines(stream: ReadableStream<Uint8Array>, put: (line: string) => 
   const reader = stream.getReader();
   for (let got = await reader.read(); !got.done; got = await reader.read()) {
     const all = (rest + dec.decode(got.value, { stream: true })).split(/\r?\n/);
-    rest = all.pop()!;
+    rest = all.pop() ?? "";
     all.forEach(put);
     if (rest.length > LINE) {
       put(rest);
@@ -555,7 +559,8 @@ function alone(): void {
 }
 
 function runs(line: string, part: Part, then = "(\\s|$)"): boolean {
-  const exe = path.basename(command().at(-1)!).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const cmd = command();
+  const exe = path.basename(cmd[cmd.length - 1]).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   return new RegExp('(^|[\\\\/\\s"])' + exe + '"?\\s+"?' + part + '"?' + then, "i").test(line);
 }
 
@@ -590,8 +595,8 @@ function alive(pid: number | undefined): boolean {
   try {
     process.kill(pid, 0);
     return true;
-  } catch (err: any) {
-    return err?.code === "EPERM";
+  } catch (err) {
+    return err_code(err) === "EPERM";
   }
 }
 
@@ -601,6 +606,14 @@ function same(a: string, b: string): boolean {
   } catch {
     return a === b;
   }
+}
+
+function uid(): number {
+  const id = process.getuid?.();
+  if (id === undefined) {
+    throw new Error("no user id here");
+  }
+  return id;
 }
 
 function read(file: string): string | null {

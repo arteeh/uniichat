@@ -80,7 +80,7 @@ const WORD = /[\p{L}\p{N}_]/u;
 const MODS: [number, string][] = [[4, "Ctrl+"], [2, "Alt+"], [1, "Shift+"]];
 
 export function screen_new(on: (key: string) => void): Screen {
-  const tty = process.stdin.isTTY === true && process.stdout.isTTY === true;
+  const tty = process.stdin.isTTY && process.stdout.isTTY;
   const ed  = { text: "", pos: 0, hist: [], at: 0, draft: "", moved: false, w: 80, tall: 1 };
   const scr = { tty, kitty: false, ed, off: false, rest: "", up: 0, rows: 0, on };
   if (tty) {
@@ -107,7 +107,7 @@ export function screen_paint(scr: Screen, body: Paint.Line[], wipe: boolean, foo
   const w     = screen_width();
   const held  = Math.min(wipe ? Infinity : scr.rows, process.stdout.rows || 24);
   const pad   = Math.max(0, held - body.length - foot.length);
-  const lines = [...body.map(Paint.line_ansi), ...Array(pad).fill("")].map((l) => l + "\r\n").join("");
+  const lines = [...body.map(Paint.line_ansi), ...Array<string>(pad).fill("")].map((l) => l + "\r\n").join("");
   const draw  = foot.map((l) => Paint.line_ansi(Paint.runs_wrap(l, w, true)[0])).join("\r\n");
   const spot  = at ?? { row: foot.length - 1, col: 0 };
   const back  = foot.length - 1 - spot.row;
@@ -314,7 +314,8 @@ export function ed_key(ed: Ed, key: string): boolean {
 }
 
 function ed_word(text: string, pos: number, d: number): number {
-  const char = (i: number) => (d < 0 ? [...text.slice(Math.max(0, i - 2), i)].at(-1) : [...text.slice(i, i + 2)][0]) ?? "";
+  // by code point, as the cursor moves
+  const char = (i: number) => (d < 0 ? Array.from(text.slice(Math.max(0, i - 2), i)).at(-1) : Array.from(text.slice(i, i + 2))[0]) ?? "";
   let i = pos;
   for (const word of [false, true]) {
     for (let c = char(i); c !== "" && WORD.test(c) === word; c = char(i)) {

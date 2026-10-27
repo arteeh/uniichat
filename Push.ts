@@ -16,6 +16,8 @@ import * as http2 from "node:http2";
 import * as net from "node:net";
 import * as config from "./Config.ts";
 import { write_whole } from "./Write.ts";
+import { err_why } from "./Err.ts";
+import { get, text_of } from "./Json.ts";
 
 export type Sub = { endpoint: string; p256dh: string; auth: string };
 
@@ -73,7 +75,7 @@ export namespace Push {
       const req = link.request(head);
       let out = "";
       req.setEncoding("utf8");
-      req.on("data", (got) => (out += got));
+      req.on("data", (got: string) => (out += got));
       req.on("error", (err) => console.error("push: " + err.message));
       req.on("end", () => {
         if (/Unregistered|BadDeviceToken/.test(out)) {
@@ -94,7 +96,7 @@ export namespace Push {
         const subs = db.query("select endpoint, p256dh, auth from web_pushes").all() as Sub[];
     const body = JSON.stringify({ text: Push.gist(text) });
     for (const sub of subs) {
-      Push.send(sub, body).then((status) => {
+      void Push.send(sub, body).then((status) => {
         if (status === 404 || status === 410) {
           db.query("delete from web_pushes where endpoint = ?").run(sub.endpoint);
         } else if (status !== 0 && (status < 200 || status > 299)) {
@@ -105,12 +107,14 @@ export namespace Push {
   }
 
   export function apns(): http2.ClientHttp2Session {
-    if (PUSH.link === null || PUSH.link.closed || PUSH.link.destroyed) {
-      const link = (PUSH.link = http2.connect("https://api.push.apple.com"));
-      link.on("error", (err) => console.error("push: " + err.message));
-      link.on("close", () => PUSH.link === link && (PUSH.link = null));
+    const old = PUSH.link;
+    if (old !== null && !old.closed && !old.destroyed) {
+      return old;
     }
-    return PUSH.link!;
+    const link = (PUSH.link = http2.connect("https://api.push.apple.com"));
+    link.on("error", (err) => console.error("push: " + err.message));
+    link.on("close", () => PUSH.link === link && (PUSH.link = null));
+    return link;
   }
 
   export function apns_jwt(): string {
@@ -138,21 +142,21 @@ export namespace Push {
       write_whole(FILE, JSON.stringify(privateKey.export({ format: "jwk" })) + "\n");
     }
     try {
-      const jwk = JSON.parse(fs.readFileSync(FILE, "utf8"));
+      const jwk = JSON.parse(fs.readFileSync(FILE, "utf8")) as JsonWebKey;
       crypto.createPrivateKey({ key: jwk, format: "jwk" });
-      const point = Buffer.concat([Buffer.from([4]), Buffer.from(jwk.x, "base64url"), Buffer.from(jwk.y, "base64url")]);
+      const point = Buffer.concat([Buffer.from([4]), Buffer.from(jwk.x ?? "", "base64url"), Buffer.from(jwk.y ?? "", "base64url")]);
       KEYS = { jwk, public: point.toString("base64url") };
-    } catch (err: any) {
-      console.error(FILE + " is not a VAPID key pair, so web push is off: put the right file back, or delete it for a new pair (every browser then turns notifications on again). " + (err?.message ?? err));
+    } catch (err) {
+      console.error(FILE + " is not a VAPID key pair, so web push is off: put the right file back, or delete it for a new pair (every browser then turns notifications on again). " + err_why(err));
       KEYS = null;
     }
     return KEYS;
   }
 
-  export function sub_read(json: any): Sub | null {
-    const endpoint = String(json?.endpoint ?? "");
-    const p256dh = String(json?.keys?.p256dh ?? "");
-    const auth = String(json?.keys?.auth ?? "");
+  export function sub_read(json: unknown): Sub | null {
+    const endpoint = text_of(get(json, "endpoint"));
+    const p256dh = text_of(get(get(json, "keys"), "p256dh"));
+    const auth = text_of(get(get(json, "keys"), "auth"));
     if (endpoint.length > URL_MAX || !URL.canParse(endpoint) || new URL(endpoint).protocol !== "https:") {
       return null;
     }
@@ -248,8 +252,8 @@ export namespace Push {
       const res = await fetch(sub.endpoint, { method: "POST", headers, body, redirect: "manual", signal: AbortSignal.timeout(ANSWER) });
       await res.body?.cancel().catch(() => null);
       return res.status;
-    } catch (err: any) {
-      console.error("web push: " + new URL(sub.endpoint).host + ": " + (err?.message ?? err));
+    } catch (err) {
+      console.error("web push: " + new URL(sub.endpoint).host + ": " + err_why(err));
       return 0;
     }
   }

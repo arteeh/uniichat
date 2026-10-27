@@ -1,15 +1,47 @@
 import type { Ask, Block, Img } from "./AskAI.ts";
+import { get } from "./Json.ts";
 import { Agent, type Emit, type Entry, type Item, type Step, type Tool, type Use, type Wire } from "./Agent.ts";
 
+// what the Messages API streams, as far as it is read here (Claude Code's
+// SDK messages carry the same shapes)
+type Content = {
+  type         : string;
+  text?        : string;
+  thinking?    : string;
+  signature?   : string | null;
+  citations?   : unknown;
+  id?          : string;
+  name?        : string;
+  input?       : unknown;
+  content?     : unknown;
+  tool_use_id? : string;
+};
+
+type Usage = { input_tokens?: unknown; cache_read_input_tokens?: unknown; cache_creation_input_tokens?: unknown; speed?: unknown };
+
+type Delta = { type: string; thinking?: string; text?: string; signature?: string; partial_json?: string; citation?: unknown };
+
+type Event = {
+  type           : string;
+  index?         : number;
+  message?       : { usage?: Usage };
+  content_block? : Content;
+  delta?         : Delta & { stop_reason?: string | null; stop_details?: { explanation?: string | null } | null };
+  usage?         : Usage;
+  error?         : { type: string; message: string };
+};
+
 type State = {
-  blocks : any[];
+  blocks : Content[];
   json   : string[];
   stop   : string;
-  why    : any;
+  why    : { explanation?: string | null } | null;
   speed  : string;
-  error  : any;
+  error  : { type: string; message: string } | null;
   used   : { read: number; write: number; input: number } | null;
 };
+
+type Message = { role: string; content: unknown[] };
 
 const HOUR  = { type: "ephemeral", ttl: "1h" };
 const WEB   = { type: "web_search_20260318", name: "web_search" };
@@ -34,7 +66,7 @@ export namespace Anthropic {
     if (ask.searches > 0) {
       defs.push({ ...WEB, max_uses: ask.searches });
     }
-    const messages: any[] = [];
+    const messages: Message[] = [];
     for (const item of items) {
       const msg = Anthropic.message(item, ask.talk === true && item === items[0]);
       const top = messages[messages.length - 1];
@@ -59,7 +91,7 @@ export namespace Anthropic {
     };
   }
 
-  export function message(item: Item, talk = false): { role: string; content: any[] } {
+  export function message(item: Item, talk = false): Message {
     switch (item.$) {
       case "User": {
         const last = item.parts.length - 1;
@@ -82,64 +114,64 @@ export namespace Anthropic {
     }
   }
 
-  export function content(texts: string[], imgs: Img[]): unknown[] {
+  export function content(texts: string[], imgs: Img[]): object[] {
     const blocks = texts.filter((text) => text !== "").map((text) => ({ type: "text", text }));
     return [...blocks, ...imgs.map(Anthropic.image)];
   }
 
-  export function image(img: Img): unknown {
+  export function image(img: Img): object {
     return { type: "image", source: { type: "base64", media_type: img.type, data: img.data } };
   }
 
-  export function read(st: State, ev: any, on: Emit): boolean {
+  export function read(st: State, ev: Event, on: Emit): boolean {
     switch (ev.type) {
       case "message_start": {
-        Anthropic.usage(st, ev.message.usage ?? {});
-        st.used = Anthropic.used(ev.message.usage ?? {});
+        Anthropic.usage(st, ev.message?.usage ?? {});
+        st.used = Anthropic.used(ev.message?.usage ?? {});
         return false;
       }
       case "content_block_start": {
-        st.blocks[ev.index] = { ...ev.content_block };
+        st.blocks[ev.index ?? 0] = { type: "", ...ev.content_block };
         Anthropic.live(ev, on);
         return false;
       }
       case "content_block_delta": {
-        Anthropic.delta(st, ev.index, ev.delta);
+        Anthropic.delta(st, ev.index ?? 0, ev.delta ?? { type: "" });
         Anthropic.live(ev, on);
         return false;
       }
       case "message_delta": {
-        st.stop = ev.delta.stop_reason ?? st.stop;
-        st.why  = ev.delta.stop_details ?? st.why;
+        st.stop = ev.delta?.stop_reason ?? st.stop;
+        st.why  = ev.delta?.stop_details ?? st.why;
         Anthropic.usage(st, ev.usage ?? {});
         return false;
       }
       case "error": {
-        st.error = ev.error;
+        st.error = ev.error ?? null;
         return true;
       }
     }
     return ev.type === "message_stop";
   }
 
-  export function used(u: any): State["used"] {
+  export function used(u: Usage): State["used"] {
     const n = (x: unknown) => (typeof x === "number" ? x : 0);
     return typeof u.input_tokens === "number" ? { read: n(u.cache_read_input_tokens), write: n(u.cache_creation_input_tokens), input: u.input_tokens } : null;
   }
 
-  export function usage(st: State, u: any): void {
+  export function usage(st: State, u: Usage): void {
     st.speed = u.speed === undefined ? st.speed : u.speed === "fast" ? "fast" : "slow";
   }
 
-  export function delta(st: State, k: number, delta: any): void {
+  export function delta(st: State, k: number, delta: Delta): void {
     const block = st.blocks[k];
     switch (delta.type) {
       case "thinking_delta": {
-        block.thinking += delta.thinking;
+        block.thinking = (block.thinking ?? "") + (delta.thinking ?? "");
         return;
       }
       case "text_delta": {
-        block.text += delta.text;
+        block.text = (block.text ?? "") + (delta.text ?? "");
         return;
       }
       case "signature_delta": {
@@ -147,30 +179,31 @@ export namespace Anthropic {
         return;
       }
       case "input_json_delta": {
-        st.json[k] = (st.json[k] ?? "") + delta.partial_json;
+        st.json[k] = (st.json[k] ?? "") + (delta.partial_json ?? "");
         return;
       }
       case "citations_delta": {
-        block.citations = [...(block.citations ?? []), delta.citation];
+        const had: unknown[] = Array.isArray(block.citations) ? block.citations : [];
+        block.citations = [...had, delta.citation];
         return;
       }
     }
   }
 
-  export function live(ev: any, on: Emit): void {
-    const block = ev.content_block ?? {};
-    const delta = ev.delta ?? {};
-    if (ev.type === "content_block_start" && block.type.endsWith("tool_use")) {
-      on("tool", block.name + " ", true);
+  export function live(ev: { type: string; content_block?: { type: string; name?: string }; delta?: Partial<Delta> & { stop_reason?: unknown } }, on: Emit): void {
+    const block = ev.content_block;
+    const delta = ev.delta;
+    if (ev.type === "content_block_start" && block?.type.endsWith("tool_use") === true) {
+      on("tool", (block.name ?? "") + " ", true);
     }
-    if (delta.type === "thinking_delta") {
-      on("mind", delta.thinking);
+    if (delta?.type === "thinking_delta") {
+      on("mind", delta.thinking ?? "");
     }
-    if (delta.type === "text_delta") {
-      on("unii", delta.text);
+    if (delta?.type === "text_delta") {
+      on("unii", delta.text ?? "");
     }
-    if (delta.type === "input_json_delta") {
-      on("tool", delta.partial_json);
+    if (delta?.type === "input_json_delta") {
+      on("tool", delta.partial_json ?? "");
     }
   }
 
@@ -184,7 +217,7 @@ export namespace Anthropic {
         b.input = Agent.parse(st.json[k]);
       }
       if (b.type === "tool_use") {
-        uses.push({ id: b.id, name: b.name, input: b.input });
+        uses.push({ id: b.id ?? "", name: b.name ?? "", input: b.input });
       }
       if (b.input === null) {
         b.input = {};
@@ -194,7 +227,7 @@ export namespace Anthropic {
     const slow = ask.speed === "fast" && st.speed !== "fast";
     const note = slow ? "ran at " + st.speed + " speed" : "";
     const step: Step = { out, uses, entries: Anthropic.entries(out), stop: "done", why: "", note };
-    if (st.error) {
+    if (st.error !== null) {
       return { ...step, stop: st.error.type === "rate_limit_error" ? "limit" : "busy", why: st.error.type + ": " + st.error.message };
     }
     switch (st.stop) {
@@ -210,7 +243,7 @@ export namespace Anthropic {
     return { ...step, stop: "fail", why: "stopped: " + st.stop + (why ? " (" + why + ")" : "") };
   }
 
-  export function entries(out: any[]): Entry[] {
+  export function entries(out: Content[]): Entry[] {
     const entries: Entry[] = [];
     for (const b of out) {
       const entry = Anthropic.entry(b);
@@ -224,18 +257,18 @@ export namespace Anthropic {
     return entries.map((e) => ({ ...e, text: e.text.trim() })).filter((e) => e.text);
   }
 
-  export function entry(b: any): Entry | null {
+  export function entry(b: Content): Entry | null {
     const c = b.content;
     switch (b.type) {
       case "text": {
-        return { kind: "unii", text: b.text };
+        return { kind: "unii", text: b.text ?? "" };
       }
       case "thinking": {
-        return { kind: "mind", text: b.thinking };
+        return { kind: "mind", text: b.thinking ?? "" };
       }
       case "tool_use":
       case "server_tool_use": {
-        return { kind: "tool", text: b.name + " " + JSON.stringify(b.input), of: b.id };
+        return { kind: "tool", text: (b.name ?? "") + " " + JSON.stringify(b.input), of: b.id };
       }
     }
     if (!b.type.endsWith("_tool_result")) {
@@ -244,20 +277,23 @@ export namespace Anthropic {
     return { kind: "echo", text: Anthropic.result(c) || "(no output)", of: b.tool_use_id };
   }
 
-  export function result(c: any): string {
+  export function result(c: unknown): string {
     if (Array.isArray(c)) {
-      return c.map((r: any) => r.title + " " + r.url).join("\n");
+      return c.map((r: unknown) => String(get(r, "title")) + " " + String(get(r, "url"))).join("\n");
     }
-    if (String(c?.type).startsWith("encrypted")) {
-      return ("(output encrypted by the API)\n" + (c.stderr ?? "")).trim();
+    const stderr = get(c, "stderr");
+    const err = typeof stderr === "string" ? stderr : "";
+    if (String(get(c, "type")).startsWith("encrypted")) {
+      return ("(output encrypted by the API)\n" + err).trim();
     }
-    if (typeof c?.stdout === "string") {
-      return (c.stdout + (c.stderr ?? "")).trim();
+    const stdout = get(c, "stdout");
+    if (typeof stdout === "string") {
+      return (stdout + err).trim();
     }
     return JSON.stringify(c);
   }
 
-  export const wire: Wire<State> = {
+  export const wire: Wire<State, Event> = {
     key     : "anthropic",
     idle    : 300e3,
     url     : "https://api.anthropic.com/v1/messages",

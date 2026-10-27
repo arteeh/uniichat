@@ -24,11 +24,14 @@ if (!fs.existsSync(SDK)) {
   throw new Error("run `bun install` first");
 }
 if (!fs.existsSync(exe)) {
-  const version = JSON.parse(fs.readFileSync(SDK + "/package.json", "utf8")).version;
+  const { version } = JSON.parse(fs.readFileSync(SDK + "/package.json", "utf8")) as { version: string };
   const tmp = fs.mkdtempSync(os.tmpdir() + "/unii-build-");
   try {
     run(["npm", "pack", pkg + "@" + version, "--pack-destination", tmp], tmp);
-    const tgz = fs.readdirSync(tmp).find((f) => f.endsWith(".tgz"))!;
+    const tgz = fs.readdirSync(tmp).find((f) => f.endsWith(".tgz"));
+    if (tgz === undefined) {
+      throw new Error("npm pack made no .tgz");
+    }
     const dir = path.dirname(exe);
     fs.mkdirSync(dir, { recursive: true });
     run(["tar", "-xzf", path.join(tmp, tgz), "-C", dir, "--strip-components=1"]);

@@ -1,3 +1,5 @@
+import { text_of } from "./Json.ts";
+
 export type Timer = { id: string; text: string; at: string; cron: string | null; zone: string };
 
 type Cron = { sets: Array<Set<number>>; day: boolean; week: boolean };
@@ -28,15 +30,18 @@ const DAYS: Record<string, number> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, F
 const CLOCKS = new Map<string, Intl.DateTimeFormat>();
 
 function clock(zone: string): Intl.DateTimeFormat | null {
-  if (!CLOCKS.has(zone)) {
-    try {
-      const fields = { year: "numeric", month: "numeric", day: "numeric", hour: "numeric", minute: "numeric", weekday: "short" } as const;
-      CLOCKS.set(zone, new Intl.DateTimeFormat("en-US", { timeZone: zone, hourCycle: "h23", ...fields }));
-    } catch {
-      return null;
-    }
+  const had = CLOCKS.get(zone);
+  if (had !== undefined) {
+    return had;
   }
-  return CLOCKS.get(zone)!;
+  try {
+    const fields = { year: "numeric", month: "numeric", day: "numeric", hour: "numeric", minute: "numeric", weekday: "short" } as const;
+    const made = new Intl.DateTimeFormat("en-US", { timeZone: zone, hourCycle: "h23", ...fields });
+    CLOCKS.set(zone, made);
+    return made;
+  } catch {
+    return null;
+  }
 }
 
 export function zone_ok(zone: string): boolean {
@@ -44,7 +49,11 @@ export function zone_ok(zone: string): boolean {
 }
 
 export function wall(ms: number, zone: string): Wall {
-  const parts = Object.fromEntries(clock(zone)!.formatToParts(ms).map((p) => [p.type, p.value]));
+  const c = clock(zone);
+  if (c === null) {
+    throw new Error("no time zone " + zone);
+  }
+  const parts = Object.fromEntries(c.formatToParts(ms).map((p) => [p.type, p.value]));
   return { y: Number(parts.year), mo: Number(parts.month), d: Number(parts.day), h: Number(parts.hour) % 24, mi: Number(parts.minute), wd: DAYS[parts.weekday] };
 }
 
@@ -157,9 +166,9 @@ export function at_read(text: string, zone: string): number | string {
 }
 
 export function timer_new(args: { message?: unknown; at?: unknown; cron?: unknown; zone?: unknown }, now: number): Timer | string {
-  const text = String(args.message ?? "").trim();
-  const zone = String(args.zone ?? "");
-  const [at, cron] = [args.at, args.cron].map((x) => (x === undefined || x === null || x === "" ? null : String(x)));
+  const text = text_of(args.message).trim();
+  const zone = text_of(args.zone);
+  const [at, cron] = [args.at, args.cron].map((x) => (x === undefined || x === null || x === "" ? null : text_of(x)));
   if (text === "" || text.length > TEXT) {
     return "A schedule's message has 1 to " + TEXT + " characters.";
   }
@@ -176,7 +185,7 @@ export function timer_new(args: { message?: unknown; at?: unknown; cron?: unknow
   if (read !== null && cron_gap(read) < GAP) {
     return "A cron's times must be at least " + GAP + " minutes apart (*/" + GAP + " is the most often).";
   }
-  const ms = read === null ? at_read(at!, zone) : cron_next(read, zone, now);
+  const ms = read !== null ? cron_next(read, zone, now) : at !== null ? at_read(at, zone) : null;
   if (typeof ms === "string") {
     return ms;
   }

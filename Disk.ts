@@ -1,6 +1,7 @@
 import { Database } from "bun:sqlite";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { err_code, err_why } from "./Err.ts";
 
 const DIRTY = new Set<string>();
 let WAITS: Array<() => void> = [];
@@ -12,7 +13,7 @@ export namespace Disk {
   // set first: the switch to WAL locks too)
   export function db(file: string): Database {
     const db = new Database(file, { create: true });
-    db.exec("pragma busy_timeout = 10000; pragma journal_mode = wal; pragma synchronous = normal;");
+    db.run("pragma busy_timeout = 10000; pragma journal_mode = wal; pragma synchronous = normal;");
     return db;
   }
 
@@ -36,7 +37,7 @@ export namespace Disk {
       const waits = WAITS;
       DIRTY.clear();
       WAITS = [];
-      await Disk.flush(files).catch((err: Error) => console.error("disk: a flush failed: " + err.message));
+      await Disk.flush(files).catch((err: unknown) => console.error("disk: a flush failed: " + err_why(err)));
       waits.forEach((ok) => ok());
     }
     RUN = null;
@@ -56,8 +57,8 @@ export namespace Disk {
   // opened to write (FlushFileBuffers), so there it is opened so, writing
   // nothing
   export async function fsync(file: string): Promise<void> {
-    const handle = await fs.promises.open(file, process.platform === "win32" ? "r+" : "r").catch((err) => {
-      if (err.code !== "ENOENT") {
+    const handle = await fs.promises.open(file, process.platform === "win32" ? "r+" : "r").catch((err: unknown) => {
+      if (err_code(err) !== "ENOENT") {
         throw err;
       }
       return null;

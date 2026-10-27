@@ -3,6 +3,7 @@ import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as config from "./Config.ts";
 import { Disk } from "./Disk.ts";
+import { get, text_of } from "./Json.ts";
 import { Push } from "./Push.ts";
 
 type Ticket = { session: string | null; what: string };
@@ -43,7 +44,7 @@ export namespace Owner {
     if (DB === null) {
       fs.mkdirSync(config.DIR, { recursive: true, mode: 0o700 });
       DB = Disk.db(FILE);
-      DB.exec(SCHEMA);
+      DB.run(SCHEMA);
     }
     return DB;
   }
@@ -78,7 +79,7 @@ export namespace Owner {
   export function ticket_read(token: string, use: boolean): Ticket | null {
     const sql = use ? "delete from tickets where hash = ? and expires >= ? returning data" : "select data from tickets where hash = ? and expires >= ?";
     const row = Owner.open().query(sql).get(Owner.hash(token), Date.now()) as { data: string } | null;
-    return row === null ? null : JSON.parse(row.data);
+    return row === null ? null : (JSON.parse(row.data) as Ticket);
   }
 
   export function code(session: string): string {
@@ -105,8 +106,8 @@ export namespace Owner {
       return console.log("Signed out " + revoke + " (" + (row.what || "a session") + ").");
     }
     const Client = await import("./Client.ts");
-    const tui = Client.read("tui").tokens ?? {};
-    const mine = new Map<string, string>([...Object.values(tui).map((t) => [Owner.hash(String(t)), "this computer's terminal"] as [string, string]), [Owner.hash(String(Client.read("device").token ?? "")), "this computer's device"]]);
+    const tui = Client.tokens(Client.read("tui"));
+    const mine = new Map<string, string>([...Object.values(tui).map((t) => [Owner.hash(t), "this computer's terminal"] as [string, string]), [Owner.hash(text_of(Client.read("device").token)), "this computer's device"]]);
     const kind = (what: string) => (what.startsWith("the device ") ? "device" : what.startsWith("the terminal ") ? "terminal" : what === "a browser" ? "browser" : "-");
     const when = (at: number) => (at > 0 ? new Date(at).toISOString().slice(0, 16).replace("T", " ") + " UTC" : "before arteeh.17");
     rows.forEach((r, i) => console.log(String(i + 1).padStart(3) + ". " + kind(r.what).padEnd(9) + (r.what || "-").padEnd(32) + " signed in " + when(r.at) + (mine.has(r.hash) ? "  (" + mine.get(r.hash) + ")" : "")));
@@ -125,7 +126,7 @@ export namespace Owner {
 
   export function act_get(id: string): object | null {
     const row = Owner.open().query("select ans from acts where id = ?").get(id) as { ans: string } | null;
-    return row === null ? null : JSON.parse(row.ans);
+    return row === null ? null : (JSON.parse(row.ans) as object);
   }
 
   export async function http(req: Request): Promise<Response | null> {
@@ -134,14 +135,14 @@ export namespace Owner {
     const owner = Owner.is(req);
     switch (url.pathname) {
       case "/api/login": {
-        const body = await req.json().catch(() => ({}));
-        const key = String(body.key ?? "");
+        const body: unknown = await req.json().catch(() => ({}));
+        const key = text_of(get(body, "key"));
         const asks = db.query("select count(*) n from tickets where expires >= ? and data ->> 'session' is not null").get(Date.now()) as { n: number };
         if (key.length < 32 || asks.n >= ASKS) {
           return Response.json({ error: key.length < 32 ? "No key." : "Too many sign-ins waiting: try again in 15 minutes." }, { status: key.length < 32 ? 400 : 429 });
         }
         const session = Owner.hash(key);
-        const what = String(body.what ?? "a terminal").replace(/[^\w .,:@()-]/g, "").slice(0, 80);
+        const what = text_of(get(body, "what"), "a terminal").replace(/[^\w .,:@()-]/g, "").slice(0, 80);
         const link = config.SITE + "/auth?t=" + Owner.ticket({ session, what });
         return Response.json({ url: link, code: Owner.code(session) });
       }
@@ -216,9 +217,9 @@ export namespace Owner {
       const row = db.query("select 1 from web_pushes where endpoint = ? and session = ?").get(endpoint, session);
       return Response.json({ key: Push.keys()?.public ?? null, on: row !== null });
     }
-    const body = await req.json().catch(() => null);
+    const body: unknown = await req.json().catch(() => null);
     if (req.method === "DELETE") {
-      db.query("delete from web_pushes where endpoint = ?").run(String(body?.endpoint ?? ""));
+      db.query("delete from web_pushes where endpoint = ?").run(text_of(get(body, "endpoint")));
       return Response.json({ ok: true });
     }
     const sub = Push.sub_read(body);
@@ -239,8 +240,12 @@ export namespace Owner {
 
   export async function confirm(req: Request): Promise<Response> {
     const form = await req.formData().catch(() => new FormData());
-    const t = String(form.get("t") ?? "");
-    const typed = String(form.get("code") ?? "").replace(/\D/g, "");
+    const field = (name: string) => {
+      const got = form.get(name);
+      return typeof got === "string" ? got : "";
+    };
+    const t = field("t");
+    const typed = field("code").replace(/\D/g, "");
     const link = Owner.ticket_read(t, false);
     if (link !== null && link.session === null) {
       Owner.ticket_read(t, true);

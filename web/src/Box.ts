@@ -1,5 +1,6 @@
 import * as Md from "../../Md.ts";
 import * as View from "../../View.ts";
+import { must } from "./Dom.ts";
 
 export type Hooks = { input: () => void; files: (files: File[]) => void };
 
@@ -239,7 +240,7 @@ function item_fit(item: HTMLElement, w: number, h: number): void {
 
 export function item_state(item: HTMLElement, state: State, note: string, url = ""): void {
   item.dataset.state = state;
-  item.querySelector<HTMLElement>(".state")!.textContent = note;
+  must(item.querySelector(".state"), "the item's state").textContent = note;
   if (url !== "") {
     const bang = View.media_kind(url) === null ? "" : "!";
     item.dataset.md = bang + "[" + (item.dataset.name ?? "").replace(/[[\]\\\n]/g, "") + "](" + url + ")";
@@ -250,10 +251,10 @@ const SIZES = new Map<string, Promise<string>>();
 
 export function box_sizes(el: ParentNode): void {
   for (const small of el.querySelectorAll<HTMLElement>("[data-of]:empty")) {
-    const url = small.dataset.of!;
+    const url = small.dataset.of ?? "";
     const got = SIZES.get(url) ?? size_ask(url);
     SIZES.set(url, got);
-    got.then((text) => {
+    void got.then((text) => {
       small.textContent ||= text;
     });
   }
@@ -384,10 +385,10 @@ function point(n: number): [Node, number] {
 
 function beside(back: boolean): HTMLElement | null {
   const sel = getSelection();
-  if (sel === null || sel.rangeCount === 0 || !sel.isCollapsed || !BOX.contains(sel.anchorNode)) {
+  if (sel === null || sel.anchorNode === null || sel.rangeCount === 0 || !sel.isCollapsed || !BOX.contains(sel.anchorNode)) {
     return null;
   }
-  const [node, off] = [sel.anchorNode!, sel.anchorOffset];
+  const [node, off] = [sel.anchorNode, sel.anchorOffset];
   let next: Node | null;
   if (node.nodeType === Node.TEXT_NODE) {
     if (back ? off > 0 : off < (node.textContent ?? "").length) {
@@ -470,6 +471,6 @@ function html_media(el: Element): Piece | null {
   if (url === null || url.origin !== location.origin || !ok) {
     return null;
   }
-  const name = el.getAttribute("download") || el.getAttribute("alt") || el.getAttribute("title") || url.pathname.split("/").pop()!;
+  const name = el.getAttribute("download") || el.getAttribute("alt") || el.getAttribute("title") || (url.pathname.split("/").pop() ?? "");
   return { name, url: url.pathname };
 }

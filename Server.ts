@@ -25,6 +25,8 @@ import * as Timer from "./Timer.ts";
 import { PROMPTS, SEARCHES, Tools } from "./Tools.ts";
 import { ACTIVE, FRAME, IDLE, IMAGES, live_push, MEDIA, PING, QUIT, SUMMARIES, TICK, TURN, WIRE, type Answer, type Live, type Part, type Pending, type Queued, type Server as Out, type Sums, type Wait } from "./View.ts";
 import * as config from "./Config.ts";
+import { err_code, err_stack, err_why } from "./Err.ts";
+import { get, rec, text_of } from "./Json.ts";
 import hello_md from "./hello.md" with { type: "text" };
 import app_js from "./web/app.js" with { type: "file" };
 import index_html from "./web/index.html" with { type: "file" };
@@ -188,7 +190,7 @@ export namespace Chat {
     const main = Run.make<Pending, Msg>(TURN, {
       pick   : () => chat.pick,
       begin  : () => Chat.begin(chat),
-      log    : (_, post) => Chat.writing(chat, async () => Chat.posted(chat, post)),
+      log    : (_, post) => Chat.writing(chat, () => Promise.try(() => Chat.posted(chat, post))),
       ask    : (_, take) => Chat.call(chat, take),
       queued : (run) => Chat.queued(chat, run),
       again  : (post) => post.kind === "user",
@@ -230,7 +232,7 @@ export namespace Chat {
     Chat.timed(chat);
     Memory.pump(mem);
     Chat.progress(chat);
-    Chat.resume(chat, cut).finally(() => Chat.change(chat)).catch((err) => console.error("unii: resuming the chat: " + (err?.message ?? err)));
+    Chat.resume(chat, cut).finally(() => Chat.change(chat)).catch((err: unknown) => console.error("unii: resuming the chat: " + err_why(err)));
     return chat;
   }
 
@@ -333,7 +335,7 @@ export namespace Chat {
       const buf = await Chat.read(body, at, READ);
       at += buf.length;
       const all = cut(rest + dec.decode(buf, { stream: at < body.size }));
-      rest = at < body.size ? all.pop()! : "";
+      rest = at < body.size ? all.pop() ?? "" : "";
       if (rest.length > READ) {
         throw new Error("A line over " + READ + " characters: no import sends it.");
       }
@@ -342,7 +344,7 @@ export namespace Chat {
   }
 
   export async function voice(chat: Chat, id: string, type: string, body: Body): Promise<Answer> {
-    const got = await OpenAI.transcribe(new Blob([await Chat.read(body, 0, body.size)], { type })).catch((err: Error) => err);
+    const got = await OpenAI.transcribe(new Blob([await Chat.read(body, 0, body.size)], { type })).catch((err: unknown) => (err instanceof Error ? err : new Error(String(err))));
     if (got instanceof Error) {
       return { error: got.message };
     }
@@ -359,7 +361,8 @@ export namespace Chat {
 
   export function ending(chat: Chat): void {
     const halt = chat.main.halt.signal;
-    const why: string | null = halt.aborted ? halt.reason : null;
+    const reason: unknown = halt.reason;
+    const why = halt.aborted && typeof reason === "string" ? reason : null;
     if (why !== null) {
       Chat.note(chat, why);
     }
@@ -452,7 +455,7 @@ export namespace Chat {
     const mem  = chat.mem;
     const at   = Memory.whole(mem, 0);
     const tail = Array.from({ length: mem.count - at }, (_, k) => at + k).map((i) => {
-      const msg = Memory.message(mem, i)!;
+      const msg = Memory.at(mem, i);
       return Memory.line({ l: 0, i }, msg.kind + ": " + msg.text) + "\n";
     });
     const blocks = [...Memory.view(mem, at), { text: tail.join("") + GOAL_ASK + goal, mark: true }];
@@ -689,7 +692,7 @@ export namespace Chat {
       if ((await proc.exited) !== 0) {
         Chat.all(chat, { $: "note", text: "after: " + err.trim() });
       }
-    }).catch((err) => console.error("after: " + (err?.message ?? err)));
+    }).catch((err: unknown) => console.error("after: " + err_why(err)));
   }
 
   export async function ingest(chat: Chat, id: string, body: Body): Promise<Answer> {
@@ -741,7 +744,7 @@ export namespace Chat {
   }
 
   export function time(batch: Batch): number {
-    return batch.left / JOBS + batch.micros.reduce((t, level, l) => t + (batch.open[l] > 0 ? level.at(-1)! : 0), 0);
+    return batch.left / JOBS + batch.micros.reduce((t, level, l) => t + (batch.open[l] > 0 ? level[level.length - 1] : 0), 0);
   }
 
   export function keep(batch: Batch, chat: Chat): void {
@@ -749,7 +752,7 @@ export namespace Chat {
     const { a, b, said, spent } = batch;
     fs.writeFileSync(file + ".new", JSON.stringify({ a, b, said, spent, why: chat.mem.hold[1] }));
     move_over(file + ".new", file);
-    Disk.wrote(file);
+    void Disk.wrote(file);
   }
 
   export function resumed(chat: Chat): Batch | null {
@@ -757,7 +760,7 @@ export namespace Chat {
     if (!fs.existsSync(file)) {
       return null;
     }
-    const saved = JSON.parse(fs.readFileSync(file, "utf8"));
+    const saved = JSON.parse(fs.readFileSync(file, "utf8")) as Kept & { why?: string };
     chat.mem.hold[1] = saved.why === "paused" ? "paused" : null;
     return Chat.batch(chat, saved);
   }
@@ -789,7 +792,7 @@ export namespace Chat {
     const done: Import.Done = {};
     let key = "";
     for (let i = 0; i < chat.mem.count; i++) {
-      const m = Memory.message(chat.mem, i)!;
+      const m = Memory.at(chat.mem, i);
       if (m.imported && m.kind === "note") {
         key = Import.import_key(m);
       } else if (m.imported && m.date > (done[key] ?? "")) {
@@ -799,18 +802,19 @@ export namespace Chat {
     return done;
   }
 
-  export function imported(x: any): Log {
+  export function imported(x: unknown): Log {
     const kinds: Kind[] = ["user", "unii", "tool", "echo", "note"];
-    if (!kinds.includes(x?.kind)) {
-      throw new Error("An import has no kind " + x?.kind + ".");
+    const kind = kinds.find((k) => k === get(x, "kind"));
+    if (kind === undefined) {
+      throw new Error("An import has no kind " + String(get(x, "kind")) + ".");
     }
-    if (typeof x.text !== "string") {
-      throw new Error("An import has a " + x.kind + " message with no text.");
+    const [text, when, of, tool] = [get(x, "text"), String(get(x, "date")), get(x, "of"), get(x, "tool")];
+    if (typeof text !== "string") {
+      throw new Error("An import has a " + kind + " message with no text.");
     }
-    const date = Number.isNaN(Date.parse(x.date)) ? undefined : new Date(x.date).toISOString();
-    const of = typeof x.of === "string" && x.of.length <= PAIR ? x.of : undefined;
-    const tool = typeof x.tool === "string" && x.tool.length <= PAIR ? x.tool : undefined;
-    return { kind: x.kind, text: x.text, date, more: x.more === true, of, tool };
+    const date = Number.isNaN(Date.parse(when)) ? undefined : new Date(when).toISOString();
+    const pair = (y: unknown) => (typeof y === "string" && y.length <= PAIR ? y : undefined);
+    return { kind, text, date, more: get(x, "more") === true, of: pair(of), tool: pair(tool) };
   }
 
   export function made(chat: Chat, l: number, i: number): void {
@@ -908,8 +912,8 @@ export namespace Chat {
           Memory.save(mem);
         }
         Chat.timed(chat);
-      } catch (err: any) {
-        console.error("unii: the schedules failed: " + (err?.stack ?? err));
+      } catch (err) {
+        console.error("unii: the schedules failed: " + err_stack(err));
         Chat.timed(chat, true);
       }
     });
@@ -1039,19 +1043,20 @@ export namespace Chat {
   }
 
   export async function answer(chat: Chat, sock: Sock, data: string): Promise<void> {
-    let msg: any = null;
+    let msg: unknown = null;
     const out = await Promise.try(() => {
       msg = JSON.parse(data);
-      return Chat.ask(chat, sock, msg) ?? Chat.apply(chat, msg, sock.data.device ?? "");
+      const got = rec(msg) ? msg : {};
+      return Chat.ask(chat, sock, got) ?? Chat.apply(chat, got, sock.data.device ?? "");
     }).catch(Chat.fail);
-    Chat.send(sock, { $: "ack", id: msg?.id, ...out });
+    Chat.send(sock, { $: "ack", id: text_of(get(msg, "id")), ...out });
   }
 
-  export function fail(err: any): Answer {
-    return { error: String(err?.message ?? err) };
+  export function fail(err: unknown): Answer {
+    return { error: err_why(err) };
   }
 
-  export function ask(chat: Chat, sock: Sock, msg: any): Answer | null {
+  export function ask(chat: Chat, sock: Sock, msg: Record<string, unknown>): Answer | null {
     switch (msg.$) {
       case "servers": {
         if (sock.data.device !== null) {
@@ -1060,7 +1065,10 @@ export namespace Chat {
         return {};
       }
       case "zoom": {
-        const [id, n] = [...msg.part].map(Number);
+        if (!Array.isArray(msg.part)) {
+          throw new Error("A zoom has no part.");
+        }
+        const [id, n] = msg.part.map(Number);
         if (n > 1 && Memory.part(chat.mem, id, n) !== null) {
           const parts: Part[] = [[id, n / 2], [id + n / 2, n / 2]];
           Chat.teach(chat, sock, parts);
@@ -1088,7 +1096,7 @@ export namespace Chat {
     return null;
   }
 
-  export function apply(chat: Chat, msg: any, device: string): Promise<Answer> {
+  export function apply(chat: Chat, msg: Record<string, unknown>, device: string): Promise<Answer> {
     const id = String(msg.id);
     const was = chat.acts.get(id) ?? (Owner.act_get(id) as Answer | null);
     if (was !== null) {
@@ -1103,13 +1111,13 @@ export namespace Chat {
     return run;
   }
 
-  export async function act(chat: Chat, id: string, msg: any, device: string): Promise<Answer> {
-    if ("req" in msg && BODIES.includes(msg.$)) {
-      return Chat.post(chat, id, msg);
+  export async function act(chat: Chat, id: string, msg: Record<string, unknown>, device: string): Promise<Answer> {
+    if (msg.req instanceof Request && typeof msg.$ === "string" && BODIES.includes(msg.$)) {
+      return Chat.post(chat, id, msg.$, msg.req, msg);
     }
     switch (msg.$) {
       case "stop": {
-        const name = msg.name === undefined ? null : String(msg.name);
+        const name = msg.name === undefined ? null : text_of(msg.name, "null");
         const what = Chat.running(chat).filter((w) => name === null || w === name);
         const why = "Stopped by the user: " + what.join(", ") + ".";
         const turn = what.includes(TURN);
@@ -1127,7 +1135,7 @@ export namespace Chat {
         return {};
       }
       case "goal": {
-        const goal = msg.text === null ? null : String(msg.text);
+        const goal = msg.text === null ? null : text_of(msg.text, "undefined");
         if (goal === chat.mem.goal) {
           return {};
         }
@@ -1157,7 +1165,7 @@ export namespace Chat {
         return {};
       }
       case "out": {
-        Tools.done(chat.tools, device, String(msg.job), msg.out);
+        Tools.done(chat.tools, device, String(msg.job), Tools.out(msg.out));
         return {};
       }
       case "unschedule": {
@@ -1202,10 +1210,10 @@ export namespace Chat {
         return {};
       }
     }
-    return { error: "No act " + msg.$ + "." };
+    return { error: "No act " + String(msg.$) + "." };
   }
 
-  export async function post(chat: Chat, id: string, msg: any): Promise<Answer> {
+  export async function post(chat: Chat, id: string, what: string, req: Request, msg: Record<string, unknown>): Promise<Answer> {
     if (Chat.full()) {
       return { error: FULL, status: 507 };
     }
@@ -1214,12 +1222,16 @@ export namespace Chat {
     const body = { fh: await fs.promises.open(file, "w+"), size: 0 };
     fs.rmSync(file);
     try {
-      for await (const data of msg.req.body ?? []) {
-        await body.fh.write(data);
-        body.size += data.length;
+      const reader = req.body?.getReader();
+      for (let got = await reader?.read(); got !== undefined && !got.done; got = await reader?.read()) {
+        await body.fh.write(got.value);
+        body.size += got.value.length;
       }
-      switch (msg.$) {
+      switch (what) {
         case "say": {
+          if (typeof msg.sizes !== "string") {
+            throw new Error("A say has no sizes.");
+          }
           return await Chat.say(chat, id, msg.sizes.split(",").filter(Boolean).map(Number), body);
         }
         case "import": {
@@ -1229,7 +1241,7 @@ export namespace Chat {
           return await Chat.voice(chat, id, String(msg.type), body);
         }
       }
-      return { error: "No act " + msg.$ + "." };
+      return { error: "No act " + what + "." };
     } finally {
       await body.fh.close();
     }
@@ -1278,7 +1290,7 @@ export namespace Chat {
     for (const [id, n] of parts.filter(([id, n]) => !sock.data.seen.has(id + "+" + n))) {
       sock.data.seen.add(id + "+" + n);
       if (n === 1) {
-        const m = Memory.message(chat.mem, id)!;
+        const m = Memory.at(chat.mem, id);
         Chat.send(sock, { $: "know", whole: { [id]: { kind: m.kind, text: m.text, date: m.date, images: m.images, of: m.of, tool: m.tool } } });
       }
       Chat.know(chat, sock, id, n);
@@ -1288,7 +1300,7 @@ export namespace Chat {
   export function know(chat: Chat, sock: Sock, id: number, n: number): void {
     const text = Memory.node(chat.mem, { l: Math.log2(n), i: id / n });
     if (text !== null) {
-      Chat.send(sock, { $: "know", nodes: { [id + "+" + n]: { text, to: Memory.message(chat.mem, id + n - 1)!.date } } });
+      Chat.send(sock, { $: "know", nodes: { [id + "+" + n]: { text, to: Memory.at(chat.mem, id + n - 1).date } } });
     }
   }
 
@@ -1311,8 +1323,8 @@ export namespace Main {
         }, LOCK_BEAT).unref();
         process.on("exit", () => fs.rmSync(LOCK_PID, { force: true }));
         return;
-      } catch (err: any) {
-        if (err.code !== "EEXIST") {
+      } catch (err) {
+        if (err_code(err) !== "EEXIST") {
           throw err;
         }
       }
@@ -1326,8 +1338,8 @@ export namespace Main {
       try {
         Bun.listen({ unix: LOCK, socket: { data() {} } });
         return;
-      } catch (err: any) {
-        if (err.code !== "EADDRINUSE") {
+      } catch (err) {
+        if (err_code(err) !== "EADDRINUSE") {
           throw err;
         }
       }
@@ -1352,8 +1364,8 @@ export namespace Main {
         process.kill(Number(text), 0);
       }
       return true;
-    } catch (err: any) {
-      return err?.code === "EPERM";
+    } catch (err) {
+      return err_code(err) === "EPERM";
     }
   }
 
@@ -1495,7 +1507,7 @@ export namespace Main {
     if (file === null) {
       return new Response("not found", { status: 404 });
     }
-    const type = MEDIA.get(file.split(".").pop()!);
+    const type = MEDIA.get(file.split(".").pop() ?? "");
     const size = fs.statSync(file).size;
     const headers: Record<string, string> = { "content-type": type ?? "application/octet-stream", "cache-control": "private, max-age=31536000, immutable", "accept-ranges": "bytes", "x-content-type-options": "nosniff" };
     if (type === undefined) {
@@ -1525,12 +1537,12 @@ export namespace Main {
     if (req.method !== "POST") {
       return Response.json(read());
     }
-    const msg = await req.json().catch(() => null);
-    const which = (["prompt", "compact"] as const).find((k) => typeof msg?.[k] === "string");
+    const msg: unknown = await req.json().catch(() => null);
+    const which = (["prompt", "compact"] as const).find((k) => typeof get(msg, k) === "string");
     if (which === undefined) {
       return Response.json({ error: "Send { prompt } or { compact }, a text." }, { status: 400 });
     }
-    const text: string = msg[which].trim();
+    const text = String(get(msg, which)).trim();
     if (Buffer.byteLength(text) > 64 * 1024) {
       return Response.json({ error: "A prompt holds at most 64 KB." }, { status: 413 });
     }
@@ -1563,16 +1575,16 @@ export namespace Main {
         return server.upgrade(req, { data }) ? undefined : new Response("upgrade failed", { status: 400 });
       }
       return await Main.page(Main.chat, p, req);
-    } catch (err: any) {
-      return Response.json({ error: err.message }, { status: 500 });
+    } catch (err) {
+      return Response.json({ error: err_why(err) }, { status: 500 });
     }
   }
 
   export function event(what: string, run: () => void, fail: () => void = () => {}): void {
     try {
       run();
-    } catch (err: any) {
-      console.error("unii: " + what + " failed: " + (err?.stack ?? err));
+    } catch (err) {
+      console.error("unii: " + what + " failed: " + err_stack(err));
       fail();
     }
   }
@@ -1614,7 +1626,7 @@ export namespace Main {
           if (text === ACTIVE || text === IDLE) {
             ws.data.active = text === ACTIVE ? Date.now() : 0;
           } else if (Main.chat.socks.has(ws)) {
-            Chat.answer(Main.chat, ws, text);
+            void Chat.answer(Main.chat, ws, text);
           }
         },
         close(ws: Sock, code) {
@@ -1679,7 +1691,7 @@ export namespace Main {
   }
 
   export function unowned(err: unknown): void {
-    console.error("unii: a failure no one owned: " + ((err as any)?.stack ?? err));
+    console.error("unii: a failure no one owned: " + err_stack(err));
   }
 
 }

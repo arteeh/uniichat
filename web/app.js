@@ -1,3 +1,8 @@
+// Err.ts
+function err_why(err) {
+  return err instanceof Error ? err.message : String(err);
+}
+
 // Clip.ts
 var CAP = 30000;
 function clip_end(str, at) {
@@ -35,6 +40,24 @@ async function* stream_lines(stream) {
     rest += text.slice(nl + 1);
   }
   yield [rest + utf8.decode()];
+}
+
+// Json.ts
+function has(x, k) {
+  return typeof x === "object" && x !== null && k in x;
+}
+function get(x, k) {
+  return has(x, k) ? x[k] : undefined;
+}
+function text_of(x, or = "") {
+  const shown = String(x);
+  return x === undefined || x === null ? or : shown;
+}
+function rec(x) {
+  return typeof x === "object" && x !== null && !Array.isArray(x);
+}
+function list(x) {
+  return Array.isArray(x) ? x : [];
 }
 
 // Import.ts
@@ -154,32 +177,35 @@ async function import_export(file) {
   if (json === null) {
     throw new Error("No conversations.json in the zip.");
   }
-  const chats = await json.text().then(JSON.parse).catch(() => null);
-  if (!Array.isArray(chats) || !chats.every((chat) => chat?.mapping !== undefined || Array.isArray(chat?.chat_messages))) {
+  const chats = await json.text().then((text) => JSON.parse(text)).catch(() => null);
+  if (!Array.isArray(chats) || !chats.every((chat) => get(chat, "mapping") !== undefined || Array.isArray(get(chat, "chat_messages")))) {
     throw new Error(NOT_EXPORT);
   }
-  const sessions = await Promise.all(chats.map(chat_session));
+  const sessions = await Promise.all(list(chats).map((chat) => chat_session(chat)));
   return sessions.filter((s) => s !== null);
 }
 function chat_session(chat) {
-  const [app, msgs] = chat.mapping ? ["ChatGPT", chat_openai(chat)] : ["Claude", chat_claude(chat)];
+  const [app, msgs] = chat.mapping ? ["ChatGPT", chat_openai(chat, chat.mapping)] : ["Claude", chat_claude(chat)];
   const file = new Blob(msgs.map((m) => JSON.stringify(m) + `
 `));
-  return import_session(file, "msgs", app, 'chat "' + String(chat.title ?? chat.name ?? "") + '"');
+  return import_session(file, "msgs", app, 'chat "' + (chat.title ?? chat.name ?? "") + '"');
 }
-function chat_openai(chat) {
+function chat_openai(chat, mapping) {
   const nodes = [];
-  for (let id = chat.current_node;id; id = chat.mapping[id]?.parent) {
-    nodes.unshift(chat.mapping[id]?.message);
+  for (let id = chat.current_node;id; id = mapping[id]?.parent) {
+    nodes.unshift(mapping[id]?.message);
   }
   let date = import_date(chat.create_time, "");
   return nodes.flatMap((m) => {
-    const role = m?.author?.role;
-    const type = String(m?.content?.content_type);
+    if (m === null || m === undefined) {
+      return [];
+    }
+    const role = m.author?.role;
+    const type = String(m.content.content_type);
     const kind = role === "user" ? "user" : role === "assistant" ? m.recipient === "all" ? "unii" : "tool" : role === "tool" ? "echo" : null;
     const skip = kind === null || m.metadata?.is_visually_hidden_from_conversation === true || type === "thoughts" || type === "reasoning_recap";
-    date = import_date(m?.create_time, date);
-    return skip ? [] : msgs_of(kind, (kind === "tool" ? m.recipient + " " : "") + parts_text(m.content.parts ?? [m.content.text]), date);
+    date = import_date(m.create_time, date);
+    return skip ? [] : msgs_of(kind, (kind === "tool" ? String(m.recipient) + " " : "") + parts_text(m.content.parts ?? [m.content.text]), date);
   });
 }
 function chat_claude(chat) {
@@ -187,8 +213,8 @@ function chat_claude(chat) {
   return (chat.chat_messages ?? []).flatMap((m) => {
     date = import_date(m.created_at, date);
     const kind = m.sender === "human" ? "user" : "unii";
-    const blocks = Array.isArray(m.content) ? m.content : [{ type: "text", text: String(m.text ?? "") }];
-    const files = [...m.attachments ?? [], ...m.files ?? []].map((f) => ({ type: "text", text: "[file " + f.file_name + "]" }));
+    const blocks = Array.isArray(m.content) ? m.content : [{ type: "text", text: text_of(m.text) }];
+    const files = [...m.attachments ?? [], ...m.files ?? []].map((f) => ({ type: "text", text: "[file " + String(f.file_name) + "]" }));
     return blocks_msgs(kind, [...blocks, ...files], date);
   });
 }
@@ -238,20 +264,20 @@ function line_claude(s, j, last) {
   const blocks = !own ? [] : typeof content === "string" ? [{ type: "text", text: content }] : Array.isArray(content) ? content : [];
   s.where ||= j.cwd ? "session in " + j.cwd : "";
   if (j.type === "attachment" && j.attachment?.type === "queued_command") {
-    return msgs_of("user", String(j.attachment.prompt ?? ""), date);
+    return msgs_of("user", text_of(j.attachment.prompt), date);
   }
   return blocks_msgs(j.type === "user" ? "user" : "unii", blocks, date);
 }
 function blocks_msgs(kind, blocks, date) {
-  const say = blocks.filter((b) => b.type === "image" || b.type === "text" && !SKIP.test(b.text));
-  const tools = blocks.flatMap((b) => b.type === "tool_use" ? msgs_of("tool", b.name + " " + JSON.stringify(b.input), date) : b.type === "tool_result" ? msgs_of("echo", parts_text(b.content), date) : []);
+  const say = blocks.filter((b) => b.type === "image" || b.type === "text" && !SKIP.test(String(b.text)));
+  const tools = blocks.flatMap((b) => b.type === "tool_use" ? msgs_of("tool", String(b.name) + " " + JSON.stringify(b.input), date) : b.type === "tool_result" ? msgs_of("echo", parts_text(b.content), date) : []);
   return [...msgs_of(kind, parts_text(say), date), ...tools];
 }
 function line_codex(s, j, last) {
   const p = j.payload ?? {};
   const date = import_date(j.timestamp, last);
   if (j.type === "session_meta") {
-    s.where = p.source?.subagent ?? p.source?.internal ? "" : "session in " + String(p.cwd ?? "");
+    s.where = p.source?.subagent ?? p.source?.internal ? "" : "session in " + text_of(p.cwd);
   }
   return j.type === "response_item" && s.where !== "" ? item_codex(p, date) : [];
 }
@@ -263,10 +289,10 @@ function item_codex(p, date) {
       return kind === null ? [] : msgs_of(kind, parts_text(parts), date);
     }
     case "function_call": {
-      return msgs_of("tool", p.name + " " + p.arguments, date);
+      return msgs_of("tool", String(p.name) + " " + String(p.arguments), date);
     }
     case "custom_tool_call": {
-      return msgs_of("tool", p.name + " " + JSON.stringify({ input: p.input }), date);
+      return msgs_of("tool", String(p.name) + " " + JSON.stringify({ input: p.input }), date);
     }
     case "local_shell_call": {
       return msgs_of("tool", "shell " + JSON.stringify({ command: p.action?.command }), date);
@@ -290,8 +316,10 @@ function parts_text(content) {
   if (typeof content === "string") {
     return content;
   }
-  const parts = Array.isArray(content) ? content : [];
-  return parts.map((c) => typeof c === "string" ? c : typeof c.text === "string" ? c.text : String(c.type ?? c.content_type).includes("image") ? "[image]" : "").join(`
+  return list(content).map((c) => {
+    const text = get(c, "text");
+    return typeof c === "string" ? c : typeof text === "string" ? text : String(get(c, "type") ?? get(c, "content_type")).includes("image") ? "[image]" : "";
+  }).join(`
 `);
 }
 
@@ -346,17 +374,17 @@ var CALL = /^(\S+) (\{[\s\S]*)$/;
 var MCP = /^mcp__.+?__/;
 var THEIRS = /^(?:([A-Za-z0-9-]+)_)?([A-Za-z0-9-]+(?:_[A-Za-z0-9-]+)*)__(.+)$/;
 var READS = new Map([
-  ["shell", (x) => ({ head: String(x.command ?? ""), blocks: [] })],
-  ["read", (x) => ({ head: String(x.path ?? "") + lines_show(x.offset, x.limit), blocks: [] })],
-  ["write", (x) => ({ head: String(x.path ?? ""), blocks: [] })],
-  ["view_video", (x) => ({ head: String(x.path ?? "") + range_show(x.start, x.end, x.unit) + (x.step === undefined ? "" : " every " + x.step), blocks: [] })],
+  ["shell", (x) => ({ head: text_of(x.command), blocks: [] })],
+  ["read", (x) => ({ head: text_of(x.path) + lines_show(x.offset, x.limit), blocks: [] })],
+  ["write", (x) => ({ head: text_of(x.path), blocks: [] })],
+  ["view_video", (x) => ({ head: text_of(x.path) + range_show(x.start, x.end, x.unit) + (x.step === undefined ? "" : " every " + text_of(x.step, "null")), blocks: [] })],
   ["edit", (x) => Array.isArray(x.edits) ? { head: edits_files(x.edits), blocks: [] } : input_shown(x)],
-  ["zoom", (x) => ({ head: msg_show(x.id, x.n) + (x.at === undefined ? "" : " from char " + x.at), blocks: [] })],
+  ["zoom", (x) => ({ head: msg_show(x.id, x.n) + (x.at === undefined ? "" : " from char " + text_of(x.at, "null")), blocks: [] })],
   ["date", (x) => ({ head: msg_show(x.id, 1), blocks: [] })],
-  ["spawn", (x) => ({ head: tasks_show(x.tasks, x.model, x.effort), blocks: (Array.isArray(x.tasks) ? x.tasks : []).flatMap(task_block) })],
-  ["tell", (x) => ({ head: String(x.name ?? ""), blocks: text_block(x.message) })],
+  ["spawn", (x) => ({ head: tasks_show(x.tasks, x.model, x.effort), blocks: list(x.tasks).flatMap(task_block) })],
+  ["tell", (x) => ({ head: text_of(x.name), blocks: text_block(x.message) })],
   ["computer", (x) => ({ head: "", blocks: text_block(x.task) })],
-  ["schedule", (x) => ({ head: (x.cron === undefined ? String(x.at ?? "") : "cron " + x.cron) + " " + String(x.zone ?? ""), blocks: text_block(x.message) })]
+  ["schedule", (x) => ({ head: (x.cron === undefined ? text_of(x.at) : "cron " + text_of(x.cron, "null")) + " " + text_of(x.zone), blocks: text_block(x.message) })]
 ]);
 function report_read(text) {
   const m = /^\[([^\]\n]+)\]\s*([\s\S]*?)(?:\s*Full chat: zoom\("[^"\n]*"\))?\s*$/.exec(text);
@@ -414,18 +442,18 @@ function text_block(x) {
 }
 function msg_show(id, n) {
   const many = typeof n === "number" && n > 1 ? "+" + n : "";
-  return typeof id === "number" ? "#" + id + many : String(id ?? "");
+  return typeof id === "number" ? "#" + id + many : text_of(id);
 }
 function tasks_show(tasks, model, effort) {
-  const list = Array.isArray(tasks) ? tasks : [];
-  const knobs = [...new Set([knobs_show(model, effort), ...list.map((t) => knobs_show(t?.model, t?.effort))])].filter((k) => k !== "").map((k) => " · " + k).join("");
-  return list.length + (list.length === 1 ? " agent" : " agents") + knobs;
+  const all = list(tasks);
+  const knobs = [...new Set([knobs_show(model, effort), ...all.map((t) => knobs_show(get(t, "model"), get(t, "effort")))])].filter((k) => k !== "").map((k) => " · " + k).join("");
+  return all.length + (all.length === 1 ? " agent" : " agents") + knobs;
 }
 function knobs_show(model, effort) {
   return [model, effort].filter((k) => typeof k === "string").join(" ");
 }
 function task_block(t) {
-  return typeof t === "string" ? text_block(t) : text_block(t?.task).map((b) => ({ ...b, k: knobs_show(t.model, t.effort) }));
+  return typeof t === "string" ? text_block(t) : text_block(get(t, "task")).map((b) => ({ ...b, k: knobs_show(get(t, "model"), get(t, "effort")) }));
 }
 function lines_show(offset, limit) {
   const from = typeof offset === "number" ? offset : 1;
@@ -434,10 +462,10 @@ function lines_show(offset, limit) {
 }
 function range_show(start, end, unit) {
   const s = unit === "second" ? "s" : "";
-  return start === undefined && end === undefined ? "" : " " + (start ?? 0) + s + "-" + (end ?? "") + (end === undefined ? "" : s);
+  return start === undefined && end === undefined ? "" : " " + text_of(start, "0") + s + "-" + text_of(end) + (end === undefined ? "" : s);
 }
 function edits_files(edits) {
-  const paths = edits.map((e) => e?.path).filter((p) => typeof p === "string");
+  const paths = edits.map((e) => get(e, "path")).filter((p) => typeof p === "string");
   return [...new Set(paths)].join(", ");
 }
 function input_parse(text) {
@@ -468,7 +496,7 @@ function input_parse(text) {
 function object_parse(text) {
   try {
     const x = JSON.parse(text);
-    return typeof x === "object" && x !== null && !Array.isArray(x) ? x : null;
+    return rec(x) ? x : null;
   } catch {
     return null;
   }
@@ -1047,7 +1075,8 @@ function span_parse(s) {
       i += c === "[" ? 1 : 2;
     } else if (c === "]" && brackets.length > 0) {
       flush();
-      const o = brackets.pop();
+      const o = brackets[brackets.length - 1];
+      brackets.pop();
       links -= o.c === "[" ? 1 : 0;
       const on = !(o.c === "[" && brackets.length < dead);
       dead = Math.min(dead, brackets.length);
@@ -1126,7 +1155,7 @@ function span_parse(s) {
       }
       const key = closer.c + closer.open + closer.len % 3;
       let opener = closer.prev;
-      const low = floor.has(key) ? floor.get(key) : bottom;
+      const low = floor.has(key) ? floor.get(key) ?? null : bottom;
       while (opener !== null && opener !== bottom && opener !== low) {
         const three = opener.c !== "~" && (opener.close || closer.open) && (opener.len + closer.len) % 3 === 0 && (opener.len % 3 !== 0 || closer.len % 3 !== 0);
         if (opener.c === closer.c && opener.open && !three && (opener.c !== "~" || opener.n === closer.n)) {
@@ -1175,11 +1204,12 @@ function span_parse(s) {
     }
   }
   function node_drop(node) {
-    node.prev.next = node.next;
+    const prev = node.prev ?? head;
+    prev.next = node.next;
     if (node.next !== null) {
       node.next.prev = node.prev;
     } else {
-      tail = node.prev;
+      tail = prev;
     }
   }
 }
@@ -1258,8 +1288,9 @@ function ticks_at(s) {
   const runs = new Map;
   for (let i = s.indexOf("`");i >= 0; i = s.indexOf("`", i)) {
     const n = run_len(s, i, "`");
-    runs.set(n, runs.get(n) ?? []);
-    runs.get(n).push(i);
+    const at = runs.get(n) ?? [];
+    runs.set(n, at);
+    at.push(i);
     i += n;
   }
   const seen = new Map;
@@ -1759,7 +1790,7 @@ function list_parse(lines, i, d) {
       continue;
     }
     if (list_kind(l) === kind && (items.length === 0 || at < w)) {
-      const mark = LIST2.exec(l)[0];
+      const mark = LIST2.exec(l)?.[0] ?? "";
       const rest = l.slice(mark.length);
       const pad = indent(rest);
       w = mark.length + (rest.trim() === "" || pad > 4 ? 1 : pad);
@@ -1782,7 +1813,7 @@ function list_parse(lines, i, d) {
     }
     [blank, end] = [0, j + 1];
   }
-  const first = LIST2.exec(lines[i])[1];
+  const first = LIST2.exec(lines[i])?.[1] ?? "";
   const k = /\d/.test(first);
   const parts = items.map((x) => blocks_parse(x, d + 1));
   const t = !loose && !parts.some((p) => p[1]);
@@ -1796,7 +1827,13 @@ function item_line(s, fenced) {
   return [!fenced && x.trim() !== "" && !HEAD.test(x) && !is_rule(x) && !ROW.test(x), fenced];
 }
 function untab(l) {
-  return l.replace(/^[ \t]*(?:(?:[-*+]|\d{1,9}[.)])[ \t]+)*/, (pre) => [...pre].reduce((out, c) => out + (c === "\t" ? " ".repeat(4 - out.length % 4) : c), ""));
+  return l.replace(/^[ \t]*(?:(?:[-*+]|\d{1,9}[.)])[ \t]+)*/, (pre) => {
+    let out = "";
+    for (const c of pre) {
+      out += c === "\t" ? " ".repeat(4 - out.length % 4) : c;
+    }
+    return out;
+  });
 }
 function indent(l) {
   return l.search(/\S|$/);
@@ -1867,7 +1904,10 @@ var Pick;
     const speeds = Pick.model(pick.vendor, pick.model)?.speeds ?? [];
     const { profile: _, ...plain } = pick;
     const all = Pick.models(offer.vendors, offer.models).map(([v, m]) => [m.label, Pick.on(plain, v, m)]);
-    const profiles = Object.keys(offer.profiles ?? {}).map((name) => [name, Pick.profile(name, offer, pick.effort, pick.speed)]);
+    const profiles = Object.keys(offer.profiles ?? {}).flatMap((name) => {
+      const on = Pick.profile(name, offer, pick.effort, pick.speed);
+      return on === null ? [] : [[name, on]];
+    });
     switch (move) {
       case "next":
       case "prev":
@@ -1934,7 +1974,8 @@ var Pick;
   }
   Pick2.falls = falls;
   function profile(name, offer, effort, speed) {
-    const first = Object.hasOwn(offer.profiles ?? {}, name) ? offer.profiles[name][0] : undefined;
+    const profiles = offer.profiles ?? {};
+    const first = Object.hasOwn(profiles, name) ? profiles[name][0] : undefined;
     if (first === undefined) {
       return null;
     }
@@ -1943,14 +1984,19 @@ var Pick;
   }
   Pick2.profile = profile;
   function read(x, offer) {
-    if (x.profile !== undefined) {
-      return typeof x.profile === "string" && EFFORTS.includes(x.effort) ? Pick.profile(x.profile, offer, x.effort, String(x.speed)) : null;
+    const [profile, effort, speed, label] = [get(x, "profile"), get(x, "effort"), get(x, "speed"), get(x, "model")];
+    if (profile !== undefined) {
+      return typeof profile === "string" && typeof effort === "string" && EFFORTS.includes(effort) ? Pick.profile(profile, offer, effort, String(speed)) : null;
     }
-    const model = offer.vendors.includes(x.vendor) && offer.models.includes(x.model) ? Pick.model(x.vendor, x.model) : undefined;
-    if (model === undefined || !EFFORTS.includes(x.effort) || !model.speeds.includes(x.speed)) {
+    const vendor = offer.vendors.find((v) => v === get(x, "vendor"));
+    if (vendor === undefined || typeof label !== "string" || !offer.models.includes(label)) {
       return null;
     }
-    return { vendor: x.vendor, model: x.model, effort: x.effort, speed: x.speed };
+    const model = Pick.model(vendor, label);
+    if (model === undefined || typeof effort !== "string" || !EFFORTS.includes(effort) || typeof speed !== "string" || !model.speeds.includes(speed)) {
+      return null;
+    }
+    return { vendor, model: label, effort, speed };
   }
   Pick2.read = read;
   function window2(pick, offer) {
@@ -2363,7 +2409,11 @@ function view_live(v, agent) {
 function link_open(v, link) {
   const ws = link.open("?tab=" + v.tab + "&wire=" + WIRE);
   let heard = Date.now();
-  const tick = setInterval(() => Date.now() - heard > PING && drop(), PING / 2);
+  const tick = setInterval(() => {
+    if (Date.now() - heard > PING) {
+      drop();
+    }
+  }, PING / 2);
   async function drop() {
     const up = v.up;
     ws.onmessage = null;
@@ -2379,14 +2429,14 @@ function link_open(v, link) {
     for (const post of v.up && v.ws === ws ? v.out.filter((p) => p.ws !== ws) : []) {
       post.ws = ws;
       if ("body" in post.msg) {
-        upload(post);
+        upload(post, post.msg);
       } else {
         ws.send(JSON.stringify(post.msg));
       }
     }
   }
-  async function upload(post) {
-    const { body, ...rest } = post.msg;
+  async function upload(post, msg) {
+    const { body, ...rest } = msg;
     const query = Object.entries(rest).map(([k, x]) => k + "=" + encodeURIComponent(String(x)));
     const res = await link.post("/api/act?" + query.join("&"), await body()).catch(() => null);
     const out = await res?.json().catch(() => null);
@@ -2414,7 +2464,7 @@ function link_open(v, link) {
       flush();
     }
   };
-  ws.onclose = () => drop();
+  ws.onclose = () => void drop();
 }
 function link_send(v, msg, done = (a) => link_note(v, a), said = "") {
   v.out.push({ msg: { id: uuid(), ...msg }, ws: null, done, said });
@@ -2433,7 +2483,7 @@ async function post(url, body, auth = {}) {
   const headers = { ...auth, "content-type": "application/json" };
   const res = await fetch(url, { method: "POST", headers, body: JSON.stringify(body) }).catch(() => null);
   const out = res === null ? { error: "Can't reach the server." } : await res.json().catch(() => res.ok ? {} : { error: "HTTP " + res.status });
-  return { ...out, ok: res?.ok === true, status: res?.status ?? 0 };
+  return { ...rec(out) ? out : {}, ok: res?.ok === true, status: res?.status ?? 0 };
 }
 function part_due(v, part, before) {
   const last = before === undefined ? NaN : part_window(v, before);
@@ -2527,6 +2577,21 @@ function entry_body(kind, text, label, tool) {
       return md_parse(text);
     }
   }
+}
+
+// web/src/Dom.ts
+function must(x, what) {
+  if (x === null || x === undefined) {
+    throw new Error("no " + what);
+  }
+  return x;
+}
+function find(root, sel, type) {
+  const el = root.querySelector(sel);
+  if (!(el instanceof type)) {
+    throw new Error("no " + sel);
+  }
+  return el;
 }
 
 // web/src/Box.ts
@@ -2748,7 +2813,7 @@ function item_fit(item, w, h) {
 }
 function item_state(item, state, note, url = "") {
   item.dataset.state = state;
-  item.querySelector(".state").textContent = note;
+  must(item.querySelector(".state"), "the item's state").textContent = note;
   if (url !== "") {
     const bang = media_kind(url) === null ? "" : "!";
     item.dataset.md = bang + "[" + (item.dataset.name ?? "").replace(/[[\]\\\n]/g, "") + "](" + url + ")";
@@ -2757,7 +2822,7 @@ function item_state(item, state, note, url = "") {
 var SIZES = new Map;
 function box_sizes(el) {
   for (const small of el.querySelectorAll("[data-of]:empty")) {
-    const url = small.dataset.of;
+    const url = small.dataset.of ?? "";
     const got = SIZES.get(url) ?? size_ask(url);
     SIZES.set(url, got);
     got.then((text) => {
@@ -2893,7 +2958,7 @@ function point(n) {
 }
 function beside(back) {
   const sel = getSelection();
-  if (sel === null || sel.rangeCount === 0 || !sel.isCollapsed || !BOX.contains(sel.anchorNode)) {
+  if (sel === null || sel.anchorNode === null || sel.rangeCount === 0 || !sel.isCollapsed || !BOX.contains(sel.anchorNode)) {
     return null;
   }
   const [node, off] = [sel.anchorNode, sel.anchorOffset];
@@ -2979,7 +3044,7 @@ function html_media(el) {
   if (url === null || url.origin !== location.origin || !ok) {
     return null;
   }
-  const name = el.getAttribute("download") || el.getAttribute("alt") || el.getAttribute("title") || url.pathname.split("/").pop();
+  const name = el.getAttribute("download") || el.getAttribute("alt") || el.getAttribute("title") || (url.pathname.split("/").pop() ?? "");
   return { name, url: url.pathname };
 }
 
@@ -2988,18 +3053,25 @@ var AHEAD = 8 * 366;
 var DAYS = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
 var CLOCKS = new Map;
 function clock(zone) {
-  if (!CLOCKS.has(zone)) {
-    try {
-      const fields = { year: "numeric", month: "numeric", day: "numeric", hour: "numeric", minute: "numeric", weekday: "short" };
-      CLOCKS.set(zone, new Intl.DateTimeFormat("en-US", { timeZone: zone, hourCycle: "h23", ...fields }));
-    } catch {
-      return null;
-    }
+  const had = CLOCKS.get(zone);
+  if (had !== undefined) {
+    return had;
   }
-  return CLOCKS.get(zone);
+  try {
+    const fields = { year: "numeric", month: "numeric", day: "numeric", hour: "numeric", minute: "numeric", weekday: "short" };
+    const made = new Intl.DateTimeFormat("en-US", { timeZone: zone, hourCycle: "h23", ...fields });
+    CLOCKS.set(zone, made);
+    return made;
+  } catch {
+    return null;
+  }
 }
 function wall(ms, zone) {
-  const parts = Object.fromEntries(clock(zone).formatToParts(ms).map((p) => [p.type, p.value]));
+  const c = clock(zone);
+  if (c === null) {
+    throw new Error("no time zone " + zone);
+  }
+  const parts = Object.fromEntries(c.formatToParts(ms).map((p) => [p.type, p.value]));
   return { y: Number(parts.year), mo: Number(parts.month), d: Number(parts.day), h: Number(parts.hour) % 24, mi: Number(parts.minute), wd: DAYS[parts.weekday] };
 }
 function wall_show(ms, zone) {
@@ -3218,10 +3290,10 @@ function setting_html(r) {
 function control_html(r) {
   switch (r.key) {
     case "vendors": {
-      return checks_html("vendors", VENDORS, list(r.value), () => "") + `<p class="warn"></p>`;
+      return checks_html("vendors", VENDORS, list2(r.value), () => "") + `<p class="warn"></p>`;
     }
     case "models": {
-      return checks_html("models", LABELS, list(r.value), (x) => Pick.models(VENDORS, [x]).map(([vendor]) => vendor).join(" "));
+      return checks_html("models", LABELS, list2(r.value), (x) => Pick.models(VENDORS, [x]).map(([vendor]) => vendor).join(" "));
     }
     case "pick":
     case "compactor":
@@ -3234,7 +3306,7 @@ function control_html(r) {
   }
   return `<input id="set-${r.key}" name="${r.key}" value="${esc(r.value)}" placeholder="${esc(r.def)}" spellcheck="false" autocapitalize="off">`;
 }
-function list(text) {
+function list2(text) {
   return text.split(",").map((x) => x.trim()).filter((x) => x !== "");
 }
 function list_changed(was, now) {
@@ -3356,7 +3428,7 @@ function file_html(shown, from, lines) {
   return `<pre class="diff" style="--nw:${nw}ch">${head}<code>${body}</code></pre>`;
 }
 function chip_html(url, name) {
-  const shown = name.trim() || url.split("/").pop();
+  const shown = name.trim() || (url.split("/").pop() ?? "");
   return `<a class="file" href="${esc(url)}" download="${esc(shown)}" title="Download ${esc(shown)}"><span class="ic">\uD83D\uDCCE</span><span class="fname">${esc(shown)}</span><small data-of="${esc(url)}"></small></a>`;
 }
 function spans_html(spans) {
@@ -3418,7 +3490,7 @@ function tree_show(which) {
     return;
   }
   const me = ++S.asked;
-  fetch("/api/tree").then((r) => r.ok ? r.json() : Promise.reject()).then((meta) => {
+  fetch("/api/tree").then((r) => r.ok ? r.json() : Promise.reject(new Error("HTTP " + r.status))).then((meta) => {
     if (me === S.asked && S.want !== null) {
       S.run = start(meta);
       S.run.show(S.want);
@@ -3512,7 +3584,7 @@ function start(meta) {
       }
     }
     sums();
-    const cards = cols.map(() => []);
+    const bases = cols.map(() => []);
     const halves = (l, i, y, h, d) => {
       if (l < 0)
         return;
@@ -3521,19 +3593,19 @@ function start(meta) {
         return;
       for (let j = 0;j < n; j++) {
         const c = at(l, i) / len(l - 1) + j, t = y + j * (k + g);
-        cards[l].push([l - 1, c, t, k, at(l - 1, c), at(l - 1, c) + len(l - 1), d]);
+        bases[l].push([l - 1, c, t, k, at(l - 1, c), at(l - 1, c) + len(l - 1), d]);
         halves(l - 1, c, t, k, d + 1);
       }
     };
     F.forEach(([l, i], k) => {
       const t = P[k] + (slot[k] - G - height(l, i)) / 2;
-      cards[L + 1].push([l, i, t, height(l, i), A[k], A[k] + len(l), 0]);
+      bases[L + 1].push([l, i, t, height(l, i), A[k], A[k] + len(l), 0]);
       halves(l, i, t, height(l, i), 1);
     });
-    ups.forEach((list, l) => list.forEach(([i, a, b]) => cards[l + 1].push([l, i, (P[a] + P[b] - G - height(l, i)) / 2, height(l, i), at(l, i), at(l, i) + len(l), 0])));
-    cards.forEach((list, c) => list.forEach((q, x) => {
-      const v = link(cards, c, x);
-      q.push(v, v[2] < 0 ? q[2] : Math.min(q[2], q[2] + v[1]), v[2] < 0 ? q[2] + q[3] : Math.max(q[2] + q[3], q[2] + v[1] + v[2] + 1));
+    ups.forEach((list, l) => list.forEach(([i, a, b]) => bases[l + 1].push([l, i, (P[a] + P[b] - G - height(l, i)) / 2, height(l, i), at(l, i), at(l, i) + len(l), 0])));
+    const cards = bases.map((list, c) => list.map((q, x) => {
+      const v = link(bases, c, x);
+      return [...q, v, v[2] < 0 ? q[2] : Math.min(q[2], q[2] + v[1]), v[2] < 0 ? q[2] + q[3] : Math.max(q[2] + q[3], q[2] + v[1] + v[2] + 1)];
     }));
     return { F, A, P, slot, find, cards, total: P[F.length] };
   };
@@ -3554,20 +3626,27 @@ function start(meta) {
     s.li = [l, i];
     s.append(document.createElement("h4"), document.createElement("pre"));
     s.firstChild.textContent = l < 0 ? "ROOT #" + i : "LVL" + l + " #" + at(l, i) + (l > 0 ? "-" + (at(l, i) + len(l) - 1) : "");
-    has(l, i) || (s.classList.add("none"), x = { h: s.firstChild.textContent, t: "Not summarized yet." });
-    x && fill(s, x);
+    if (!has(l, i)) {
+      s.classList.add("none");
+      x = { h: s.firstChild.textContent, t: "Not summarized yet." };
+    }
+    if (x) {
+      fill(s, x);
+    }
     return s;
   };
   const fill = (s, x) => {
     s.classList.remove("wait");
-    /^\w+$/.test(x.k ?? "") && s.classList.add(x.k);
+    if (x.k !== undefined && /^\w+$/.test(x.k)) {
+      s.classList.add(x.k);
+    }
     s.firstChild.textContent = x.h;
     s.lastChild.textContent = x.t;
     s.fresh = true;
   };
   const near = () => [Math.floor(tree.scrollLeft / step()) - 1, (tree.scrollLeft + tree.clientWidth) / step()];
   const load = () => {
-    const { scrollTop: y, clientHeight: sh } = tree, [c0, c1] = near(), want = [...shown.keys()].filter((k) => !shown.get(k).thin);
+    const { scrollTop: y, clientHeight: sh } = tree, [c0, c1] = near(), want = [...shown].filter(([, s]) => !s.thin).map(([k]) => k);
     plan.cards.forEach((list, c) => {
       for (let x = c < c0 || c > c1 ? list.length : lo(list, (q) => q[9] >= y - 4 * sh);x < list.length && list[x][8] <= y + 5 * sh; x++) {
         list[x][6] < 2 && want.push(list[x][0] + "." + list[x][1]);
@@ -3578,7 +3657,14 @@ function start(meta) {
       const part = keys.slice(j, j + 200), put = (list) => {
         if (signal.aborted)
           return;
-        part.forEach((k, x) => (got.set(k, list[x] ?? { h: k, t: "(none)" }), shown.has(k) && fill(shown.get(k), got.get(k))));
+        part.forEach((k, x) => {
+          const one = list[x] ?? { h: k, t: "(none)" };
+          got.set(k, one);
+          const s = shown.get(k);
+          if (s !== undefined) {
+            fill(s, one);
+          }
+        });
         moving || draw();
       };
       part.forEach((k) => got.set(k, null));
@@ -3590,10 +3676,10 @@ function start(meta) {
       return;
     const p = plan, sh = tree.clientHeight, keep = new Set, [c0, c1] = near();
     cols.forEach((col, c) => {
-      col.style.height = Y + Math.max(p.total, e < 1 ? old.total : 0) + 4 * em + "px";
+      col.style.height = Y + Math.max(p.total, e < 1 ? old?.total ?? 0 : 0) + 4 * em + "px";
       const list = p.cards[c];
       for (let x = c < c0 || c > c1 ? list.length : lo(list, (q) => q[9] >= y - sh / 2);x < list.length && list[x][8] <= y + 1.5 * sh; x++) {
-        const [l, i, t, h, , , , [up, ...v]] = list[x], k = l + "." + i, w = e < 1 && (old.get(k) ?? from(old, l, i));
+        const [l, i, t, h, , , , [up, ...v]] = list[x], k = l + "." + i, w = e < 1 && old !== undefined && (old.get(k) ?? from(old, l, i));
         const s = shown.get(k) ?? make(l, i);
         s.parentNode !== col && col.append(s);
         shown.set(k, s);
@@ -3607,7 +3693,12 @@ function start(meta) {
     shown.forEach((s, k) => keep.has(k) || (s === big && shut(true), s.remove(), shown.delete(k)));
     const upto = L < 0 ? N : B[L].length * 2 ** L;
     upto < N ? note.textContent = (N - upto === 1 ? "Message #" + upto + " isn't" : "Messages #" + upto + "-" + (N - 1) + " aren't") + " in a LVL" + L + " summary yet: each holds " + 2 ** L + "." : note.remove();
-    upto < N && (note.style.top = Y + p.total + "px", note.parentNode !== cols[L + 1] && cols[L + 1].append(note));
+    if (upto < N) {
+      note.style.top = Y + p.total + "px";
+      if (note.parentNode !== cols[L + 1]) {
+        cols[L + 1].append(note);
+      }
+    }
     y !== tree.scrollTop && (tree.scrollTop = y);
     back.disabled = tree.scrollLeft < 1;
     next.disabled = tree.scrollLeft + tree.clientWidth >= tree.scrollWidth - 1;
@@ -3626,7 +3717,7 @@ function start(meta) {
     s === big || (s.style.height = hc + "px");
     [["--t", a - d], ["--h", h], ["--m", m], ["--c", hc / 2 - d], ["--hm", Math.max(0, (1 - f) * (hc - HL) / 2 + f * HM)], ["--pb", f * PB]].forEach(([name, z]) => s.style.setProperty(name, z + "px"));
     s.style.setProperty("--o", String(f));
-    if (one !== !!s.one) {
+    if (one !== (s.one ?? false)) {
       s.one = one;
       s.classList.toggle("one", one);
       s.tabIndex = one ? -1 : 0;
@@ -3645,7 +3736,7 @@ function start(meta) {
     return null;
   };
   const ease = (s) => {
-    s.offsetHeight;
+    s.getBoundingClientRect();
     s.classList.add("ease");
     clearTimeout(s.eased);
     s.eased = setTimeout(() => s.classList.remove("ease"), 200);
@@ -3685,7 +3776,7 @@ function start(meta) {
   const press = (s) => {
     if (s.one)
       return shut(), slide(cols.indexOf(s.parentNode));
-    const sel = getSelection();
+    const sel = must(getSelection(), "a selection");
     if (s === big)
       return (sel.isCollapsed || !s.contains(sel.anchorNode)) && shut();
     shut();
@@ -3728,7 +3819,12 @@ function start(meta) {
     const frame = (now) => {
       const e = D ? Math.min(1, (now - t0) / D) : 1, f = 1 - (1 - e) ** 3;
       if (me === moving) {
-        e < 1 ? (draw(y0 + (y1 - y0) * f, f, old), requestAnimationFrame(frame)) : done();
+        if (e < 1) {
+          draw(y0 + (y1 - y0) * f, f, old);
+          requestAnimationFrame(frame);
+        } else {
+          done();
+        }
       }
     };
     done = () => me === moving && (moving = 0, draw(y1));
@@ -3743,7 +3839,10 @@ function start(meta) {
     wait = setTimeout(pack, end ? 0 : 150);
   }, { signal });
   tree.addEventListener("scroll", () => {
-    tree.scrollLeft !== left && (left = tree.scrollLeft, sliding = true, moving = 0, shut(true));
+    if (tree.scrollLeft !== left) {
+      [left, sliding, moving] = [tree.scrollLeft, true, 0];
+      shut(true);
+    }
     moving || draw();
   }, { signal });
   plan = layout(L);
@@ -3755,7 +3854,10 @@ function start(meta) {
         shut(true);
         shown.forEach((s) => s.fresh = !s.classList.contains("wait"));
       }
-      started || (started = true, tree.scrollLeft = (L + 1) * step());
+      if (!started) {
+        started = true;
+        tree.scrollLeft = (L + 1) * step();
+      }
       redo();
     }
   };
@@ -3795,7 +3897,12 @@ function start(meta) {
     if (!on)
       return;
     const c = Math.max(0, Math.min(Math.round(tree.scrollLeft / step()), Math.ceil((tree.scrollWidth - tree.clientWidth) / step())));
-    Math.abs(tree.scrollLeft - c * step()) < 1 ? (tree.classList.remove("drag"), pack()) : slide(c);
+    if (Math.abs(tree.scrollLeft - c * step()) < 1) {
+      tree.classList.remove("drag");
+      pack();
+    } else {
+      slide(c);
+    }
   };
   addEventListener("pointerup", drop, { signal });
   addEventListener("pointercancel", drop, { signal });
@@ -3809,7 +3916,12 @@ function start(meta) {
   };
   tree.addEventListener("click", (e) => {
     const s = e.target.closest(".s");
-    s ? press(s) : (shut(), go(e.target));
+    if (s) {
+      press(s);
+    } else {
+      shut();
+      go(e.target);
+    }
   }, { signal });
   tree.addEventListener("keydown", (e) => {
     const t = e.target;
@@ -3823,7 +3935,10 @@ function start(meta) {
   let viewed = false;
   return {
     show: (w) => {
-      w === "VIEW" && !viewed && (viewed = true, $(".view").scrollTop = 0);
+      if (w === "VIEW" && !viewed) {
+        viewed = true;
+        $(".view").scrollTop = 0;
+      }
       which = w;
       show();
     },
@@ -3856,13 +3971,13 @@ var PTS = new Map;
 var G = null;
 var TAP = null;
 function viewer_new() {
-  D = document.querySelector("#viewer");
-  STAGE = D.querySelector(".stage");
-  IMG = STAGE.querySelector("img");
+  D = find(document, "#viewer", HTMLDialogElement);
+  STAGE = find(D, ".stage", HTMLElement);
+  IMG = find(STAGE, "img", HTMLImageElement);
   D.addEventListener("close", closed);
-  D.querySelector(".shut").onclick = () => D.close();
-  D.querySelector(".prev").onclick = () => step(-1);
-  D.querySelector(".next").onclick = () => step(1);
+  find(D, ".shut", HTMLElement).onclick = () => D.close();
+  find(D, ".prev", HTMLElement).onclick = () => step(-1);
+  find(D, ".next", HTMLElement).onclick = () => step(1);
   D.addEventListener("keydown", key);
   D.addEventListener("wheel", wheel, { passive: false });
   STAGE.addEventListener("pointerdown", down);
@@ -3907,9 +4022,11 @@ function viewer_open(pic, push = true, el = null) {
   }
 }
 function viewer_sync() {
-  const pic = history.state?.pic;
-  if (typeof pic?.src === "string" && typeof pic.name === "string") {
-    viewer_open({ src: pic.src, name: pic.name, log: pic.log === true }, false);
+  const state = history.state;
+  const pic = get(state, "pic");
+  const [src, name] = [get(pic, "src"), get(pic, "name")];
+  if (typeof src === "string" && typeof name === "string") {
+    viewer_open({ src, name, log: get(pic, "log") === true }, false);
   } else if (D.open) {
     D.close();
   }
@@ -3921,22 +4038,23 @@ function closed() {
   PTS.clear();
   G = TAP = null;
   IMG.removeAttribute("src");
-  if (history.state?.pic != null) {
+  const state = history.state;
+  if (get(state, "pic") != null) {
     history.back();
   }
 }
 function show(pic) {
   V.pic = pic;
   V.w = V.h = V.swipe = 0;
-  D.querySelector(".name").textContent = pic.name;
-  D.querySelector(".zoom").textContent = "";
-  const get = D.querySelector(".get");
+  must(D.querySelector(".name"), ".name").textContent = pic.name;
+  must(D.querySelector(".zoom"), ".zoom").textContent = "";
+  const get = find(D, ".get", HTMLAnchorElement);
   get.href = pic.src;
   get.download = file_name(pic);
   const [list, k] = place();
-  D.querySelector(".prev").hidden = k <= 0;
-  D.querySelector(".next").hidden = k < 0 || k >= list.length - 1;
-  D.querySelector(".why").hidden = true;
+  find(D, ".prev", HTMLElement).hidden = k <= 0;
+  find(D, ".next", HTMLElement).hidden = k < 0 || k >= list.length - 1;
+  find(D, ".why", HTMLElement).hidden = true;
   IMG.classList.add("wait");
   IMG.alt = pic.name;
   IMG.src = pic.src;
@@ -3958,7 +4076,7 @@ function show(pic) {
     if (IMG.complete && IMG.naturalWidth > 0) {
       loaded();
     } else {
-      D.querySelector(".why").hidden = false;
+      find(D, ".why", HTMLElement).hidden = false;
     }
   });
 }
@@ -3966,7 +4084,7 @@ function place() {
   if (V.pic === null || !V.pic.log) {
     return [[], -1];
   }
-  const list = [...document.querySelectorAll(PICS)].map((img) => viewer_pic(img));
+  const list = [...document.querySelectorAll(PICS)].flatMap((img) => viewer_pic(img) ?? []);
   const src = V.pic.src;
   const at = list.flatMap((p, k) => p.src === src ? [k] : []);
   const k = at.reduce((best, k) => best < 0 || Math.abs(k - V.n) < Math.abs(best - V.n) ? k : best, -1);
@@ -4023,7 +4141,7 @@ function hold() {
 function draw() {
   IMG.style.transform = `translate(${V.x + V.swipe}px, ${V.y}px) scale(${V.s})`;
   D.classList.toggle("big", !fitted());
-  D.querySelector(".zoom").textContent = V.w === 0 ? "" : Math.round(V.s * 100) + "%";
+  must(D.querySelector(".zoom"), ".zoom").textContent = V.w === 0 ? "" : Math.round(V.s * 100) + "%";
 }
 function toggle(x, y) {
   const big = V.fit < 0.999 ? 1 : V.fit * 2.5;
@@ -4195,9 +4313,9 @@ var SCENES = `
   <div class="scene"><p>Your entire life.</p><p>One single chat.</p></div>
   <div class="scene"><i class="mark"></i><h1>UniiChat</h1></div>`;
 var v = view_new();
-var BOX2 = $2(".composer .field");
+var BOX2 = $2(".composer .field", HTMLElement);
 var UPS = new Map;
-var BACK = $2("#import [name=back]");
+var BACK = $2("#import [name=back]", HTMLInputElement);
 var P = {
   rec: null,
   shown: "",
@@ -4227,8 +4345,8 @@ var P = {
   after: false,
   at: ""
 };
-function $2(sel) {
-  return document.querySelector(sel);
+function $2(sel, type = HTMLElement) {
+  return find(document, sel, type);
 }
 function kept(fact) {
   return "unii." + fact;
@@ -4239,7 +4357,8 @@ async function boot() {
     navigator.serviceWorker?.register("/sw.js").catch(() => {});
   }
   const tree = location.pathname === TREE ? TREE + (tree_view() ? "#view" : "") : null;
-  const pic = history.state?.pic != null;
+  const state = history.state;
+  const pic = get(state, "pic") != null;
   history.replaceState(null, "", PAGES.includes(location.pathname) ? "/settings" : tree ?? "/");
   if (pic) {
     history.back();
@@ -4291,7 +4410,7 @@ function solo(title, sub) {
   document.body.innerHTML = `<main><h1>${title}</h1><p class="sub">${sub}</p></main>`;
 }
 function chat() {
-  const file = $2("input[type=file]");
+  const file = $2("input[type=file]", HTMLInputElement);
   box_new(BOX2, { input: typed, files: attach });
   BOX2.addEventListener("blur", () => draw2(false));
   BOX2.onkeydown = (ev) => {
@@ -4324,7 +4443,7 @@ function chat() {
     }
   };
   document.onclick = click;
-  visualViewport.onresize = () => {
+  must(visualViewport, "visualViewport").onresize = () => {
     if (box_focused() && box_caret()[0] === box_text().length) {
       BOX2.scrollTop = BOX2.scrollHeight;
     }
@@ -4478,7 +4597,7 @@ function click(ev) {
   }
   const cut = target.closest(".unfold") ?? (el === null && target.closest("a") === null ? target.closest(".msg.long:not(.shown) > .cut") : null);
   if (cut !== null && (sel === null || sel.isCollapsed)) {
-    unfold(cut.parentElement);
+    unfold(must(cut.parentElement, "the cut's message"));
     return;
   }
   if (el === null || sel !== null && !sel.isCollapsed && el.contains(sel.focusNode)) {
@@ -4546,7 +4665,7 @@ var FOLD2 = 10;
 var measured = new WeakSet;
 function folds() {
   for (const cut of document.querySelectorAll("#log .msg > .cut")) {
-    const msg = cut.parentElement;
+    const msg = must(cut.parentElement, "the cut's message");
     if (!measured.has(msg)) {
       measured.add(msg);
       msg.classList.toggle("long", cut.scrollHeight > FOLD2 * parseFloat(getComputedStyle(cut).lineHeight));
@@ -4556,7 +4675,7 @@ function folds() {
 }
 function fold_show(msg, open) {
   msg.classList.toggle("shown", open);
-  const button = msg.querySelector(":scope > .unfold");
+  const button = must(msg.querySelector(":scope > .unfold"), "the message's unfold");
   button.setAttribute("aria-expanded", String(open));
   button.textContent = open ? "Show less" : "Show all";
 }
@@ -4621,8 +4740,8 @@ function meter(stream, rec) {
   const probe = audio.createAnalyser();
   audio.createMediaStreamSource(stream).connect(probe);
   const buf = new Uint8Array(probe.fftSize);
-  const canvas = $2(".voice canvas");
-  const pen = canvas.getContext("2d");
+  const canvas = $2(".voice canvas", HTMLCanvasElement);
+  const pen = must(canvas.getContext("2d"), "a 2d canvas");
   const levels = [];
   const start = performance.now();
   const frame = (now) => {
@@ -4713,14 +4832,15 @@ function hear(msg) {
   draw2(true);
 }
 function importer() {
-  const form = $2("#import form");
-  const dir = $2("#import [name=dir]");
-  $2(".imp").onclick = () => import_open(false);
-  const zip = $2("#import [name=zip]");
+  const form = $2("#import form", HTMLFormElement);
+  const dir = $2("#import [name=dir]", HTMLInputElement);
+  $2(".imp").onclick = () => void import_open(false);
+  const zip = $2("#import [name=zip]", HTMLInputElement);
   $2(".pickdir").onclick = () => dir.click();
   for (const src of import_srcs()) {
-    src.querySelector(".pickzip").onclick = () => zip.click();
-    src.querySelector(".pickzip").title = "From the website: " + EXPORTS[src.dataset.app] + ", which emails you a zip.";
+    const pick = find(src, ".pickzip", HTMLButtonElement);
+    pick.onclick = () => zip.click();
+    pick.title = "From the website: " + EXPORTS[src.dataset.app ?? ""] + ", which emails you a zip.";
   }
   $2(".into").onclick = () => {
     P.step = "";
@@ -4818,7 +4938,7 @@ function import_sent(out) {
   $2("#import").showPopover();
 }
 function import_plan2() {
-  const form = new FormData($2("#import form"));
+  const form = new FormData($2("#import form", HTMLFormElement));
   const want = { off: [...P.off], since: import_since(), tools: form.has("tools") };
   const found = [...P.found.values()].flatMap((read) => read.sessions);
   return import_plan(found, want, P.done);
@@ -4838,15 +4958,15 @@ function import_bar() {
   $2("#import form").hidden = going || P.step === "start";
   $2("#import .prog").hidden = !going;
   $2("#import .prog .title").textContent = done ? "Memory tree built" : "Building your memory tree";
-  $2("#import progress").value = part;
-  $2(".imping progress").value = part;
+  $2("#import progress", HTMLProgressElement).value = part;
+  $2(".imping progress", HTMLProgressElement).value = part;
   $2(".imping").hidden = run === null;
   $2(".imping").classList.toggle("why", why);
   $2(".imping span").textContent = why ? "Import paused" : "Building memory";
   $2(".imping").title = $2("#import .pct").textContent = said;
   $2("#import .prog .sub").hidden = why || done;
   $2("#import .flow").textContent = why ? "Resume" : "Pause";
-  $2("#import .flow").hidden = run === null;
+  $2("#import .flow", HTMLButtonElement).hidden = run === null;
   return going;
 }
 function import_draw(status) {
@@ -4870,22 +4990,22 @@ function import_draw(status) {
   $2("#import .tools").hidden = !sessions.some((s) => s.heads.some((m) => m.kind === "tool" || m.kind === "echo"));
   $2("#import .found").textContent = found + moved;
   for (const src of import_srcs()) {
-    const list = src.querySelector(".sessions");
+    const list = must(src.querySelector(".sessions"), "#import .sessions");
     const shown = plan.sessions.filter((s) => s.app === src.dataset.app);
     markup(list, shown.map((s) => `<label title="${esc(s.where + ", " + import_count(s.heads.length, ""))}"><input type="checkbox" name="session" value="${esc(import_id(s))}">${import_cells(s).map((c) => `<span>${esc(c)}</span>`).join("")}</label>`));
     list.querySelectorAll("input").forEach((box) => box.checked = !P.off.has(box.value));
     const on = shown.filter((s) => !P.off.has(import_id(s))).length;
-    src.querySelector(".pick").hidden = shown.length === 0;
-    src.querySelector(".pick summary").textContent = (on < shown.length ? on + " of " : shown.length > 1 ? "All " : "") + shown.length + (shown.length === 1 ? " session" : " sessions") + " picked · choose";
+    find(src, ".pick", HTMLElement).hidden = shown.length === 0;
+    must(src.querySelector(".pick summary"), "#import .pick summary").textContent = (on < shown.length ? on + " of " : shown.length > 1 ? "All " : "") + shown.length + (shown.length === 1 ? " session" : " sessions") + " picked · choose";
   }
   $2("#import .guess").textContent = status;
-  const [go, dir] = [$2("#import .go"), $2(".pickdir")];
+  const [go, dir] = [$2("#import .go", HTMLButtonElement), $2(".pickdir", HTMLButtonElement)];
   go.hidden = msgs === 0;
   go.disabled = status.startsWith("Reading");
   dir.textContent = msgs > 0 ? "Add a folder" : "Choose folder";
   dir.classList.toggle("alt", msgs > 0);
   dir.disabled = go.disabled;
-  import_srcs().forEach((src) => src.querySelector(".pickzip").disabled = dir.disabled);
+  import_srcs().forEach((src) => find(src, ".pickzip", HTMLButtonElement).disabled = dir.disabled);
 }
 function import_srcs() {
   return [...document.querySelectorAll("#import .src")];
@@ -4923,7 +5043,7 @@ function markup(el, htmls) {
 function html_parse(html) {
   const made = document.createElement("template");
   made.innerHTML = html;
-  const child = made.content.firstElementChild;
+  const child = must(made.content.firstElementChild, "an element in " + html.slice(0, 40));
   MARKUP.set(child, html);
   return child;
 }
@@ -4999,12 +5119,12 @@ function bars() {
   }
   if (P.due && !P.going && renew_free()) {
     P.going = true;
-    setTimeout(renew);
+    setTimeout(() => void renew());
   }
   const on = view_typing(v);
   const stop = on && v.busy && box_blank();
   const tabs = view_tabs(v);
-  const send = $2(".send");
+  const send = $2(".send", HTMLButtonElement);
   $2(".net").hidden = v.up;
   $2(".timers").hidden = v.timers.length === 0;
   $2(".timers span").textContent = String(v.timers.length);
@@ -5014,7 +5134,7 @@ function bars() {
   }
   send.classList.toggle("stop", stop);
   $2(".composer").hidden = !on;
-  $2(".mic").disabled = v.out.some((p) => p.msg.$ === "voice");
+  $2(".mic", HTMLButtonElement).disabled = v.out.some((p) => p.msg.$ === "voice");
   $2(".mic").classList.toggle("rec", P.rec !== null);
   $2(".composer").classList.toggle("rec", P.rec !== null);
   const knob = document.activeElement?.dataset?.knob;
@@ -5121,8 +5241,8 @@ async function account() {
     account_prompt(form);
   });
   mcp_draw();
-  el.querySelectorAll(".retry").forEach((retry) => retry.onclick = () => account());
-  $2("#account .out").onclick = signout;
+  el.querySelectorAll(".retry").forEach((retry) => retry.onclick = () => void account());
+  $2("#account .out").onclick = () => void signout();
   const bell = document.querySelector("#account .notify");
   bell?.addEventListener("click", () => {
     bell.disabled = true;
@@ -5140,7 +5260,8 @@ function mcp_draw() {
   if (box === null || v.pick === null) {
     return;
   }
-  const on = box.contains(document.activeElement) ? document.activeElement.getAttribute("aria-label") : null;
+  const active = document.activeElement;
+  const on = active !== null && box.contains(active) ? active.getAttribute("aria-label") : null;
   markup(box, mcp_html(v.mcp));
   [...box.querySelectorAll("[role=switch]")].find((b) => b.getAttribute("aria-label") === on)?.focus();
 }
@@ -5150,19 +5271,20 @@ async function signout() {
   location.href = "/";
 }
 async function account_prompt(form) {
-  const area = form.querySelector("textarea");
-  const why = form.querySelector(".why");
-  const save = form.querySelector("button");
+  const area = find(form, "textarea", HTMLTextAreaElement);
+  const why = must(form.querySelector(".why"), "the prompt's why");
+  const save = find(form, "button", HTMLButtonElement);
   const sent = area.value;
   save.disabled = true;
   P.saving++;
   const out = await post("/api/prompts", { [area.name]: sent });
   P.saving--;
   save.disabled = false;
+  const saved = get(out[area.name], "text");
   if (out.error === undefined && area.value === sent) {
-    area.value = out[area.name]?.text ?? sent;
+    area.value = text_of(saved, sent);
   }
-  why.textContent = out.error ?? (area.value === out[area.name]?.text ? "Saved." : "Not saved yet: Save again.");
+  why.textContent = text_of(out.error, area.value === saved ? "Saved." : "Not saved yet: Save again.");
   form.classList.toggle("bad", out.error !== undefined);
   if (out.error === undefined && area.value === sent) {
     P.dirty.delete(form);
@@ -5212,10 +5334,10 @@ async function notify(on) {
   const what = on ? "on" : "off";
   try {
     const out = on ? await notify_on(push.reg, push.key) : await notify_off(push.reg);
-    toast(out.error ?? "Notifications are " + what + ".");
+    toast(text_of(out.error, "Notifications are " + what + "."));
   } catch (err) {
     const denied = typeof Notification !== "undefined" && Notification.permission === "denied";
-    toast(denied ? "Notifications are blocked in this browser's settings." : "Could not turn notifications " + what + ": " + (err?.message ?? err));
+    toast(denied ? "Notifications are blocked in this browser's settings." : "Could not turn notifications " + what + ": " + err_why(err));
   }
   account();
 }
@@ -5224,7 +5346,7 @@ async function notify_on(reg, key) {
   const ask = () => reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: bytes });
   const sub = await ask().catch(async (err) => {
     const old = await reg.pushManager.getSubscription();
-    if (old === null || err?.name !== "InvalidStateError") {
+    if (old === null || get(err, "name") !== "InvalidStateError") {
       throw err;
     }
     await old.unsubscribe();
@@ -5243,7 +5365,7 @@ async function notify_off(reg) {
 }
 function settings_draw(page) {
   $2("#account .owned").innerHTML = settings_html(page);
-  const form = $2("#account form.settings");
+  const form = $2("#account form.settings", HTMLFormElement);
   const rows = new Map(page.settings.map((r) => [r.key, r]));
   const unset = new Set;
   const profs = Object.entries(page.profiles ?? {});
@@ -5251,14 +5373,14 @@ function settings_draw(page) {
   const names = () => profs.map(([name]) => name.trim()).filter((name) => name !== "");
   const listed = (key) => {
     const boxes = [...form.querySelectorAll(`input[name="${key}"]`)];
-    return boxes.length === 0 ? list(rows.get(key).value) : boxes.filter((b) => b.checked).map((b) => b.value);
+    return boxes.length === 0 ? list2(rows.get(key)?.value ?? "") : boxes.filter((b) => b.checked).map((b) => b.value);
   };
   const picks = () => {
     const vendors = listed("vendors");
-    form.querySelectorAll(".opt[data-vendor]:not([data-vendor=''])").forEach((o) => o.hidden = !o.dataset.vendor.split(" ").some((v) => vendors.includes(v)));
+    form.querySelectorAll(".opt[data-vendor]:not([data-vendor=''])").forEach((o) => o.hidden = !(o.dataset.vendor ?? "").split(" ").some((v) => vendors.includes(v)));
     for (const key of PICKS) {
       const value = form.querySelector(`input[name="${key}"]`);
-      const four = value?.parentElement.querySelector(".four");
+      const four = value?.parentElement?.querySelector(".four");
       if (value && four) {
         const focus = document.activeElement?.name;
         four.innerHTML = picks_html(key, vendors, listed("models"), value.value, key === "agents" ? "The chat's pick" : null, names());
@@ -5281,9 +5403,9 @@ function settings_draw(page) {
     if (el === null) {
       return;
     }
-    unset.delete(el.dataset.key);
+    unset.delete(el.dataset.key ?? "");
     el.classList.remove("unset");
-    el.querySelector(".err").textContent = "";
+    must(el.querySelector(".err"), "the setting's err").textContent = "";
     const value = el.querySelector("input[type=hidden]");
     if (value !== null) {
       value.value = pick_mend([...el.querySelectorAll("select")].map((s) => s.value), listed("models"), names());
@@ -5298,16 +5420,16 @@ function settings_draw(page) {
     if (btn === null) {
       return;
     }
-    const el = btn.closest(".set");
-    const key = el.dataset.key;
+    const el = must(btn.closest(".set"), "the reset's setting");
+    const key = el.dataset.key ?? "";
     const r = rows.get(key);
-    el.querySelectorAll("input[type=checkbox]").forEach((b) => b.checked = list(r.def).includes(b.value));
+    el.querySelectorAll("input[type=checkbox]").forEach((b) => b.checked = list2(r?.def ?? "").includes(b.value));
     el.querySelectorAll("input:not([type=checkbox]), textarea").forEach((i) => i.value = r?.def ?? "");
     picks();
     unset.add(key);
     el.classList.add("unset");
     btn.hidden = true;
-    el.querySelector(".from").insertAdjacentText("beforeend", key.startsWith("key.") ? " · removed once saved" : " · the default once saved");
+    must(el.querySelector(".from"), "the setting's from").insertAdjacentText("beforeend", key.startsWith("key.") ? " · removed once saved" : " · the default once saved");
   };
   form.onsubmit = (ev) => {
     ev.preventDefault();
@@ -5321,7 +5443,7 @@ function settings_draw(page) {
   };
   const profs_changed = (focus) => {
     profs_draw(focus);
-    box.closest(".set").querySelector(".err").textContent = "";
+    must(box?.closest(".set")?.querySelector(".err"), "the profiles' err").textContent = "";
     picks();
   };
   const renamed = (was, now) => {
@@ -5382,8 +5504,8 @@ function settings_draw(page) {
       return;
     }
     ev.preventDefault();
-    const li = grip.closest("li");
-    const ol = li.parentElement;
+    const li = must(grip.closest("li"), "the grip's row");
+    const ol = must(li.parentElement, "the grip's list");
     const [i, from] = [Number(grip.dataset.i), Number(grip.dataset.j)];
     li.classList.add("drag");
     const move = (e) => {
@@ -5416,7 +5538,7 @@ async function settings_save(form, page, unset, listed, profs) {
       continue;
     }
     const field = form.querySelector(`input[name="${r.key}"]`);
-    const now = r.key === "vendors" || r.key === "models" ? list_changed(list(r.value), listed(r.key))?.join(",") ?? r.value : field?.value.trim() ?? r.value;
+    const now = r.key === "vendors" || r.key === "models" ? list_changed(list2(r.value), listed(r.key))?.join(",") ?? r.value : field?.value.trim() ?? r.value;
     if (unset.has(r.key)) {
       set[r.key] = null;
     } else if (now !== r.value) {
@@ -5431,7 +5553,7 @@ async function settings_save(form, page, unset, listed, profs) {
       keys[k.name] = typed;
     }
   }
-  const why = form.querySelector(".save .why");
+  const why = must(form.querySelector(".save .why"), "the save's why");
   form.querySelectorAll(".err").forEach((e) => e.textContent = "");
   let profiles;
   if (page.profiles != null) {
@@ -5439,8 +5561,8 @@ async function settings_save(form, page, unset, listed, profs) {
     const all = now.map(([name]) => name);
     const bad = all.includes("") ? "Name each profile." : all.some((name, k) => all.indexOf(name) !== k) ? "Two profiles have the same name." : now.some(([, list]) => list.length === 0) ? "Add a model to each profile." : null;
     if (bad !== null) {
-      const at = form.querySelector(".profiles");
-      at.querySelector(".err").textContent = bad;
+      const at = find(form, ".profiles", HTMLElement);
+      must(at.querySelector(".err"), "the profiles' err").textContent = bad;
       at.scrollIntoView({ block: "center" });
       return;
     }
@@ -5451,7 +5573,7 @@ async function settings_save(form, page, unset, listed, profs) {
     why.textContent = "Nothing changed.";
     return;
   }
-  const go = form.querySelector(".go");
+  const go = find(form, ".go", HTMLButtonElement);
   go.disabled = true;
   why.textContent = "";
   P.saving++;
@@ -5459,13 +5581,14 @@ async function settings_save(form, page, unset, listed, profs) {
   P.saving--;
   go.disabled = false;
   if (!out.ok) {
-    const at = out.key === undefined ? null : form.querySelector(`.set[data-key="${out.key}"]`);
-    (at?.querySelector(".err") ?? why).textContent = out.error ?? "Could not save.";
+    const at = out.key === undefined ? null : form.querySelector(`.set[data-key="${text_of(out.key, "null")}"]`);
+    (at?.querySelector(".err") ?? why).textContent = text_of(out.error, "Could not save.");
     (at ?? why).scrollIntoView({ block: "center" });
     return;
   }
-  const later = out.saved.filter((key) => page.settings.find((r) => r.key === key)?.apply === "restart");
-  settings_draw(out);
+  const done = out;
+  const later = done.saved.filter((key) => page.settings.find((r) => r.key === key)?.apply === "restart");
+  settings_draw(done);
   P.dirty.delete(form);
   P.since = true;
   draw2(false);
@@ -5497,7 +5620,7 @@ async function renew(hidden = false) {
   const tries = was === v.build ? Number(n) : 0;
   const store = isSecureContext && "caches" in window ? window.caches : null;
   const keys = await store?.keys().catch(() => []) ?? [];
-  await Promise.all(keys.filter((k) => k.startsWith("unii-shell")).map((k) => store?.delete(k)));
+  await Promise.all(store === null ? [] : keys.filter((k) => k.startsWith("unii-shell")).map((k) => store.delete(k)));
   if (tries > 0) {
     await Promise.all(["/", "/app.js", "/style.css", "/sw.js"].map((path) => fetch(path, { cache: "reload" }).catch(() => null)));
   }
@@ -5526,7 +5649,16 @@ function renewed() {
   P.back = back.at;
   P.away = back.away;
   const end = Date.now() + 3000;
-  const y = () => back.y !== null && (document.documentElement.scrollHeight >= back.y + innerHeight || Date.now() > end ? scrollTo(0, back.y) : setTimeout(y, 100));
+  const y = () => {
+    const to = back.y;
+    if (to !== null) {
+      if (document.documentElement.scrollHeight >= to + innerHeight || Date.now() > end) {
+        scrollTo(0, to);
+      } else {
+        setTimeout(y, 100);
+      }
+    }
+  };
   y();
 }
 function toast(text, stay = false) {

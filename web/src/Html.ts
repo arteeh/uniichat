@@ -399,7 +399,7 @@ function file_html(shown: string, from: number, lines: string[]): string {
 }
 
 function chip_html(url: string, name: string): string {
-  const shown = name.trim() || url.split("/").pop()!;
+  const shown = name.trim() || (url.split("/").pop() ?? "");
   return `<a class="file" href="${esc(url)}" download="${esc(shown)}" title="Download ${esc(shown)}"><span class="ic">📎</span><span class="fname">${esc(shown)}</span><small data-of="${esc(url)}"></small></a>`;
 }
 

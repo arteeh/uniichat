@@ -3,14 +3,17 @@
 import * as child from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { err_why } from "./Err.ts";
 import * as Update from "./Update.ts";
 
 const SET = /^--env=(UNII_DIR|XDG_CONFIG_HOME)=(.+)$/;
 const ARGS = process.argv.slice(2).filter((a) => !SET.test(a));
 const SETS = process.argv.slice(2).filter((a) => SET.test(a));
 for (const a of SETS) {
-  const [, k, v] = a.match(SET)!;
-  process.env[k] = v;
+  const m = SET.exec(a);
+  if (m !== null) {
+    process.env[m[1]] = m[2];
+  }
 }
 const WEB  = /^https?:\/\//;
 const URL_ = ARGS.find((a) => WEB.test(a));
@@ -127,15 +130,15 @@ if (part !== null && (FLAG.has("-d") || sub === "stop")) {
 
 if ((SETS.length > 0 && !FLAG.has("--service")) || (FLAG.size > 0 && !runs && !(part !== null && sub === "logs" && flags("-f")))) {
   fail("no command " + ARGS.join(" ") + ".\n\n" + USAGE);
-} else if (runs && FLAG.has("--service")) {
-  await (await import("./Service.ts")).supervise(part!, REST.slice(1).concat(URL_ ?? []));
-} else if (runs && FLAG.has("-d")) {
+} else if (runs && part !== null && FLAG.has("--service")) {
+  await (await import("./Service.ts")).supervise(part, REST.slice(1).concat(URL_ ?? []));
+} else if (runs && part !== null && FLAG.has("-d")) {
   if (part === "device") {
     await (await import("./Device.ts")).signin(URL_);
   } else {
     await serve_free();
   }
-  await (await import("./Service.ts")).start(part!, REST.slice(1));
+  await (await import("./Service.ts")).start(part, REST.slice(1));
 } else if (part !== null && sub === "stop" && !odd([cmd, sub]) && URL_ === undefined) {
   await (await import("./Service.ts")).stop(part);
 } else if (part !== null && sub === "logs" && !odd([cmd, sub]) && URL_ === undefined) {
@@ -150,26 +153,26 @@ if ((SETS.length > 0 && !FLAG.has("--service")) || (FLAG.size > 0 && !runs && !(
   update();
 } else if (runs && part === "device") {
   if (SERVICE === undefined) {
-    (await import("./Service.ts")).foreground(part!);
+    (await import("./Service.ts")).foreground(part);
   } else {
-    (await import("./Service.ts")).served(part!);
+    (await import("./Service.ts")).served(part);
   }
   await (await import("./Device.ts")).run(URL_);
 } else if (cmd === "serve" && sub === "chatgpt" && [undefined, "logout", "status"].includes(more) && !odd([cmd, sub, ...(more ? [more] : [])])) {
-  await (await import("./ChatGPT.ts")).ChatGPT.cli(REST.slice(1)).catch((err) => fail(err.message));
+  await (await import("./ChatGPT.ts")).ChatGPT.cli(REST.slice(1)).catch((err: unknown) => fail(err_why(err)));
 } else if (cmd === "serve" && sub === "claude" && [undefined, "logout", "status"].includes(more) && !odd([cmd, sub, ...(more ? [more] : [])])) {
-  await (await import("./ClaudeSub.ts")).ClaudeSub.cli(REST.slice(1)).catch((err) => fail(err.message));
+  await (await import("./ClaudeSub.ts")).ClaudeSub.cli(REST.slice(1)).catch((err: unknown) => fail(err_why(err)));
 } else if (cmd === "serve" && sub === "sessions" && !odd([cmd, sub])) {
   await (await import("./Owner.ts")).Owner.sessions();
 } else if (cmd === "serve" && sub === "revoke" && more !== undefined && !odd([cmd, sub, more])) {
-  await (await import("./Owner.ts")).Owner.sessions(more).catch((err) => fail(err.message));
+  await (await import("./Owner.ts")).Owner.sessions(more).catch((err: unknown) => fail(err_why(err)));
 } else if (cmd === "serve" && sub === "link" && !odd([cmd, sub])) {
   (await import("./Owner.ts")).Owner.cli();
 } else if (runs && part === "serve") {
   if (SERVICE === undefined) {
-    (await import("./Service.ts")).foreground(part!);
+    (await import("./Service.ts")).foreground(part);
   } else {
-    (await import("./Service.ts")).served(part!);
+    (await import("./Service.ts")).served(part);
   }
   await (await import("./Server.ts")).serve(Number(sub ?? 8788));
 } else {

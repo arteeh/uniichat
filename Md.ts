@@ -177,7 +177,8 @@ export function span_parse(s: string): Span[] {
       i += c === "[" ? 1 : 2;
     } else if (c === "]" && brackets.length > 0) {
       flush();
-      const o = brackets.pop()!;
+      const o = brackets[brackets.length - 1];
+      brackets.pop();
       links -= o.c === "[" ? 1 : 0;
       const on = !(o.c === "[" && brackets.length < dead);
       dead = Math.min(dead, brackets.length);
@@ -257,7 +258,7 @@ export function span_parse(s: string): Span[] {
       }
       const key = closer.c + closer.open + (closer.len % 3);
       let opener = closer.prev;
-      const low = floor.has(key) ? floor.get(key)! : bottom;
+      const low = floor.has(key) ? floor.get(key) ?? null : bottom;
       while (opener !== null && opener !== bottom && opener !== low) {
         const three = opener.c !== "~" && (opener.close || closer.open) && (opener.len + closer.len) % 3 === 0 && (opener.len % 3 !== 0 || closer.len % 3 !== 0);
         if (opener.c === closer.c && opener.open && !three && (opener.c !== "~" || opener.n === closer.n)) {
@@ -307,12 +308,14 @@ export function span_parse(s: string): Span[] {
     }
   }
 
+  // never the head: every other node has a prev
   function node_drop(node: Node): void {
-    node.prev!.next = node.next;
+    const prev = node.prev ?? head;
+    prev.next = node.next;
     if (node.next !== null) {
       node.next.prev = node.prev;
     } else {
-      tail = node.prev!;
+      tail = prev;
     }
   }
 }
@@ -375,7 +378,7 @@ function url_of(k: string): string {
 }
 
 function text_unescape(s: string): string {
-  return s.replace(/\\([!-/:-@[-`{-~])|&#?[0-9A-Za-z]{1,32};/g, (m, esc) => esc ?? entity(m) ?? m);
+  return s.replace(/\\([!-/:-@[-`{-~])|&#?[0-9A-Za-z]{1,32};/g, (m: string, esc: string | undefined) => esc ?? entity(m) ?? m);
 }
 
 function spans_push(spans: Span[], span: Span): void {
@@ -403,8 +406,9 @@ function ticks_at(s: string): (from: number, n: number) => number {
   const runs = new Map<number, number[]>();
   for (let i = s.indexOf("`"); i >= 0; i = s.indexOf("`", i)) {
     const n = run_len(s, i, "`");
-    runs.set(n, runs.get(n) ?? []);
-    runs.get(n)!.push(i);
+    const at = runs.get(n) ?? [];
+    runs.set(n, at);
+    at.push(i);
     i += n;
   }
   const seen = new Map<number, number>();
@@ -921,7 +925,7 @@ function list_parse(lines: string[], i: number, d: number): [Block, number] {
       continue;
     }
     if (list_kind(l) === kind && (items.length === 0 || at < w)) {
-      const mark = LIST.exec(l)![0];
+      const mark = LIST.exec(l)?.[0] ?? "";
       const rest = l.slice(mark.length);
       const pad  = indent(rest);
       w     = mark.length + (rest.trim() === "" || pad > 4 ? 1 : pad);
@@ -944,7 +948,7 @@ function list_parse(lines: string[], i: number, d: number): [Block, number] {
     }
     [blank, end] = [0, j + 1];
   }
-  const first = LIST.exec(lines[i])![1];
+  const first = LIST.exec(lines[i])?.[1] ?? "";
   const k     = /\d/.test(first);
   const parts = items.map((x) => blocks_parse(x, d + 1));
   const t     = !loose && !parts.some((p) => p[1]);
@@ -960,7 +964,13 @@ function item_line(s: string, fenced: boolean): [boolean, boolean] {
 }
 
 function untab(l: string): string {
-  return l.replace(/^[ \t]*(?:(?:[-*+]|\d{1,9}[.)])[ \t]+)*/, (pre) => [...pre].reduce((out, c) => out + (c === "\t" ? " ".repeat(4 - (out.length % 4)) : c), ""));
+  return l.replace(/^[ \t]*(?:(?:[-*+]|\d{1,9}[.)])[ \t]+)*/, (pre) => {
+    let out = "";
+    for (const c of pre) {
+      out += c === "\t" ? " ".repeat(4 - (out.length % 4)) : c;
+    }
+    return out;
+  });
 }
 
 function indent(l: string): number {

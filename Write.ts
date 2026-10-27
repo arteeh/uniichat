@@ -1,5 +1,6 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { err_code } from "./Err.ts";
 
 const WIN = process.platform === "win32";
 
@@ -54,8 +55,8 @@ export function move_over(from: string, to: string): void {
     try {
       fs.renameSync(from, to);
       return;
-    } catch (err: any) {
-      if (!WIN || k >= TRIES || !["EPERM", "EACCES", "EBUSY"].includes(err?.code)) {
+    } catch (err) {
+      if (!WIN || k >= TRIES || !["EPERM", "EACCES", "EBUSY"].includes(err_code(err) ?? "")) {
         throw err;
       }
       Bun.sleepSync(APART);

@@ -5,8 +5,10 @@ import * as path from "node:path";
 import * as Client from "./Client.ts";
 import { Machine, SCRATCH, WIN, type Job } from "./Machine.ts";
 import { Mcp } from "./Mcp.ts";
+import { err_code } from "./Err.ts";
+import { get, text_of } from "./Json.ts";
 import * as Service from "./Service.ts";
-import { FRAME, media_kind, PING, QUIT, RETRY, TICK, WIRE } from "./View.ts";
+import { FRAME, media_kind, PING, QUIT, RETRY, TICK, WIRE, type Server } from "./View.ts";
 
 const LOCAL = process.platform === "darwin" ? child.spawnSync("scutil", ["--get", "LocalHostName"]).stdout?.toString().trim() : "";
 const HOST  = LOCAL || os.hostname();
@@ -20,14 +22,12 @@ const BYE = 2000;
 export async function signin(given: string | undefined): Promise<{ url: string; token: string; name: string; work: string }> {
   const conf = Client.read("device");
   const url = Client.server(given, conf);
-  const name = String(conf.name ?? HOST);
-  const work = String(conf.work ?? WORK);
-  let token: string | undefined = conf.url === url ? conf.token : undefined;
-  if (!await Client.signed(url, token)) {
-    token = await Client.login(url, "the device " + name);
-  }
+  const name = text_of(conf.name, HOST);
+  const work = text_of(conf.work, WORK);
+  const saved = conf.url === url && typeof conf.token === "string" ? conf.token : undefined;
+  const token = saved !== undefined && await Client.signed(url, saved) ? saved : await Client.login(url, "the device " + name);
   Client.write("device", { ...conf, url, token, name, work });
-  return { url, token: token!, name, work };
+  return { url, token, name, work };
 }
 
 export async function run(given: string | undefined): Promise<void> {
@@ -35,7 +35,7 @@ export async function run(given: string | undefined): Promise<void> {
   console.log("unii device " + name + " on " + url + ", work dir " + work);
   const query = "?tab=" + crypto.randomUUID() + "&wire=" + WIRE + "&device=" + encodeURIComponent(name) + "&work=" + encodeURIComponent(work) + "&scratch=" + encodeURIComponent(SCRATCH) + (WIN ? "&shell=PowerShell" : "");
   const jobs = new Map<string, AbortController>();
-  const outs = new Map<string, object>();
+  const outs = new Map<string, { $: "out"; id: string; job: string; out: object }>();
   let ws: WebSocket | null = null;
   let quitting = false;
   const send = (msg: object) => ws?.readyState === WebSocket.OPEN && ws.send(JSON.stringify(msg));
@@ -44,12 +44,12 @@ export async function run(given: string | undefined): Promise<void> {
     const mcp = servers();
     if (mcp !== null && mcp !== told && ws?.readyState === WebSocket.OPEN) {
       told = mcp;
-      send({ $: "servers", id: crypto.randomUUID(), mcp: JSON.parse(mcp) });
+      send({ $: "servers", id: crypto.randomUUID(), mcp: JSON.parse(mcp) as unknown });
     }
   };
   setInterval(tell, LOOK);
   const open = () => {
-    const sock = (ws = new WebSocket(url.replace(/^http/, "ws") + "/ws" + query, { headers: Client.auth(token) } as any));
+    const sock = (ws = new Client.Socket(url.replace(/^http/, "ws") + "/ws" + query, { headers: Client.auth(token) }));
     let heard = Date.now();
     let up = false;
     const tick = setInterval(() => Date.now() - heard > PING && sock.close(), PING / 2);
@@ -65,9 +65,9 @@ export async function run(given: string | undefined): Promise<void> {
       if (ev.data === TICK) {
         return;
       }
-      const msg = JSON.parse(String(ev.data));
-      if (msg.$ === "job" && !jobs.has(msg.id) && ![...outs.values()].some((o: any) => o.job === msg.id)) {
-        job(msg.id, msg.job);
+      const msg = JSON.parse(String(ev.data)) as Server;
+      if (msg.$ === "job" && !jobs.has(msg.id) && ![...outs.values()].some((o) => o.job === msg.id)) {
+        void job(msg.id, msg.job);
       } else if (msg.$ === "jobs") {
         jobs.forEach((abort, id) => msg.ids.includes(id) || abort.abort());
       } else if (msg.$ === "ack") {
@@ -97,7 +97,7 @@ export async function run(given: string | undefined): Promise<void> {
     const most = FRAME - 1024;
     const big  = { text: "The output, " + size + " bytes, is over the " + most + " a tool may send.", fail: true };
     jobs.delete(id);
-    const act = { $: "out", id: crypto.randomUUID(), job: id, out: size > most ? big : out };
+    const act = { $: "out" as const, id: crypto.randomUUID(), job: id, out: size > most ? big : out };
     outs.set(act.id, act);
     send(act);
   };
@@ -154,16 +154,16 @@ async function show_one(file: string, shown: string, url: string, token: string,
 let said = "";
 function servers(): string | null {
   try {
-    const file = fs.existsSync(FILE) ? JSON.parse(fs.readFileSync(FILE, "utf8")) : {};
-    let mcp = file?.mcp || {};
+    const file: unknown = fs.existsSync(FILE) ? JSON.parse(fs.readFileSync(FILE, "utf8")) : {};
+    let mcp: unknown = get(file, "mcp") || {};
     if (typeof mcp === "string") {
       mcp = JSON.parse(mcp.trim().startsWith("{") ? mcp : fs.readFileSync(mcp.trim().replace(/^~(?=[\\/]|$)/, os.homedir()), "utf8"));
     }
     said = "";
     return JSON.stringify(mcp);
-  } catch (err: any) {
+  } catch (err) {
     // not the parser's why: it may quote a secret
-    const why = err instanceof SyntaxError ? "isn't JSON" : "can't be read (" + (err?.code ?? err) + ")";
+    const why = err instanceof SyntaxError ? "isn't JSON" : "can't be read (" + (err_code(err) ?? String(err)) + ")";
     if (why !== said) {
       said = why;
       console.error("unii: " + FILE + " or its mcp " + why + ": the MCP servers told stay as they were");

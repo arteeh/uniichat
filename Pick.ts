@@ -1,4 +1,5 @@
 import type { Vendor } from "./AskAI.ts";
+import { get } from "./Json.ts";
 
 export type Pick = {
   vendor   : Vendor;
@@ -68,7 +69,10 @@ export namespace Pick {
     const speeds = Pick.model(pick.vendor, pick.model)?.speeds ?? [];
     const { profile: _, ...plain } = pick;
     const all = Pick.models(offer.vendors, offer.models).map(([v, m]): [string, Pick] => [m.label, Pick.on(plain, v, m)]);
-    const profiles = Object.keys(offer.profiles ?? {}).map((name): [string, Pick] => [name, Pick.profile(name, offer, pick.effort, pick.speed)!]);
+    const profiles = Object.keys(offer.profiles ?? {}).flatMap((name): [string, Pick][] => {
+      const on = Pick.profile(name, offer, pick.effort, pick.speed);
+      return on === null ? [] : [[name, on]];
+    });
     switch (move) {
       case "next":
       case "prev":
@@ -135,7 +139,8 @@ export namespace Pick {
   }
 
   export function profile(name: string, offer: Offer, effort: string, speed: string): Pick | null {
-    const first = Object.hasOwn(offer.profiles ?? {}, name) ? offer.profiles![name][0] : undefined;
+    const profiles = offer.profiles ?? {};
+    const first = Object.hasOwn(profiles, name) ? profiles[name][0] : undefined;
     if (first === undefined) {
       return null;
     }
@@ -143,15 +148,20 @@ export namespace Pick {
     return { ...on, effort: first.effort ?? effort, speed: first.speed ?? on.speed, profile: name };
   }
 
-  export function read(x: any, offer: Offer): Pick | null {
-    if (x.profile !== undefined) {
-      return typeof x.profile === "string" && EFFORTS.includes(x.effort) ? Pick.profile(x.profile, offer, x.effort, String(x.speed)) : null;
+  export function read(x: unknown, offer: Offer): Pick | null {
+    const [profile, effort, speed, label] = [get(x, "profile"), get(x, "effort"), get(x, "speed"), get(x, "model")];
+    if (profile !== undefined) {
+      return typeof profile === "string" && typeof effort === "string" && EFFORTS.includes(effort) ? Pick.profile(profile, offer, effort, String(speed)) : null;
     }
-    const model = offer.vendors.includes(x.vendor) && offer.models.includes(x.model) ? Pick.model(x.vendor, x.model) : undefined;
-    if (model === undefined || !EFFORTS.includes(x.effort) || !model.speeds.includes(x.speed)) {
+    const vendor = offer.vendors.find((v) => v === get(x, "vendor"));
+    if (vendor === undefined || typeof label !== "string" || !offer.models.includes(label)) {
       return null;
     }
-    return { vendor: x.vendor, model: x.model, effort: x.effort, speed: x.speed };
+    const model = Pick.model(vendor, label);
+    if (model === undefined || typeof effort !== "string" || !EFFORTS.includes(effort) || typeof speed !== "string" || !model.speeds.includes(speed)) {
+      return null;
+    }
+    return { vendor, model: label, effort, speed };
   }
 
   export function window(pick: Pick, offer: Offer): number {

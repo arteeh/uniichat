@@ -1,6 +1,7 @@
 import { AskAI, type Ask, type Call, type End, type Event, type Parked } from "./AskAI.ts";
 import type { Pick } from "./Pick.ts";
 import type { Live } from "./View.ts";
+import { err_stack, err_why } from "./Err.ts";
 
 export type Waiting = { text: string; tool: string; logged: boolean; started: boolean };
 
@@ -88,8 +89,8 @@ export namespace Run {
           await Run.logs(run);
         }
       }
-    } catch (err: any) {
-      Run.safe(run, () => kind.failed(run, String(err?.message ?? err)));
+    } catch (err) {
+      Run.safe(run, () => kind.failed(run, err_why(err)));
     } finally {
       Run.safe(run, () => kind.ending(run));
       run.call = null;
@@ -115,8 +116,8 @@ export namespace Run {
         run.wait.push(msg);
         logged.push(q);
         done(null);
-      } catch (err: any) {
-        const why = "a message couldn't be logged: " + String(err?.message ?? err);
+      } catch (err) {
+        const why = "a message couldn't be logged: " + err_why(err);
         done(why);
         Run.safe(run, () => run.kind.failed(run, why));
       } finally {
@@ -133,8 +134,8 @@ export namespace Run {
   export function safe<Q, M>(run: Run<Q, M>, step: () => void): void {
     try {
       step();
-    } catch (err: any) {
-      console.error("unii: " + run.name + ": " + (err?.stack ?? err));
+    } catch (err) {
+      console.error("unii: " + run.name + ": " + err_stack(err));
     }
   }
 

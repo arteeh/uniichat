@@ -6,6 +6,8 @@ import { Limit } from "./Limit.ts";
 import { live_push } from "./View.ts";
 import { Machine, type Spec } from "./Machine.ts";
 import * as config from "./Config.ts";
+import { err_why } from "./Err.ts";
+import { get } from "./Json.ts";
 
 export type Out = { text: string; fail: boolean; imgs?: Img[] };
 
@@ -49,7 +51,15 @@ export type Refusal = { why: string; say: string; until?: number };
 
 export type Emit = (kind: Kind, text: string, fresh?: boolean) => void;
 
-export type Wire<S> = {
+export type Part = { type: string; text?: string; mimeType?: string; data?: string };
+
+type Listed = { tools: { name: string; description: string; inputSchema: object }[]; notes?: unknown };
+
+type Called = { content: Part[]; isError?: boolean };
+
+type Rpc = { "tools/list": Listed; "tools/call": Called };
+
+export type Wire<S, E> = {
   key     : string;
   auth?   : (refused: string | undefined) => Promise<string>;
   refusal?: (res: Response, body: string) => Refusal | null;
@@ -59,8 +69,8 @@ export type Wire<S> = {
   headers : (key: string, ask: Ask) => Record<string, string>;
   body    : (ask: Ask, items: Item[], tools: Tool[], max: number) => unknown;
   start   : (ask: Ask) => S;
-  read    : (st: S, ev: any, on: Emit) => boolean;
-  begun   : (ev: any) => boolean;
+  read    : (st: S, ev: E, on: Emit) => boolean;
+  begun   : (ev: E) => boolean;
   step    : (st: S, ask: Ask) => Step;
 };
 
@@ -103,8 +113,8 @@ export namespace Agent {
         } else {
           await Agent.loop(OpenAI.wire, run);
         }
-      } catch (err: any) {
-        end.text ||= err.message;
+      } catch (err) {
+        end.text ||= err_why(err);
       }
       end.ok = end.ok && !run.abort.signal.aborted;
       return end;
@@ -112,7 +122,7 @@ export namespace Agent {
     return { wake, stop, done };
   }
 
-  export async function loop<S>(wire: Wire<S>, run: Doing): Promise<void> {
+  export async function loop<S, E>(wire: Wire<S, E>, run: Doing): Promise<void> {
     const { ask, on, end } = run;
     const signal = run.abort.signal;
     const key = wire.auth ? "" : config.KEYS[wire.key];
@@ -167,7 +177,7 @@ export namespace Agent {
     }
   }
 
-  export async function step<S>(wire: Wire<S>, run: Doing, key: string, make: (max: number) => unknown, items: Item[]): Promise<Step> {
+  export async function step<S, E>(wire: Wire<S, E>, run: Doing, key: string, make: (max: number) => unknown, items: Item[]): Promise<Step> {
     const signal = run.abort.signal;
     const model = run.ask.model;
     const own = run.ask.yields === undefined ? model : model + " " + run.ask.yields;
@@ -189,8 +199,8 @@ export namespace Agent {
           return Agent.fail("stopped", seen);
         }
         const { res, step } = got;
-        if (res?.status === 401 && wire.auth && refused === undefined) {
-          refused = token as string;
+        if (res?.status === 401 && wire.auth && refused === undefined && typeof token === "string") {
+          refused = token;
           continue;
         }
         const limit = step.stop === "limit";
@@ -257,14 +267,14 @@ export namespace Agent {
     return after?.[1] ?? (told.length > 0 ? Math.max(...told.map(([, t]) => t)) : null);
   }
 
-  export async function token<S>(wire: Wire<S>, key: string, refused: string | undefined): Promise<string | Step> {
+  export async function token<S, E>(wire: Wire<S, E>, key: string, refused: string | undefined): Promise<string | Step> {
     if (wire.auth === undefined) {
       return key;
     }
     try {
       return await wire.auth(refused);
-    } catch (err: any) {
-      if (err?.busy !== true) {
+    } catch (err) {
+      if (!(err instanceof Error && "busy" in err && err.busy === true)) {
         throw err;
       }
       return Agent.fail(err.message, [], "busy");
@@ -311,7 +321,7 @@ export namespace Agent {
     }
   }
 
-  export async function request<S>(wire: Wire<S>, run: Doing, key: string, body: unknown, seen: Entry[]): Promise<{ res: Response | null; step: Step }> {
+  export async function request<S, E>(wire: Wire<S, E>, run: Doing, key: string, body: unknown, seen: Entry[]): Promise<{ res: Response | null; step: Step }> {
     const flight = await AskAI.wait(run.ask);
     if (run.abort.signal.aborted) {
       flight.end();
@@ -320,7 +330,7 @@ export namespace Agent {
     return Agent.send(wire, run, key, body, flight, seen);
   }
 
-  export async function send<S>(wire: Wire<S>, run: Doing, key: string, body: unknown, flight: Flight, seen: Entry[]): Promise<{ res: Response | null; step: Step }> {
+  export async function send<S, E>(wire: Wire<S, E>, run: Doing, key: string, body: unknown, flight: Flight, seen: Entry[]): Promise<{ res: Response | null; step: Step }> {
     const idle = new AbortController();
     const timer = setTimeout(() => idle.abort(new Error("no word from the API in " + wire.idle / 1e3 + " s")), wire.idle);
     const st = wire.start(run.ask);
@@ -342,9 +352,9 @@ export namespace Agent {
       const off = spent || OFF.includes(res.status) || refusal !== null;
       const stop = refusal !== null ? "down" : text !== null && Agent.limited(res, text) && !spent ? "limit" : text !== null && Agent.passing(res) && !spent ? "busy" : "down";
       const until = text !== null && stop === "limit" ? wire.reset?.(res, text) ?? undefined : undefined;
-      step = text !== null ? { ...Agent.fail(why, [], stop), off, refusal: refusal ?? undefined, until } : await Agent.stream(wire, run, res.body!, timer, seen, st, flight.begun);
-    } catch (err: any) {
-      step = Agent.fail(err.message, [], "busy");
+      step = text !== null || res.body === null ? { ...Agent.fail(why, [], stop), off, refusal: refusal ?? undefined, until } : await Agent.stream(wire, run, res.body, timer, seen, st, flight.begun);
+    } catch (err) {
+      step = Agent.fail(err_why(err), [], "busy");
     }
     clearTimeout(timer);
     flight.end();
@@ -356,8 +366,8 @@ export namespace Agent {
   // else the start of its body
   export function reason(body: string): string {
     try {
-      const json = JSON.parse(body);
-      const why = json?.error?.message ?? json?.detail;
+      const json: unknown = JSON.parse(body);
+      const why = get(get(json, "error"), "message") ?? get(json, "detail");
       return typeof why === "string" ? why : body.slice(0, 2000);
     } catch {
       return body.slice(0, 2000);
@@ -376,7 +386,7 @@ export namespace Agent {
     return should === "true" || (should !== "false" && busy);
   }
 
-  export async function stream<S>(wire: Wire<S>, run: Doing, body: ReadableStream<Uint8Array>, timer: Timer, seen: Entry[], st: S, begun: () => void): Promise<Step> {
+  export async function stream<S, E>(wire: Wire<S, E>, run: Doing, body: ReadableStream<Uint8Array>, timer: Timer, seen: Entry[], st: S, begun: () => void): Promise<Step> {
     const ask = run.ask;
     const on: Emit = (kind, text, fresh) => {
       if (!run.abort.signal.aborted) {
@@ -385,7 +395,8 @@ export namespace Agent {
       }
     };
     try {
-      for await (const ev of Agent.events(body)) {
+      for await (const data of Agent.events(body)) {
+        const ev = JSON.parse(data) as E;
         timer.refresh();
         if (wire.begun(ev)) {
           begun();
@@ -396,8 +407,8 @@ export namespace Agent {
         }
       }
       return Agent.fail("the stream ended early", seen, "busy");
-    } catch (err: any) {
-      return Agent.fail(err.message, seen, "busy");
+    } catch (err) {
+      return Agent.fail(err_why(err), seen, "busy");
     }
   }
 
@@ -410,14 +421,14 @@ export namespace Agent {
   export async function* events(stream: ReadableStream<Uint8Array>) {
     for await (const line of AskAI.lines(stream)) {
       if (line.startsWith("data:") && line.slice(5).trim() !== "[DONE]") {
-        yield JSON.parse(line.slice(5));
+        yield line.slice(5);
       }
     }
   }
 
   export function parse(json: string): unknown {
     try {
-      return JSON.parse(json || "{}");
+      return JSON.parse(json || "{}") as unknown;
     } catch {
       return null;
     }
@@ -433,8 +444,8 @@ export namespace Agent {
     try {
       const out = await Agent.call(run, use.name, use.input);
       return { ...out, text: out.text || "(no output)" };
-    } catch (err: any) {
-      const why = run.abort.signal.aborted ? "(stopped)" : err.message;
+    } catch (err) {
+      const why = run.abort.signal.aborted ? "(stopped)" : err_why(err);
       return { text: why, fail: true };
     }
   }
@@ -444,18 +455,17 @@ export namespace Agent {
       return { tools: [], notes: [] };
     }
     const list = await Agent.rpc(run, "tools/list", {});
-    const tools = list.tools.map((t: any) => ({ name: t.name, info: t.description, schema: t.inputSchema }));
+    const tools = list.tools.map((t) => ({ name: t.name, info: t.description, schema: t.inputSchema }));
     return { tools, notes: Array.isArray(list.notes) ? list.notes.map(String) : [] };
   }
 
   export async function call(run: Doing, name: string, input: unknown): Promise<Out> {
     const res = await Agent.rpc(run, "tools/call", { name, arguments: input });
-    const pics = res.content.filter((part: any) => part.type === "image");
-    const imgs = pics.map((part: any) => ({ type: part.mimeType, data: part.data }));
+    const imgs = res.content.flatMap((part) => (part.type === "image" ? [{ type: part.mimeType ?? "", data: part.data ?? "" }] : []));
     return { text: AskAI.show(res.content), fail: res.isError === true, imgs };
   }
 
-  export async function rpc(run: Doing, method: string, params: unknown): Promise<any> {
+  export async function rpc<M extends keyof Rpc>(run: Doing, method: M, params: unknown): Promise<Rpc[M]> {
     const res = await fetch(run.ask.server, {
       method  : "POST",
       headers : { "content-type": "application/json" },
@@ -463,7 +473,7 @@ export namespace Agent {
       signal  : run.abort.signal,
       timeout : false,
     } as RequestInit);
-    const msg = await res.json();
+    const msg = (await res.json()) as { result: Rpc[M]; error?: { message: string } };
     if (msg.error) {
       throw new Error(method + ": " + msg.error.message);
     }

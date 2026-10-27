@@ -3,10 +3,12 @@ import type { Out } from "./Agent.ts";
 import type { Img } from "./AskAI.ts";
 import { clip } from "./Clip.ts";
 import type * as config from "./Config.ts";
+import { err_why } from "./Err.ts";
+import { get, list as items, rec, text_of } from "./Json.ts";
 import { Machine, type Job, type Spec } from "./Machine.ts";
 
 type Link = {
-  ask   : (method: string, params: object, signal: AbortSignal) => Promise<any>;
+  ask   : (method: string, params: object, signal: AbortSignal) => Promise<unknown>;
   tell  : (method: string, params: object, signal?: AbortSignal) => Promise<void>;
   close : () => void;
   dead  : () => string | null;
@@ -106,7 +108,7 @@ export namespace Mcp {
       s.up = Mcp.open(servers, s);
     } else if (s.stale) {
       s.stale = false;
-      s.up = s.up.then(() => Mcp.listed(servers, s, AbortSignal.timeout(LIMITS.start))).catch((err) => "failed to list its tools: " + Mcp.why(err));
+      s.up = s.up.then(() => Mcp.listed(servers, s, AbortSignal.timeout(LIMITS.start))).catch((err: unknown) => "failed to list its tools: " + Mcp.why(err));
     }
     const up = s.up;
     const got = await up;
@@ -156,19 +158,23 @@ export namespace Mcp {
     const left: string[] = [];
     let cursor: string | undefined;
     do {
-      const got = await s.link!.ask("tools/list", cursor === undefined ? {} : { cursor }, signal);
-      for (const tool of Array.isArray(got?.tools) ? got.tools : []) {
-        const name = Mcp.name(s.conf.name, String(tool?.name));
+      if (s.link === null) {
+        throw new Error("was closed");
+      }
+      const got = await s.link.ask("tools/list", cursor === undefined ? {} : { cursor }, signal);
+      for (const tool of items(get(got, "tools"))) {
+        const name = Mcp.name(s.conf.name, String(get(tool, "name")));
         const long = name.length > 64 ? "its name for the model, " + name + ", is over 64 characters" : null;
-        const schema = long ?? (names.has(name) ? "its name is another's for the model" : Mcp.schema(tool?.inputSchema));
+        const schema = long ?? (names.has(name) ? "its name is another's for the model" : Mcp.schema(get(tool, "inputSchema")));
         if (typeof schema === "string") {
-          left.push(JSON.stringify(String(tool?.name)) + " (" + schema + ")");
+          left.push(JSON.stringify(String(get(tool, "name"))) + " (" + schema + ")");
           continue;
         }
-        names.set(name, String(tool.name));
-        specs.push({ name, info: String(tool.description ?? ""), schema });
+        names.set(name, String(get(tool, "name")));
+        specs.push({ name, info: text_of(get(tool, "description")), schema });
       }
-      cursor = typeof got?.nextCursor === "string" ? got.nextCursor : undefined;
+      const more = get(got, "nextCursor");
+      cursor = typeof more === "string" ? more : undefined;
     } while (cursor !== undefined);
     if (left.join(", ") !== s.left) {
       s.left = left.join(", ");
@@ -183,9 +189,8 @@ export namespace Mcp {
 
   // an input schema the vendors take, else why none: an object's, with
   // properties (Anthropic refuses anyOf, oneOf and allOf at its top)
-  export function schema(given: any): object | string {
-    const is = (x: any) => typeof x === "object" && x !== null && !Array.isArray(x);
-    const obj = is(given) ? given : {};
+  export function schema(given: unknown): object | string {
+    const obj = rec(given) ? given : {};
     if (obj.type !== undefined && obj.type !== "object") {
       return "its input isn't an object";
     }
@@ -193,7 +198,7 @@ export namespace Mcp {
     if (top !== undefined) {
       return "its input schema has " + top + " at its top, which the vendors refuse";
     }
-    return { ...obj, type: "object", properties: is(obj.properties) ? obj.properties : {} };
+    return { ...obj, type: "object", properties: rec(obj.properties) ? obj.properties : {} };
   }
 
   export function tell(servers: Servers, s: Server, why: string, show: boolean): void {
@@ -261,28 +266,29 @@ export namespace Mcp {
     }
   }
 
-  export function out(got: any): Out {
+  export function out(got: unknown): Out {
     const texts: string[] = [];
     const imgs: Img[] = [];
-    for (const part of Array.isArray(got?.content) ? got.content : []) {
-      const res = part?.resource;
-      const pic = part?.type === "image" && typeof part.data === "string" && /^image\/(png|jpeg|gif|webp)$/.test(part.mimeType);
-      if (part?.type === "text") {
-        texts.push(String(part.text ?? ""));
-      } else if (pic && part.data.length * 0.75 <= LIMITS.img) {
-        imgs.push({ type: part.mimeType, data: part.data });
-      } else if (part?.type === "resource" && typeof res?.text === "string") {
-        texts.push(res.text);
+    for (const part of items(get(got, "content"))) {
+      const res = get(part, "resource");
+      const [type, data, mime, said] = [get(part, "type"), get(part, "data"), get(part, "mimeType"), get(res, "text")];
+      const pic = type === "image" && typeof data === "string" && typeof mime === "string" && /^image\/(png|jpeg|gif|webp)$/.test(mime);
+      if (type === "text") {
+        texts.push(text_of(get(part, "text")));
+      } else if (pic && data.length * 0.75 <= LIMITS.img) {
+        imgs.push({ type: mime, data });
+      } else if (type === "resource" && typeof said === "string") {
+        texts.push(said);
       } else {
-        texts.push("[" + [part?.type, part?.mimeType ?? res?.mimeType, part?.uri ?? res?.uri].filter((x) => typeof x === "string").join(" ") + "]");
+        texts.push("[" + [type, mime ?? get(res, "mimeType"), get(part, "uri") ?? get(res, "uri")].filter((x) => typeof x === "string").join(" ") + "]");
       }
     }
-    if (texts.length === 0 && imgs.length === 0 && got?.structuredContent !== undefined) {
-      texts.push(JSON.stringify(got.structuredContent));
+    if (texts.length === 0 && imgs.length === 0 && get(got, "structuredContent") !== undefined) {
+      texts.push(JSON.stringify(get(got, "structuredContent")));
     }
     const text = clip();
     text.add(texts.join("\n"));
-    return { text: text.text(), fail: got?.isError === true, imgs };
+    return { text: text.text(), fail: get(got, "isError") === true, imgs };
   }
 
   export function close(s: Server): void {
@@ -298,15 +304,21 @@ export namespace Mcp {
     return (server + "__" + tool).replace(/[^A-Za-z0-9_-]/g, "_");
   }
 
-  export function why(err: any): string {
-    return String(err?.message ?? err);
+  export function why(err: unknown): string {
+    return err_why(err);
   }
 
-  export function answer(msg: any): object {
-    if (msg.method === "ping") {
-      return { jsonrpc: "2.0", id: msg.id, result: {} };
+  export function reason(signal: AbortSignal): Error {
+    const why: unknown = signal.reason;
+    return why instanceof Error ? why : new Error(why === undefined ? "stopped" : text_of(why));
+  }
+
+  export function answer(msg: unknown): object {
+    const id = get(msg, "id");
+    if (get(msg, "method") === "ping") {
+      return { jsonrpc: "2.0", id, result: {} };
     }
-    return { jsonrpc: "2.0", id: msg.id, error: { code: -32601, message: "unii offers no " + msg.method } };
+    return { jsonrpc: "2.0", id, error: { code: -32601, message: "unii offers no " + String(get(msg, "method")) } };
   }
 
   export async function* texts(stream: ReadableStream<Uint8Array>): AsyncGenerator<string> {
@@ -322,9 +334,12 @@ export namespace Mcp {
   }
 
   export function stdio(conf: config.McpServer, changed: () => void, died: (why: string) => void): Link {
-    const env = Object.fromEntries(PASS.flatMap((k) => (process.env[k] === undefined ? [] : [[k, process.env[k]!]])));
+    const env = Object.fromEntries(PASS.flatMap((k) => {
+      const v = process.env[k];
+      return v === undefined ? [] : [[k, v]];
+    }));
     const proc = Bun.spawn([conf.command, ...conf.args], { cwd: conf.cwd || undefined, env: { ...env, ...conf.env }, stdin: "pipe", stdout: "pipe", stderr: "pipe", detached: !WIN, windowsHide: true });
-    const waits = new Map<number, { ok: (got: any) => void; no: (err: Error) => void }>();
+    const waits = new Map<number, { ok: (got: unknown) => void; no: (err: Error) => void }>();
     let next = 0;
     let dead: string | null = null;
     let tail = "";
@@ -334,37 +349,39 @@ export namespace Mcp {
         dead = why;
         died(why);
       }
-      waits.forEach((w) => w.no(new Error(dead!)));
+      const gone = dead;
+      waits.forEach((w) => w.no(new Error(gone)));
       waits.clear();
     };
     const write = (msg: object) => {
       try {
-        proc.stdin.write(JSON.stringify(msg) + "\n");
-        proc.stdin.flush();
+        void proc.stdin.write(JSON.stringify(msg) + "\n");
+        void proc.stdin.flush();
       } catch {}
     };
     const heard = (line: string) => {
-      let msg: any;
+      let msg: unknown;
       try {
         msg = JSON.parse(line);
       } catch {
         return;
       }
-      const w = waits.get(Number(msg?.id));
-      if (msg?.method !== undefined && msg.id !== undefined) {
+      const [id, method, error] = [get(msg, "id"), get(msg, "method"), get(msg, "error")];
+      const w = waits.get(Number(id));
+      if (method !== undefined && id !== undefined) {
         write(Mcp.answer(msg));
-      } else if (msg?.method === "notifications/tools/list_changed") {
+      } else if (method === "notifications/tools/list_changed") {
         changed();
       } else if (w !== undefined) {
-        waits.delete(Number(msg.id));
-        msg.error === undefined ? w.ok(msg.result) : w.no(new Error(msg.error?.message ?? JSON.stringify(msg.error)));
+        waits.delete(Number(id));
+        error === undefined ? w.ok(get(msg, "result")) : w.no(new Error(text_of(get(error, "message"), JSON.stringify(error))));
       }
     };
     const end = () => {
       if (!ended) {
         ended = true;
         try {
-          proc.stdin.end();
+          void proc.stdin.end();
         } catch {}
         try {
           process.kill(-proc.pid, "SIGTERM");
@@ -381,14 +398,15 @@ export namespace Mcp {
         size += parts[0].length;
         const lines = parts.length === 1 ? [] : [rest.join(""), ...parts.slice(1, -1)];
         if (parts.length > 1) {
-          [rest, size] = [[parts.at(-1)!], parts.at(-1)!.length];
+          const last = parts[parts.length - 1];
+          [rest, size] = [[last], last.length];
         }
         if (size > LIMITS.msg || lines.some((line) => line.length > LIMITS.msg)) {
           throw new Error("sent a message over " + LIMITS.msg + " characters");
         }
         lines.forEach((line) => line.trim() !== "" && heard(line));
       }
-    })().catch((err) => {
+    })().catch((err: unknown) => {
       fail(Mcp.why(err) + "; unii ended it");
       end();
     });
@@ -397,27 +415,40 @@ export namespace Mcp {
         tail = (tail + chunk).slice(-TAIL);
       }
     })().catch(() => {});
-    proc.exited.then(async (code) => {
+    void proc.exited.then(async (code) => {
       end();
       await Promise.race([err, Bun.sleep(200)]);
       const how = proc.signalCode ? "was killed by " + proc.signalCode : "exited with code " + code;
       const said = tail.trim();
       fail(how + (said === "" ? "" : ": " + said.split("\n").slice(-5).join(" / ")));
     });
-    const tell = async (method: string, params: object) => write({ jsonrpc: "2.0", method, params });
-    const ask = (method: string, params: object, signal: AbortSignal) => new Promise<any>((ok, no) => {
+    const tell = (method: string, params: object) => {
+      write({ jsonrpc: "2.0", method, params });
+      return Promise.resolve();
+    };
+    const ask = (method: string, params: object, signal: AbortSignal) => new Promise<unknown>((ok, no) => {
       if (dead !== null || signal.aborted) {
-        return no(dead !== null ? new Error(dead) : signal.reason);
+        no(dead !== null ? new Error(dead) : Mcp.reason(signal));
+        return;
       }
       const id = ++next;
       const stop = () => {
         waits.delete(id);
-        tell("notifications/cancelled", { requestId: id, reason: "stopped" });
-        no(signal.reason ?? new Error("stopped"));
+        void tell("notifications/cancelled", { requestId: id, reason: "stopped" });
+        no(Mcp.reason(signal));
       };
       signal.addEventListener("abort", stop, { once: true });
       const done = () => signal.removeEventListener("abort", stop);
-      waits.set(id, { ok: (got) => (done(), ok(got)), no: (err) => (done(), no(err)) });
+      waits.set(id, {
+        ok: (got) => {
+          done();
+          ok(got);
+        },
+        no: (err) => {
+          done();
+          no(err);
+        },
+      });
       write({ jsonrpc: "2.0", id, method, params });
     });
     const close = () => {
@@ -437,37 +468,37 @@ export namespace Mcp {
       }
       const out = await run(conf.device, job(input), signal);
       if (signal.aborted) {
-        throw signal.reason ?? new Error("stopped");
+        throw Mcp.reason(signal);
       }
       if (out.fail) {
         throw new Error(out.text);
       }
-      const got = JSON.parse(out.text);
-      if (got.changed) {
+      const got: unknown = JSON.parse(out.text);
+      if (get(got, "changed")) {
         changed();
       }
-      if (got.dead && dead === null) {
-        dead = got.dead + " (on " + conf.device + ")";
+      if (get(got, "dead") && dead === null) {
+        dead = String(get(got, "dead")) + " (on " + conf.device + ")";
         died(dead);
       }
-      if (dead !== null || got.error !== undefined) {
-        throw new Error(dead ?? got.error);
+      if (dead !== null || get(got, "error") !== undefined) {
+        throw new Error(dead ?? String(get(got, "error")));
       }
-      return got.result;
+      return get(got, "result");
     };
     const ask = (method: string, params: object, signal: AbortSignal) => send({ conf: method === "initialize" ? conf : undefined, method, params }, signal);
     const tell = (method: string, params: object, signal = AbortSignal.timeout(LIMITS.start)) => send({ method, params, tell: true }, signal).then(() => {});
     const close = () => {
       if (dead === null) {
         dead = "was ended by unii";
-        run(conf.device, job({ method: "close" }), AbortSignal.timeout(LIMITS.start)).catch(() => {});
+        run(conf.device, job({ method: "close" }), AbortSignal.timeout(LIMITS.start)).catch(() => undefined);
       }
     };
     return { ask, tell, close, dead: () => dead };
   }
 
-  export async function here(input: any, signal: AbortSignal): Promise<Out> {
-    const { key, method, params } = input;
+  export async function here(input: Record<string, unknown>, signal: AbortSignal): Promise<Out> {
+    const [key, method, params] = [String(input.key), String(input.method), rec(input.params) ? input.params : {}];
     const answer = (got: object): Out => {
       const s = HERE.get(key);
       const changed = s?.changed ?? false;
@@ -485,12 +516,14 @@ export namespace Mcp {
     if (method === "initialize") {
       s?.link.close();
       HERE.delete(key);
-      const c: config.McpServer = input.conf;
-      const vars = (text: string) => text.replace(/\$\{([A-Za-z_][A-Za-z0-9_]*)\}/g, (_, v) => {
-        if (process.env[v] === undefined) {
+      // the server's own config, sent by Mcp.device
+      const c = input.conf as config.McpServer;
+      const vars = (text: string) => text.replace(/\$\{([A-Za-z_][A-Za-z0-9_]*)\}/g, (_, v: string) => {
+        const value = process.env[v];
+        if (value === undefined) {
           throw new Error("uses ${" + v + "}, which isn't set");
         }
-        return process.env[v]!;
+        return value;
       });
       let conf: config.McpServer;
       try {
@@ -551,17 +584,17 @@ export namespace Mcp {
         throw new Error("HTTP " + res.status);
       }
     };
-    const heard = (msg: any, id: number): any => {
-      if (msg?.method !== undefined && msg.id !== undefined) {
-        post(Mcp.answer(msg), AbortSignal.timeout(LIMITS.start)).then((res) => res.body?.cancel(), () => {});
-      } else if (msg?.method === "notifications/tools/list_changed") {
+    const heard = (msg: unknown, id: number): unknown => {
+      if (get(msg, "method") !== undefined && get(msg, "id") !== undefined) {
+        post(Mcp.answer(msg), AbortSignal.timeout(LIMITS.start)).then((res) => res.body?.cancel(), () => undefined);
+      } else if (get(msg, "method") === "notifications/tools/list_changed") {
         changed();
-      } else if (Number(msg?.id) === id) {
+      } else if (Number(get(msg, "id")) === id) {
         return msg;
       }
       return null;
     };
-    const read = async (res: Response, id: number): Promise<any> => {
+    const read = async (res: Response, id: number): Promise<unknown> => {
       const sse = (res.headers.get("content-type") ?? "").includes("text/event-stream");
       const event = (text: string) => {
         const data = text.split(/\r\n|\r|\n/).filter((l) => l.startsWith("data:")).map((l) => l.slice(5).replace(/^ /, ""));
@@ -571,14 +604,17 @@ export namespace Mcp {
           return null;
         }
       };
+      if (res.body === null) {
+        throw new Error("sent no body");
+      }
       let text = "";
-      for await (const chunk of Mcp.texts(res.body!)) {
+      for await (const chunk of Mcp.texts(res.body)) {
         text += chunk;
         if (text.length > LIMITS.msg) {
           throw new Error("sent a message over " + LIMITS.msg + " characters");
         }
         const events = sse ? text.split(/\r\n\r\n|\n\n|\r\r/) : [];
-        text = sse ? events.pop()! : text;
+        text = sse ? events.pop() ?? "" : text;
         for (const msg of events.map(event)) {
           if (msg !== null) {
             return msg;
@@ -592,7 +628,9 @@ export namespace Mcp {
         throw new Error(dead);
       }
       const id = ++next;
-      const stop = () => tell("notifications/cancelled", { requestId: id, reason: "stopped" }).catch(() => {});
+      const stop = () => {
+        tell("notifications/cancelled", { requestId: id, reason: "stopped" }).catch(() => undefined);
+      };
       signal.addEventListener("abort", stop, { once: true });
       try {
         const res = await post({ jsonrpc: "2.0", id, method, params }, signal);
@@ -609,11 +647,12 @@ export namespace Mcp {
         if (msg === null) {
           throw new Error("no answer to " + method);
         }
-        if (msg.error !== undefined) {
-          throw new Error(msg.error?.message ?? JSON.stringify(msg.error));
+        const error = get(msg, "error");
+        if (error !== undefined) {
+          throw new Error(text_of(get(error, "message"), JSON.stringify(error)));
         }
-        version = method === "initialize" ? String(msg.result?.protocolVersion ?? VERSION) : version;
-        return msg.result;
+        version = method === "initialize" ? text_of(get(get(msg, "result"), "protocolVersion"), VERSION) : version;
+        return get(msg, "result");
       } catch (err) {
         if (Mcp.why(err).startsWith("sent a message over")) {
           end(Mcp.why(err) + "; unii ended it");
@@ -628,7 +667,7 @@ export namespace Mcp {
         dead = why;
         ender.abort(new Error(why));
         if (session !== null && why !== EXPIRED) {
-          fetch(conf.url, { method: "DELETE", headers: headers(), signal: AbortSignal.timeout(LIMITS.kill) }).then((res) => res.body?.cancel(), () => {});
+          fetch(conf.url, { method: "DELETE", headers: headers(), signal: AbortSignal.timeout(LIMITS.kill) }).then((res) => res.body?.cancel(), () => undefined);
         }
       }
     };

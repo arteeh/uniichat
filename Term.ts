@@ -8,6 +8,7 @@ import * as Paint from "./Paint.ts";
 import { type Move, Pick } from "./Pick.ts";
 import * as Screen from "./Screen.ts";
 import * as View from "./View.ts";
+import { err_why } from "./Err.ts";
 
 type Term = {
   v       : View.View;
@@ -131,8 +132,8 @@ function term_new(url: string, token: string): Term {
 
 function term_connect(t: Term): void {
   View.link_open(t.v, {
-    open : (query) => new WebSocket(t.url.replace(/^http/, "ws") + "/ws" + query, { headers: Client.auth(t.token) } as any),
-    post : (path, body) => fetch(t.url + path, { method: "POST", headers: Client.auth(t.token), body }),
+    open : (query) => new Client.Socket(t.url.replace(/^http/, "ws") + "/ws" + query, { headers: Client.auth(t.token) }),
+    post : (path, body) => fetch(t.url + path, { method: "POST", headers: Client.auth(t.token), body } as RequestInit),
     hear : (msg) => term_hear(t, msg),
     lost : (up) => term_lost(t, up),
   });
@@ -226,7 +227,7 @@ function term_idle(t: Term): void {
 function term_press(t: Term, key: string): void {
   const cmd = term_commands().find((c) => c[1] !== "" && c[1].split(", ").includes(key));
   if (cmd !== undefined && (!t.scr.off || PAGE_KEYS.includes(key))) {
-    cmd[3](t, cmd[0] === "" ? key : "");
+    void cmd[3](t, cmd[0] === "" ? key : "");
   }
   term_draw(t);
 }
@@ -267,7 +268,7 @@ function term_command(t: Term, text: string): boolean {
   const run = cmd?.[3](t, text.trim().slice(word.length).trim());
   if (run instanceof Promise) {
     t.pending += 1;
-    run.finally(() => {
+    void run.finally(() => {
       t.pending -= 1;
       term_idle(t);
     });
@@ -430,7 +431,7 @@ async function term_import(t: Term, arg: string): Promise<void> {
     return;
   }
   term_note(t, "Looking for Claude and ChatGPT chats on this computer…");
-  const read = await Promise.all([...IMPORTS.map(term_sessions), ...files.map(export_sessions)]).catch((e) => String(e.message ?? e));
+  const read = await Promise.all([...IMPORTS.map(term_sessions), ...files.map(export_sessions)]).catch((e: unknown) => err_why(e));
   if (typeof read === "string") {
     term_note(t, "Not imported: " + read);
     return;
@@ -440,7 +441,7 @@ async function term_import(t: Term, arg: string): Promise<void> {
   if (done === null) {
     return;
   }
-  const old   = await done.json();
+  const old   = (await done.json()) as Import.Done;
   const shown = Import.import_plan(sessions, want, old).sessions;
   want.off    = shown.filter((_, k) => words.includes("-#" + (k + 1))).map(Import.import_id);
   const plan  = Import.import_plan(sessions, want, old);
@@ -460,7 +461,7 @@ async function term_import(t: Term, arg: string): Promise<void> {
 }
 
 async function term_sessions(dir: string): Promise<Import.Session[]> {
-  const files = fs.existsSync(dir) ? fs.readdirSync(dir, { recursive: true }).map((f) => dir + "/" + (WIN ? String(f).replaceAll("\\", "/") : f)).filter(Import.import_file) : [];
+  const files = fs.existsSync(dir) ? fs.readdirSync(dir, { recursive: true, encoding: "utf8" }).map((f) => dir + "/" + (WIN ? f.replaceAll("\\", "/") : f)).filter(Import.import_file) : [];
   const found: Import.Session[] = [];
   for (const f of files) {
     found.push(...[await Import.import_session(Bun.file(f), "log")].filter((s) => s !== null));
@@ -478,8 +479,9 @@ async function export_sessions(path: string): Promise<Import.Session[]> {
 async function term_logout(t: Term): Promise<void> {
   await View.post(t.url + "/api/logout", {}, Client.auth(t.token));
   const conf = Client.read("tui");
-  delete conf.tokens?.[Client.host(t.url)];
-  Client.write("tui", conf);
+  const tokens = Client.tokens(conf);
+  delete tokens[Client.host(t.url)];
+  Client.write("tui", { ...conf, tokens });
   term_note(t, "Signed out. Run unii to sign in again.");
   term_quit(t);
 }
@@ -574,7 +576,7 @@ function term_print(t: Term, msg: View.Server): void {
 
 function term_page(t: Term): void {
   term_rows(t, [], true);
-  [t.last, t.wait, t.logs] = [-1, [], new Map()];
+  [t.last, t.wait, t.logs] = [-1, [], new Map<string, number>()];
   term_show(t);
 }
 
@@ -704,12 +706,13 @@ function term_paint(t: Term): void {
 export async function main(given: string | undefined): Promise<void> {
   const conf = Client.read("tui");
   const url = Client.server(given, conf);
-  const tokens = conf.tokens ?? {};
-  let token: string | undefined = tokens[Client.host(url)];
-  if (!await Client.signed(url, token)) {
+  const tokens = Client.tokens(conf);
+  const saved = Object.hasOwn(tokens, Client.host(url)) ? tokens[Client.host(url)] : undefined;
+  let token = saved !== undefined && await Client.signed(url, saved) ? saved : null;
+  if (token === null) {
     token = await Client.login(url, "the terminal on " + os.hostname());
     Client.write("tui", { ...conf, url, tokens: { ...tokens, [Client.host(url)]: token } });
   }
-  const t = term_new(url, token!);
+  const t = term_new(url, token);
   term_connect(t);
 }

@@ -3,6 +3,7 @@ import { AskAI, type Again, type Ask, type Block, type Call, type Event, type Im
 import { clip_page, clip_pages } from "./Clip.ts";
 import * as config from "./Config.ts";
 import { Disk } from "./Disk.ts";
+import { err_code, err_why } from "./Err.ts";
 import { Pick } from "./Pick.ts";
 import * as names from "./Names.ts";
 import type { Timer } from "./Timer.ts";
@@ -35,6 +36,11 @@ type Kept = { parts: Array<[number, number]>; batch: boolean };
 type Saved = Kept & { seen?: Kept; main: End; tree: End; pick: object | null; goal?: string | null; work?: string[]; timers?: Timer[]; off?: string[]; talk?: number | null };
 
 type Queues = { main: Pending[]; agents: Record<string, string[]> };
+
+// a line of a log, as Memory.log writes it
+type Rec = { i?: number; l?: number; act?: string; ans?: object };
+
+type Recs = { main: Root; tree: { text: string } };
 
 export type Memory = {
   dir    : string;
@@ -151,7 +157,7 @@ export namespace Memory {
 
   export function saved(dir: string): Saved | null {
     try {
-      return JSON.parse(fs.readFileSync(dir + "/view.json", "utf8"));
+      return JSON.parse(fs.readFileSync(dir + "/view.json", "utf8")) as Saved;
     } catch {
       return null;
     }
@@ -169,12 +175,12 @@ export namespace Memory {
     const [chat, seen] = [mem.view, mem.seen].map((view): Kept => ({ parts: view.parts.map((part) => [part.l, part.i]), batch: view.batch }));
     fs.writeFileSync(file + ".new", JSON.stringify({ ...chat, seen, pick: mem.pick, goal: mem.goal, off: mem.off, talk: mem.talk, work: mem.work, timers: mem.timers, ...mem.ends }));
     move_over(file + ".new", file);
-    Disk.wrote(file);
+    void Disk.wrote(file);
   }
 
   export function queues(dir: string): Queues {
     try {
-      const got = JSON.parse(fs.readFileSync(dir + "/queue.json", "utf8"));
+      const got = JSON.parse(fs.readFileSync(dir + "/queue.json", "utf8")) as Partial<Queues>;
       return { main: got.main ?? [], agents: got.agents ?? {} };
     } catch {
       return { main: [], agents: {} };
@@ -185,7 +191,7 @@ export namespace Memory {
     const file = mem.dir + "/queue.json";
     fs.writeFileSync(file + ".new", JSON.stringify({ main: mem.queue, agents: mem.tells }));
     move_over(file + ".new", file);
-    Disk.wrote(file);
+    void Disk.wrote(file);
   }
 
   export function index(mem: Memory, stream: Stream, from: End): End {
@@ -209,7 +215,7 @@ export namespace Memory {
     const data = Memory.slice(file, at, fs.statSync(file).size - at);
     let k = 0;
     for (let nl = data.indexOf(10); nl >= 0; nl = data.indexOf(10, k)) {
-      const rec = Memory.parse(data.subarray(k, nl).toString("utf8"), file);
+      const rec = Memory.parse(data.subarray(k, nl).toString("utf8"), file) as Rec | null;
       if (rec !== null) {
         Memory.place(mem, fd, stream, rec, day, at + k, nl - k);
       }
@@ -227,7 +233,7 @@ export namespace Memory {
     return (2 * i + 1) * 2 ** l - 1;
   }
 
-  export function place(mem: Memory, fd: number, stream: Stream, rec: any, day: number, at: number, length: number): void {
+  export function place(mem: Memory, fd: number, stream: Stream, rec: Rec, day: number, at: number, length: number): void {
     const buf = Buffer.alloc(SLOT);
     if (rec.act !== undefined) {
       mem.acted(rec.act, rec.ans ?? {});
@@ -238,17 +244,17 @@ export namespace Memory {
     buf.writeDoubleLE(at, 0);
     buf.writeUInt32LE(day, 8);
     buf.writeUInt32LE(length, 12);
-    fs.writeSync(fd, buf, 0, SLOT, (stream === "main" ? rec.i : Memory.slot(rec.l, rec.i)) * SLOT);
+    fs.writeSync(fd, buf, 0, SLOT, (stream === "main" ? rec.i : Memory.slot(rec.l ?? 0, rec.i)) * SLOT);
   }
 
-  export function read(mem: Memory, stream: Stream, slot: number): any {
+  export function read<S extends Stream>(mem: Memory, stream: S, slot: number): Recs[S] | null {
     const rec = Memory.pread(Memory.fd(mem, mem.dir + "/" + stream + ".index"), slot * SLOT, SLOT);
     const day = rec.length < SLOT ? 0 : rec.readUInt32LE(8);
     if (day === 0) {
       return null;
     }
     const line = Memory.pread(Memory.fd(mem, Memory.path(mem, stream, day)), rec.readDoubleLE(0), rec.readUInt32LE(12));
-    return JSON.parse(line.toString("utf8"));
+    return JSON.parse(line.toString("utf8")) as Recs[S];
   }
 
   export function fd(mem: Memory, file: string): number {
@@ -283,21 +289,21 @@ export namespace Memory {
     return mem.dir + "/" + stream + "/" + new Date(day * DAY).toISOString().slice(0, 10) + ".jsonl";
   }
 
-  export function file(file: string): any[] {
+  export function file(file: string): Root[] {
     const data = fs.readFileSync(file, "utf8");
     if (data !== "" && !data.endsWith("\n")) {
       fs.appendFileSync(file, "\n");
     }
-    return data.split("\n").flatMap((line) => Memory.parse(line, file) ?? []);
+    return data.split("\n").flatMap((line) => (Memory.parse(line, file) as Root | null) ?? []);
   }
 
   export function file_text(file: string): string {
     return fs.existsSync(file) ? fs.readFileSync(file, "utf8").trim() : "";
   }
 
-  export function parse(line: string, file: string): any {
+  export function parse(line: string, file: string): unknown {
     try {
-      return JSON.parse(line);
+      return JSON.parse(line) as unknown;
     } catch {
       if (line !== "") {
         console.error("skipped a line of " + file + ": not JSON");
@@ -306,7 +312,7 @@ export namespace Memory {
     }
   }
 
-  export function log(mem: Memory, stream: Stream, recs: object[]): void {
+  export function log(mem: Memory, stream: Stream, recs: Rec[]): void {
     const day = Date.parse(new Date().toLocaleDateString("sv-SE")) / DAY;
     const lines = recs.map((rec) => JSON.stringify(rec));
     let at = Memory.append(Memory.path(mem, stream, day), lines);
@@ -330,7 +336,7 @@ export namespace Memory {
       return at;
     } finally {
       fs.closeSync(fd);
-      Disk.wrote(file);
+      void Disk.wrote(file);
     }
   }
 
@@ -354,6 +360,14 @@ export namespace Memory {
 
   export function message(mem: Memory, i: number): Root | null {
     return Number.isInteger(i) && i >= 0 && i < mem.count ? Memory.read(mem, "main", i) : null;
+  }
+
+  export function at(mem: Memory, i: number): Root {
+    const root = Memory.message(mem, i);
+    if (root === null) {
+      throw new Error("the chat has no message #" + i);
+    }
+    return root;
   }
 
   export function push(mem: Memory, msgs: Msg[]): Root[] {
@@ -385,7 +399,7 @@ export namespace Memory {
   export function whole(mem: Memory, from: number): number {
     let [k, size, pics] = [mem.count, 0, 0];
     for (; k > from; k--) {
-      const root = Memory.message(mem, k - 1)!;
+      const root = Memory.at(mem, k - 1);
       size += root.size;
       pics += root.images?.length ?? 0;
       if (k < mem.count && (size > HIGH || pics > PICS)) {
@@ -397,7 +411,7 @@ export namespace Memory {
 
   export function say(mem: Memory, a: number, b: number): Say {
     const ids = Array.from({ length: b - a }, (_, k) => a + k);
-    const text = ids.map((id) => Memory.message(mem, id)!.text).join("");
+    const text = ids.map((id) => Memory.at(mem, id).text).join("");
     return { text, imgs: ids.flatMap((id) => Memory.images(mem, id)) };
   }
 
@@ -423,10 +437,10 @@ export namespace Memory {
     if (fit) {
       const out = img.resize(Math.round(size.width * k), Math.round(size.height * k)).jpeg({ quality: 85 });
       await Bun.write(mem.dir + IMAGES + name + ".jpg", await out.bytes());
-      Disk.wrote(mem.dir + IMAGES + name + ".jpg");
+      void Disk.wrote(mem.dir + IMAGES + name + ".jpg");
     }
     await Bun.write(mem.dir + IMAGES + name, bytes);
-    Disk.wrote(mem.dir + IMAGES + name);
+    void Disk.wrote(mem.dir + IMAGES + name);
     return name;
   }
 
@@ -632,8 +646,8 @@ export namespace Memory {
       mem.busy.delete(key);
       Memory.pump(mem);
       Memory.fit(mem);
-    }).catch((err) => {
-      console.error("compactor: node " + l + "/" + i + ": " + (err?.message ?? err));
+    }).catch((err: unknown) => {
+      console.error("compactor: node " + l + "/" + i + ": " + err_why(err));
     });
   }
 
@@ -828,8 +842,8 @@ ${Memory.cut(line)}| ← LIMIT`;
     };
     const take = () => {
       const top = heap[0];
-      const last = heap.pop()!;
-      if (heap.length > 0) {
+      const last = heap.pop();
+      if (last !== undefined && heap.length > 0) {
         heap[0] = last;
         for (let x = 0; ; ) {
           const m = [x, 2 * x + 1, 2 * x + 2].reduce((m, c) => (c < heap.length && over(heap[c], heap[m]) ? c : m));
@@ -953,7 +967,7 @@ ${Memory.cut(line)}| ← LIMIT`;
   }
 
   export function talk_line(mem: Memory, i: number): string {
-    const root = Memory.message(mem, i)!;
+    const root = Memory.at(mem, i);
     const part = { l: 0, i };
     return Memory.said(root) ? Memory.ref(part) + "|" + Memory.show(root).replace(/<\/chat>/gi, "<\\/chat>") : Memory.line(part, Memory.node(mem, part) ?? WAIT);
   }
@@ -967,7 +981,7 @@ ${Memory.cut(line)}| ← LIMIT`;
     for (let i = mem.talk ?? end; i < end; i++) {
       let n = mem.talked.get(i);
       if (n === undefined) {
-        const done = Memory.said(Memory.message(mem, i)!) || Memory.node(mem, { l: 0, i }) !== null;
+        const done = Memory.said(Memory.at(mem, i)) || Memory.node(mem, { l: 0, i }) !== null;
         n = done ? Memory.bytes(Memory.talk_line(mem, i)) + 1 : NODE + 16;
         if (done) {
           mem.talked.set(i, n);
@@ -980,8 +994,8 @@ ${Memory.cut(line)}| ← LIMIT`;
 
   export function talk_from(mem: Memory): number {
     for (let i = mem.count - 1; i >= 0; i--) {
-      if (Memory.said(Memory.message(mem, i)!)) {
-        while (i > 0 && Memory.message(mem, i - 1)!.more) {
+      if (Memory.said(Memory.at(mem, i))) {
+        while (i > 0 && Memory.at(mem, i - 1).more) {
           i--;
         }
         return i;
@@ -1039,7 +1053,7 @@ ${Memory.cut(line)}| ← LIMIT`;
     let sep = "\n";
     yield '{"messages": [';
     for (let i = 0; i < mem.count; i++) {
-      const { kind, text, date, images, more, of, tool } = Memory.message(mem, i)!;
+      const { kind, text, date, images, more, of, tool } = Memory.at(mem, i);
       yield (i === 0 ? "\n" : ",\n") + JSON.stringify({ id: i, kind, text, date, images, more, of, tool });
     }
     yield '],\n"summaries": [';
@@ -1108,8 +1122,8 @@ ${Memory.cut(line)}| ← LIMIT`;
     fs.mkdirSync(mem.dir + AGENTS, { recursive: true });
     try {
       fs.writeFileSync(mem.dir + AGENTS + name + ".jsonl", "", { flag: "wx" });
-    } catch (err: any) {
-      if (err.code === "EEXIST") {
+    } catch (err) {
+      if (err_code(err) === "EEXIST") {
         return Memory.agent_new(mem);
       }
       throw err;

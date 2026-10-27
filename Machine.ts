@@ -3,10 +3,18 @@ import * as os from "node:os";
 import * as path from "node:path";
 import type { Out } from "./Agent.ts";
 import { CAP, clip, clip_end } from "./Clip.ts";
+import { err_code, err_why } from "./Err.ts";
+import { get, list as listed, text_of } from "./Json.ts";
 import { Mcp } from "./Mcp.ts";
 import { FIT, HEAD, IMAGE, image_kind, PIXELS } from "./View.ts";
 
-export type Job = { name: string; input: any; cwd: string };
+export type Job = { name: string; input: Record<string, unknown>; cwd: string };
+
+// what ffprobe -of json tells of a video, as far as it is read here
+type Probe = {
+  streams? : { index?: number; codec_name?: string; width?: number; height?: number; sample_aspect_ratio?: string; avg_frame_rate?: string; r_frame_rate?: string; nb_frames?: string; duration?: string; side_data_list?: { rotation?: number }[] }[];
+  format?  : { duration?: string; format_name?: string; start_time?: string };
+};
 
 export type Spec = { name: string; info: string; schema: object };
 
@@ -97,12 +105,12 @@ export namespace Machine {
         case "read": {
           const kind = image_kind(Machine.head(file));
           const data = kind === null ? null : fs.readFileSync(file);
-          const shown = data === null ? null : await Machine.image(data, kind!, Machine.side(input.max_side));
+          const shown = data === null || kind === null ? null : await Machine.image(data, kind, Machine.side(input.max_side));
           if (shown !== null) {
             return shown;
           }
           if (data?.includes(0)) {
-            return { text: "Not a readable " + kind + " (" + data.length + " bytes).", fail: true };
+            return { text: "Not a readable " + String(kind) + " (" + data.length + " bytes).", fail: true };
           }
           return Machine.read(file, Number(input.offset ?? 1), Number(input.limit ?? Infinity), Number(input.at ?? 0));
         }
@@ -132,8 +140,8 @@ export namespace Machine {
           return { text: "No tool " + job.name + ".", fail: true };
         }
       }
-    } catch (err: any) {
-      return { text: String(err?.message ?? err), fail: true };
+    } catch (err) {
+      return { text: err_why(err), fail: true };
     }
   }
 
@@ -158,7 +166,9 @@ export namespace Machine {
       if (!WIN || Machine.group(proc)) {
         Machine.kill(-proc.pid);
       }
-      readers.forEach((r) => r.cancel().catch(() => {}));
+      readers.forEach((r) => {
+        r.cancel().catch(() => undefined);
+      });
     };
     signal.addEventListener("abort", kill, { once: true });
     let kept = true;
@@ -197,8 +207,8 @@ export namespace Machine {
     try {
       process.kill(pid, 0);
       return true;
-    } catch (err: any) {
-      return err.code === "EPERM";
+    } catch (err) {
+      return err_code(err) === "EPERM";
     }
   }
 
@@ -308,7 +318,7 @@ export namespace Machine {
     }
   }
 
-  export async function video(file: string, input: any, signal: AbortSignal): Promise<Out> {
+  export async function video(file: string, input: Record<string, unknown>, signal: AbortSignal): Promise<Out> {
     const [ffmpeg, ffprobe] = ["ffmpeg", "ffprobe"].map((bin) => Bun.which(bin, { PATH: process.env.PATH ?? "" }));
     if (ffmpeg === null || ffprobe === null) {
       return { text: "view_video needs ffmpeg and ffprobe, which aren't installed on this device. Install ffmpeg (e.g. apt install ffmpeg / brew install ffmpeg / winget install ffmpeg) and try again.", fail: true };
@@ -318,10 +328,10 @@ export namespace Machine {
     if (probe.code !== 0) {
       return { text: "ffprobe: " + probe.err.trim(), fail: true };
     }
-    const json   = JSON.parse(probe.out.toString());
+    const json   = JSON.parse(probe.out.toString()) as Probe;
     const stream = json.streams?.[0];
-    if (!(stream?.width > 0 && stream.height > 0)) {
-      return { text: "No video stream in " + input.path + ".", fail: true };
+    if (stream === undefined || !((stream.width ?? 0) > 0 && (stream.height ?? 0) > 0)) {
+      return { text: "No video stream in " + String(input.path) + ".", fail: true };
     }
     const sec    = input.unit === "second";
     const given  = (x: unknown) => x !== undefined && x !== null;
@@ -338,11 +348,11 @@ export namespace Machine {
     const secs   = Number(stream.duration ?? json.format?.duration);
     const nb     = Number(stream.nb_frames) > 0 ? Number(stream.nb_frames) : times !== null && whole ? times.length : 0;
     const total  = nb > 0 ? nb + " frames (0-" + (nb - 1) + ")" : secs > 0 && fps > 0 ? "about " + Math.round(secs * fps) + " frames" : "frame count unknown";
-    const turned = Math.abs(Number(stream.side_data_list?.find((d: any) => d.rotation !== undefined)?.rotation) || 0) % 180 === 90;
-    const [sa, sb] = String(stream.sample_aspect_ratio ?? "").split(":").map(Number);
+    const turned = Math.abs(Number(stream.side_data_list?.find((d) => d.rotation !== undefined)?.rotation) || 0) % 180 === 90;
+    const [sa, sb] = (stream.sample_aspect_ratio ?? "").split(":").map(Number);
     const wide   = Number(stream.width) * (sa > 0 && sb > 0 ? sa / sb : 1);
     const [w0, h0] = turned ? [Number(stream.height), wide] : [wide, Number(stream.height)];
-    const about  = input.path + ": " + (secs > 0 ? +secs.toFixed(3) + " s, " : "") + +fps.toFixed(3) + " fps, " + total + ", " + Math.round(w0) + "x" + Math.round(h0) + ", " + stream.codec_name;
+    const about  = String(input.path) + ": " + (secs > 0 ? +secs.toFixed(3) + " s, " : "") + +fps.toFixed(3) + " fps, " + total + ", " + Math.round(w0) + "x" + Math.round(h0) + ", " + String(stream.codec_name);
     if (sec && times === null && !(fps > 0)) {
       return { text: about + "\nIts frame times are unknown: give start and end in frames.", fail: true };
     }
@@ -374,20 +384,21 @@ export namespace Machine {
     const font  = Math.max(10, Math.round(Math.min(h / 10, w / 8)));
     const label = ":fontsize=" + font + ":fontcolor=white:box=1:boxcolor=black@0.6:boxborderw=2:x=2";
     const seeks = times !== null && INDEXED.test(json.format?.format_name ?? "");
-    const at    = (f: number) => (seeks && f > 0 ? (times![f - 1] + times![f]) / 2 : 0);
+    const known = times ?? [];
+    const at    = (f: number) => (seeks && f > 0 ? (known[f - 1] + known[f]) / 2 : 0);
     const from  = (f: number) => (at(f) > 0 ? ["-ss", at(f).toFixed(6)] : []);
     const hms   = (t: number) => new Date(Math.max(0, t) * 1000).toISOString().slice(11, 23);
     const out   = ["-frames:v", "1", "-f", "image2pipe", "-c:v", "mjpeg", "-q:v", "3", "pipe:1"];
     const fit   = "scale=" + w + ":" + h + ",setsar=1";
     const grid  = "tile=" + cols + "x" + rows + ":nb_frames=" + count + ":padding=" + GAP + ":margin=" + GAP + ":color=white";
     const takes = Array.from({ length: count }, (_, i) => start + i * step);
-    const apart = seeks && count > 1 && (times![takes[count - 1]] - times![start]) / (count - 1) > SPARSE;
+    const apart = seeks && count > 1 && (known[takes[count - 1]] - known[start]) / (count - 1) > SPARSE;
     const sheet = async (stamp: boolean) => {
       const marks = (n: string, t: string) => (stamp ? ",drawtext=text='" + n + "'" + label + ":y=2,drawtext=text='" + t + "'" + label + ":y=h-th-4" : "");
       if (apart) {
         const shots: Buffer[] = [];
         for (const f of takes) {
-          const one = await Machine.exec([ffmpeg, "-v", "error", ...from(f), "-i", file, "-map", "0:" + stream.index, "-vf", fit + marks(String(f), hms(times![f]).replaceAll(":", "\\:")), ...out], signal);
+          const one = await Machine.exec([ffmpeg, "-v", "error", ...from(f), "-i", file, "-map", "0:" + stream.index, "-vf", fit + marks(String(f), hms(known[f]).replaceAll(":", "\\:")), ...out], signal);
           if (one.code !== 0 || one.out.length === 0) {
             return one;
           }
@@ -434,20 +445,19 @@ export namespace Machine {
   }
 
   export function edit(cwd: string, edits: unknown): Out {
-    const list  = Array.isArray(edits) ? edits : [];
     const files = new Map<string, { shown: string; was: string; text: string }>();
-    for (const [k, e] of list.entries()) {
-      const file  = path.resolve(cwd, String(e?.path));
+    for (const [k, e] of listed(edits).entries()) {
+      const file  = path.resolve(cwd, String(get(e, "path")));
       const known = files.get(file);
       const was   = known?.was ?? (fs.existsSync(file) ? fs.readFileSync(file, "utf8") : null);
       const text  = known?.text ?? was ?? "";
-      const old   = String(e?.old ?? "");
+      const old   = text_of(get(e, "old"));
       const count = old === "" ? 0 : text.split(old).length - 1;
-      const why   = was === null ? "no such file" : count === 0 ? "old was not found" : count > 1 && e.all !== true ? "old matches " + count + " times; give more context, or all" : "";
-      if (why !== "") {
-        return { text: "Edit " + (k + 1) + " (" + e?.path + "): " + why + ". No file was changed.", fail: true };
+      const why   = was === null ? "no such file" : count === 0 ? "old was not found" : count > 1 && get(e, "all") !== true ? "old matches " + count + " times; give more context, or all" : "";
+      if (why !== "" || was === null) {
+        return { text: "Edit " + (k + 1) + " (" + String(get(e, "path")) + "): " + why + ". No file was changed.", fail: true };
       }
-      files.set(file, { shown: known?.shown ?? String(e.path), was: was!, text: text.split(old).join(String(e.new)) });
+      files.set(file, { shown: known?.shown ?? String(get(e, "path")), was, text: text.split(old).join(String(get(e, "new"))) });
     }
     if (files.size === 0) {
       return { text: "edits is empty: give a list of {path, old, new}.", fail: true };
@@ -468,13 +478,14 @@ export namespace Machine {
     } catch {}
     for (const name of names) {
       const file = path.join(root, name, "SKILL.md");
-      let head: any = null;
+      let head: unknown = null;
       try {
         head = skill_head(file);
       } catch {}
-      const ok = typeof head?.name === "string" && /^[a-z0-9-]{1,64}$/.test(head.name) && typeof head.description === "string" && head.description.trim() !== "";
-      if (ok && !found.has(head.name)) {
-        found.set(head.name, { name: head.name, description: head.description.trim().slice(0, 1024), dir: path.dirname(file) });
+      const [named, description] = [get(head, "name"), get(head, "description")];
+      const ok = typeof named === "string" && /^[a-z0-9-]{1,64}$/.test(named) && typeof description === "string" && description.trim() !== "";
+      if (ok && !found.has(named)) {
+        found.set(named, { name: named, description: description.trim().slice(0, 1024), dir: path.dirname(file) });
       }
     }
     return [...found.values()];
@@ -505,7 +516,7 @@ export namespace Machine {
 
 // a SKILL.md's YAML frontmatter, from its first 64 KB; a regular file only,
 // so a FIFO or device can't hang the device
-function skill_head(file: string): any {
+function skill_head(file: string): unknown {
   if (!fs.statSync(file).isFile()) {
     return null;
   }

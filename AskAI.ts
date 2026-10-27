@@ -6,6 +6,8 @@ import { Machine } from "./Machine.ts";
 import { OpenAI } from "./OpenAI.ts";
 import { Pick } from "./Pick.ts";
 import * as config from "./Config.ts";
+import { err_why } from "./Err.ts";
+import { get, text_of } from "./Json.ts";
 
 export type Kind = "user" | "work" | "mind" | "unii" | "tool" | "echo" | "note";
 
@@ -167,12 +169,12 @@ export namespace AskAI {
           return failed && all.length > 1 ? { ...end, text: "no model answered; " + all.join("; ") } : end;
         }
         k = skip(next ? k + 1 : 0);
-        limits = limited && picks[k] === left ? end.limits! : 0;
+        limits = limited && picks[k] === left ? end.limits ?? 0 : 0;
         call = go();
         end = await call.done;
       }
     };
-    run().then(resolve, (err) => resolve(AskAI.end(String(err?.message ?? err))));
+    run().then(resolve, (err: unknown) => resolve(AskAI.end(err_why(err))));
     return out;
   }
 
@@ -203,8 +205,8 @@ export namespace AskAI {
   export function start(ask: Ask, on: (ev: Event) => void): Try {
     try {
       return ask.vendor === "claude-sub" ? ClaudeSub.ask(ask, on) : Agent.ask(ask, on);
-    } catch (err: any) {
-      return { wake: () => {}, stop: () => {}, done: Promise.resolve(AskAI.end(err.message)) };
+    } catch (err) {
+      return { wake: () => {}, stop: () => {}, done: Promise.resolve(AskAI.end(err_why(err))) };
     }
   }
 
@@ -248,10 +250,10 @@ export namespace AskAI {
     const ttl = TTL[ask.vendor];
     for (;;) {
       const now = Date.now();
-      const live = (key: string) => CACHE.get(key)?.ready || (CACHE.get(key)?.until ?? 0) > now;
+      const live = (key: string) => (CACHE.get(key)?.ready ?? null) !== null || (CACHE.get(key)?.until ?? 0) > now;
       const k = keys.findLastIndex(live);
-      const got = k < 0 ? null : CACHE.get(keys[k])!;
-      if (got?.ready) {
+      const got = k < 0 ? null : CACHE.get(keys[k]) ?? null;
+      if (got !== null && got.ready !== null) {
         await got.ready;
         continue;
       }
@@ -300,11 +302,11 @@ export namespace AskAI {
     }
   }
 
-  export function show(content: any): string {
+  export function show(content: unknown): string {
     if (typeof content === "string") {
       return content;
     }
-    return (content ?? []).map((part: any) => part.text ?? "[" + part.type + "]").join("\n");
+    return (Array.isArray(content) ? content : []).map((part: unknown) => text_of(get(part, "text"), "[" + text_of(get(part, "type"), "undefined") + "]")).join("\n");
   }
 
 }

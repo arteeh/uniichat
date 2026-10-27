@@ -2,6 +2,8 @@ import * as fs from "node:fs";
 import * as config from "./Config.ts";
 import { LABELS } from "./Pick.ts";
 import { write_whole } from "./Write.ts";
+import { err_code, err_why } from "./Err.ts";
+import { get, rec } from "./Json.ts";
 
 export type Row = {
   key     : string;
@@ -45,8 +47,8 @@ export namespace Settings {
     try {
       snap = config.config_snapshot();
       file = config.config_file_of(snap.file);
-    } catch (err: any) {
-      error = "config.json can't be read (" + String(err?.message ?? err).replace(/^config: (config\.json )?/, "") + "): fix it on the server; nothing can be saved here till then.";
+    } catch (err) {
+      error = "config.json can't be read (" + err_why(err).replace(/^config: (config\.json )?/, "") + "): fix it on the server; nothing can be saved here till then.";
     }
     try {
       keys = config.keys_of(snap.keys);
@@ -87,22 +89,23 @@ export namespace Settings {
     if (text.length > BODY) {
       return refuse(413, "Too large.");
     }
-    let body: any;
+    let body: unknown;
     try {
       body = JSON.parse(text);
     } catch {
       return refuse(400, "Not JSON.");
     }
-    const set = Settings.record(body?.set);
-    const keys = Settings.record(body?.keys);
-    const profiles = body?.profiles === undefined ? undefined : body.profiles === null ? null : Settings.profiles(body.profiles);
+    const set = Settings.record(get(body, "set"));
+    const keys = Settings.record(get(body, "keys"));
+    const given = get(body, "profiles");
+    const profiles = given === undefined ? undefined : given === null ? null : Settings.profiles(given);
     let snap: config.Snapshot;
     try {
       snap = config.config_snapshot();
-    } catch (err: any) {
-      return refuse(409, String(err?.message ?? err).replace(/^config: /, "") + ": fix it on the server first.");
+    } catch (err) {
+      return refuse(409, err_why(err).replace(/^config: /, "") + ": fix it on the server first.");
     }
-    if (body?.version !== snap.version) {
+    if (get(body, "version") !== snap.version) {
       return refuse(409, "The settings changed since this page read them (another tab, or config.json edited by hand). Reload to see them, then save again.");
     }
     let file: Record<string, unknown>;
@@ -143,7 +146,7 @@ export namespace Settings {
       if (process.env.UNII_PROFILES !== undefined) {
         return refuse(409, "UNII_PROFILES sets the profiles: unset it on the server to change them here.", "profiles");
       }
-      if (body.profiles !== null && profiles === null) {
+      if (given !== null && profiles === null) {
         return refuse(400, "Each profile needs a name (up to " + NAME + " characters, no \":\") and one to " + RANKS + " models.", "profiles");
       }
       if (profiles === null || Object.keys(profiles).length === 0) {
@@ -184,8 +187,8 @@ export namespace Settings {
         write_whole(config.FILE_PATH, JSON.stringify(next, null, 2) + "\n", mode);
       }
       config.config_reload();
-    } catch (err: any) {
-      const out = refuse(500, "The settings couldn't be saved (" + (err?.code ?? String(err?.message ?? err).replace(/^config: /, "")) + "). Reload to see what is saved.");
+    } catch (err) {
+      const out = refuse(500, "The settings couldn't be saved (" + (err_code(err) ?? err_why(err).replace(/^config: /, "")) + "). Reload to see what is saved.");
       return { ...out, wrote: true };
     }
     const saved = [...Object.keys(set), ...(profiles === undefined ? [] : ["profiles"]), ...Object.keys(keys).map((name) => "key." + name)];
@@ -197,20 +200,20 @@ export namespace Settings {
     if (x === null || typeof x !== "object" || Array.isArray(x) || all.length > PROFILES) {
       return null;
     }
-    const line = (t: unknown) => typeof t === "string" && t.trim() !== "" && t.length <= VALUE && !/[\x00-\x1f\x7f]/.test(t);
+    const line = (t: unknown): t is string => typeof t === "string" && t.trim() !== "" && t.length <= VALUE && !/[\x00-\x1f\x7f]/.test(t);
     const out: Array<[string, string[]]> = [];
     for (const [name, list] of all) {
       const key = name.trim();
       if (!line(key) || key.length > NAME || key.includes(":") || key === "__proto__" || out.some(([k]) => k === key) || !Array.isArray(list) || list.length === 0 || list.length > RANKS || !list.every(line)) {
         return null;
       }
-      out.push([key, list.map((m: string) => m.trim())]);
+      out.push([key, list.map((m) => m.trim())]);
     }
     return Object.fromEntries(out);
   }
 
   export function record(x: unknown): Record<string, unknown> {
-    return x !== null && typeof x === "object" && !Array.isArray(x) ? (x as Record<string, unknown>) : {};
+    return rec(x) ? x : {};
   }
 
   export function check(file: Record<string, unknown>, changed: Set<string>): { error: string; key?: string } | null {
@@ -224,8 +227,8 @@ export namespace Settings {
     }
     try {
       config.config_make(file);
-    } catch (err: any) {
-      const text = String(err?.message ?? err).replace(/^config: /, "");
+    } catch (err) {
+      const text = err_why(err).replace(/^config: /, "");
       const key = text.startsWith("profile") ? "profiles" : config.SETTINGS.find((s) => text.startsWith(s.key + " "))?.key;
       const pick = key === "pick" || key === "compactor" || key === "agents";
       const error = pick ? config.config_value(file, key) + " isn't offered by the vendors and models checked: pick another." : key === "vendors" ? "There is no vendor " + text.replace(/^vendors can't offer /, "") + "." : text + ".";
