@@ -4,6 +4,7 @@ import * as child from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { err_why } from "./Err.ts";
+import type { Part } from "./Service.ts";
 import * as Update from "./Update.ts";
 
 const SET = /^--env=(UNII_DIR|XDG_CONFIG_HOME)=(.+)$/;
@@ -18,7 +19,7 @@ for (const a of SETS) {
 const WEB  = /^https?:\/\//;
 const URL_ = ARGS.find((a) => WEB.test(a));
 const FLAGS = ["-d", "-f", "--service"];
-const HELPS = ["--help", "-h"];
+const HELPS = ["--help", "-h", "help"];
 const REST = ARGS.filter((a) => !WEB.test(a) && !FLAGS.includes(a) && !HELPS.includes(a));
 const FLAG = new Set(ARGS.filter((a) => FLAGS.includes(a)));
 
@@ -27,7 +28,6 @@ const SUPERVISOR = Number(process.env.UNII_SUPERVISOR ?? 0);
 delete process.env.UNII_SERVICE;
 delete process.env.UNII_SUPERVISOR;
 
-type Part = "device" | "serve";
 type Cmd = {
   use: string;
   about: string;
@@ -106,14 +106,13 @@ if (WIN && !BUN) {
   }
 }
 
-async function run_here(part: Part): Promise<typeof import("./Service.ts")> {
+async function run_here(part: Part): Promise<void> {
   const Service = await import("./Service.ts");
   if (SERVICE === undefined) {
     Service.foreground(part);
   } else {
     Service.served(part);
   }
-  return Service;
 }
 
 function service(part: Part, run: (arg?: string) => unknown): Cmd[] {
@@ -150,7 +149,7 @@ const TREE: Cmd = { use: "unii [url]", about: "the chat in this terminal", url: 
     }),
     { use: "link", about: "a link that signs a browser in", run: async () => { (await import("./Owner.ts")).Owner.cli(); } },
     { use: "sessions", about: "the browsers, terminals and devices signed in", run: async () => (await import("./Owner.ts")).Owner.sessions(), kids: [
-      { use: "revoke <n>|--all", about: "sign one out, or all", arg: /./, need: true, run: async (n) => (await import("./Owner.ts")).Owner.sessions(n).catch((err: unknown) => fail(err_why(err))) },
+      { use: "revoke <n>|--all", about: "sign one out, or all", arg: /^(\d+|--all)$/, need: true, run: async (n) => (await import("./Owner.ts")).Owner.sessions(n).catch((err: unknown) => fail(err_why(err))) },
     ] },
     plan("claude", "your Claude plan (claude-sub)"),
     plan("chatgpt", "your ChatGPT plan (openai-sub)"),
@@ -167,10 +166,7 @@ function rows(c: Cmd, head: string, depth: number): [string, string][] {
 }
 
 const words = REST[0] === "-v" || REST[0] === "--version" ? ["version", ...REST.slice(1)] : [...REST];
-const help = ARGS.some((a) => HELPS.includes(a)) || words[0] === "help";
-if (words[0] === "help") {
-  words.shift();
-}
+const help = ARGS.some((a) => HELPS.includes(a));
 let cmd = TREE;
 const trail = ["unii"];
 while (words.length > 0) {
@@ -193,15 +189,15 @@ if (SUPERVISOR > 0) {
   (await import("./Service.ts")).watch(SUPERVISOR, part ?? undefined);
 }
 
-const service_run = FLAG.has("--service") && part !== null && trail.length === 2 && FLAG.size === 1;
+const service_run = FLAG.has("--service") && trail.length === 2 && FLAG.size === 1 ? part : null;
 const arg = words[0];
 const fits =
   cmd.run !== undefined &&
   words.length <= (cmd.arg ? 1 : 0) &&
   (arg === undefined ? !cmd.need : cmd.arg?.test(arg) === true) &&
   (URL_ === undefined || cmd.url === true) &&
-  [...FLAG].every((f) => (f === "-d" && daemon !== undefined) || (f === "-f" && cmd.follow === true) || (f === "--service" && service_run)) &&
-  (SETS.length === 0 || service_run);
+  [...FLAG].every((f) => (f === "-d" && daemon !== undefined) || (f === "-f" && cmd.follow === true) || (f === "--service" && service_run !== null)) &&
+  (SETS.length === 0 || service_run !== null);
 
 if (help || !fits) {
   const head = trail.length === 1 ? TREE.use : [...trail.slice(0, -1), cmd.use].join(" ");
@@ -209,8 +205,8 @@ if (help || !fits) {
   const width = Math.max(31, ...all.map(([use]) => use.length + 2));
   console.log(all.map(([use, about]) => use.padEnd(width) + about).join("\n"));
   process.exitCode = help ? 0 : 2;
-} else if (service_run && part !== null) {
-  await (await import("./Service.ts")).supervise(part, REST.slice(1).concat(URL_ ?? []));
+} else if (service_run !== null) {
+  await (await import("./Service.ts")).supervise(service_run, REST.slice(1).concat(URL_ ?? []));
 } else {
   await cmd.run?.(arg);
 }

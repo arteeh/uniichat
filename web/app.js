@@ -3193,8 +3193,8 @@ function pick_html(fold, on, knobs, talk) {
   const heat = used >= 80 ? " hot" : used >= 50 ? " warm" : "";
   const rule = talk == null ? `<span class="rule"></span>` : `<span class="rule meter${heat}" style="--used:${used}%" title="Conversation: ${used}% of space used (${talk_tokens(talk)})" role="meter" aria-valuenow="${used}" aria-valuemin="0" aria-valuemax="100" aria-label="Conversation space used"></span>`;
   const dot = `<span class="dot">·</span>`;
-  const left = all.length > 0 && modes.length > 0 ? [...all, dot, ...modes] : [...all, ...modes];
-  return [...left, rule, ...parts.flatMap((part, i) => i === 0 ? part : [dot, ...part])];
+  const join = (groups) => groups.filter((g) => g.length > 0).flatMap((g, i) => i === 0 ? g : [dot, ...g]);
+  return [...join([all, modes]), rule, ...join(parts)];
 }
 function choice_html(c) {
   const head = c.vendor === null ? "" : `<p>${esc(c.vendor)}</p>`;

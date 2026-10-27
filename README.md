@@ -75,7 +75,7 @@ Set up
 
 1. **Start the server** on the computer that keeps your chat:
    `unii serve -d`. It runs in the background from then on, at
-   http://127.0.0.1:8788, with its data in `~/.unii`. To use it from
+   http://127.0.0.1:8788, with its data in `~/.unii` (or `$UNII_DIR`). To use it from
    other devices, put it behind HTTPS (see Q&A) and set `site` in
    Settings to that address.
 2. **Sign in.** `unii serve link` on that computer prints a link that
@@ -116,7 +116,9 @@ Use
 - **Web:** open the server's address. Install it as an app from your
   browser to get notifications when Unii replies.
 - **Terminal:** `unii [url]`. `/help` lists its commands; `/import`
-  brings in this computer's Claude Code and Codex sessions.
+  brings in this computer's Claude Code and Codex sessions. Without a
+  url it uses `$UNII_URL`, else the last one, else http://127.0.0.1:8788.
+  The terminal and devices keep their server and sign-in in `~/.config/unii`.
 - **Conversation mode:** the switch next to "fold all" (`/mode` in the
   terminal). From then on, your and Unii's messages stay word for word
   in Unii's memory, for a real discussion. It costs more per turn and
