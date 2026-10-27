@@ -22,9 +22,9 @@ const NODE = 512;
 
 const LINE = 480;
 
-const PRICE = { base: 187, byte: 735, depth: 628 };
+const COMPACTION_MICRO_USD_FIT = { base: 187, per_source_doubling: 735, per_summary_under: 628 };
 
-const PART = 2 ** 20;
+const PIECE_KEPT_AS_BLOB = 2 ** 20;
 
 export const APPS = ["Claude", "ChatGPT"];
 
@@ -166,7 +166,15 @@ export function import_id(s: Session): string {
 }
 
 export function import_key(note: { text: string; date?: string }): string {
-  return note.date + " " + note.text.replace(/^.*?(?= session in | chat ")/, "").replace(/, from [^,]*$/, "");
+  return note.date + " " + without_local_time(without_app(note.text));
+}
+
+function without_app(name: string): string {
+  return name.replace(/^.*?(?= session in | chat ")/, "");
+}
+
+function without_local_time(name: string): string {
+  return name.replace(/, from [^,]*$/, "");
 }
 
 export async function* import_body(picked: Session[]): AsyncGenerator<string> {
@@ -177,7 +185,7 @@ export async function* import_body(picked: Session[]): AsyncGenerator<string> {
     part += JSON.stringify(import_note(s)) + "\n";
     for await (const m of import_read(s)) {
       part += kept.has(n++) ? JSON.stringify(m) + "\n" : "";
-      if (part.length >= PART) {
+      if (part.length >= PIECE_KEPT_AS_BLOB) {
         yield part;
         part = "";
       }
@@ -210,8 +218,8 @@ function node_usd(node: Node): number {
   if (node.bytes <= NODE) {
     return 0;
   }
-  const { base, byte, depth } = PRICE;
-  return Math.round(base + byte * Math.log2(node.bytes / NODE) + depth * (node.depth + 1));
+  const fit = COMPACTION_MICRO_USD_FIT;
+  return Math.round(fit.base + fit.per_source_doubling * Math.log2(node.bytes / NODE) + fit.per_summary_under * (node.depth + 1));
 }
 
 function node_line(node: Node): Node {
