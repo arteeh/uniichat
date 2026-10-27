@@ -41,22 +41,26 @@ const BACK = $("#import [name=back]", HTMLInputElement);
 const P = {
   rec   : null as MediaRecorder | null,
   shown : "",
-  end   : true,
-  stick : true,
-  y     : 0,
   frame : 0,
   rows  : true,
   toast : 0,
-  found : new Map<string, Read>(),
-  done  : {} as Import.Done,
-  off   : new Set<string>(),
-  step  : "" as "" | "start" | "send" | "run" | "seen" | "done",
   push  : null as { reg: ServiceWorkerRegistration; key: string } | null,
-  away  : null as { y: number; end: boolean } | null,
   used  : { ws: null as WebSocket | null, on: false, at: 0 },
+  after : false,
+  at    : "",
+};
+
+const SCROLL = {
+  end   : true,
+  stick : true,
+  y     : 0,
   open  : new Set<string>(),
-  build : document.documentElement.dataset.build ?? "",
   still : false,
+  away  : null as { y: number; end: boolean } | null,
+};
+
+const RENEW = {
+  build : document.documentElement.dataset.build ?? "",
   due   : false,
   going : false,
   since : false,
@@ -64,8 +68,13 @@ const P = {
   saving: 0,
   gave  : null as WebSocket | null,
   back  : null as { a: number; top: number } | null,
-  after : false,
-  at    : "",
+};
+
+const IMPORT = {
+  found : new Map<string, Read>(),
+  done  : {} as Import.Done,
+  off   : new Set<string>(),
+  step  : "" as "" | "start" | "send" | "run" | "seen" | "done",
 };
 
 function $(sel: string): HTMLElement;
@@ -104,8 +113,8 @@ async function boot(): Promise<void> {
   addEventListener("focus", () => in_use());
   document.addEventListener("visibilitychange", () => {
     in_use();
-    if (document.hidden && P.due && !P.going && renew_free(true)) {
-      P.going = true;
+    if (document.hidden && RENEW.due && !RENEW.going && renew_free(true)) {
+      RENEW.going = true;
       void renew(true);
     }
   });
@@ -186,19 +195,19 @@ function chat(): void {
   };
   document.onscroll = () => {
     if (at_end()) {
-      P.end = true;
-    } else if (scrollY < P.y) {
-      P.end = false;
+      SCROLL.end = true;
+    } else if (scrollY < SCROLL.y) {
+      SCROLL.end = false;
     }
-    P.y = scrollY;
+    SCROLL.y = scrollY;
     mine_show();
   };
   $(".mine").onclick = mine;
   $(".down").onclick = down;
   const keep = new ResizeObserver(() => {
-    if (P.still) {
-      P.still = false;
-    } else if (P.end && !$("#log").hidden && !at_end()) {
+    if (SCROLL.still) {
+      SCROLL.still = false;
+    } else if (SCROLL.end && !$("#log").hidden && !at_end()) {
       scrollTo(0, document.documentElement.scrollHeight);
     }
   });
@@ -319,7 +328,7 @@ function upload_answer(xhr: XMLHttpRequest): { name: string } | { error: string 
 
 function act(a: View.Act): void {
   const said = a.$ === "Send" ? a.text.trim() : "";
-  P.end = P.end || a.$ === "Send";
+  SCROLL.end = SCROLL.end || a.$ === "Send";
   P.rows = true;
   for (const msg of View.view_act(v, a)) {
     View.link_send(v, msg, a.$ === "Send" ? (out) => back(a, out) : undefined, said);
@@ -421,7 +430,7 @@ function folds(): void {
       measured.add(msg);
       msg.classList.toggle("long", cut.scrollHeight > FOLD * parseFloat(getComputedStyle(cut).lineHeight));
     }
-    fold_show(msg, P.open.has(msg.dataset.a ?? ""));
+    fold_show(msg, SCROLL.open.has(msg.dataset.a ?? ""));
   }
 }
 
@@ -435,13 +444,13 @@ function fold_show(msg: HTMLElement, open: boolean): void {
 function unfold(msg: HTMLElement): void {
   const open = !msg.classList.contains("shown");
   const id = msg.dataset.a ?? "";
-  open ? P.open.add(id) : P.open.delete(id);
-  const [top, follow] = [msg.getBoundingClientRect().top, P.end];
-  P.end = false;
+  open ? SCROLL.open.add(id) : SCROLL.open.delete(id);
+  const [top, follow] = [msg.getBoundingClientRect().top, SCROLL.end];
+  SCROLL.end = false;
   fold_show(msg, open);
   scrollBy(0, msg.getBoundingClientRect().top - top);
-  P.end = follow || at_end();
-  P.still = follow;
+  SCROLL.end = follow || at_end();
+  SCROLL.still = follow;
 }
 
 const FRAMED = new WeakSet<HTMLIFrameElement>();
@@ -609,7 +618,7 @@ function importer(): void {
     pick.title = "From the website: " + Import.EXPORTS[src.dataset.app ?? ""] + ", which emails you a zip.";
   }
   $(".into").onclick = () => {
-    P.step = "";
+    IMPORT.step = "";
     import_draw("");
   };
   $("#import").onclick = (ev) => (ev.target as HTMLElement).closest(".skip") && $("#import").hidePopover();
@@ -617,14 +626,14 @@ function importer(): void {
   $("#import .flow").onclick = import_flow;
   $("#import").ontoggle = (ev) => {
     if (ev.newState === "closed") {
-      P.step = P.step === "start" || P.step === "done" ? "" : P.step;
+      IMPORT.step = IMPORT.step === "start" || IMPORT.step === "done" ? "" : IMPORT.step;
     }
     import_draw("");
   };
   form.oninput = (ev) => {
     const box = ev.target as HTMLInputElement;
     if (box.name === "session") {
-      box.checked ? P.off.delete(box.value) : P.off.add(box.value);
+      box.checked ? IMPORT.off.delete(box.value) : IMPORT.off.add(box.value);
     }
     import_draw("");
   };
@@ -668,15 +677,15 @@ function import_flow(): void {
 
 async function import_open(first: boolean): Promise<void> {
   $("#menu").hidePopover();
-  P.done = (await fetch("/api/imported").then((res) => res.json()).catch(() => ({}))) as Import.Done;
+  IMPORT.done = (await fetch("/api/imported").then((res) => res.json()).catch(() => ({}))) as Import.Done;
   $("#import form .skip").textContent = first ? "Start fresh" : "Close";
-  P.step = first ? "start" : P.step === "done" ? "" : P.step;
+  IMPORT.step = first ? "start" : IMPORT.step === "done" ? "" : IMPORT.step;
   import_draw("");
   $("#import").showPopover();
 }
 
 function import_took(name: string, read: Read, status: string): void {
-  P.found.set(name, read);
+  IMPORT.found.set(name, read);
   BACK.min = "0";
   BACK.value = "0";
   import_draw(status);
@@ -693,16 +702,16 @@ async function import_welcome(): Promise<void> {
 
 function import_send(): void {
   const picked = import_plan().picked;
-  P.step = "send";
+  IMPORT.step = "send";
   import_draw("");
   const body = async () => new Blob(await Array.fromAsync(Import.import_body(picked), (part) => new Blob([part])));
   View.link_send(v, { $: "import", body }, import_sent);
 }
 
 function import_sent(out: View.Answer): void {
-  P.step = out.error !== undefined ? "" : out.going ? "run" : "done";
+  IMPORT.step = out.error !== undefined ? "" : out.going ? "run" : "done";
   if (out.error === undefined) {
-    P.found.clear();
+    IMPORT.found.clear();
   }
   import_draw(out.error === undefined ? "" : "Not imported: " + out.error);
   $("#import").showPopover();
@@ -710,9 +719,9 @@ function import_sent(out: View.Answer): void {
 
 function import_plan(): Import.Plan {
   const form = new FormData($("#import form", HTMLFormElement));
-  const want = { off: [...P.off], since: import_since(), tools: form.has("tools") };
-  const found = [...P.found.values()].flatMap((read) => read.sessions);
-  return Import.import_plan(found, want, P.done);
+  const want = { off: [...IMPORT.off], since: import_since(), tools: form.has("tools") };
+  const found = [...IMPORT.found.values()].flatMap((read) => read.sessions);
+  return Import.import_plan(found, want, IMPORT.done);
 }
 
 function import_since(): string {
@@ -721,14 +730,14 @@ function import_since(): string {
 
 function import_bar(): boolean {
   const run = v.importing;
-  P.step = run !== null ? "seen" : P.step === "seen" ? "done" : P.step;
-  const done  = P.step === "done";
-  const going = ["send", "run", "seen", "done"].includes(P.step);
+  IMPORT.step = run !== null ? "seen" : IMPORT.step === "seen" ? "done" : IMPORT.step;
+  const done  = IMPORT.step === "done";
+  const going = ["send", "run", "seen", "done"].includes(IMPORT.step);
   const part  = run === null ? Number(done) : run.done / Math.max(1, run.total);
   const why   = Boolean(run?.why);
-  const said  = run !== null ? View.progress_show(run) : done ? Import.DONE : P.step === "send" ? "Sending…" : "Starting…";
-  $("#import .start").hidden = P.step !== "start";
-  $("#import form").hidden = going || P.step === "start";
+  const said  = run !== null ? View.progress_show(run) : done ? Import.DONE : IMPORT.step === "send" ? "Sending…" : "Starting…";
+  $("#import .start").hidden = IMPORT.step !== "start";
+  $("#import form").hidden = going || IMPORT.step === "start";
   $("#import .prog").hidden = !going;
   $("#import .prog .title").textContent = done ? "Memory tree built" : "Building your memory tree";
   $("#import progress", HTMLProgressElement).value = part;
@@ -747,7 +756,7 @@ function import_draw(status: string): void {
   if (import_bar()) {
     return;
   }
-  const reads    = [...P.found.values()];
+  const reads    = [...IMPORT.found.values()];
   const sessions = reads.flatMap((read) => read.sessions);
   const plan     = import_plan();
   const msgs     = plan.msgs;
@@ -767,8 +776,8 @@ function import_draw(status: string): void {
     const list  = must(src.querySelector(".sessions"), "#import .sessions");
     const shown = plan.sessions.filter((s) => s.app === src.dataset.app);
     markup(list, shown.map((s) => `<label title="${Html.esc(s.where + ", " + Import.import_count(s.heads.length, ""))}"><input type="checkbox" name="session" value="${Html.esc(Import.import_id(s))}">${Import.import_cells(s).map((c) => `<span>${Html.esc(c)}</span>`).join("")}</label>`));
-    list.querySelectorAll("input").forEach((box) => (box.checked = !P.off.has(box.value)));
-    const on = shown.filter((s) => !P.off.has(Import.import_id(s))).length;
+    list.querySelectorAll("input").forEach((box) => (box.checked = !IMPORT.off.has(box.value)));
+    const on = shown.filter((s) => !IMPORT.off.has(Import.import_id(s))).length;
     find(src, ".pick", HTMLElement).hidden = shown.length === 0;
     must(src.querySelector(".pick summary"), "#import .pick summary").textContent = (on < shown.length ? on + " of " : shown.length > 1 ? "All " : "") + shown.length + (shown.length === 1 ? " session" : " sessions") + " picked · choose";
   }
@@ -828,7 +837,7 @@ function html_parse(html: string): Element {
 }
 
 function draw(stick: boolean): void {
-  P.stick = P.stick && stick;
+  SCROLL.stick = SCROLL.stick && stick;
   if (P.frame === 0) {
     P.frame = requestAnimationFrame(() => {
       paint();
@@ -840,16 +849,16 @@ function draw(stick: boolean): void {
 function paint(): void {
   if ($("#log").hidden) {
     P.frame = 0;
-    P.stick = true;
+    SCROLL.stick = true;
     bars();
     return;
   }
   const doc = document.documentElement;
-  const follow = P.stick && P.end;
+  const follow = SCROLL.stick && SCROLL.end;
   const at = P.rows && !follow ? anchor() : null;
   const shown = shown_key();
   P.frame = 0;
-  P.stick = true;
+  SCROLL.stick = true;
   bars();
   if (P.rows) {
     markup($("#log .rows"), View.view_body(v).map(Html.row_html));
@@ -860,17 +869,17 @@ function paint(): void {
   Box.box_sizes($("#log .tail"));
   folds();
   frames();
-  const back = P.back === null ? null : document.querySelector<HTMLElement>(`#log [data-a="${P.back.a}"]`);
-  if (back !== null && P.back !== null) {
+  const back = RENEW.back === null ? null : document.querySelector<HTMLElement>(`#log [data-a="${RENEW.back.a}"]`);
+  if (back !== null && RENEW.back !== null) {
     P.shown = shown;
-    scrollBy(0, back.getBoundingClientRect().top - P.back.top);
-    P.back = null;
-    P.end = at_end();
+    scrollBy(0, back.getBoundingClientRect().top - RENEW.back.top);
+    RENEW.back = null;
+    SCROLL.end = at_end();
     return;
   }
   if (shown !== P.shown) {
     P.shown = shown;
-    P.end = v.fold === null;
+    SCROLL.end = v.fold === null;
     scrollTo(0, v.fold === null ? doc.scrollHeight : 0);
     return;
   }
@@ -885,7 +894,7 @@ function paint(): void {
   const el = rows.filter((r) => Number(r.dataset.a) <= at.a).pop();
   if (el !== undefined) {
     scrollBy(0, el.getBoundingClientRect().top - at.top);
-    P.end = at_end();
+    SCROLL.end = at_end();
   }
 }
 
@@ -901,8 +910,8 @@ function bars(): void {
   for (const note of v.notes.splice(0)) {
     toast(note);
   }
-  if (P.due && !P.going && renew_free()) {
-    P.going = true;
+  if (RENEW.due && !RENEW.going && renew_free()) {
+    RENEW.going = true;
     setTimeout(() => void renew());
   }
   const on = View.view_typing(v);
@@ -946,7 +955,7 @@ function mine(): void {
   const rows = [...document.querySelectorAll<HTMLElement>("#log .msg.user")];
   const el = rows.findLast(mine_above);
   if (el !== undefined) {
-    P.end = false;
+    SCROLL.end = false;
     el.scrollIntoView();
   }
   mine_show();
@@ -955,12 +964,12 @@ function mine(): void {
 function mine_show(): void {
   const first = document.querySelector<HTMLElement>("#log .msg.user");
   $(".mine").hidden = first === null || !mine_above(first);
-  $(".down").hidden = P.end || innerHeight + scrollY >= document.documentElement.scrollHeight - 1;
+  $(".down").hidden = SCROLL.end || innerHeight + scrollY >= document.documentElement.scrollHeight - 1;
 }
 
 function down(): void {
   scrollTo(0, document.documentElement.scrollHeight);
-  P.end = true;
+  SCROLL.end = true;
   mine_show();
 }
 
@@ -979,8 +988,8 @@ function route(): void {
   const page = PAGES.includes(location.pathname);
   const tree = location.pathname === TREE;
   const chat = !page && !tree;
-  if (!chat && !$("#log").hidden && P.away === null) {
-    P.away = { y: scrollY, end: P.end };
+  if (!chat && !$("#log").hidden && SCROLL.away === null) {
+    SCROLL.away = { y: scrollY, end: SCROLL.end };
   }
   $("#log").hidden = !chat;
   document.body.classList.toggle("account", page);
@@ -988,14 +997,14 @@ function route(): void {
   $("#account").hidden = !page;
   $("#tree").hidden = !tree;
   P.at = location.pathname + location.hash;
-  P.shown = chat && P.away !== null ? shown_key() : location.pathname;
-  if (chat && P.away !== null) {
-    P.end = P.away.end;
+  P.shown = chat && SCROLL.away !== null ? shown_key() : location.pathname;
+  if (chat && SCROLL.away !== null) {
+    SCROLL.end = SCROLL.away.end;
     P.rows = true;
     paint();
-    scrollTo(0, P.end ? document.documentElement.scrollHeight : P.away.y);
-    P.y = scrollY;
-    P.away = null;
+    scrollTo(0, SCROLL.end ? document.documentElement.scrollHeight : SCROLL.away.y);
+    SCROLL.y = scrollY;
+    SCROLL.away = null;
   }
   if (page) {
     void account();
@@ -1005,7 +1014,7 @@ function route(): void {
   } else {
     Tree.tree_hide();
   }
-  draw(chat && P.end);
+  draw(chat && SCROLL.end);
 }
 
 function popped(): void {
@@ -1022,11 +1031,11 @@ async function account(): Promise<void> {
   const prompts = got !== null && got.ok ? ((await got.json().catch(() => null)) as View.Prompts | null) : null;
   const push = await notify_state().catch(() => null);
   el.innerHTML = Html.account_html(prompts, push);
-  P.dirty.clear();
+  RENEW.dirty.clear();
   el.oninput = (ev) => {
     const form = (ev.target as Element).closest("form");
     if (form !== null) {
-      P.dirty.add(form);
+      RENEW.dirty.add(form);
     }
   };
   el.querySelectorAll<HTMLFormElement>("form.prompt").forEach((form) => (form.onsubmit = (ev) => {
@@ -1072,9 +1081,9 @@ async function account_prompt(form: HTMLFormElement): Promise<void> {
   const save = find(form, "button", HTMLButtonElement);
   const sent = area.value;
   save.disabled = true;
-  P.saving++;
+  RENEW.saving++;
   const out = await View.post("/api/prompts", { [area.name]: sent });
-  P.saving--;
+  RENEW.saving--;
   save.disabled = false;
   const saved = get(out[area.name], "text");
   if (out.error === undefined && area.value === sent) {
@@ -1083,8 +1092,8 @@ async function account_prompt(form: HTMLFormElement): Promise<void> {
   why.textContent = text_of(out.error, area.value === saved ? "Saved." : "Not saved yet: Save again.");
   form.classList.toggle("bad", out.error !== undefined);
   if (out.error === undefined && area.value === sent) {
-    P.dirty.delete(form);
-    P.since = true;
+    RENEW.dirty.delete(form);
+    RENEW.since = true;
   }
   draw(false);
 }
@@ -1383,9 +1392,9 @@ async function settings_save(form: HTMLFormElement, page: Page, unset: Set<strin
   const go = find(form, ".go", HTMLButtonElement);
   go.disabled = true;
   why.textContent = "";
-  P.saving++;
+  RENEW.saving++;
   const out = await View.post("/api/settings", { version: page.version, set, keys, ...(profiles === undefined ? {} : { profiles }) });
-  P.saving--;
+  RENEW.saving--;
   go.disabled = false;
   if (!out.ok) {
     const at = out.key === undefined ? null : form.querySelector<HTMLElement>(`.set[data-key="${text_of(out.key, "null")}"]`);
@@ -1397,33 +1406,41 @@ async function settings_save(form: HTMLFormElement, page: Page, unset: Set<strin
   const done = out as Page & { saved: string[] };
   const later = done.saved.filter((key) => page.settings.find((r) => r.key === key)?.apply === "restart");
   settings_draw(done);
-  P.dirty.delete(form);
-  P.since = true;
+  RENEW.dirty.delete(form);
+  RENEW.since = true;
   draw(false);
   toast(later.length === 0 ? "Saved." : "Saved. " + later.join(", ") + " " + (later.length === 1 ? "applies" : "apply") + " once the server restarts.");
 }
 
 function renew_due(build: string | undefined): void {
-  if (build === undefined || P.build === "" || build === P.build) {
-    P.build ||= build ?? "";
-    P.due = false;
+  if (build === undefined || build_same(build)) {
+    RENEW.build ||= build ?? "";
+    RENEW.due = false;
     return;
   }
-  const [was, n] = (sessionStorage.getItem(kept("build")) ?? "").split(" ");
-  if (was === build && Number(n) >= 2 && (P.gave === null || P.gave === v.ws)) {
-    P.gave = v.ws;
+  if (reloads_spent_on(build)) {
+    RENEW.gave = v.ws;
     return;
   }
-  P.since = P.due && P.since;
-  P.due = true;
+  RENEW.since = RENEW.due && RENEW.since;
+  RENEW.due = true;
   draw(false);
+}
+
+function build_same(build: string): boolean {
+  return RENEW.build === "" || build === RENEW.build;
+}
+
+function reloads_spent_on(build: string): boolean {
+  const [was, n] = (sessionStorage.getItem(kept("build")) ?? "").split(" ");
+  return was === build && Number(n) >= 2 && (RENEW.gave === null || RENEW.gave === v.ws);
 }
 
 function renew_free(hidden = false): boolean {
   const page = location.pathname !== "/" && location.pathname !== TREE;
   const quiet = P.rec === null && UPS.size === 0 && v.out.length === 0 && !$("#import").matches(":popover-open") && !Viewer.viewer_on();
   const typing = !DESK.matches && Box.box_focused() && !hidden;
-  return quiet && !typing && (!page || (P.since && P.dirty.size === 0 && P.saving === 0));
+  return quiet && !typing && (!page || (RENEW.since && RENEW.dirty.size === 0 && RENEW.saving === 0));
 }
 
 async function renew(hidden = false): Promise<void> {
@@ -1435,12 +1452,12 @@ async function renew(hidden = false): Promise<void> {
   if (tries > 0) {
     await Promise.all(["/", "/app.js", "/style.css", "/sw.js"].map((path) => fetch(path, { cache: "reload" }).catch(() => null)));
   }
-  if (!P.due || !renew_free(hidden)) {
-    P.going = false;
+  if (!RENEW.due || !renew_free(hidden)) {
+    RENEW.going = false;
     return;
   }
   const chat = !$("#log").hidden;
-  const back: Back = { at: chat && !P.end ? anchor() : null, y: chat ? null : scrollY, away: P.away, caret: Box.box_caret(), focus: Box.box_focused(), open: [...P.open] };
+  const back: Back = { at: chat && !SCROLL.end ? anchor() : null, y: chat ? null : scrollY, away: SCROLL.away, caret: Box.box_caret(), focus: Box.box_focused(), open: [...SCROLL.open] };
   sessionStorage.setItem(kept("back"), JSON.stringify(back));
   sessionStorage.setItem(kept("build"), (v.build ?? "") + " " + (tries + 1));
   location.reload();
@@ -1457,9 +1474,9 @@ function renewed(): void {
     Box.box_focus();
   }
   Box.box_place(back.caret[0], back.caret[1]);
-  back.open.forEach((id) => P.open.add(id));
-  P.back = back.at;
-  P.away = back.away;
+  back.open.forEach((id) => SCROLL.open.add(id));
+  RENEW.back = back.at;
+  SCROLL.away = back.away;
   const end = Date.now() + 3000;
   const y = () => {
     const to = back.y;
