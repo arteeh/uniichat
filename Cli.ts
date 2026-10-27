@@ -18,7 +18,8 @@ for (const a of SETS) {
 const WEB  = /^https?:\/\//;
 const URL_ = ARGS.find((a) => WEB.test(a));
 const FLAGS = ["-d", "-f", "--service"];
-const REST = ARGS.filter((a) => !WEB.test(a) && !FLAGS.includes(a));
+const HELPS = ["--help", "-h"];
+const REST = ARGS.filter((a) => !WEB.test(a) && !FLAGS.includes(a) && !HELPS.includes(a));
 const FLAG = new Set(ARGS.filter((a) => FLAGS.includes(a)));
 
 const SERVICE = process.env.UNII_SERVICE;
@@ -26,42 +27,19 @@ const SUPERVISOR = Number(process.env.UNII_SUPERVISOR ?? 0);
 delete process.env.UNII_SERVICE;
 delete process.env.UNII_SUPERVISOR;
 
-const USAGE = `Usage: unii [url]           the chat in this terminal (url: $UNII_URL, else
-                            the last one, else http://127.0.0.1:8788)
-       unii device [url]    this computer as a device of the server: the
-                            agent's shell and files here
-       unii serve [port]    your UniiChat server, at http://127.0.0.1:8788
-                            (another port: set its "site" too); data in
-                            ~/.unii ($UNII_DIR)
-       unii device|serve -d [url|port]
-                            the same in the background, as a service of
-                            your user (systemd; Windows: a Scheduled Task;
-                            macOS: a LaunchAgent) that starts at login and
-                            again if it crashes; run again, it restarts
-       unii device|serve stop
-                            stop that service and remove it
-       unii device|serve logs [-f]
-                            its output (-f: and follow it)
-       unii serve link      a link that signs a browser in to the server
-                            here (run it where the server runs)
-       unii serve chatgpt [logout|status]
-                            sign the server here in to a ChatGPT plan (its
-                            openai-sub vendor), by a code entered in any
-                            browser; or out; or show who it's signed in as
-       unii serve claude [logout|status]
-                            the same for a Claude plan (its claude-sub
-                            vendor), in Claude Code's own sign-in
-       unii serve sessions  the browsers, terminals and devices signed in
-       unii serve revoke <n>|--all
-                            sign one of them out (its open sockets close),
-                            or all
-       unii update          replace this unii with the fork's newest
-                            release (its installer, shown first)
-       unii version         this unii's version
-       unii help            this
-The terminal and the device keep their server and sign-in in
-~/.config/unii (tui.json, device.json). unii never checks for updates by
-itself: run unii update. In the chat, /help lists every command and key.`;
+type Part = "device" | "serve";
+type Cmd = {
+  use: string;
+  about: string;
+  kids?: Cmd[];
+  arg?: RegExp;
+  need?: boolean;
+  url?: boolean;
+  follow?: boolean;
+  run?: (arg?: string) => unknown;
+};
+
+const PORT = /^\d+$/;
 
 async function serve_free(): Promise<void> {
   const Service = await import("./Service.ts");
@@ -128,67 +106,111 @@ if (WIN && !BUN) {
   }
 }
 
-const [cmd, sub, more] = REST;
-const odd = (words: string[]) => REST.slice(words.length).length > 0;
-const part = cmd === "serve" || cmd === "device" ? cmd : null;
-const flags = (...ok: string[]) => [...FLAG].every((f) => ok.includes(f)) && !(FLAG.has("-d") && FLAG.has("--service"));
-const runs = part !== null && (part === "device" ? sub === undefined : sub === undefined || /^\d+$/.test(sub)) && !odd([cmd, ...(sub ? [sub] : [])]) && (part === "device" || URL_ === undefined) && flags("-d", "--service");
+async function run_here(part: Part): Promise<typeof import("./Service.ts")> {
+  const Service = await import("./Service.ts");
+  if (SERVICE === undefined) {
+    Service.foreground(part);
+  } else {
+    Service.served(part);
+  }
+  return Service;
+}
+
+function service(part: Part, run: (arg?: string) => unknown): Cmd[] {
+  return [
+    { use: "-d", about: "the same, as a service that starts at login", arg: part === "serve" ? PORT : undefined, url: part === "device", run },
+    { use: "stop", about: "stop and remove that service", run: async () => { unmark_from_parent_shell(); await (await import("./Service.ts")).stop(part); } },
+    { use: "logs [-f]", about: "its output (-f: keep following)", follow: true, run: async () => (await import("./Service.ts")).logs(part, FLAG.has("-f")) },
+  ];
+}
+
+function plan(name: "claude" | "chatgpt", about: string): Cmd {
+  const cli = async (word: string) => {
+    const mod = name === "claude" ? (await import("./ClaudeSub.ts")).ClaudeSub : (await import("./ChatGPT.ts")).ChatGPT;
+    await mod.cli([word]).catch((err: unknown) => fail(err_why(err)));
+  };
+  return { use: name, about, kids: [
+    { use: "login", about: "sign in", run: () => cli("login") },
+    { use: "logout", about: "sign out", run: () => cli("logout") },
+    { use: "status", about: "who it's signed in as", run: () => cli("status") },
+  ] };
+}
+
+const TREE: Cmd = { use: "unii [url]", about: "the chat in this terminal", url: true, run: async () => (await import("./Term.ts")).main(URL_), kids: [
+  { use: "device [url]", about: "this computer as a device of a server", url: true, run: async () => { await run_here("device"); await (await import("./Device.ts")).run(URL_); }, kids: service("device", async () => {
+    unmark_from_parent_shell();
+    await (await import("./Device.ts")).signin(URL_);
+    await (await import("./Service.ts")).start("device", []);
+  }) },
+  { use: "serve [port]", about: "your UniiChat server (port 8788)", arg: PORT, run: async (port) => { await run_here("serve"); await (await import("./Server.ts")).serve(Number(port ?? 8788)); }, kids: [
+    ...service("serve", async (port) => {
+      unmark_from_parent_shell();
+      await serve_free();
+      await (await import("./Service.ts")).start("serve", port === undefined ? [] : [port]);
+    }),
+    { use: "link", about: "a link that signs a browser in", run: async () => { (await import("./Owner.ts")).Owner.cli(); } },
+    { use: "sessions", about: "the browsers, terminals and devices signed in", run: async () => (await import("./Owner.ts")).Owner.sessions(), kids: [
+      { use: "revoke <n>|--all", about: "sign one out, or all", arg: /./, need: true, run: async (n) => (await import("./Owner.ts")).Owner.sessions(n).catch((err: unknown) => fail(err_why(err))) },
+    ] },
+    plan("claude", "your Claude plan (claude-sub)"),
+    plan("chatgpt", "your ChatGPT plan (openai-sub)"),
+  ] },
+  { use: "update", about: "install the newest release", run: update },
+  { use: "version", about: "this unii's version", run: () => console.log("unii " + Update.VERSION) },
+  { use: "help", about: "this" },
+] };
+
+const key = (c: Cmd) => c.use.split(" ")[0];
+
+function rows(c: Cmd, head: string, depth: number): [string, string][] {
+  return [["  ".repeat(depth) + head, c.about], ...(c.kids ?? []).flatMap((k) => rows(k, k.use, depth + 1))];
+}
+
+const words = REST[0] === "-v" || REST[0] === "--version" ? ["version", ...REST.slice(1)] : [...REST];
+const help = ARGS.some((a) => HELPS.includes(a)) || words[0] === "help";
+if (words[0] === "help") {
+  words.shift();
+}
+let cmd = TREE;
+const trail = ["unii"];
+while (words.length > 0) {
+  const next = cmd.kids?.find((k) => key(k) === words[0]);
+  if (next === undefined) {
+    break;
+  }
+  cmd = next;
+  trail.push(key(next));
+  words.shift();
+}
+const part = trail[1] === "device" || trail[1] === "serve" ? trail[1] : null;
+const daemon = FLAG.has("-d") ? cmd.kids?.find((k) => key(k) === "-d") : undefined;
+if (daemon !== undefined) {
+  cmd = daemon;
+  trail.push("-d");
+}
+
 if (SUPERVISOR > 0) {
   (await import("./Service.ts")).watch(SUPERVISOR, part ?? undefined);
 }
 
-if (part !== null && (FLAG.has("-d") || sub === "stop")) {
-  unmark_from_parent_shell();
-}
+const service_run = FLAG.has("--service") && part !== null && trail.length === 2 && FLAG.size === 1;
+const arg = words[0];
+const fits =
+  cmd.run !== undefined &&
+  words.length <= (cmd.arg ? 1 : 0) &&
+  (arg === undefined ? !cmd.need : cmd.arg?.test(arg) === true) &&
+  (URL_ === undefined || cmd.url === true) &&
+  [...FLAG].every((f) => (f === "-d" && daemon !== undefined) || (f === "-f" && cmd.follow === true) || (f === "--service" && service_run)) &&
+  (SETS.length === 0 || service_run);
 
-if ((SETS.length > 0 && !FLAG.has("--service")) || (FLAG.size > 0 && !runs && !(part !== null && sub === "logs" && flags("-f")))) {
-  fail("no command " + ARGS.join(" ") + ".\n\n" + USAGE);
-} else if (runs && part !== null && FLAG.has("--service")) {
+if (help || !fits) {
+  const head = trail.length === 1 ? TREE.use : [...trail.slice(0, -1), cmd.use].join(" ");
+  const all = rows(cmd, head, 0);
+  const width = Math.max(31, ...all.map(([use]) => use.length + 2));
+  console.log(all.map(([use, about]) => use.padEnd(width) + about).join("\n"));
+  process.exitCode = help ? 0 : 2;
+} else if (service_run && part !== null) {
   await (await import("./Service.ts")).supervise(part, REST.slice(1).concat(URL_ ?? []));
-} else if (runs && part !== null && FLAG.has("-d")) {
-  if (part === "device") {
-    await (await import("./Device.ts")).signin(URL_);
-  } else {
-    await serve_free();
-  }
-  await (await import("./Service.ts")).start(part, REST.slice(1));
-} else if (part !== null && sub === "stop" && !odd([cmd, sub]) && URL_ === undefined) {
-  await (await import("./Service.ts")).stop(part);
-} else if (part !== null && sub === "logs" && !odd([cmd, sub]) && URL_ === undefined) {
-  await (await import("./Service.ts")).logs(part, FLAG.has("-f"));
-} else if (cmd === undefined) {
-  await (await import("./Term.ts")).main(URL_);
-} else if (["help", "--help", "-h"].includes(cmd)) {
-  console.log(USAGE);
-} else if (cmd === "version" && !odd([cmd])) {
-  console.log("unii " + Update.VERSION);
-} else if (cmd === "update" && !odd([cmd]) && URL_ === undefined) {
-  update();
-} else if (runs && part === "device") {
-  if (SERVICE === undefined) {
-    (await import("./Service.ts")).foreground(part);
-  } else {
-    (await import("./Service.ts")).served(part);
-  }
-  await (await import("./Device.ts")).run(URL_);
-} else if (cmd === "serve" && sub === "chatgpt" && [undefined, "logout", "status"].includes(more) && !odd([cmd, sub, ...(more ? [more] : [])])) {
-  await (await import("./ChatGPT.ts")).ChatGPT.cli(REST.slice(1)).catch((err: unknown) => fail(err_why(err)));
-} else if (cmd === "serve" && sub === "claude" && [undefined, "logout", "status"].includes(more) && !odd([cmd, sub, ...(more ? [more] : [])])) {
-  await (await import("./ClaudeSub.ts")).ClaudeSub.cli(REST.slice(1)).catch((err: unknown) => fail(err_why(err)));
-} else if (cmd === "serve" && sub === "sessions" && !odd([cmd, sub])) {
-  await (await import("./Owner.ts")).Owner.sessions();
-} else if (cmd === "serve" && sub === "revoke" && more !== undefined && !odd([cmd, sub, more])) {
-  await (await import("./Owner.ts")).Owner.sessions(more).catch((err: unknown) => fail(err_why(err)));
-} else if (cmd === "serve" && sub === "link" && !odd([cmd, sub])) {
-  (await import("./Owner.ts")).Owner.cli();
-} else if (runs && part === "serve") {
-  if (SERVICE === undefined) {
-    (await import("./Service.ts")).foreground(part);
-  } else {
-    (await import("./Service.ts")).served(part);
-  }
-  await (await import("./Server.ts")).serve(Number(sub ?? 8788));
 } else {
-  const moved = cmd === "chatgpt" || cmd === "claude" ? " (now unii serve " + cmd + ")" : "";
-  fail("no command " + ARGS.join(" ") + moved + ".\n\n" + USAGE);
+  await cmd.run?.(arg);
 }

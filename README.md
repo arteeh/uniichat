@@ -46,7 +46,7 @@ What this fork adds:
   the composer stays above a phone's keyboard.
 - **One owner per server**, no accounts, email, billing, or anything
   else exclusive to the uniichat.com version; `unii serve sessions`
-  and `revoke` to sign a lost device out.
+  and `unii serve sessions revoke` to sign a lost device out.
 - **Background services** (`-d`, `stop`, `logs`) that updates restart.
 - **Subagent improvements**: their own tab, a `stop` that ends one
   and its jobs, and a report when one hits a usage limit.
@@ -82,8 +82,8 @@ Set up
    signs your browser in. Terminals and devices sign in with a link
    and a code you confirm in that browser.
 3. **Pick a model.** In the web app, ☰ › Settings: add API keys. To use
-   your Claude or ChatGPT plan instead, run `unii serve claude` or
-   `unii serve chatgpt` on the server's computer, then pick `claude-sub`
+   your Claude or ChatGPT plan instead, run `unii serve claude login` or
+   `unii serve chatgpt login` on the server's computer, then pick `claude-sub`
    or `openai-sub`.
 4. **Add your computers.** On each one Unii may work on:
    `unii device -d https://your-server`. Unii works in `~/.unii/work`

@@ -65,7 +65,7 @@ const DEFAULT_MODEL: Record<Vendor, string> = {
   "openai-api" : "gpt-6.1-sol",
 };
 
-const NONE     = "Not signed in and no API key: sign in with `unii serve claude` (or `unii serve chatgpt`) on the server, or set a key in Settings";
+const NONE     = "Not signed in and no API key: sign in with `unii serve claude login` (or `unii serve chatgpt login`) on the server, or set a key in Settings";
 const NONE_WHY = "not signed in, no key";
 
 export const VARS: Record<string, string> = {

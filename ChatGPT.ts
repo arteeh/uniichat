@@ -39,7 +39,7 @@ const LIMITS: Record<string, string> = {
   insufficient_quota  : "is out of quota",
 };
 
-const SIGN_IN = "run `unii serve chatgpt` on the server";
+const SIGN_IN = "run `unii serve chatgpt login` on the server";
 
 let REFRESHING: Promise<Auth> | null = null;
 

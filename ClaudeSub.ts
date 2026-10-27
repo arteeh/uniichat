@@ -44,7 +44,7 @@ const HOUR = { type: "ephemeral", ttl: "1h" };
 
 const OUTLASTS_CLAUDE_CODES_MCP_TIMEOUT = 1e8;
 
-const SIGN_IN = "claude-sub is not signed in, or its sign-in expired: run `unii serve claude` on the server";
+const SIGN_IN = "claude-sub is not signed in, or its sign-in expired: run `unii serve claude login` on the server";
 
 const OFF = ["server_error", "overloaded", "billing_error", "account_on_hold", "oauth_org_not_allowed", "verification_required", "model_not_found"];
 
