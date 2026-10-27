@@ -299,20 +299,32 @@ function changed(): void {
 
 function tidy(): void {
   for (const n of [...BOX.childNodes]) {
-    if (n.nodeType === Node.TEXT_NODE || (n instanceof HTMLElement && n.classList.contains("item"))) {
-      continue;
+    if (!box_may_hold(n)) {
+      as_text(n);
     }
-    if (n.nodeName === "BR") {
-      if (n !== BOX.lastChild) {
-        n.replaceWith("\n");
-      }
-      continue;
-    }
-    const line = n instanceof HTMLElement && BLOCKS.has(n.nodeName) && n.previousSibling !== null ? "\n" : "";
-    const items = n instanceof HTMLElement ? [...n.querySelectorAll<HTMLElement>(".item")] : [];
-    n.replaceWith(line + (items.length > 0 ? "" : n.textContent ?? ""), ...items);
   }
   BOX.normalize();
+  end_break_as_text_ends();
+  BOX.classList.toggle("blank", box_blank());
+}
+
+function box_may_hold(n: ChildNode): boolean {
+  return n.nodeType === Node.TEXT_NODE || (n instanceof HTMLElement && n.classList.contains("item"));
+}
+
+function as_text(n: ChildNode): void {
+  if (n.nodeName === "BR") {
+    if (n !== BOX.lastChild) {
+      n.replaceWith("\n");
+    }
+    return;
+  }
+  const line = n instanceof HTMLElement && BLOCKS.has(n.nodeName) && n.previousSibling !== null ? "\n" : "";
+  const items = n instanceof HTMLElement ? [...n.querySelectorAll<HTMLElement>(".item")] : [];
+  n.replaceWith(line + (items.length > 0 ? "" : n.textContent ?? ""), ...items);
+}
+
+function end_break_as_text_ends(): void {
   const last = BOX.lastChild;
   const before = last?.nodeName === "BR" ? last.previousSibling : last;
   const ends = before?.nodeType === Node.TEXT_NODE && (before.textContent ?? "").endsWith("\n");
@@ -321,7 +333,6 @@ function tidy(): void {
   } else if (!ends && last?.nodeName === "BR") {
     last.remove();
   }
-  BOX.classList.toggle("blank", box_blank());
 }
 
 function offsets(points: Array<[Node, number]>): { text: string; at: number[] } {
