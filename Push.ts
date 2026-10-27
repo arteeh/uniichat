@@ -40,7 +40,17 @@ const ANSWER = 30 * 1000;
 const URL_MAX = 2048;
 
 const INSIDE = new net.BlockList();
-for (const cidr of ["0.0.0.0/8", "10.0.0.0/8", "100.64.0.0/10", "127.0.0.0/8", "169.254.0.0/16", "172.16.0.0/12", "192.0.0.0/24", "192.168.0.0/16", "198.18.0.0/15", "224.0.0.0/3", "::/127", "fc00::/7", "fe80::/10", "ff00::/8"]) {
+const NOT_PUBLIC: Record<string, string[]> = {
+  "this network"            : ["0.0.0.0/8"],
+  "private"                 : ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "fc00::/7"],
+  "carrier-grade NAT"       : ["100.64.0.0/10"],
+  "loopback, unspecified"   : ["127.0.0.0/8", "::/127"],
+  "link-local"              : ["169.254.0.0/16", "fe80::/10"],
+  "IETF protocol"           : ["192.0.0.0/24"],
+  "benchmarking"            : ["198.18.0.0/15"],
+  "multicast, reserved"     : ["224.0.0.0/3", "ff00::/8"],
+};
+for (const cidr of Object.values(NOT_PUBLIC).flat()) {
   const [ip, bits] = cidr.split("/");
   INSIDE.addSubnet(ip, Number(bits), net.isIPv6(ip) ? "ipv6" : "ipv4");
 }
@@ -54,7 +64,9 @@ export const ACTIVE_MS = 60 * 1000;
 const PUSH = { link: null as http2.ClientHttp2Session | null, jwt: "", at: 0, by: "" };
 const PUSH_AGE = 40 * 60 * 1000;
 
-let KEYS: Keys | null | undefined;
+type Broken = { broken: string };
+
+let KEYS: Keys | Broken | undefined;
 
 export namespace Push {
 
@@ -134,23 +146,32 @@ export namespace Push {
 
 
   export function keys(): Keys | null {
-    if (KEYS !== undefined) {
-      return KEYS;
+    if (KEYS === undefined) {
+      Push.make_if_missing();
+      KEYS = Push.read_keys();
+      if ("broken" in KEYS) {
+        console.error(FILE + " is not a VAPID key pair, so web push is off: put the right file back, or delete it for a new pair (every browser then turns notifications on again). " + KEYS.broken);
+      }
     }
+    return "broken" in KEYS ? null : KEYS;
+  }
+
+  export function make_if_missing(): void {
     if (!fs.existsSync(FILE)) {
       const { privateKey } = crypto.generateKeyPairSync("ec", { namedCurve: "P-256" });
       write_whole(FILE, JSON.stringify(privateKey.export({ format: "jwk" })) + "\n");
     }
+  }
+
+  export function read_keys(): Keys | Broken {
     try {
       const jwk = JSON.parse(fs.readFileSync(FILE, "utf8")) as JsonWebKey;
       crypto.createPrivateKey({ key: jwk, format: "jwk" });
       const point = Buffer.concat([Buffer.from([4]), Buffer.from(jwk.x ?? "", "base64url"), Buffer.from(jwk.y ?? "", "base64url")]);
-      KEYS = { jwk, public: point.toString("base64url") };
+      return { jwk, public: point.toString("base64url") };
     } catch (err) {
-      console.error(FILE + " is not a VAPID key pair, so web push is off: put the right file back, or delete it for a new pair (every browser then turns notifications on again). " + err_why(err));
-      KEYS = null;
+      return { broken: err_why(err) };
     }
-    return KEYS;
   }
 
   export function sub_read(json: unknown): Sub | null {
