@@ -61,7 +61,7 @@ function list(x) {
 }
 
 // Import.ts
-var PART = 2 ** 20;
+var PIECE_KEPT_AS_BLOB = 2 ** 20;
 var OLD = "Nothing new: these chats are in Unii's memory already.";
 var NOT_EXPORT = "Not a Claude or ChatGPT export.";
 var MIDWAY = "Meanwhile, UniiChat can answer with a partial tree.";
@@ -145,7 +145,13 @@ function import_id(s) {
   return import_key(import_note(s));
 }
 function import_key(note) {
-  return note.date + " " + note.text.replace(/^.*?(?= session in | chat ")/, "").replace(/, from [^,]*$/, "");
+  return note.date + " " + without_local_time(without_app(note.text));
+}
+function without_app(name) {
+  return name.replace(/^.*?(?= session in | chat ")/, "");
+}
+function without_local_time(name) {
+  return name.replace(/, from [^,]*$/, "");
 }
 async function* import_body(picked) {
   let part = "";
@@ -157,7 +163,7 @@ async function* import_body(picked) {
     for await (const m of import_read(s)) {
       part += kept.has(n++) ? JSON.stringify(m) + `
 ` : "";
-      if (part.length >= PART) {
+      if (part.length >= PIECE_KEPT_AS_BLOB) {
         yield part;
         part = "";
       }
@@ -964,8 +970,9 @@ var READ = /^\[(lines (\d+)-\d+ of \d+[^\]]*)\]$/;
 var FAILED = "error: ";
 var HUNK = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/;
 var MARKS = /^(?:\s*(?:[-*+]|\d{1,9}[.)])(?:[ \t]+|$)|\s*>\s?)*/;
-var DEPTH = 32;
-var DEEP = 16;
+var LINK_PARENS_MAX = 32;
+var NESTING_MAX = 16;
+var LABEL_SCAN_MAX = 1000;
 var DEFS = new Map;
 var COLLECT = false;
 var UNSHUT = { lines: [], from: new Map };
@@ -1341,7 +1348,7 @@ function link_tail(s, i, unshut) {
     for (;j < s.length && !/[\s\x00-\x1f]/.test(s[j]); j++) {
       if (s[j] === "\\" && j + 1 < s.length) {
         j++;
-      } else if (s[j] === "(" && ++depth > DEPTH) {
+      } else if (s[j] === "(" && ++depth > LINK_PARENS_MAX) {
         return null;
       } else if (s[j] === ")" && depth-- === 0) {
         break;
@@ -1438,11 +1445,7 @@ function md_pasted(s) {
   for (let k = s.indexOf("](/media/");k >= 0; k = s.indexOf("](/media/", k + 1)) {
     MEDIA_URL.lastIndex = k + 2;
     const url = MEDIA_URL.exec(s);
-    let a = k - 1;
-    while (a >= 0 && k - a <= 1000 && s[a] !== "[" && s[a] !== "]" && s[a] !== `
-`) {
-      a--;
-    }
+    const a = label_open(s, k);
     const bang = s[a - 1] === "!";
     const from = bang ? a - 1 : a;
     const file = url !== null && !MEDIA.has(url[0].slice(url[0].lastIndexOf(".") + 1));
@@ -1471,10 +1474,18 @@ function md_output(s, name = "result") {
   }
   return [...out, ...output_lines(lines.slice(at), name)];
 }
+function label_open(s, close) {
+  let a = close - 1;
+  while (a >= 0 && close - a <= LABEL_SCAN_MAX && s[a] !== "[" && s[a] !== "]" && s[a] !== `
+`) {
+    a--;
+  }
+  return a;
+}
 function md_shown(s, name = "result") {
   const out = [];
   const failed = s.startsWith(FAILED);
-  let marked = !failed;
+  let error_owed = failed;
   let rest = [];
   const said = () => {
     out.push(...md_output(rest.join(`
@@ -1488,11 +1499,11 @@ function md_shown(s, name = "result") {
       said();
       out.push({ $: "Para", x: [{ $: "Pict", x: media[0][2], k: media[0][3], t: "" }] });
     } else {
-      rest.push(marked ? line : FAILED + line);
-      marked = true;
+      rest.push(error_owed ? FAILED + line : line);
+      error_owed = false;
     }
   }
-  rest.push(...marked ? [] : [FAILED.trim()]);
+  rest.push(...error_owed ? [FAILED.trim()] : []);
   said();
   return out;
 }
@@ -1693,7 +1704,7 @@ function block_parse(lines, i, d) {
   if (is_rule(line)) {
     return [{ $: "Rule" }, i + 1];
   }
-  if (QUOT.test(line) && d < DEEP) {
+  if (QUOT.test(line) && d < NESTING_MAX) {
     let [para, fenced] = item_line(line.replace(QUOT, ""), false);
     const end = runs((l, j) => {
       const lazy = !QUOT.test(l) && para && l.trim() !== "" && !block_starts(lines, j);
@@ -1705,7 +1716,7 @@ function block_parse(lines, i, d) {
     const body = lines.slice(i, end).map((l) => l.replace(QUOT, ""));
     return [{ $: "Quot", x: blocks_parse(body, d + 1)[0] }, end];
   }
-  if (list_kind(line) !== null && d < DEEP) {
+  if (list_kind(line) !== null && d < NESTING_MAX) {
     return list_parse(lines, i, d);
   }
   const a = table_head(lines, i);
@@ -2864,22 +2875,31 @@ function changed() {
 }
 function tidy() {
   for (const n of [...BOX.childNodes]) {
-    if (n.nodeType === Node.TEXT_NODE || n instanceof HTMLElement && n.classList.contains("item")) {
-      continue;
+    if (!box_may_hold(n)) {
+      as_text(n);
     }
-    if (n.nodeName === "BR") {
-      if (n !== BOX.lastChild) {
-        n.replaceWith(`
-`);
-      }
-      continue;
-    }
-    const line = n instanceof HTMLElement && BLOCKS.has(n.nodeName) && n.previousSibling !== null ? `
-` : "";
-    const items = n instanceof HTMLElement ? [...n.querySelectorAll(".item")] : [];
-    n.replaceWith(line + (items.length > 0 ? "" : n.textContent ?? ""), ...items);
   }
   BOX.normalize();
+  end_break_as_text_ends();
+  BOX.classList.toggle("blank", box_blank());
+}
+function box_may_hold(n) {
+  return n.nodeType === Node.TEXT_NODE || n instanceof HTMLElement && n.classList.contains("item");
+}
+function as_text(n) {
+  if (n.nodeName === "BR") {
+    if (n !== BOX.lastChild) {
+      n.replaceWith(`
+`);
+    }
+    return;
+  }
+  const line = n instanceof HTMLElement && BLOCKS.has(n.nodeName) && n.previousSibling !== null ? `
+` : "";
+  const items = n instanceof HTMLElement ? [...n.querySelectorAll(".item")] : [];
+  n.replaceWith(line + (items.length > 0 ? "" : n.textContent ?? ""), ...items);
+}
+function end_break_as_text_ends() {
   const last = BOX.lastChild;
   const before = last?.nodeName === "BR" ? last.previousSibling : last;
   const ends = before?.nodeType === Node.TEXT_NODE && (before.textContent ?? "").endsWith(`
@@ -2889,7 +2909,6 @@ function tidy() {
   } else if (!ends && last?.nodeName === "BR") {
     last.remove();
   }
-  BOX.classList.toggle("blank", box_blank());
 }
 function offsets(points) {
   const at = points.map(() => -1);
@@ -3568,9 +3587,9 @@ function start(meta) {
   const got = new Map, shown = new Map;
   let L = vt, plan, moving = 0, wait, width = 0, started = false, left = 0, sliding = false, done = () => {}, goal = null, big = null;
   const height = (_l, _i) => HC;
-  const frontier = (L) => Array.from({ length: L < 0 ? N : B[L].length }, (_, i) => [L, i]);
+  const level_nodes = (L) => Array.from({ length: L < 0 ? N : B[L].length }, (_, i) => [L, i]);
   const layout = (L) => {
-    const F = frontier(L), A = F.map((p) => at(...p)), slot = F.map((p) => height(...p) + G), P = new Float64Array(F.length + 1);
+    const level = level_nodes(L), A = level.map((p) => at(...p)), slot = level.map((p) => height(...p) + G), P = new Float64Array(level.length + 1);
     const find = (m) => lo(A, (a) => a > m) - 1;
     const sums = () => slot.forEach((s, k) => P[k + 1] = P[k] + s);
     const ups = [];
@@ -3597,7 +3616,7 @@ function start(meta) {
         halves(l - 1, c, t, k, d + 1);
       }
     };
-    F.forEach(([l, i], k) => {
+    level.forEach(([l, i], k) => {
       const t = P[k] + (slot[k] - G - height(l, i)) / 2;
       bases[L + 1].push([l, i, t, height(l, i), A[k], A[k] + len(l), 0]);
       halves(l, i, t, height(l, i), 1);
@@ -3607,7 +3626,7 @@ function start(meta) {
       const v = link(bases, c, x);
       return [...q, v, v[2] < 0 ? q[2] : Math.min(q[2], q[2] + v[1]), v[2] < 0 ? q[2] + q[3] : Math.max(q[2] + q[3], q[2] + v[1] + v[2] + 1)];
     }));
-    return { F, A, P, slot, find, cards, total: P[F.length] };
+    return { level, A, P, slot, find, cards, total: P[level.length] };
   };
   const link = (cards, c, x) => {
     const [l, i, y, h, a, b] = cards[c][x], mid = y + h / 2, kids = cards[c - 1] ?? [];
@@ -3783,13 +3802,13 @@ function start(meta) {
     s.classList.contains("more") && grow(s);
   };
   const anchor = () => {
-    const { F, A, P, slot } = plan, k = Math.max(0, Math.min(plan.F.length - 1, lo(P, (z) => z > tree.scrollTop) - 1)), d = tree.scrollTop - P[k];
-    return F.length ? { key: F[k].join("."), d, m: A[k] + Math.min(0.999, d / slot[k]) * len(F[k][0]) } : null;
+    const { level, A, P, slot } = plan, k = Math.max(0, Math.min(plan.level.length - 1, lo(P, (z) => z > tree.scrollTop) - 1)), d = tree.scrollTop - P[k];
+    return level.length ? { key: level[k].join("."), d, m: A[k] + Math.min(0.999, d / slot[k]) * len(level[k][0]) } : null;
   };
   const place = (a, p) => {
     if (!a)
       return 0;
-    const k = p.find(Math.floor(a.m)), [l, i] = p.F[k];
+    const k = p.find(Math.floor(a.m)), [l, i] = p.level[k];
     return p.P[k] + (l + "." + i === a.key ? Math.min(a.d, p.slot[k]) : (a.m - p.A[k]) / len(l) * p.slot[k]);
   };
   const redo = () => {
@@ -4319,31 +4338,37 @@ var BACK = $2("#import [name=back]", HTMLInputElement);
 var P = {
   rec: null,
   shown: "",
-  end: true,
-  stick: true,
-  y: 0,
   frame: 0,
   rows: true,
   toast: 0,
-  found: new Map,
-  done: {},
-  off: new Set,
-  step: "",
   push: null,
-  away: null,
   used: { ws: null, on: false, at: 0 },
+  after: false,
+  at: ""
+};
+var SCROLL = {
+  end: true,
+  stick: true,
+  y: 0,
   open: new Set,
-  build: document.documentElement.dataset.build ?? "",
   still: false,
+  away: null
+};
+var RENEW = {
+  build: document.documentElement.dataset.build ?? "",
   due: false,
   going: false,
   since: false,
   dirty: new Set,
   saving: 0,
   gave: null,
-  back: null,
-  after: false,
-  at: ""
+  back: null
+};
+var IMPORT = {
+  found: new Map,
+  done: {},
+  off: new Set,
+  step: ""
 };
 function $2(sel, type = HTMLElement) {
   return find(document, sel, type);
@@ -4377,8 +4402,8 @@ async function boot() {
   addEventListener("focus", () => in_use());
   document.addEventListener("visibilitychange", () => {
     in_use();
-    if (document.hidden && P.due && !P.going && renew_free(true)) {
-      P.going = true;
+    if (document.hidden && RENEW.due && !RENEW.going && renew_free(true)) {
+      RENEW.going = true;
       renew(true);
     }
   });
@@ -4451,19 +4476,19 @@ function chat() {
   };
   document.onscroll = () => {
     if (at_end()) {
-      P.end = true;
-    } else if (scrollY < P.y) {
-      P.end = false;
+      SCROLL.end = true;
+    } else if (scrollY < SCROLL.y) {
+      SCROLL.end = false;
     }
-    P.y = scrollY;
+    SCROLL.y = scrollY;
     mine_show();
   };
   $2(".mine").onclick = mine;
   $2(".down").onclick = down2;
   const keep = new ResizeObserver(() => {
-    if (P.still) {
-      P.still = false;
-    } else if (P.end && !$2("#log").hidden && !at_end()) {
+    if (SCROLL.still) {
+      SCROLL.still = false;
+    } else if (SCROLL.end && !$2("#log").hidden && !at_end()) {
       scrollTo(0, document.documentElement.scrollHeight);
     }
   });
@@ -4575,7 +4600,7 @@ function upload_answer(xhr) {
 }
 function act(a) {
   const said = a.$ === "Send" ? a.text.trim() : "";
-  P.end = P.end || a.$ === "Send";
+  SCROLL.end = SCROLL.end || a.$ === "Send";
   P.rows = true;
   for (const msg of view_act(v, a)) {
     link_send(v, msg, a.$ === "Send" ? (out) => back(a, out) : undefined, said);
@@ -4670,7 +4695,7 @@ function folds() {
       measured.add(msg);
       msg.classList.toggle("long", cut.scrollHeight > FOLD2 * parseFloat(getComputedStyle(cut).lineHeight));
     }
-    fold_show(msg, P.open.has(msg.dataset.a ?? ""));
+    fold_show(msg, SCROLL.open.has(msg.dataset.a ?? ""));
   }
 }
 function fold_show(msg, open) {
@@ -4682,13 +4707,13 @@ function fold_show(msg, open) {
 function unfold(msg) {
   const open = !msg.classList.contains("shown");
   const id = msg.dataset.a ?? "";
-  open ? P.open.add(id) : P.open.delete(id);
-  const [top, follow] = [msg.getBoundingClientRect().top, P.end];
-  P.end = false;
+  open ? SCROLL.open.add(id) : SCROLL.open.delete(id);
+  const [top, follow] = [msg.getBoundingClientRect().top, SCROLL.end];
+  SCROLL.end = false;
   fold_show(msg, open);
   scrollBy(0, msg.getBoundingClientRect().top - top);
-  P.end = follow || at_end();
-  P.still = follow;
+  SCROLL.end = follow || at_end();
+  SCROLL.still = follow;
 }
 var FRAMED = new WeakSet;
 function frames(all = false) {
@@ -4843,7 +4868,7 @@ function importer() {
     pick.title = "From the website: " + EXPORTS[src.dataset.app ?? ""] + ", which emails you a zip.";
   }
   $2(".into").onclick = () => {
-    P.step = "";
+    IMPORT.step = "";
     import_draw("");
   };
   $2("#import").onclick = (ev) => ev.target.closest(".skip") && $2("#import").hidePopover();
@@ -4851,14 +4876,14 @@ function importer() {
   $2("#import .flow").onclick = import_flow;
   $2("#import").ontoggle = (ev) => {
     if (ev.newState === "closed") {
-      P.step = P.step === "start" || P.step === "done" ? "" : P.step;
+      IMPORT.step = IMPORT.step === "start" || IMPORT.step === "done" ? "" : IMPORT.step;
     }
     import_draw("");
   };
   form.oninput = (ev) => {
     const box = ev.target;
     if (box.name === "session") {
-      box.checked ? P.off.delete(box.value) : P.off.add(box.value);
+      box.checked ? IMPORT.off.delete(box.value) : IMPORT.off.add(box.value);
     }
     import_draw("");
   };
@@ -4902,14 +4927,14 @@ function import_flow() {
 }
 async function import_open(first) {
   $2("#menu").hidePopover();
-  P.done = await fetch("/api/imported").then((res) => res.json()).catch(() => ({}));
+  IMPORT.done = await fetch("/api/imported").then((res) => res.json()).catch(() => ({}));
   $2("#import form .skip").textContent = first ? "Start fresh" : "Close";
-  P.step = first ? "start" : P.step === "done" ? "" : P.step;
+  IMPORT.step = first ? "start" : IMPORT.step === "done" ? "" : IMPORT.step;
   import_draw("");
   $2("#import").showPopover();
 }
 function import_took(name, read, status) {
-  P.found.set(name, read);
+  IMPORT.found.set(name, read);
   BACK.min = "0";
   BACK.value = "0";
   import_draw(status);
@@ -4924,38 +4949,38 @@ async function import_welcome() {
 }
 function import_send() {
   const picked = import_plan2().picked;
-  P.step = "send";
+  IMPORT.step = "send";
   import_draw("");
   const body = async () => new Blob(await Array.fromAsync(import_body(picked), (part) => new Blob([part])));
   link_send(v, { $: "import", body }, import_sent);
 }
 function import_sent(out) {
-  P.step = out.error !== undefined ? "" : out.going ? "run" : "done";
+  IMPORT.step = out.error !== undefined ? "" : out.going ? "run" : "done";
   if (out.error === undefined) {
-    P.found.clear();
+    IMPORT.found.clear();
   }
   import_draw(out.error === undefined ? "" : "Not imported: " + out.error);
   $2("#import").showPopover();
 }
 function import_plan2() {
   const form = new FormData($2("#import form", HTMLFormElement));
-  const want = { off: [...P.off], since: import_since(), tools: form.has("tools") };
-  const found = [...P.found.values()].flatMap((read) => read.sessions);
-  return import_plan(found, want, P.done);
+  const want = { off: [...IMPORT.off], since: import_since(), tools: form.has("tools") };
+  const found = [...IMPORT.found.values()].flatMap((read) => read.sessions);
+  return import_plan(found, want, IMPORT.done);
 }
 function import_since() {
   return BACK.valueAsNumber > Number(BACK.min) ? new Date(BACK.valueAsNumber * 86400000).toISOString().slice(0, 10) : "";
 }
 function import_bar() {
   const run = v.importing;
-  P.step = run !== null ? "seen" : P.step === "seen" ? "done" : P.step;
-  const done = P.step === "done";
-  const going = ["send", "run", "seen", "done"].includes(P.step);
+  IMPORT.step = run !== null ? "seen" : IMPORT.step === "seen" ? "done" : IMPORT.step;
+  const done = IMPORT.step === "done";
+  const going = ["send", "run", "seen", "done"].includes(IMPORT.step);
   const part = run === null ? Number(done) : run.done / Math.max(1, run.total);
   const why = Boolean(run?.why);
-  const said = run !== null ? progress_show(run) : done ? DONE : P.step === "send" ? "Sending…" : "Starting…";
-  $2("#import .start").hidden = P.step !== "start";
-  $2("#import form").hidden = going || P.step === "start";
+  const said = run !== null ? progress_show(run) : done ? DONE : IMPORT.step === "send" ? "Sending…" : "Starting…";
+  $2("#import .start").hidden = IMPORT.step !== "start";
+  $2("#import form").hidden = going || IMPORT.step === "start";
   $2("#import .prog").hidden = !going;
   $2("#import .prog .title").textContent = done ? "Memory tree built" : "Building your memory tree";
   $2("#import progress", HTMLProgressElement).value = part;
@@ -4973,7 +4998,7 @@ function import_draw(status) {
   if (import_bar()) {
     return;
   }
-  const reads = [...P.found.values()];
+  const reads = [...IMPORT.found.values()];
   const sessions = reads.flatMap((read) => read.sessions);
   const plan = import_plan2();
   const msgs = plan.msgs;
@@ -4993,8 +5018,8 @@ function import_draw(status) {
     const list = must(src.querySelector(".sessions"), "#import .sessions");
     const shown = plan.sessions.filter((s) => s.app === src.dataset.app);
     markup(list, shown.map((s) => `<label title="${esc(s.where + ", " + import_count(s.heads.length, ""))}"><input type="checkbox" name="session" value="${esc(import_id(s))}">${import_cells(s).map((c) => `<span>${esc(c)}</span>`).join("")}</label>`));
-    list.querySelectorAll("input").forEach((box) => box.checked = !P.off.has(box.value));
-    const on = shown.filter((s) => !P.off.has(import_id(s))).length;
+    list.querySelectorAll("input").forEach((box) => box.checked = !IMPORT.off.has(box.value));
+    const on = shown.filter((s) => !IMPORT.off.has(import_id(s))).length;
     find(src, ".pick", HTMLElement).hidden = shown.length === 0;
     must(src.querySelector(".pick summary"), "#import .pick summary").textContent = (on < shown.length ? on + " of " : shown.length > 1 ? "All " : "") + shown.length + (shown.length === 1 ? " session" : " sessions") + " picked · choose";
   }
@@ -5048,7 +5073,7 @@ function html_parse(html) {
   return child;
 }
 function draw2(stick) {
-  P.stick = P.stick && stick;
+  SCROLL.stick = SCROLL.stick && stick;
   if (P.frame === 0) {
     P.frame = requestAnimationFrame(() => {
       paint();
@@ -5059,16 +5084,16 @@ function draw2(stick) {
 function paint() {
   if ($2("#log").hidden) {
     P.frame = 0;
-    P.stick = true;
+    SCROLL.stick = true;
     bars();
     return;
   }
   const doc = document.documentElement;
-  const follow = P.stick && P.end;
+  const follow = SCROLL.stick && SCROLL.end;
   const at = P.rows && !follow ? anchor() : null;
   const shown = shown_key();
   P.frame = 0;
-  P.stick = true;
+  SCROLL.stick = true;
   bars();
   if (P.rows) {
     markup($2("#log .rows"), view_body(v).map(row_html));
@@ -5079,17 +5104,17 @@ function paint() {
   box_sizes($2("#log .tail"));
   folds();
   frames();
-  const back = P.back === null ? null : document.querySelector(`#log [data-a="${P.back.a}"]`);
-  if (back !== null && P.back !== null) {
+  const back = RENEW.back === null ? null : document.querySelector(`#log [data-a="${RENEW.back.a}"]`);
+  if (back !== null && RENEW.back !== null) {
     P.shown = shown;
-    scrollBy(0, back.getBoundingClientRect().top - P.back.top);
-    P.back = null;
-    P.end = at_end();
+    scrollBy(0, back.getBoundingClientRect().top - RENEW.back.top);
+    RENEW.back = null;
+    SCROLL.end = at_end();
     return;
   }
   if (shown !== P.shown) {
     P.shown = shown;
-    P.end = v.fold === null;
+    SCROLL.end = v.fold === null;
     scrollTo(0, v.fold === null ? doc.scrollHeight : 0);
     return;
   }
@@ -5104,7 +5129,7 @@ function paint() {
   const el = rows.filter((r) => Number(r.dataset.a) <= at.a).pop();
   if (el !== undefined) {
     scrollBy(0, el.getBoundingClientRect().top - at.top);
-    P.end = at_end();
+    SCROLL.end = at_end();
   }
 }
 function shown_key() {
@@ -5117,8 +5142,8 @@ function bars() {
   for (const note of v.notes.splice(0)) {
     toast(note);
   }
-  if (P.due && !P.going && renew_free()) {
-    P.going = true;
+  if (RENEW.due && !RENEW.going && renew_free()) {
+    RENEW.going = true;
     setTimeout(() => void renew());
   }
   const on = view_typing(v);
@@ -5160,7 +5185,7 @@ function mine() {
   const rows = [...document.querySelectorAll("#log .msg.user")];
   const el = rows.findLast(mine_above);
   if (el !== undefined) {
-    P.end = false;
+    SCROLL.end = false;
     el.scrollIntoView();
   }
   mine_show();
@@ -5168,11 +5193,11 @@ function mine() {
 function mine_show() {
   const first = document.querySelector("#log .msg.user");
   $2(".mine").hidden = first === null || !mine_above(first);
-  $2(".down").hidden = P.end || innerHeight + scrollY >= document.documentElement.scrollHeight - 1;
+  $2(".down").hidden = SCROLL.end || innerHeight + scrollY >= document.documentElement.scrollHeight - 1;
 }
 function down2() {
   scrollTo(0, document.documentElement.scrollHeight);
-  P.end = true;
+  SCROLL.end = true;
   mine_show();
 }
 function mine_above(el) {
@@ -5188,8 +5213,8 @@ function route() {
   const page = PAGES.includes(location.pathname);
   const tree = location.pathname === TREE;
   const chat = !page && !tree;
-  if (!chat && !$2("#log").hidden && P.away === null) {
-    P.away = { y: scrollY, end: P.end };
+  if (!chat && !$2("#log").hidden && SCROLL.away === null) {
+    SCROLL.away = { y: scrollY, end: SCROLL.end };
   }
   $2("#log").hidden = !chat;
   document.body.classList.toggle("account", page);
@@ -5197,14 +5222,14 @@ function route() {
   $2("#account").hidden = !page;
   $2("#tree").hidden = !tree;
   P.at = location.pathname + location.hash;
-  P.shown = chat && P.away !== null ? shown_key() : location.pathname;
-  if (chat && P.away !== null) {
-    P.end = P.away.end;
+  P.shown = chat && SCROLL.away !== null ? shown_key() : location.pathname;
+  if (chat && SCROLL.away !== null) {
+    SCROLL.end = SCROLL.away.end;
     P.rows = true;
     paint();
-    scrollTo(0, P.end ? document.documentElement.scrollHeight : P.away.y);
-    P.y = scrollY;
-    P.away = null;
+    scrollTo(0, SCROLL.end ? document.documentElement.scrollHeight : SCROLL.away.y);
+    SCROLL.y = scrollY;
+    SCROLL.away = null;
   }
   if (page) {
     account();
@@ -5214,7 +5239,7 @@ function route() {
   } else {
     tree_hide();
   }
-  draw2(chat && P.end);
+  draw2(chat && SCROLL.end);
 }
 function popped() {
   if (location.pathname + location.hash !== P.at) {
@@ -5229,11 +5254,11 @@ async function account() {
   const prompts = got !== null && got.ok ? await got.json().catch(() => null) : null;
   const push = await notify_state().catch(() => null);
   el.innerHTML = account_html(prompts, push);
-  P.dirty.clear();
+  RENEW.dirty.clear();
   el.oninput = (ev) => {
     const form = ev.target.closest("form");
     if (form !== null) {
-      P.dirty.add(form);
+      RENEW.dirty.add(form);
     }
   };
   el.querySelectorAll("form.prompt").forEach((form) => form.onsubmit = (ev) => {
@@ -5276,9 +5301,9 @@ async function account_prompt(form) {
   const save = find(form, "button", HTMLButtonElement);
   const sent = area.value;
   save.disabled = true;
-  P.saving++;
+  RENEW.saving++;
   const out = await post("/api/prompts", { [area.name]: sent });
-  P.saving--;
+  RENEW.saving--;
   save.disabled = false;
   const saved = get(out[area.name], "text");
   if (out.error === undefined && area.value === sent) {
@@ -5287,8 +5312,8 @@ async function account_prompt(form) {
   why.textContent = text_of(out.error, area.value === saved ? "Saved." : "Not saved yet: Save again.");
   form.classList.toggle("bad", out.error !== undefined);
   if (out.error === undefined && area.value === sent) {
-    P.dirty.delete(form);
-    P.since = true;
+    RENEW.dirty.delete(form);
+    RENEW.since = true;
   }
   draw2(false);
 }
@@ -5576,9 +5601,9 @@ async function settings_save(form, page, unset, listed, profs) {
   const go = find(form, ".go", HTMLButtonElement);
   go.disabled = true;
   why.textContent = "";
-  P.saving++;
+  RENEW.saving++;
   const out = await post("/api/settings", { version: page.version, set, keys, ...profiles === undefined ? {} : { profiles } });
-  P.saving--;
+  RENEW.saving--;
   go.disabled = false;
   if (!out.ok) {
     const at = out.key === undefined ? null : form.querySelector(`.set[data-key="${text_of(out.key, "null")}"]`);
@@ -5589,31 +5614,37 @@ async function settings_save(form, page, unset, listed, profs) {
   const done = out;
   const later = done.saved.filter((key) => page.settings.find((r) => r.key === key)?.apply === "restart");
   settings_draw(done);
-  P.dirty.delete(form);
-  P.since = true;
+  RENEW.dirty.delete(form);
+  RENEW.since = true;
   draw2(false);
   toast(later.length === 0 ? "Saved." : "Saved. " + later.join(", ") + " " + (later.length === 1 ? "applies" : "apply") + " once the server restarts.");
 }
 function renew_due(build) {
-  if (build === undefined || P.build === "" || build === P.build) {
-    P.build ||= build ?? "";
-    P.due = false;
+  if (build === undefined || build_same(build)) {
+    RENEW.build ||= build ?? "";
+    RENEW.due = false;
     return;
   }
-  const [was, n] = (sessionStorage.getItem(kept("build")) ?? "").split(" ");
-  if (was === build && Number(n) >= 2 && (P.gave === null || P.gave === v.ws)) {
-    P.gave = v.ws;
+  if (reloads_spent_on(build)) {
+    RENEW.gave = v.ws;
     return;
   }
-  P.since = P.due && P.since;
-  P.due = true;
+  RENEW.since = RENEW.due && RENEW.since;
+  RENEW.due = true;
   draw2(false);
+}
+function build_same(build) {
+  return RENEW.build === "" || build === RENEW.build;
+}
+function reloads_spent_on(build) {
+  const [was, n] = (sessionStorage.getItem(kept("build")) ?? "").split(" ");
+  return was === build && Number(n) >= 2 && (RENEW.gave === null || RENEW.gave === v.ws);
 }
 function renew_free(hidden = false) {
   const page = location.pathname !== "/" && location.pathname !== TREE;
   const quiet = P.rec === null && UPS.size === 0 && v.out.length === 0 && !$2("#import").matches(":popover-open") && !viewer_on();
   const typing = !DESK.matches && box_focused() && !hidden;
-  return quiet && !typing && (!page || P.since && P.dirty.size === 0 && P.saving === 0);
+  return quiet && !typing && (!page || RENEW.since && RENEW.dirty.size === 0 && RENEW.saving === 0);
 }
 async function renew(hidden = false) {
   const [was, n] = (sessionStorage.getItem(kept("build")) ?? "").split(" ");
@@ -5624,12 +5655,12 @@ async function renew(hidden = false) {
   if (tries > 0) {
     await Promise.all(["/", "/app.js", "/style.css", "/sw.js"].map((path) => fetch(path, { cache: "reload" }).catch(() => null)));
   }
-  if (!P.due || !renew_free(hidden)) {
-    P.going = false;
+  if (!RENEW.due || !renew_free(hidden)) {
+    RENEW.going = false;
     return;
   }
   const chat = !$2("#log").hidden;
-  const back = { at: chat && !P.end ? anchor() : null, y: chat ? null : scrollY, away: P.away, caret: box_caret(), focus: box_focused(), open: [...P.open] };
+  const back = { at: chat && !SCROLL.end ? anchor() : null, y: chat ? null : scrollY, away: SCROLL.away, caret: box_caret(), focus: box_focused(), open: [...SCROLL.open] };
   sessionStorage.setItem(kept("back"), JSON.stringify(back));
   sessionStorage.setItem(kept("build"), (v.build ?? "") + " " + (tries + 1));
   location.reload();
@@ -5645,9 +5676,9 @@ function renewed() {
     box_focus();
   }
   box_place(back.caret[0], back.caret[1]);
-  back.open.forEach((id) => P.open.add(id));
-  P.back = back.at;
-  P.away = back.away;
+  back.open.forEach((id) => SCROLL.open.add(id));
+  RENEW.back = back.at;
+  SCROLL.away = back.away;
   const end = Date.now() + 3000;
   const y = () => {
     const to = back.y;
