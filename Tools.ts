@@ -10,7 +10,7 @@ import { Memory } from "./Memory.ts";
 import PROMPT from "./prompt.txt" with { type: "text" };
 import COMPACT_PROMPT from "./compact.txt" with { type: "text" };
 import { EFFORTS, Pick } from "./Pick.ts";
-import { Run, type Heard } from "./Run.ts";
+import { Run, type CallHooks, type Heard, type InboxHooks, type LoopHooks } from "./Run.ts";
 import type { Msg } from "./Server.ts";
 import * as Timer from "./Timer.ts";
 import { PING, type Pending } from "./View.ts";
@@ -427,14 +427,22 @@ export namespace Tools {
     return true;
   }
 
-  export function attach(tools: Tools, term: string, host: string, who: string, link: Link, kept: Set<string>): string {
+  export function device_name(tools: Tools, host: string, who: string, kept: Set<string>): { name: string; rejoined: boolean } {
     const own = [...tools.devices].find(([, d]) => d.who === who && d.host === host)?.[0];
+    if (own !== undefined) {
+      return { name: own, rejoined: true };
+    }
     const held = (d: Device | undefined) => d !== undefined && (d.who === who || kept.has(d.who) || [...d.terms.values()].some((t) => t.live()));
-    let name = own ?? host;
-    for (let k = 2; own === undefined && held(tools.devices.get(name)); k++) {
+    let name = host;
+    for (let k = 2; held(tools.devices.get(name)); k++) {
       name = host + "-" + k;
     }
-    if (own === undefined) {
+    return { name, rejoined: false };
+  }
+
+  export function attach(tools: Tools, term: string, host: string, who: string, link: Link, kept: Set<string>): string {
+    const { name, rejoined } = Tools.device_name(tools, host, who, kept);
+    if (!rejoined) {
       Tools.forget(tools, name);
     }
     const d: Device = tools.devices.get(name) ?? { who, host, terms: new Map(), jobs: new Map(), skills: [], mcp: [], why: "", clash: "" };
@@ -471,16 +479,18 @@ export namespace Tools {
     Tools.plug(tools);
   }
 
+  export function detach_unless_back(tools: Tools, term: string, device: string, link: Link): void {
+    if (tools.devices.get(device)?.terms.get(term) === link && !link.live()) {
+      Tools.detach(tools, term, device);
+    }
+  }
+
   export function lost(tools: Tools, term: string, device: string): void {
     const link = tools.devices.get(device)?.terms.get(term);
     if (link === undefined || link.live()) {
       return;
     }
-    setTimeout(() => {
-      if (tools.devices.get(device)?.terms.get(term) === link && !link.live()) {
-        Tools.detach(tools, term, device);
-      }
-    }, GRACE).unref?.();
+    setTimeout(() => Tools.detach_unless_back(tools, term, device, link), GRACE).unref?.();
     Tools.plug(tools);
   }
 
@@ -520,13 +530,17 @@ export namespace Tools {
     Tools.plug(tools);
   }
 
+  export function same_prefix_note(name: string, prefix: string, other: string): string {
+    return "The device " + name + "'s MCP servers are left out: their tools would be named " + prefix + "_…, as the device " + other + "'s are. Rename one of the two (name in its ~/.config/unii/device.json).";
+  }
+
   export function plug(tools: Tools): void {
-    const taken = new Map<string, string>();
+    const prefix_owner = new Map<string, string>();
     const next: config.McpServer[] = [];
     for (const [name, d] of tools.devices) {
       const prefix = config.config_mcp_prefix(name);
-      const other = d.mcp.length === 0 ? undefined : taken.get(prefix);
-      const clash = other === undefined ? "" : "The device " + name + "'s MCP servers are left out: their tools would be named " + prefix + "_…, as the device " + other + "'s are. Rename one of the two (name in its ~/.config/unii/device.json).";
+      const other = d.mcp.length === 0 ? undefined : prefix_owner.get(prefix);
+      const clash = other === undefined ? "" : Tools.same_prefix_note(name, prefix, other);
       if (clash !== d.clash) {
         d.clash = clash;
         if (clash !== "") {
@@ -535,7 +549,7 @@ export namespace Tools {
         }
       }
       if (d.mcp.length > 0 && other === undefined) {
-        taken.set(prefix, name);
+        prefix_owner.set(prefix, name);
         if (Tools.live(d)) {
           next.push(...d.mcp);
         }
@@ -724,28 +738,43 @@ export namespace Tools {
   }
 
   export function kind(tools: Tools, agent: () => Agent): Run<Say, Say>["kind"] {
+    return { ...Tools.agent_inbox(tools), ...Tools.agent_calls(tools, agent), ...Tools.agent_loop(tools, agent), change: () => tools.log.change() };
+  }
+
+  export function agent_inbox(tools: Tools): InboxHooks<Say, Say> {
     const log = tools.log;
     return {
-      pick   : () => Tools.pick(tools, agent()),
-      begin  : () => {},
       log    : (run, say) => {
         log.push(run, "user", say.text);
         return say;
-      },
-      ask    : (_, take) => {
-        take();
-        return Tools.ask(tools, agent());
       },
       queued : (run) => {
         Tools.queued(tools, run);
         log.change();
       },
       again  : () => false,
+    };
+  }
+
+  export function agent_calls(tools: Tools, agent: () => Agent): CallHooks<Say, Say> {
+    return {
+      pick   : () => Tools.pick(tools, agent()),
+      ask    : (_, take) => {
+        take();
+        return Tools.ask(tools, agent());
+      },
       ended  : (_, end) => {
         const a = agent();
         a.replies.push(end.ok ? end.text : a.why ?? "failed: " + end.text);
         return end.ok;
       },
+      on     : (run, ev) => tools.log.on(run, ev),
+    };
+  }
+
+  export function agent_loop(tools: Tools, agent: () => Agent): LoopHooks<Say, Say> {
+    return {
+      begin  : () => {},
       failed : (_, why) => {
         agent().replies.push("failed: " + why);
       },
@@ -753,10 +782,8 @@ export namespace Tools {
       finish : (run) => {
         const a = agent();
         run.fell = null;
-        log.report(report_text(a.name, a.replies.join("\n\n")), !run.halt.signal.aborted);
+        tools.log.report(report_text(a.name, a.replies.join("\n\n")), !run.halt.signal.aborted);
       },
-      on     : (run, ev) => log.on(run, ev),
-      change : () => log.change(),
     };
   }
 
