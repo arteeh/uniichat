@@ -273,7 +273,11 @@ export namespace ChatGPT {
     if (get(item, "role") !== "user" || !Array.isArray(content)) {
       return item;
     }
-    return Object.assign({}, item, { content: content.map((part: unknown) => Object.assign({}, part, { prompt_cache_breakpoint: undefined })) });
+    return Object.assign({}, item, { content: content.map((part: unknown) => {
+      const unmarked: Record<string, unknown> = Object.assign({}, part);
+      delete unmarked.prompt_cache_breakpoint;
+      return unmarked;
+    }) });
   }
 
   export function headers(token: string): Record<string, string> {
