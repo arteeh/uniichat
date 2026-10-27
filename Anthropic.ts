@@ -2,8 +2,6 @@ import type { Ask, Block, Img } from "./AskAI.ts";
 import { get } from "./Json.ts";
 import { Agent, type Emit, type Entry, type Item, type Step, type Tool, type Use, type Wire } from "./Agent.ts";
 
-// what the Messages API streams, as far as it is read here (Claude Code's
-// SDK messages carry the same shapes)
 type Content = {
   type         : string;
   text?        : string;

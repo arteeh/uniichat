@@ -527,7 +527,6 @@ export namespace Mcp {
     if (method === "initialize") {
       s?.link.close();
       HERE.delete(key);
-      // the server's own config, sent by Mcp.device
       const c = input.conf as config.McpServer;
       const vars = (text: string) => text.replace(/\$\{([A-Za-z_][A-Za-z0-9_]*)\}/g, (_, v: string) => {
         const value = process.env[v];

@@ -45,7 +45,6 @@ const INJECTED = /^(<[a-z_]+[ >]|# AGENTS\.md)/;
 
 const SKIP = /^(<command-|<local-command|\[Request interrupted)/;
 
-// what the exports and the session logs hold, as far as they are read here
 type Block = { type?: string; text?: unknown; name?: string; input?: unknown; content?: unknown };
 
 type GptMsg = { author?: { role?: string }; recipient?: string; content: { content_type?: string; parts?: unknown[]; text?: unknown }; metadata?: { is_visually_hidden_from_conversation?: boolean }; create_time?: unknown };

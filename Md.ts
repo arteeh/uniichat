@@ -310,7 +310,6 @@ function span_parse(s: string): Span[] {
     }
   }
 
-  // never the head: every other node has a prev
   function node_drop(node: Node): void {
     const prev = node.prev ?? head;
     prev.next = node.next;

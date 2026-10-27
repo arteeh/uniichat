@@ -37,7 +37,6 @@ type Saved = Kept & { seen?: Kept; main: End; tree: End; pick: object | null; go
 
 type Queues = { main: Pending[]; agents: Record<string, string[]> };
 
-// a line of a log, as Memory.log writes it
 type Rec = { i?: number; l?: number; act?: string; ans?: object };
 
 type Recs = { main: Root; tree: { text: string } };

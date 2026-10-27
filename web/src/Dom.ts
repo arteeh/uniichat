@@ -1,4 +1,3 @@
-// what the page's own markup always has: an error if it doesn't
 export function must<T>(x: T | null | undefined, what: string): T {
   if (x === null || x === undefined) {
     throw new Error("no " + what);

@@ -9,7 +9,6 @@ import { FIT, HEAD, IMAGE, image_kind, PIXELS } from "./View.ts";
 
 export type Job = { name: string; input: Record<string, unknown>; cwd: string };
 
-// what ffprobe -of json tells of a video, as far as it is read here
 type Stream = NonNullable<Probe["streams"]>[number];
 
 type Probe = {
@@ -435,7 +434,6 @@ export namespace Machine {
     return { text, fail: false, imgs: [{ type: "image/jpeg", data: made.out.toString("base64") }] };
   }
 
-  // a frame rate as ffprobe gives it ("30000/1001"); 0 if none
   export async function video_probe(ffprobe: string, file: string, shown: string, signal: AbortSignal): Promise<{ json: Probe; stream: Stream } | Out> {
     const entries = "stream=index,codec_name,width,height,sample_aspect_ratio,avg_frame_rate,r_frame_rate,nb_frames,duration:stream_side_data=rotation:format=duration,format_name,start_time";
     const probe = await Machine.exec([ffprobe, "-v", "error", "-select_streams", "V:0", "-show_entries", entries, "-of", "json", file], signal);
@@ -485,6 +483,7 @@ export namespace Machine {
     return { seeks, at, apart };
   }
 
+  // a frame rate as ffprobe gives it ("30000/1001"); 0 if none
   export function rate(text: unknown): number {
     const [a, b = 1] = String(text).split("/").map(Number);
     return a > 0 && b > 0 ? a / b : 0;

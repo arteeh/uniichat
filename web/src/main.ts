@@ -12,11 +12,9 @@ import * as Viewer from "./Viewer.ts";
 
 type Read = { sessions: Import.Session[]; moved: number };
 
-// what a reload keeps, in sessionStorage
 type Back = { at: { a: number; top: number } | null; y: number | null; away: { y: number; end: boolean } | null; caret: [number, number]; focus: boolean; open: string[] };
 
 declare global {
-  // the iOS app's bridge to its web view
   interface Window { webkit?: { messageHandlers?: { unii?: { postMessage: (msg: unknown) => void } } } }
 }
 
@@ -558,7 +556,6 @@ function heard(out: View.Answer): void {
 function connect(): void {
   View.link_open(v, {
     open : (query) => new WebSocket(location.origin.replace(/^http/, "ws") + "/ws" + query),
-    // the page's acts send Blobs; an async iterable is the terminal's
     post : (path, body) => fetch(path, { method: "POST", body: body as BodyInit }),
     hear : hear,
     lost : lost,
@@ -1402,7 +1399,6 @@ async function settings_save(form: HTMLFormElement, page: Page, unset: Set<strin
     (at ?? why).scrollIntoView({ block: "center" });
     return;
   }
-  // the server's answer to a save: its settings page, and the keys saved
   const done = out as Page & { saved: string[] };
   const later = done.saved.filter((key) => page.settings.find((r) => r.key === key)?.apply === "restart");
   settings_draw(done);

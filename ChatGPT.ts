@@ -14,7 +14,6 @@ export type Auth = { auth_mode: "chatgpt"; OPENAI_API_KEY: null; tokens: Tokens;
 
 type Sub = State & { items: Output[] };
 
-// an OpenAI sign-in token's payload, as far as it is read here
 type Claims = { exp?: unknown; email?: string; "https://api.openai.com/auth"?: { chatgpt_account_id?: string; chatgpt_plan_type?: string } };
 
 type Got = { id_token?: string; access_token?: string; refresh_token?: string };

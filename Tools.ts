@@ -633,7 +633,6 @@ export namespace Tools {
     return run;
   }
 
-  // a job's result as a device sends it
   export function out(x: unknown): Out {
     const imgs = items(get(x, "imgs")).flatMap((img) => {
       const [type, data] = [get(img, "type"), get(img, "data")];

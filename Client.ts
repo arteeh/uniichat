@@ -7,7 +7,6 @@ import { write_whole } from "./Write.ts";
 const DIR   = (process.env.XDG_CONFIG_HOME || os.homedir() + "/.config") + "/unii";
 const LOCAL = "http://127.0.0.1:8788";
 
-// lib dom's WebSocket type hides the options Bun's takes
 export const Socket = WebSocket as unknown as new (url: string, options: Bun.WebSocketOptions) => WebSocket;
 
 export function read(name: string): Record<string, unknown> {

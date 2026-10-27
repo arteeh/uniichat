@@ -113,7 +113,6 @@ export type Server =
 export type Sent = { text: string; images?: Blob[] };
 
 export type Answer = { error?: string; status?: number; text?: string; going?: boolean };
-// Bun's fetch takes an async iterable too (the terminal's import)
 type Upload = BodyInit | AsyncIterable<string>;
 type Body   = () => Upload | Promise<Upload>;
 
@@ -659,7 +658,6 @@ export function link_open(v: View, link: Link): void {
     const { body, ...rest } = msg;
     const query = Object.entries(rest).map(([k, x]) => k + "=" + encodeURIComponent(String(x)));
     const res = await link.post("/api/act?" + query.join("&"), await body()).catch(() => null);
-    // the server's answer to the act
     const out = (await res?.json().catch(() => null)) as Answer | null | undefined;
     if (out != null) {
       link.hear({ $: "ack", id: post.msg.id, ...out });

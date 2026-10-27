@@ -556,7 +556,6 @@ export namespace ClaudeSub {
     const queue: SDKUserMessage[] = [];
     let wake = () => {};
     let shut = false;
-    // the SDK's types take only four image types; MCP servers may send others, which the API refuses
     const push = (content: unknown[]) => {
       queue.push({ type: "user", message: { role: "user", content: content as Exclude<SDKUserMessage["message"]["content"], string> }, parent_tool_use_id: null });
       wake();

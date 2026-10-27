@@ -3,7 +3,6 @@ import { Agent, type Emit, type Entry, type Item, type Step, type Tool, type Use
 import * as config from "./Config.ts";
 import { get, str, text_of } from "./Json.ts";
 
-// what the Responses API streams and returns, as far as it is read here
 type Content = { type: string; text?: string; refusal?: string; annotations?: { type: string; title?: string; url?: string }[] };
 
 export type Output = { type: string; call_id?: string; name?: string; arguments?: string; summary?: { text: string }[]; content?: Content[]; action?: unknown };

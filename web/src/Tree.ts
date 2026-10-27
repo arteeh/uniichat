@@ -9,10 +9,8 @@ type Card = HTMLDivElement & {
   li: number[]; v: number[]; fresh: boolean; one?: boolean; thin?: boolean; dy: number; eased: ReturnType<typeof setTimeout> | undefined;
 };
 
-// a card's place: level, index, top, height, first and end message, depth
 type Base = [number, number, number, number, number, number, number];
 
-// and its links to the column before (Tree's link), its span's top and bottom
 type Q = [...Base, number[], number, number];
 
 type Plan = { level: [number, number][]; A: number[]; P: Float64Array; slot: number[]; find: (m: number) => number; cards: Q[][]; total: number };
@@ -281,7 +279,7 @@ const from = (old: Old, l: number, i: number) => {
   return null;
 };
 const ease = (s: Card) => {
-  s.getBoundingClientRect(); // a layout first, so the transition starts from where it is
+  s.getBoundingClientRect();
   s.classList.add("ease");
   clearTimeout(s.eased);
   s.eased = setTimeout(() => s.classList.remove("ease"), 200);
