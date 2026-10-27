@@ -113,19 +113,26 @@ export function foreground(part: Part): void {
   console.log("Running in the foreground. `unii " + part + " -d` runs it as a background service.");
 }
 
+export const STOP_SIGNALS = ["SIGHUP", "SIGTERM", "SIGINT"] as const;
+
 export function watch(parent: number, part?: Part, me = parent): void {
-  const stop = part === undefined || !WIN ? null : LOGS + "/" + part + ".stop";
+  const stop_file = part === undefined || !WIN ? null : LOGS + "/" + part + ".stop";
+  const stop_asked = () => stop_file !== null && read(stop_file)?.trim() === String(me);
   let quit = false;
   setInterval(() => {
-    if (quit || (alive(parent) && (stop === null || read(stop)?.trim() !== String(me)))) {
+    if (quit || (alive(parent) && !stop_asked())) {
       return;
     }
     quit = true;
     if (part === undefined || me !== parent || process.listenerCount("SIGTERM") === 0) {
       process.exit(0);
     }
-    process.emit("SIGTERM");
-  }, stop === null ? 2000 : 500).unref();
+    stop_as_if_signalled();
+  }, stop_file === null ? 2000 : 500).unref();
+}
+
+function stop_as_if_signalled(): void {
+  process.emit("SIGTERM");
 }
 
 function unit(part: Part): string {

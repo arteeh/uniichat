@@ -19,6 +19,8 @@ const LOOK = 2000;
 
 const BYE = 2000;
 
+const SENDABLE = FRAME - 1024;
+
 export async function signin(given: string | undefined): Promise<{ url: string; token: string; name: string; work: string }> {
   const conf = Client.read("device");
   const url = Client.server(given, conf);
@@ -92,30 +94,36 @@ export async function run(given: string | undefined): Promise<void> {
   const job = async (id: string, job: Job) => {
     const abort = new AbortController();
     jobs.set(id, abort);
-    const out  = job.name === "show" ? await show(job, url, token, abort.signal) : await Machine.run(job, abort.signal);
-    const size = Buffer.byteLength(JSON.stringify(out));
-    const most = FRAME - 1024;
-    const big  = { text: "The output, " + size + " bytes, is over the " + most + " a tool may send.", fail: true };
+    const out = job.name === "show" ? await show(job, url, token, abort.signal) : await Machine.run(job, abort.signal);
     jobs.delete(id);
-    const act = { $: "out" as const, id: crypto.randomUUID(), job: id, out: size > most ? big : out };
+    const act = { $: "out" as const, id: crypto.randomUUID(), job: id, out: sendable_or_its_size(out) };
     outs.set(act.id, act);
     send(act);
   };
   process.on("exit", Machine.end);
-  for (const sig of ["SIGHUP", "SIGTERM", "SIGINT"]) {
-    process.on(sig, () => {
-      if (quitting) {
-        return;
-      }
-      quitting = true;
-      if (ws?.readyState !== WebSocket.OPEN) {
-        process.exit(0);
-      }
-      ws.close(QUIT);
-      setTimeout(() => process.exit(0), BYE);
-    });
-  }
+  on_stop(() => {
+    if (quitting) {
+      return;
+    }
+    quitting = true;
+    if (ws?.readyState !== WebSocket.OPEN) {
+      process.exit(0);
+    }
+    ws.close(QUIT);
+    setTimeout(() => process.exit(0), BYE);
+  });
   open();
+}
+
+function sendable_or_its_size(out: { text: string; fail: boolean }): { text: string; fail: boolean } {
+  const size = Buffer.byteLength(JSON.stringify(out));
+  return size <= SENDABLE ? out : { text: "The output, " + size + " bytes, is over the " + SENDABLE + " a tool may send.", fail: true };
+}
+
+function on_stop(stop: () => void): void {
+  for (const sig of Service.STOP_SIGNALS) {
+    process.on(sig, stop);
+  }
 }
 
 async function show(job: Job, url: string, token: string, signal: AbortSignal): Promise<{ text: string; fail: boolean }> {
