@@ -2,6 +2,7 @@ import * as child from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import type { Out } from "./Agent.ts";
 import * as Client from "./Client.ts";
 import { Machine, SCRATCH, WIN, type Job } from "./Machine.ts";
 import { Mcp } from "./Mcp.ts";
@@ -115,7 +116,7 @@ export async function run(given: string | undefined): Promise<void> {
   open();
 }
 
-function run_job(job: Job, url: string, token: string, signal: AbortSignal): Promise<{ text: string; fail: boolean }> {
+function run_job(job: Job, url: string, token: string, signal: AbortSignal): Promise<Out> {
   if (job.name === "show") {
     return show(job, url, token, signal);
   }
@@ -125,7 +126,7 @@ function run_job(job: Job, url: string, token: string, signal: AbortSignal): Pro
   return Machine.run(job, signal);
 }
 
-function sendable_or_its_size(out: { text: string; fail: boolean }): { text: string; fail: boolean } {
+function sendable_or_its_size(out: Out): Out {
   const size = Buffer.byteLength(JSON.stringify(out));
   return size <= SENDABLE ? out : { text: "The output, " + size + " bytes, is over the " + SENDABLE + " a tool may send.", fail: true };
 }
