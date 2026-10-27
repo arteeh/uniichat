@@ -63,7 +63,8 @@ function row_make(row: View.Row): string {
       const cut = row.kind === "tool" || (row.kind === "echo" && !media);
       const fold = tall ? `<div class="clip">${body}</div><details class="more"><summary></summary></details>` : cut ? `<div class="cut">${body}</div><button class="unfold" aria-expanded="false">Show all</button>` : body;
       const who = row.who === "" ? "" : ` data-who="${esc(row.who)}"`;
-      return `<div class="msg ${row.kind}"${at}${who}>${copy}${fold}${pics}</div>`;
+      const queued = row.queued === true ? " queued" : "";
+      return `<div class="msg ${row.kind}${queued}"${at}${who}>${copy}${fold}${pics}</div>`;
     }
     case "Cap": {
       return `<p class="cap">${esc(row.text)}</p>`;

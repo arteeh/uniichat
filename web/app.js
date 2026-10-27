@@ -1985,7 +1985,6 @@ var NOTICE = 3 * 60 * 60 * 1000;
 var WAIT = "compressing…";
 var SUMS = "compressing earlier messages…";
 var UNSENT = "Sends once connected.";
-var QUEUED = "Queued: it goes in as this turn ends.";
 var MEDIA2 = MEDIA;
 var MEDIA_AS2 = MEDIA_AS;
 var STORED = /^[0-9a-f]{16}\.([a-z0-9]{1,10})$/;
@@ -2248,8 +2247,8 @@ function view_tail(v, live = view_stream(v)) {
   const said = v.page === null && !v.up ? v.out.flatMap((p) => entry_rows(null, "user", p.said)) : [];
   const kept = said.length > 0 ? [...said, Cap(UNSENT)] : [];
   const name = v.page === null ? TURN : v.page.name;
-  const queued = (v.queue[name] ?? []).flatMap((q) => entry_rows(null, q.kind, q.text));
-  const after = [...queued.length > 0 ? [...queued, Cap(QUEUED)] : [], ...kept, ...load];
+  const queued = (v.queue[name] ?? []).flatMap((q) => entry_rows(null, q.kind, q.text).map((row) => row.$ === "Msg" ? { ...row, queued: true } : row));
+  const after = [...queued, ...kept, ...load];
   const limit = v.limits[name];
   if (limit !== undefined) {
     return [...rows, Cap(limit_show(limit)), ...after];
@@ -3058,7 +3057,8 @@ function row_make(row) {
       const cut = row.kind === "tool" || row.kind === "echo" && !media;
       const fold = tall ? `<div class="clip">${body}</div><details class="more"><summary></summary></details>` : cut ? `<div class="cut">${body}</div><button class="unfold" aria-expanded="false">Show all</button>` : body;
       const who = row.who === "" ? "" : ` data-who="${esc(row.who)}"`;
-      return `<div class="msg ${row.kind}"${at}${who}>${copy}${fold}${pics}</div>`;
+      const queued = row.queued === true ? " queued" : "";
+      return `<div class="msg ${row.kind}${queued}"${at}${who}>${copy}${fold}${pics}</div>`;
     }
     case "Cap": {
       return `<p class="cap">${esc(row.text)}</p>`;

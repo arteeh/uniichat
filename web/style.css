@@ -250,6 +250,7 @@ header > .imping { display: flex; flex-direction: column; justify-content: cente
 .msg.user { margin-left: auto; width: fit-content; max-width: min(82%, 560px); padding: 10px 17px; border: 1.25px solid var(--edge); border-radius: 20px 20px 6px 20px; font: 16px/1.55 var(--sans); }
 .msg.user { scroll-margin-top: calc(var(--head) + 66px); }
 .msg.work { padding: 14px 20px; border: 1.25px solid var(--edge); border-radius: 14px; font: 16px/1.55 var(--sans); }
+.msg.queued { border-style: dotted; }
 .msg.work::before { content: attr(data-who); position: absolute; left: 14px; top: -.75em; padding: 0 6px; background: var(--paper); font: 600 12px/1.5 var(--sans); color: var(--mid); }
 .msg.note { color: var(--mid); }
 .msg.unii { font: 16px/1.55 var(--sans); }

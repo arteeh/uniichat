@@ -103,13 +103,14 @@ function fill_lines(body: Line[], iw: number): Line[] {
   return [edge("▄"), ...mid, edge("▀")];
 }
 
-function frame_lines(body: Line[], iw: number, edge: Ink, title: Line): Line[] {
+function frame_lines(body: Line[], iw: number, edge: Ink, title: Line, dotted = false): Line[] {
+  const [h, v] = dotted ? ["┄", "┆"] : ["─", "│"];
   const head = runs_wrap(title, iw + 1, true)[0];
-  const bar  = "─".repeat(Math.max(0, iw + 1 - line_width(head)));
-  const top  = [Run("╭─", edge), ...head, Run(bar + "╮", edge)];
-  const end  = [Run("╰" + "─".repeat(Math.max(0, iw + 2)) + "╯", edge)];
+  const bar  = h.repeat(Math.max(0, iw + 1 - line_width(head)));
+  const top  = [Run("╭" + h, edge), ...head, Run(bar + "╮", edge)];
+  const end  = [Run("╰" + h.repeat(Math.max(0, iw + 2)) + "╯", edge)];
   const pad  = (l: Line) => Run(" ".repeat(Math.max(0, iw - line_width(l))));
-  const mid  = body.map((l) => [Run("│ ", edge), ...l, pad(l), Run(" │", edge)]);
+  const mid  = body.map((l) => [Run(v + " ", edge), ...l, pad(l), Run(" " + v, edge)]);
   return [top, ...mid, end];
 }
 
@@ -138,7 +139,7 @@ function row_lines(row: View.Row, w: number): Line[] {
       return frame_lines(rows_lines(row.rows, w - 4), w - 4, DIM, bar);
     }
     case "Msg": {
-      return row.call === null ? msg_lines(row.kind, row.who, row.body, w) : fill_lines(call_lines(row.call, w - 2), w - 2);
+      return row.call === null ? msg_lines(row.kind, row.who, row.body, w, row.queued === true) : fill_lines(call_lines(row.call, w - 2), w - 2);
     }
     case "Cap": {
       return runs_wrap([Run(text_clean(row.text), { ...DIM, i: true })], w, false);
@@ -156,7 +157,7 @@ function sum_lines(id: number, n: number, head: Line, text: string, w: number): 
   return [...rows, ...ends].map((l, k) => [Run(" " + (k === 0 ? n + "x" : "").padEnd(GUTTER), lvl), ...l]);
 }
 
-function msg_lines(kind: Kind, who: string, body: Md.Block[], w: number): Line[] {
+function msg_lines(kind: Kind, who: string, body: Md.Block[], w: number, queued: boolean): Line[] {
   const look = Theme.KIND[kind];
   const ink  = { ...INK, d: look.dim, i: look.it };
   if (body.length === 0) {
@@ -167,7 +168,7 @@ function msg_lines(kind: Kind, who: string, body: Md.Block[], w: number): Line[]
   }
   if (Theme.FRAMED.includes(kind)) {
     const edge = kind === "user" ? { ...INK, c: Theme.ANSI.you } : INK;
-    return frame_lines(blocks_lines(body, w - 4, ink), w - 4, edge, who === "" ? [] : [Run(" " + who + " ", { ...edge, b: true })]);
+    return frame_lines(blocks_lines(body, w - 4, ink), w - 4, edge, who === "" ? [] : [Run(" " + who + " ", { ...edge, b: true })], queued);
   }
   const name = who === "" ? [] : [[Run(who, { ...DIM, b: true })]];
   return [...name, ...blocks_lines(body, w, ink)];

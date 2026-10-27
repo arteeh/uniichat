@@ -137,7 +137,7 @@ export type Act =
 export type Row =
   | { $: "Sum"; id: number; n: number; text: string; call: Call.Call | null }
   | { $: "Box"; id: number; n: number; text: string; rows: Row[] }
-  | { $: "Msg"; id: number | null; kind: Kind; who: string; text: string; body: Md.Block[]; call: Call.Call | null; images: string[] }
+  | { $: "Msg"; id: number | null; kind: Kind; who: string; text: string; body: Md.Block[]; call: Call.Call | null; images: string[]; queued?: boolean }
   | { $: "Cap"; text: string }
 
 export type Tab = { name: string | null; here: boolean; text: string };
@@ -177,8 +177,6 @@ const WAIT = "compressing…";
 const SUMS = "compressing earlier messages…";
 
 const UNSENT = "Sends once connected.";
-
-const QUEUED = "Queued: it goes in as this turn ends.";
 
 const MARKS: Array<[string, number, string]> = [
   ["image/png", 0, "\x89PNG"],
@@ -473,8 +471,8 @@ export function view_tail(v: View, live = view_stream(v)): Row[] {
   const said = v.page === null && !v.up ? v.out.flatMap((p) => entry_rows(null, "user", p.said)) : [];
   const kept = said.length > 0 ? [...said, Cap(UNSENT)] : [];
   const name = v.page === null ? TURN : v.page.name;
-  const queued = (v.queue[name] ?? []).flatMap((q) => entry_rows(null, q.kind, q.text));
-  const after = [...(queued.length > 0 ? [...queued, Cap(QUEUED)] : []), ...kept, ...load];
+  const queued = (v.queue[name] ?? []).flatMap((q) => entry_rows(null, q.kind, q.text).map((row) => (row.$ === "Msg" ? { ...row, queued: true } : row)));
+  const after = [...queued, ...kept, ...load];
   const limit = v.limits[name];
   if (limit !== undefined) {
     return [...rows, Cap(limit_show(limit)), ...after];
