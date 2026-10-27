@@ -51,8 +51,6 @@ export function command(): string[] {
   return bun ? [process.execPath, path.resolve(process.argv[1])] : [process.execPath];
 }
 
-// whether -d makes the service run as administrator: on Windows, run
-// elevated (`sudo unii device -d`) and answered y
 export function admin(part: Part): boolean {
   if (!WIN || !elevated()) {
     return false;
@@ -65,7 +63,6 @@ export function admin(part: Part): boolean {
 }
 
 function elevated(): boolean {
-  // the High Mandatory Level, an elevated token's
   return run(["whoami", "/groups", "/fo", "csv", "/nh"]).out.includes("S-1-16-12288");
 }
 
@@ -336,13 +333,10 @@ async function win_start(part: Part, args: string[], admin: boolean): Promise<vo
   say(part, now, "the Scheduled Task " + n + ", started at logon" + (admin ? ", as administrator" : ""));
 }
 
-// its task runs elevated, so this shell can't read its unii's command line
 function win_out_of_sight(part: Part): boolean {
   return ADMIN_TASK.test(win_task(name(part)) ?? "") && !elevated();
 }
 
-// a task made elevated (sudo unii device -d) only an elevated shell can
-// change, and only it sees and ends the unii running in it
 function win_admin_check(part: Part, had: string | null, verb: string): void {
   if (had !== null && ADMIN_TASK.test(had) && !elevated()) {
     fail("unii " + part + " runs as administrator (its task was made by `sudo unii " + part + " -d`), so only an elevated shell can change it: run `sudo unii " + part + " " + verb + "`" + (verb === "-d" ? " (answer N to run it without admin rights)" : "") + ".");

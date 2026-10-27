@@ -572,8 +572,6 @@ export namespace Chat {
     }
   }
 
-  // the main's context as its last request had it, against the model's
-  // window; before any request, a guess from what the next one would send
   export function meter(chat: Chat): Meter | null {
     const mem = chat.mem;
     if (mem.talk === null) {

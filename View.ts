@@ -250,7 +250,6 @@ export function Cap(text: string): Row {
 
 export const TOKEN = 3;
 
-// rounded up, so any use shows
 export function talk_percent(talk: Talk): number {
   return Math.ceil(talk.used * 100);
 }
