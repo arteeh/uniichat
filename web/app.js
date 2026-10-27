@@ -207,11 +207,11 @@ function chat_openai(chat, mapping) {
       return [];
     }
     const role = m.author?.role;
-    const type = String(m.content.content_type);
+    const type = String(m.content?.content_type);
     const kind = role === "user" ? "user" : role === "assistant" ? m.recipient === "all" ? "unii" : "tool" : role === "tool" ? "echo" : null;
     const skip = kind === null || m.metadata?.is_visually_hidden_from_conversation === true || type === "thoughts" || type === "reasoning_recap";
     date = import_date(m.create_time, date);
-    return skip ? [] : msgs_of(kind, (kind === "tool" ? String(m.recipient) + " " : "") + parts_text(m.content.parts ?? [m.content.text]), date);
+    return skip ? [] : msgs_of(kind, (kind === "tool" ? String(m.recipient) + " " : "") + parts_text(m.content?.parts ?? [m.content?.text]), date);
   });
 }
 function chat_claude(chat) {
