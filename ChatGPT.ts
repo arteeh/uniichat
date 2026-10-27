@@ -19,7 +19,7 @@ type Claims = { exp?: unknown; email?: string; "https://api.openai.com/auth"?: {
 
 type Got = { id_token?: string; access_token?: string; refresh_token?: string };
 
-const CLIENT    = "app_EMoamEEZ73f0CkXaXp7hrann";
+const CODEX_CLIENT = "app_EMoamEEZ73f0CkXaXp7hrann";
 const ISSUER    = config.config_get("chatgpt_issuer", "https://auth.openai.com").replace(/\/$/, "");
 const CODEX     = config.config_get("chatgpt_url", "https://chatgpt.com/backend-api/codex").replace(/\/$/, "");
 const RESPONSES = CODEX + "/responses";
@@ -115,21 +115,40 @@ export namespace ChatGPT {
     return Object.assign(new Error("ChatGPT token refresh failed: " + why), { busy: true });
   }
 
-  export async function refresh(old: Auth): Promise<Auth> {
-    const newer = () => {
-      const now = ChatGPT.load();
-      if (now === null) {
-        throw new Error("openai-sub was signed out: " + SIGN_IN);
+  export function refreshed_elsewhere(old: Auth): Auth | null {
+    const now = ChatGPT.load();
+    if (now === null) {
+      throw new Error("openai-sub was signed out: " + SIGN_IN);
+    }
+    return now.tokens.refresh_token !== old.tokens.refresh_token ? now : null;
+  }
+
+  export async function refreshed_elsewhere_soon(old: Auth): Promise<Auth | null> {
+    for (const end = Date.now() + SETTLE; ; await Bun.sleep(250)) {
+      const now = ChatGPT.refreshed_elsewhere(old);
+      if (now !== null || Date.now() >= end) {
+        return now;
       }
-      return now.tokens.refresh_token !== old.tokens.refresh_token ? now : null;
-    };
+    }
+  }
+
+  export function save_unless_refreshed_elsewhere(old: Auth, auth: Auth): Auth {
+    const now = ChatGPT.refreshed_elsewhere(old);
+    if (now !== null) {
+      return now;
+    }
+    ChatGPT.save(auth);
+    return auth;
+  }
+
+  export async function refresh(old: Auth): Promise<Auth> {
     let res: Response;
     let text: string;
     try {
       res = await fetch(ISSUER + "/oauth/token", {
         method  : "POST",
         headers : { "content-type": "application/json" },
-        body    : JSON.stringify({ client_id: CLIENT, grant_type: "refresh_token", refresh_token: old.tokens.refresh_token }),
+        body    : JSON.stringify({ client_id: CODEX_CLIENT, grant_type: "refresh_token", refresh_token: old.tokens.refresh_token }),
         signal  : AbortSignal.timeout(REQUEST),
       });
       text = await res.text();
@@ -143,31 +162,20 @@ export namespace ChatGPT {
       if (res.status !== 401 && !GONE.includes(code)) {
         throw ChatGPT.busy("HTTP " + res.status);
       }
-      for (const end = Date.now() + SETTLE; ; await Bun.sleep(250)) {
-        const now = newer();
-        if (now !== null) {
-          return now;
-        }
-        if (Date.now() >= end) {
-          break;
-        }
+      const now = await ChatGPT.refreshed_elsewhere_soon(old);
+      if (now !== null) {
+        return now;
       }
       throw new Error("openai-sub's sign-in has expired or was revoked (" + (code || "HTTP " + res.status) + "): " + SIGN_IN);
     }
     if (typeof get(body, "access_token") !== "string") {
       throw ChatGPT.busy("no access token");
     }
-    const auth = ChatGPT.auth(ChatGPT.got(body), old.tokens);
-    const now = newer();
-    if (now !== null) {
-      return now;
-    }
-    ChatGPT.save(auth);
-    return auth;
+    return ChatGPT.save_unless_refreshed_elsewhere(old, ChatGPT.auth(ChatGPT.got(body), old.tokens));
   }
 
   export async function exchange(code: string, redirect: string, verifier: string): Promise<Auth> {
-    const form = new URLSearchParams({ grant_type: "authorization_code", client_id: CLIENT, code, redirect_uri: redirect, code_verifier: verifier });
+    const form = new URLSearchParams({ grant_type: "authorization_code", client_id: CODEX_CLIENT, code, redirect_uri: redirect, code_verifier: verifier });
     const res = await fetch(ISSUER + "/oauth/token", { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: form, signal: AbortSignal.timeout(REQUEST) });
     const text = await res.text();
     if (!res.ok) {
@@ -182,7 +190,7 @@ export namespace ChatGPT {
     const api = ISSUER + "/api/accounts/deviceauth";
     const post = (path: string, body: object) =>
       fetch(api + path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body), signal: AbortSignal.timeout(REQUEST) });
-    const res = await post("/usercode", { client_id: CLIENT });
+    const res = await post("/usercode", { client_id: CODEX_CLIENT });
     if (!res.ok) {
       const off = res.status === 404 ? " (device code sign-in is off for this account: allow it in ChatGPT's security settings)" : "";
       throw new Error("ChatGPT device code request failed: HTTP " + res.status + off);
@@ -212,7 +220,7 @@ export namespace ChatGPT {
     const res = await fetch(ISSUER + "/oauth/revoke", {
       method  : "POST",
       headers : { "content-type": "application/json" },
-      body    : JSON.stringify({ token: auth.tokens.refresh_token, token_type_hint: "refresh_token", client_id: CLIENT }),
+      body    : JSON.stringify({ token: auth.tokens.refresh_token, token_type_hint: "refresh_token", client_id: CODEX_CLIENT }),
       signal  : AbortSignal.timeout(REQUEST),
     }).catch(() => null);
     fs.rmSync(config.CHATGPT, { force: true });
