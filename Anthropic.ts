@@ -271,13 +271,14 @@ export namespace Anthropic {
         return { kind: "tool", text: (b.name ?? "") + " " + JSON.stringify(b.input), of: b.id };
       }
     }
-    if (!b.type.endsWith("_tool_result")) {
-      return null;
-    }
-    return { kind: "echo", text: Anthropic.result(c) || "(no output)", of: b.tool_use_id };
+    return b.type.endsWith("_tool_result") ? Anthropic.server_echo(c, b.tool_use_id) : null;
   }
 
-  export function result(c: unknown): string {
+  export function server_echo(content: unknown, of: string | undefined): Entry {
+    return { kind: "echo", text: Anthropic.result_text(content) || "(no output)", of };
+  }
+
+  export function result_text(c: unknown): string {
     if (Array.isArray(c)) {
       return c.map((r: unknown) => String(get(r, "title")) + " " + String(get(r, "url"))).join("\n");
     }
