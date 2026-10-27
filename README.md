@@ -103,7 +103,8 @@ your user (systemd on Linux, a Scheduled Task on Windows, a LaunchAgent
 on macOS): it starts at login and restarts if it crashes.
 `unii serve stop` / `unii device stop` removes it, `logs -f` follows its
 output. On Linux, `loginctl enable-linger` keeps it running while you're
-logged out.
+logged out. On Windows, `sudo unii device -d` offers to run it as
+administrator, so Unii can control apps that run as admin.
 
 **Settings** are mostly on the Settings page, including Unii's system
 prompt and compaction prompt. They're kept in `~/.unii/config.json`,

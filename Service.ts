@@ -35,6 +35,13 @@ export const DIRS = ["UNII_DIR", "XDG_CONFIG_HOME"];
 
 const ABOUT: Record<Part, string> = { serve: "UniiChat server (unii serve)", device: "UniiChat device (unii device)" };
 
+const ASK_ADMIN: Record<Part, string> = {
+  device: "unii device will run as administrator: everything it runs, and every app it controls, gets admin rights. Run it as administrator? [y/N]",
+  serve: "unii serve will run as administrator: everything it runs gets admin rights. Run it as administrator? [y/N]",
+};
+
+const ADMIN_TASK = /<RunLevel>\s*HighestAvailable\s*<\/RunLevel>/;
+
 export function name(part: Part): string {
   return "unii-" + part;
 }
@@ -44,7 +51,25 @@ export function command(): string[] {
   return bun ? [process.execPath, path.resolve(process.argv[1])] : [process.execPath];
 }
 
-export async function start(part: Part, args: string[]): Promise<void> {
+// whether -d makes the service run as administrator: on Windows, run
+// elevated (`sudo unii device -d`) and answered y
+export function admin(part: Part): boolean {
+  if (!WIN || !elevated()) {
+    return false;
+  }
+  if (!process.stdin.isTTY) {
+    console.log("unii " + part + " -d runs elevated, but has no terminal to ask in whether to run it as administrator (sudo's input off?), so it runs without admin rights. `sudo config --enable normal`, then `sudo unii " + part + " -d`, asks.");
+    return false;
+  }
+  return /^y$/i.test(prompt(ASK_ADMIN[part])?.trim() ?? "");
+}
+
+function elevated(): boolean {
+  // the High Mandatory Level, an elevated token's
+  return run(["whoami", "/groups", "/fo", "csv", "/nh"]).out.includes("S-1-16-12288");
+}
+
+export async function start(part: Part, args: string[], admin = false): Promise<void> {
   const dirs = Object.fromEntries(DIRS.flatMap((k) => {
     const v = process.env[k];
     return v ? [[k, path.resolve(k === "UNII_DIR" ? DATA : v)]] : [];
@@ -53,7 +78,7 @@ export async function start(part: Part, args: string[]): Promise<void> {
     alone();
   }
   if (WIN) {
-    return win_start(part, [...Object.entries(dirs).map(([k, v]) => "--env=" + k + "=" + v), ...args]);
+    return win_start(part, [...Object.entries(dirs).map(([k, v]) => "--env=" + k + "=" + v), ...args], admin);
   }
   const env = { ...(process.env.PATH ? { PATH: process.env.PATH } : {}), ...dirs };
   return MAC ? mac_start(part, args, env) : linux_start(part, args, env);
@@ -79,7 +104,9 @@ export async function logs(part: Part, follow: boolean): Promise<void> {
 
 export function running(part: Part): string | null {
   if (WIN || MAC) {
-    return ours(part, pids(part).slice(0, 1)).length > 0 ? (WIN ? "the Scheduled Task " : "the LaunchAgent ") + name(part) : null;
+    const first = pids(part).slice(0, 1);
+    const up = ours(part, first).length > 0 || (WIN && alive(first[0]) && win_out_of_sight(part));
+    return up ? (WIN ? "the Scheduled Task " : "the LaunchAgent ") + name(part) : null;
   }
   const file = unit(part);
   if (!read(file)?.includes(MARK) || Bun.which("systemctl") === null) {
@@ -280,7 +307,7 @@ function mac_stop(part: Part): void {
   console.log("unii " + part + " stopped: its background service " + n + " is removed.");
 }
 
-async function win_start(part: Part, args: string[]): Promise<void> {
+async function win_start(part: Part, args: string[], admin: boolean): Promise<void> {
   const n = name(part);
   const step = clock(part, "-d");
   const pid = read(LOGS + "/" + part + ".pid");
@@ -290,11 +317,12 @@ async function win_start(part: Part, args: string[]): Promise<void> {
   if (had !== null && !had.includes(MARK)) {
     fail(n + " isn't unii's: that Scheduled Task isn't one unii made, so unii leaves it as it is. To use unii " + part + " -d, remove it (schtasks /delete /tn " + n + "); or keep using it.");
   }
+  win_admin_check(part, had, "-d");
   const line = ["--headless", ...command(), part, "--service", ...args].map(winq).join(" ");
   const about = MARK + ": `unii " + part + " -d` made this task, and makes it again; `unii " + part + " stop` removes it.";
   const file = path.join(os.tmpdir(), n + "-" + process.pid + ".xml");
   // UTF-16, as schtasks reads a task's XML
-  fs.writeFileSync(file, Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from(TASK(about, user(), line, HOME), "utf16le")]));
+  fs.writeFileSync(file, Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from(TASK(about, user(), line, HOME, admin), "utf16le")]));
   try {
     schtasks("/create", "/tn", "\\" + n, "/xml", file, "/f");
   } finally {
@@ -305,7 +333,20 @@ async function win_start(part: Part, args: string[]): Promise<void> {
   step("task started");
   const now = await up(part, was, () => supervised(part, pid) === false, () => supervised(part, pid) === true);
   step(now === "up" ? "up" : "not up");
-  say(part, now, "the Scheduled Task " + n + ", started at logon");
+  say(part, now, "the Scheduled Task " + n + ", started at logon" + (admin ? ", as administrator" : ""));
+}
+
+// its task runs elevated, so this shell can't read its unii's command line
+function win_out_of_sight(part: Part): boolean {
+  return ADMIN_TASK.test(win_task(name(part)) ?? "") && !elevated();
+}
+
+// a task made elevated (sudo unii device -d) only an elevated shell can
+// change, and only it sees and ends the unii running in it
+function win_admin_check(part: Part, had: string | null, verb: string): void {
+  if (had !== null && ADMIN_TASK.test(had) && !elevated()) {
+    fail("unii " + part + " runs as administrator (its task was made by `sudo unii " + part + " -d`), so only an elevated shell can change it: run `sudo unii " + part + " " + verb + "`" + (verb === "-d" ? " (answer N to run it without admin rights)" : "") + ".");
+  }
 }
 
 function win_task_unii_made(part: Part, n: string, had: string | null): boolean {
@@ -341,6 +382,7 @@ async function win_stop(part: Part): Promise<void> {
   if (!win_task_unii_made(part, n, had)) {
     return;
   }
+  win_admin_check(part, had, "stop");
   forget_run(part);
   if (mine.length === 0) {
     win_end_task(n);
@@ -353,13 +395,13 @@ async function win_stop(part: Part): Promise<void> {
   console.log("unii " + part + " stopped: its background service " + n + " is removed.");
 }
 
-function TASK(about: string, who: string, line: string, dir: string): string {
+function TASK(about: string, who: string, line: string, dir: string, admin: boolean): string {
   const x = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   return `<?xml version="1.0" encoding="UTF-16"?>
 <Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
   <RegistrationInfo><Description>${x(about)}</Description></RegistrationInfo>
   <Triggers><LogonTrigger><Enabled>true</Enabled><UserId>${x(who)}</UserId></LogonTrigger></Triggers>
-  <Principals><Principal id="Author"><UserId>${x(who)}</UserId><LogonType>InteractiveToken</LogonType><RunLevel>LeastPrivilege</RunLevel></Principal></Principals>
+  <Principals><Principal id="Author"><UserId>${x(who)}</UserId><LogonType>InteractiveToken</LogonType><RunLevel>${admin ? "HighestAvailable" : "LeastPrivilege"}</RunLevel></Principal></Principals>
   <Settings>
     <MultipleInstancesPolicy>StopExisting</MultipleInstancesPolicy>
     <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>

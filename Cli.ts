@@ -138,14 +138,17 @@ function plan(name: "claude" | "chatgpt", about: string): Cmd {
 const TREE: Cmd = { use: "unii [url]", about: "the chat in this terminal", url: true, run: async () => (await import("./Term.ts")).main(URL_), kids: [
   { use: "device [url]", about: "this computer as a device of a server", url: true, run: async () => { await run_here("device"); await (await import("./Device.ts")).run(URL_); }, kids: service("device", async () => {
     unmark_from_parent_shell();
+    const Service = await import("./Service.ts");
+    const admin = Service.admin("device");
     await (await import("./Device.ts")).signin(URL_);
-    await (await import("./Service.ts")).start("device", []);
+    await Service.start("device", [], admin);
   }) },
   { use: "serve [port]", about: "your UniiChat server (port 8788)", arg: PORT, run: async (port) => { await run_here("serve"); await (await import("./Server.ts")).serve(Number(port ?? 8788)); }, kids: [
     ...service("serve", async (port) => {
       unmark_from_parent_shell();
       await serve_free();
-      await (await import("./Service.ts")).start("serve", port === undefined ? [] : [port]);
+      const Service = await import("./Service.ts");
+      await Service.start("serve", port === undefined ? [] : [port], Service.admin("serve"));
     }),
     { use: "link", about: "a link that signs a browser in", run: async () => { (await import("./Owner.ts")).Owner.cli(); } },
     { use: "sessions", about: "the browsers, terminals and devices signed in", run: async () => (await import("./Owner.ts")).Owner.sessions(), kids: [
