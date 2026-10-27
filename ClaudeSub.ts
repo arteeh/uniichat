@@ -18,7 +18,7 @@ export const SUMS = 4;
 
 const FRESH = 60e3;
 
-export const ON = "(The AI service's usage limit cut your last step short. It has reset: go on.)";
+const GO_ON_AFTER_LIMIT = "(The AI service's usage limit cut your last step short. It has reset: go on.)";
 
 const WEB = ["WebSearch"];
 
@@ -41,6 +41,8 @@ const ENV = {
 };
 
 const HOUR = { type: "ephemeral", ttl: "1h" };
+
+const OUTLASTS_CLAUDE_CODES_MCP_TIMEOUT = 1e8;
 
 const SIGN_IN = "claude-sub is not signed in, or its sign-in expired: run `unii serve claude` on the server";
 
@@ -82,13 +84,15 @@ export namespace ClaudeSub {
   }
 
   export async function find(): Promise<string> {
-    if (config.CLAUDE) {
-      return config.CLAUDE;
-    }
+    return config.CLAUDE || (await ClaudeSub.carried()) || ClaudeSub.installed();
+  }
+
+  export async function carried(): Promise<string | null> {
     const inside = Bun.embeddedFiles.map((f) => (f as Blob & { name: string }).name).find((name) => /^claude(-|\.|$)/.test(name));
-    if (inside !== undefined) {
-      return ClaudeSub.extract((process.platform === "win32" ? "B:\\~BUN\\root\\" : "/$bunfs/root/") + inside);
-    }
+    return inside === undefined ? null : ClaudeSub.extract_under_unii_dir((process.platform === "win32" ? "B:\\~BUN\\root\\" : "/$bunfs/root/") + inside);
+  }
+
+  export function installed(): string {
     try {
       return Bun.fileURLToPath(import.meta.resolve("@anthropic-ai/claude-agent-sdk-" + ClaudeSub.platform() + (process.platform === "win32" ? "/claude.exe" : "/claude")));
     } catch {
@@ -101,15 +105,19 @@ export namespace ClaudeSub {
     return process.platform + "-" + process.arch + (musl ? "-musl" : "");
   }
 
-  export async function extract(inside: string): Promise<string> {
+  export async function extract_under_unii_dir(inside: string): Promise<string> {
     const { extractFromBunfs } = await import("@anthropic-ai/claude-agent-sdk/extract");
+    const out = ClaudeSub.with_tmpdir(config.DIR, () => extractFromBunfs(inside));
+    ClaudeSub.claim(path.dirname(out));
+    ClaudeSub.prune(path.dirname(path.dirname(out)), path.basename(path.dirname(out)));
+    return out;
+  }
+
+  export function with_tmpdir<T>(dir: string, run: () => T): T {
     const was = process.env.CLAUDE_CODE_TMPDIR;
-    process.env.CLAUDE_CODE_TMPDIR = config.DIR;
+    process.env.CLAUDE_CODE_TMPDIR = dir;
     try {
-      const out = extractFromBunfs(inside);
-      ClaudeSub.claim(path.dirname(out));
-      ClaudeSub.prune(path.dirname(path.dirname(out)), path.basename(path.dirname(out)));
-      return out;
+      return run();
     } finally {
       if (was === undefined) {
         delete process.env.CLAUDE_CODE_TMPDIR;
@@ -238,7 +246,7 @@ export namespace ClaudeSub {
   }
 
   export function mcp(server: string): Parameters<Query["setMcpServers"]>[0] {
-    return server ? { unii: { type: "http", url: server, alwaysLoad: true, timeout: 1e8 } } : {};
+    return server ? { unii: { type: "http", url: server, alwaysLoad: true, timeout: OUTLASTS_CLAUDE_CODES_MCP_TIMEOUT } } : {};
   }
 
 
@@ -349,11 +357,7 @@ export namespace ClaudeSub {
   }
 
   export async function run(ask: Ask, on: (ev: Event) => void, signal: AbortSignal, limit: Limit): Promise<Partial<End>> {
-    let bin = await ClaudeSub.bin();
-    if (!fs.existsSync(bin)) {
-      LOADED.bin = null;
-      bin = await ClaudeSub.bin();
-    }
+    const bin = await ClaudeSub.bin_on_disk();
     const sdk = await ClaudeSub.sdk();
     let seen: Live[] = [];
     let said = false;
@@ -390,16 +394,15 @@ export namespace ClaudeSub {
           if (signal.aborted) {
             return {};
           }
-          const blocks = ask.blocks.filter((b) => b.text !== "");
-          code.box.put(blocks.map((b) => b.text), ask.imgs ?? [], blocks.slice(0, -1).findLastIndex((b) => b.mark));
+          ClaudeSub.first_message(code, ask);
         } else if (limit.n > 0) {
-          code.box.put([ON], []);
+          ClaudeSub.go_on_after_limit(code);
         }
         let got: Out | null;
         try {
           got = await ClaudeSub.turn(code, ask, emit, log, signal, acted, () => (seen = []));
         } catch (err) {
-          if (!(err instanceof Died) || said || signal.aborted || tries > 0) {
+          if (!ClaudeSub.died_before_saying(err, said, signal) || tries > 0) {
             throw err;
           }
           tries += 1;
@@ -411,7 +414,7 @@ export namespace ClaudeSub {
           return got === null ? {} : { ...got, acted: acted.v };
         }
         limit.n += 1;
-        if (!acted.v) {
+        if (!ClaudeSub.keeps_code_across_limit(acted.v)) {
           void ClaudeSub.close(code);
           code = null;
         }
@@ -429,6 +432,44 @@ export namespace ClaudeSub {
         Agent.fail("stopped", seen).entries.forEach((e) => on({ $: "Entry", ...e }));
       }
     }
+  }
+
+  export async function bin_on_disk(): Promise<string> {
+    const bin = await ClaudeSub.bin();
+    if (fs.existsSync(bin)) {
+      return bin;
+    }
+    LOADED.bin = null;
+    return ClaudeSub.bin();
+  }
+
+  export function first_message(code: Code, ask: Ask): void {
+    const blocks = ask.blocks.filter((b) => b.text !== "");
+    code.box.put(blocks.map((b) => b.text), ask.imgs ?? [], blocks.slice(0, -1).findLastIndex((b) => b.mark));
+  }
+
+  export function go_on_after_limit(code: Code): void {
+    code.box.put([GO_ON_AFTER_LIMIT], []);
+  }
+
+  export function keeps_code_across_limit(acted: boolean): boolean {
+    return acted;
+  }
+
+  export function died_before_saying(err: unknown, said: boolean, signal: AbortSignal): boolean {
+    return err instanceof Died && !said && !signal.aborted;
+  }
+
+  export function interrupt_overage(code: Code, info: SDKRateLimitInfo, interrupted: boolean): boolean {
+    if (info.isUsingOverage === true && !interrupted) {
+      code.q.interrupt().catch(() => {});
+      return true;
+    }
+    return interrupted;
+  }
+
+  export function limit_ended(whole: boolean, hit: boolean, over: boolean, info: SDKRateLimitInfo | null): boolean {
+    return !whole && (hit || over || info?.status === "rejected");
   }
 
   export async function turn(code: Code, ask: Ask, emit: Emit, log: (ev: Event) => void, signal: AbortSignal, acted: { v: boolean }, fresh: () => void): Promise<Out | null> {
@@ -456,10 +497,7 @@ export namespace ClaudeSub {
       if (msg.type === "rate_limit_event") {
         info = msg.rate_limit_info;
         ClaudeSub.note(info);
-        if (info.isUsingOverage === true && !over) {
-          over = true;
-          code.q.interrupt().catch(() => {});
-        }
+        over = ClaudeSub.interrupt_overage(code, info, over);
       }
       if (msg.type === "assistant" && msg.error === undefined) {
         Anthropic.entries(msg.message.content).forEach((e) => log({ $: "Entry", ...e }));
@@ -480,7 +518,7 @@ export namespace ClaudeSub {
       }
       const ok = msg.subtype === "success" && !msg.is_error;
       const why = msg.subtype === "success" ? msg.result : msg.errors.join("; ");
-      if (!ok && (hit || over || info?.status === "rejected")) {
+      if (ClaudeSub.limit_ended(ok, hit, over, info)) {
         return { limit: { until: info && ClaudeSub.reset(info), text: why } };
       }
       if (!ok) {
