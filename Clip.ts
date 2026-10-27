@@ -20,10 +20,13 @@ export function clip(): { add: (str: string) => void; text: () => string } {
       return head + tail;
     }
     const cut  = tail.length - keep;
-    const text = head + "\n[... " + (gone + cut) + " characters cut ...]\n" + tail.slice(cut);
-    return new TextDecoder().decode(new TextEncoder().encode(text));
+    return unpinned_copy(head + "\n[... " + (gone + cut) + " characters cut ...]\n" + tail.slice(cut));
   };
   return { add, text };
+}
+
+function unpinned_copy(text: string): string {
+  return new TextDecoder().decode(new TextEncoder().encode(text));
 }
 
 export function clip_end(str: string, at: number): number {
