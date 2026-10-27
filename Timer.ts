@@ -138,7 +138,7 @@ export function cron_next(c: Cron, zone: string, after: number): number | null {
 
 export function cron_gap(c: Cron): number {
   const times = [...c.sets[1]].flatMap((h) => [...c.sets[0]].map((mi) => h * 60 + mi)).sort((a, b) => a - b);
-  const gaps = times.map((t, k) => (k === 0 ? times[times.length - 1] - 1440 : times[k - 1])).map((prev, k) => times[k] - prev);
+  const gaps = times.map((_, k) => (k === 0 ? times[times.length - 1] - 1440 : times[k - 1])).map((prev, k) => times[k] - prev);
   return Math.min(...gaps);
 }
 

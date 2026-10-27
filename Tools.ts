@@ -305,12 +305,12 @@ export namespace Tools {
         const notes = plugged ? Mcp.heard(tools.mcp, Tools.off(tools), who) : [];
         const agent = tools.agents.get(who);
         notes.forEach((text) => agent !== undefined && tools.log.push(agent.run, "note", text));
-        return { tools: [...Tools.list(tools, who), ...theirs].map((t) => ({ name: t.name, description: t.info, inputSchema: t.schema })), notes };
+        return { tools: [...Tools.list(who), ...theirs].map((t) => ({ name: t.name, description: t.info, inputSchema: t.schema })), notes };
       }
       case "tools/call": {
         const name = String(params.name);
         const args = params.arguments ?? {};
-        const has = Tools.list(tools, who).some((t) => t.name === name);
+        const has = Tools.list(who).some((t) => t.name === name);
         const mcp = has ? null : Tools.mcp(tools, who, name);
         const no: Out = { text: "No tool " + name + ".", fail: true };
         const out = has ? await Tools.call(tools, who, name, args, signal, id) : mcp !== null ? await Mcp.call(tools.mcp, mcp, name, args, signal) : no;
@@ -324,7 +324,7 @@ export namespace Tools {
     return null;
   }
 
-  export function list(tools: Tools, who: string): Spec[] {
+  export function list(who: string): Spec[] {
     return who === "main" ? [...OWN, ...BOSS, ...kit(who), SKILL] : [...OWN, ...kit(who), SKILL];
   }
 

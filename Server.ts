@@ -1626,7 +1626,8 @@ export namespace Main {
       const kept = Owner.kept();
       Main.chat.socks.forEach((sock) => {
         if (kept.has(sock.data.who)) {
-          return sock.send(TICK);
+          sock.send(TICK);
+          return;
         }
         Chat.leave(Main.chat, sock, true);
         sock.close(QUIT, "signed out");

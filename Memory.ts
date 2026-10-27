@@ -649,7 +649,7 @@ export namespace Memory {
     const upto = Math.min(Memory.ctx(l, i), Memory.first(mem, 0, Memory.side(mem, l, i)));
     const blocks = [...Memory.view(mem, upto, Memory.last(mem, Memory.before(mem.seen.parts, upto), config.COMPACTOR_CONTEXT)), task];
     const lines: string[] = [];
-    let end = await Memory.compact(mem, l, i, Memory.ask(mem, l, i, text, blocks));
+    let end = await Memory.compact(mem, l, i, Memory.ask(mem, l, i, blocks));
     while (end.ok && end.text.trim() !== "") {
       const line = end.text.trim();
       lines.push(line);
@@ -657,7 +657,7 @@ export namespace Memory {
         break;
       }
       const note = { text: Memory.over(line), mark: false };
-      end = await Memory.compact(mem, l, i, Memory.ask(mem, l, i, text, [...blocks, note]));
+      end = await Memory.compact(mem, l, i, Memory.ask(mem, l, i, [...blocks, note]));
     }
     if (lines.length === 0 && !end.ok && end.stop !== "fail") {
       throw new Error(end.text);
@@ -690,7 +690,7 @@ export namespace Memory {
     parts.forEach(({ l, i }) => mem.made?.(l, i));
   }
 
-  export function ask(mem: Memory, l: number, i: number, text: string, blocks: Block[]): Call {
+  export function ask(mem: Memory, l: number, i: number, blocks: Block[]): Call {
     const own = Memory.served(mem, l, i) === "compactor";
     const repick = () => Pick.ask(config.COMPACTOR);
     const told: { again: Again | null } = { again: null };

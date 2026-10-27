@@ -52,7 +52,7 @@ const PAGE_KEYS = ["Tab", "Ctrl+D", "Ctrl+Z", "Esc"];
 
 const ARROWS: Record<string, Move> = { "Shift+Left": "prev", "Shift+Right": "next", "Shift+Up": "up", "Shift+Down": "down" };
 
-function term_groups(v: View.View): [group: string, cmds: Cmd[]][] {
+function term_groups(): [group: string, cmds: Cmd[]][] {
   return [
     ["Chat", [
       ["",                  "Enter",                   "send; on an empty input, interrupt UniiChat",    term_enter],
@@ -92,8 +92,8 @@ function term_groups(v: View.View): [group: string, cmds: Cmd[]][] {
   ];
 }
 
-function term_commands(v: View.View): Cmd[] {
-  return term_groups(v).flatMap(([, cmds]) => cmds);
+function term_commands(): Cmd[] {
+  return term_groups().flatMap(([, cmds]) => cmds);
 }
 
 function term_new(url: string, token: string): Term {
@@ -224,7 +224,7 @@ function term_idle(t: Term): void {
 }
 
 function term_press(t: Term, key: string): void {
-  const cmd = term_commands(t.v).find((c) => c[1] !== "" && c[1].split(", ").includes(key));
+  const cmd = term_commands().find((c) => c[1] !== "" && c[1].split(", ").includes(key));
   if (cmd !== undefined && (!t.scr.off || PAGE_KEYS.includes(key))) {
     cmd[3](t, cmd[0] === "" ? key : "");
   }
@@ -263,7 +263,7 @@ function term_cycle(t: Term): void {
 
 function term_command(t: Term, text: string): boolean {
   const word = text.trim().split(/\s+/)[0];
-  const cmd = term_commands(t.v).find(([use]) => use !== "" && use.split(" ")[0] === word);
+  const cmd = term_commands().find(([use]) => use !== "" && use.split(" ")[0] === word);
   const run = cmd?.[3](t, text.trim().slice(word.length).trim());
   if (run instanceof Promise) {
     t.pending += 1;
@@ -277,13 +277,13 @@ function term_command(t: Term, text: string): boolean {
 
 function term_help(t: Term): void {
   const how   = (c: Cmd) => [c[0], c[1]].filter((x) => x !== "").join(", ");
-  const left  = Math.max(...term_commands(t.v).map((c) => Paint.text_width(how(c)))) + 2;
+  const left  = Math.max(...term_commands().map((c) => Paint.text_width(how(c)))) + 2;
   const right = Math.max(20, term_inner() - left);
   const row   = (c: Cmd) => Paint.runs_wrap([Paint.Run(c[2])], right, false).map((l, k) => [Paint.Run((k === 0 ? how(c) : "").padEnd(left)), ...l]);
   const bold  = { ...Paint.INK, b: true };
   const group = ([name, cmds]: [string, Cmd[]]) => [[Paint.Run(name, bold)], ...cmds.flatMap(row)];
   const edit  = Paint.runs_wrap([Paint.Run(Screen.EDITING)], term_inner(), false);
-  t.out = t.out.concat(term_inset([[], ...term_groups(t.v).flatMap(group), [Paint.Run("Editing", bold)], ...edit]));
+  t.out = t.out.concat(term_inset([[], ...term_groups().flatMap(group), [Paint.Run("Editing", bold)], ...edit]));
 }
 
 async function term_image(t: Term, arg: string): Promise<void> {
@@ -442,7 +442,7 @@ async function term_import(t: Term, arg: string): Promise<void> {
   }
   const old   = await done.json();
   const shown = Import.import_plan(sessions, want, old).sessions;
-  want.off    = shown.filter((s, k) => words.includes("-#" + (k + 1))).map(Import.import_id);
+  want.off    = shown.filter((_, k) => words.includes("-#" + (k + 1))).map(Import.import_id);
   const plan  = Import.import_plan(sessions, want, old);
   const found = "Found " + Import.import_count(plan.msgs, "new ") + ". ";
   if (plan.msgs === 0) {
