@@ -75,8 +75,7 @@ const KEYS: Record<string, string> = {
   "8~"  : "End",
 };
 
-const WORD_BEFORE = /[\p{L}\p{N}_]*[^\p{L}\p{N}_]*$/u;
-const WORD_AFTER = /^[^\p{L}\p{N}_]*[\p{L}\p{N}_]*/u;
+const WORD = /[\p{L}\p{N}_]/u;
 
 const MODS: [number, string][] = [[4, "Ctrl+"], [2, "Alt+"], [1, "Shift+"]];
 
@@ -315,10 +314,14 @@ function ed_key(ed: Ed, key: string): boolean {
 }
 
 function ed_word(text: string, pos: number, d: number): number {
-  if (d < 0) {
-    return pos - (WORD_BEFORE.exec(text.slice(0, pos))?.[0].length ?? 0);
+  const code_point_at = (i: number) => (d < 0 ? Array.from(text.slice(Math.max(0, i - 2), i)).at(-1) : Array.from(text.slice(i, i + 2))[0]) ?? "";
+  let i = pos;
+  for (const word of [false, true]) {
+    for (let c = code_point_at(i); c !== "" && WORD.test(c) === word; c = code_point_at(i)) {
+      i += d * c.length;
+    }
   }
-  return pos + (WORD_AFTER.exec(text.slice(pos))?.[0].length ?? 0);
+  return i;
 }
 
 function ed_vert(ed: Ed, places: Place[], at: Place, d: number): void {
