@@ -5,7 +5,6 @@ import type { Out } from "./Agent.ts";
 import { CAP, clip, clip_end } from "./Clip.ts";
 import { err_code, err_why } from "./Err.ts";
 import { get, list as listed, text_of } from "./Json.ts";
-import { Mcp } from "./Mcp.ts";
 import { FIT, HEAD, IMAGE, image_kind, PIXELS } from "./View.ts";
 
 export type Job = { name: string; input: Record<string, unknown>; cwd: string };
@@ -124,9 +123,6 @@ export namespace Machine {
         }
         case "edit": {
           return Machine.edit(cwd, input.edits);
-        }
-        case "mcp": {
-          return await Mcp.here(input, signal);
         }
         case "skills": {
           return { text: JSON.stringify(Machine.skills(os.homedir())), fail: false };

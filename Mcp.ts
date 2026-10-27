@@ -5,7 +5,7 @@ import { clip } from "./Clip.ts";
 import type * as config from "./Config.ts";
 import { err_why } from "./Err.ts";
 import { get, list as items, rec, text_of } from "./Json.ts";
-import { Machine, type Job, type Spec } from "./Machine.ts";
+import { Machine, WIN, type Job, type Spec } from "./Machine.ts";
 
 type Link = {
   ask   : (method: string, params: object, signal: AbortSignal) => Promise<unknown>;
@@ -14,25 +14,37 @@ type Link = {
   dead  : () => string | null;
 };
 
-export type Server = {
-  conf  : config.McpServer;
+type Started = {
   up    : Promise<Spec[] | string> | null;
   fail  : { why: string; till: number } | null;
   link  : Link | null;
   names : Map<string, string>;
   stale : boolean;
+};
+
+type Told = {
   said  : string | null;
   shown : boolean;
   heard : Map<string, string | null>;
   left  : string;
+};
+
+type Kept = {
+  conf  : config.McpServer;
   calls : number;
   gone  : boolean;
 };
 
+export type Server = Kept & Started & Told;
+
 type Run = (device: string, job: Job, signal: AbortSignal) => Promise<Out>;
 export type Servers = { all: Map<string, Server>; note: (text: string) => void; run: Run; open: (device: string) => boolean };
 
-const LIMITS = { start: 60e3, again: 30e3, kill: 3e3, msg: 16 * 2 ** 20, img: 5 * 2 ** 20 };
+const START_MS = 60e3;
+const RETRY_FAILED_START_MS = 30e3;
+const KILL_AFTER_TERM_MS = 3e3;
+const MESSAGE_MAX_CHARS = 16 * 2 ** 20;
+const IMAGE_MAX_BYTES = 5 * 2 ** 20;
 
 const EXPIRED = "ended its session (HTTP 404)";
 
@@ -41,7 +53,6 @@ const INIT    = { protocolVersion: VERSION, capabilities: {}, clientInfo: { name
 
 const TAIL = 1000;
 
-const WIN = process.platform === "win32";
 const PASS = WIN
   ? ["APPDATA", "HOMEDRIVE", "HOMEPATH", "LOCALAPPDATA", "PATH", "PROCESSOR_ARCHITECTURE", "SYSTEMDRIVE", "SYSTEMROOT", "TEMP", "USERNAME", "USERPROFILE", "PROGRAMFILES"]
   : ["HOME", "LOGNAME", "PATH", "SHELL", "TERM", "USER", "LANG", "LC_ALL", "LC_CTYPE", "TZ", "TMPDIR"];
@@ -108,7 +119,7 @@ export namespace Mcp {
       s.up = Mcp.open(servers, s);
     } else if (s.stale) {
       s.stale = false;
-      s.up = s.up.then(() => Mcp.listed(servers, s, AbortSignal.timeout(LIMITS.start))).catch((err: unknown) => "failed to list its tools: " + Mcp.why(err));
+      s.up = s.up.then(() => Mcp.listed(servers, s, AbortSignal.timeout(START_MS))).catch((err: unknown) => "failed to list its tools: " + Mcp.why(err));
     }
     const up = s.up;
     const got = await up;
@@ -117,7 +128,7 @@ export namespace Mcp {
     }
     if (typeof got === "string") {
       Mcp.close(s);
-      s.fail = { why: got, till: Date.now() + LIMITS.again };
+      s.fail = { why: got, till: Date.now() + RETRY_FAILED_START_MS };
       Mcp.tell(servers, s, got + "; its tools are left out until it starts", true);
       return got;
     }
@@ -132,7 +143,7 @@ export namespace Mcp {
   }
 
   export async function open(servers: Servers, s: Server): Promise<Spec[] | string> {
-    const timer = AbortSignal.timeout(LIMITS.start);
+    const timer = AbortSignal.timeout(START_MS);
     const changed = () => (s.stale = true);
     let up = false;
     let link: Link | null = null;
@@ -145,7 +156,7 @@ export namespace Mcp {
       up = true;
       return specs;
     } catch (err) {
-      return timer.aborted ? "didn't start within " + LIMITS.start / 1e3 + " s" : "failed to start: " + Mcp.why(err);
+      return timer.aborted ? "didn't start within " + START_MS / 1e3 + " s" : "failed to start: " + Mcp.why(err);
     }
   }
 
@@ -275,7 +286,7 @@ export namespace Mcp {
       const pic = type === "image" && typeof data === "string" && typeof mime === "string" && /^image\/(png|jpeg|gif|webp)$/.test(mime);
       if (type === "text") {
         texts.push(text_of(get(part, "text")));
-      } else if (pic && data.length * 0.75 <= LIMITS.img) {
+      } else if (pic && data.length * 0.75 <= IMAGE_MAX_BYTES) {
         imgs.push({ type: mime, data });
       } else if (type === "resource" && typeof said === "string") {
         texts.push(said);
@@ -386,7 +397,7 @@ export namespace Mcp {
         try {
           process.kill(-proc.pid, "SIGTERM");
         } catch {}
-        setTimeout(() => Machine.kill(-proc.pid), LIMITS.kill).unref();
+        setTimeout(() => Machine.kill(-proc.pid), KILL_AFTER_TERM_MS).unref();
       }
     };
     (async () => {
@@ -401,8 +412,8 @@ export namespace Mcp {
           const last = parts[parts.length - 1];
           [rest, size] = [[last], last.length];
         }
-        if (size > LIMITS.msg || lines.some((line) => line.length > LIMITS.msg)) {
-          throw new Error("sent a message over " + LIMITS.msg + " characters");
+        if (size > MESSAGE_MAX_CHARS || lines.some((line) => line.length > MESSAGE_MAX_CHARS)) {
+          throw new Error("sent a message over " + MESSAGE_MAX_CHARS + " characters");
         }
         lines.forEach((line) => line.trim() !== "" && heard(line));
       }
@@ -487,11 +498,11 @@ export namespace Mcp {
       return get(got, "result");
     };
     const ask = (method: string, params: object, signal: AbortSignal) => send({ conf: method === "initialize" ? conf : undefined, method, params }, signal);
-    const tell = (method: string, params: object, signal = AbortSignal.timeout(LIMITS.start)) => send({ method, params, tell: true }, signal).then(() => {});
+    const tell = (method: string, params: object, signal = AbortSignal.timeout(START_MS)) => send({ method, params, tell: true }, signal).then(() => {});
     const close = () => {
       if (dead === null) {
         dead = "was ended by unii";
-        run(conf.device, job({ method: "close" }), AbortSignal.timeout(LIMITS.start)).catch(() => undefined);
+        run(conf.device, job({ method: "close" }), AbortSignal.timeout(START_MS)).catch(() => undefined);
       }
     };
     return { ask, tell, close, dead: () => dead };
@@ -577,7 +588,7 @@ export namespace Mcp {
     const post = (msg: object, signal: AbortSignal) => {
       return fetch(conf.url, { method: "POST", headers: headers(), body: JSON.stringify(msg), signal: AbortSignal.any([signal, ender.signal]), timeout: false } as RequestInit);
     };
-    const tell = async (method: string, params: object, signal = AbortSignal.timeout(LIMITS.start)) => {
+    const tell = async (method: string, params: object, signal = AbortSignal.timeout(START_MS)) => {
       const res = await post({ jsonrpc: "2.0", method, params }, signal);
       await res.body?.cancel();
       if (!res.ok) {
@@ -586,7 +597,7 @@ export namespace Mcp {
     };
     const heard = (msg: unknown, id: number): unknown => {
       if (get(msg, "method") !== undefined && get(msg, "id") !== undefined) {
-        post(Mcp.answer(msg), AbortSignal.timeout(LIMITS.start)).then((res) => res.body?.cancel(), () => undefined);
+        post(Mcp.answer(msg), AbortSignal.timeout(START_MS)).then((res) => res.body?.cancel(), () => undefined);
       } else if (get(msg, "method") === "notifications/tools/list_changed") {
         changed();
       } else if (Number(get(msg, "id")) === id) {
@@ -610,8 +621,8 @@ export namespace Mcp {
       let text = "";
       for await (const chunk of Mcp.texts(res.body)) {
         text += chunk;
-        if (text.length > LIMITS.msg) {
-          throw new Error("sent a message over " + LIMITS.msg + " characters");
+        if (text.length > MESSAGE_MAX_CHARS) {
+          throw new Error("sent a message over " + MESSAGE_MAX_CHARS + " characters");
         }
         const events = sse ? text.split(/\r\n\r\n|\n\n|\r\r/) : [];
         text = sse ? events.pop() ?? "" : text;
@@ -667,7 +678,7 @@ export namespace Mcp {
         dead = why;
         ender.abort(new Error(why));
         if (session !== null && why !== EXPIRED) {
-          fetch(conf.url, { method: "DELETE", headers: headers(), signal: AbortSignal.timeout(LIMITS.kill) }).then((res) => res.body?.cancel(), () => undefined);
+          fetch(conf.url, { method: "DELETE", headers: headers(), signal: AbortSignal.timeout(KILL_AFTER_TERM_MS) }).then((res) => res.body?.cancel(), () => undefined);
         }
       }
     };

@@ -5,7 +5,7 @@ import * as path from "node:path";
 import * as Client from "./Client.ts";
 import { Machine, SCRATCH, WIN, type Job } from "./Machine.ts";
 import { Mcp } from "./Mcp.ts";
-import { err_code } from "./Err.ts";
+import { err_code, err_why } from "./Err.ts";
 import { get, text_of } from "./Json.ts";
 import * as Service from "./Service.ts";
 import { FRAME, media_kind, PING, QUIT, RETRY, TICK, WIRE, type Server } from "./View.ts";
@@ -94,7 +94,7 @@ export async function run(given: string | undefined): Promise<void> {
   const job = async (id: string, job: Job) => {
     const abort = new AbortController();
     jobs.set(id, abort);
-    const out = job.name === "show" ? await show(job, url, token, abort.signal) : await Machine.run(job, abort.signal);
+    const out = await run_job(job, url, token, abort.signal);
     jobs.delete(id);
     const act = { $: "out" as const, id: crypto.randomUUID(), job: id, out: sendable_or_its_size(out) };
     outs.set(act.id, act);
@@ -113,6 +113,16 @@ export async function run(given: string | undefined): Promise<void> {
     setTimeout(() => process.exit(0), BYE);
   });
   open();
+}
+
+function run_job(job: Job, url: string, token: string, signal: AbortSignal): Promise<{ text: string; fail: boolean }> {
+  if (job.name === "show") {
+    return show(job, url, token, signal);
+  }
+  if (job.name === "mcp") {
+    return Mcp.here(job.input, signal).catch((err: unknown) => ({ text: err_why(err), fail: true }));
+  }
+  return Machine.run(job, signal);
 }
 
 function sendable_or_its_size(out: { text: string; fail: boolean }): { text: string; fail: boolean } {
