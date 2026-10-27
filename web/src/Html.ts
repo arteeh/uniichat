@@ -112,7 +112,9 @@ export function pick_html(fold: string | null, on: boolean, knobs: View.Knob[], 
   const used = talk == null ? 0 : Math.round(talk.used * 100);
   const heat = used >= 80 ? " hot" : used >= 50 ? " warm" : "";
   const rule = talk == null ? `<span class="rule"></span>` : `<span class="rule meter${heat}" style="--used:${used}%" title="Conversation: ${used}% of space used (${View.talk_tokens(talk)})" role="meter" aria-valuenow="${used}" aria-valuemin="0" aria-valuemax="100" aria-label="Conversation space used"></span>`;
-  return [...all, ...modes, rule, ...parts.flatMap((part, i) => (i === 0 ? part : [`<span class="dot">·</span>`, ...part]))];
+  const dot = `<span class="dot">·</span>`;
+  const left = all.length > 0 && modes.length > 0 ? [...all, dot, ...modes] : [...all, ...modes];
+  return [...left, rule, ...parts.flatMap((part, i) => (i === 0 ? part : [dot, ...part]))];
 }
 
 function choice_html(c: View.Choice): string {
