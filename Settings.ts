@@ -61,7 +61,7 @@ export namespace Settings {
       const value = config.config_value(file, s.key);
       const running = s.apply === "restart" && config.STARTED[s.key] !== value ? config.STARTED[s.key] : null;
       const def = config.config_default(file, s.key);
-      return { key: s.key, value, def: def.value, why: def.why, from, env, apply: s.apply, web: s.web, running };
+      return { key: s.key, value, def: def.value, why: def.why, from, env, apply: s.apply, web: s.server_only === null, running };
     });
     const shown = Object.entries(config.VARS).map(([name, env]): Key => {
       const from = config.config_key_from(name, keys);
@@ -127,7 +127,7 @@ export namespace Settings {
       if (s === undefined) {
         return refuse(400, "No setting " + JSON.stringify(key) + ".");
       }
-      if (!s.web) {
+      if (s.server_only !== null) {
         return refuse(403, key + " is changed in config.json on the server only.", key);
       }
       if (process.env[env] !== undefined) {

@@ -1657,11 +1657,10 @@ export namespace Main {
     });
     console.log("unii: " + config.SITE + ", data in " + config.DIR + ", on 127.0.0.1:" + port);
     Service.ready("serve");
-    if (config.MCP_LEFT !== null) {
-      console.error("unii: " + config.MCP_LEFT);
-    }
-    if (config.MCP_FILE) {
-      console.error("unii: unii serve runs no MCP servers: the mcp in " + config.FILE_PATH + " runs only on a unii device that reads this file (unii device beside the server).");
+    for (const note of [config.MCP_ENV_NOTE, config.MCP_FILE_STARTUP_NOTE]) {
+      if (note !== null) {
+        console.error("unii: " + note);
+      }
     }
   }
 

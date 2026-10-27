@@ -546,9 +546,9 @@ export namespace Tools {
   }
 
   export function left(tools: Tools): void {
-    if (!tools.left && config.MCP_LEFT !== null) {
+    if (!tools.left && config.MCP_ENV_NOTE !== null) {
       tools.left = true;
-      tools.log.note(config.MCP_LEFT);
+      tools.log.note(config.MCP_ENV_NOTE);
     }
   }
 

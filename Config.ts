@@ -7,7 +7,9 @@ import { err_code, err_why } from "./Err.ts";
 import { get, list as items, rec, text_of } from "./Json.ts";
 import { EFFORTS, LABELS, VENDORS, Pick, type Fall, type Offer } from "./Pick.ts";
 
-export type Setting = { key: string; def: string; apply: "now" | "restart"; web: boolean };
+type ServerOnly = "runs a command";
+
+export type Setting = { key: string; def: string; apply: "now" | "restart"; server_only: ServerOnly | null };
 
 export type From = "env" | "file" | "default";
 
@@ -38,16 +40,16 @@ export const FILE_PATH = DIR + "/config.json";
 export const KEYS_PATH = DIR + "/keys.json";
 
 export const SETTINGS: Setting[] = [
-  { key: "vendors",   def: "claude-api",                        apply: "now",     web: true  },
-  { key: "models",    def: LABELS.join(),                       apply: "now",     web: true  },
-  { key: "pick",      def: "claude-api:sonnet-5.5:medium:slow", apply: "now",     web: true  },
-  { key: "compactor", def: "claude-api:sonnet-5.5:medium:slow", apply: "now",     web: true  },
-  { key: "compactor_context", def: "4",                         apply: "now",     web: true  },
-  { key: "agents",    def: "",                                  apply: "now",     web: true  },
-  { key: "site",      def: "http://127.0.0.1:8788",             apply: "restart", web: true  },
-  { key: "apple",     def: "",                                  apply: "restart", web: true  },
-  { key: "apns",      def: "",                                  apply: "restart", web: true  },
-  { key: "after",     def: "",                                  apply: "now",     web: false },
+  { key: "vendors",   def: "claude-api",                        apply: "now",     server_only: null },
+  { key: "models",    def: LABELS.join(),                       apply: "now",     server_only: null },
+  { key: "pick",      def: "claude-api:sonnet-5.5:medium:slow", apply: "now",     server_only: null },
+  { key: "compactor", def: "claude-api:sonnet-5.5:medium:slow", apply: "now",     server_only: null },
+  { key: "compactor_context", def: "4",                         apply: "now",     server_only: null },
+  { key: "agents",    def: "",                                  apply: "now",     server_only: null },
+  { key: "site",      def: "http://127.0.0.1:8788",             apply: "restart", server_only: null },
+  { key: "apple",     def: "",                                  apply: "restart", server_only: null },
+  { key: "apns",      def: "",                                  apply: "restart", server_only: null },
+  { key: "after",     def: "",                                  apply: "now",     server_only: "runs a command" },
 ];
 
 const USABLE: Record<Vendor, string> = {
@@ -107,12 +109,19 @@ export const APNS       = config_value(FILE, "apns");
 
 export const MEDIA_MAX  = (Number(config_get("media_mb", "")) || 1024) * 2 ** 20;
 
-const MCP_VAR = process.env.UNII_MCP;
-delete process.env.UNII_MCP;
-export const MCP_LEFT: string | null = config_mcp_some(MCP_VAR)
+const MCP_VAR = config_env_taken("UNII_MCP");
+export const MCP_ENV_NOTE: string | null = config_mcp_some(MCP_VAR)
   ? "UNII_MCP is set, but unii serve runs no MCP servers, so they are left out: put them in the mcp of a device's own ~/.unii/config.json (for this computer, run unii device beside the server)."
   : null;
-export const MCP_FILE = config_mcp_some(FILE.mcp);
+export const MCP_FILE_STARTUP_NOTE: string | null = config_mcp_some(FILE.mcp)
+  ? "unii serve runs no MCP servers: the mcp in " + FILE_PATH + " runs only on a unii device that reads this file (unii device beside the server)."
+  : null;
+
+function config_env_taken(name: string): string | undefined {
+  const value = process.env[name];
+  delete process.env[name];
+  return value;
+}
 
 export function config_value(file: Record<string, unknown>, key: string): string {
   return config_env_value(key) ?? config_str(file[key]) ?? config_default(file, key).value;
@@ -123,12 +132,16 @@ export function config_default(file: Record<string, unknown>, key: string): { va
   if (key !== "vendors" && key !== "pick" && key !== "compactor") {
     return { value: def, why: "" };
   }
-  const usable = config_usable();
-  if (key === "vendors") {
-    const named = config_named(file).filter((v) => !usable.includes(v));
-    const whys = [...usable.map((v) => USABLE[v]), ...(named.length === 0 ? [] : [named.join(", ") + " chosen"])];
-    return usable.length + named.length === 0 ? { value: def, why: NONE_WHY } : { value: [...usable, ...named].join(), why: whys.join(", ") };
-  }
+  return key === "vendors" ? config_default_vendors(file, def, config_usable()) : config_default_pick(file, def, config_usable());
+}
+
+function config_default_vendors(file: Record<string, unknown>, def: string, usable: Vendor[]): { value: string; why: string } {
+  const named = config_named(file).filter((v) => !usable.includes(v));
+  const whys = [...usable.map((v) => USABLE[v]), ...(named.length === 0 ? [] : [named.join(", ") + " chosen"])];
+  return usable.length + named.length === 0 ? { value: def, why: NONE_WHY } : { value: [...usable, ...named].join(), why: whys.join(", ") };
+}
+
+function config_default_pick(file: Record<string, unknown>, def: string, usable: Vendor[]): { value: string; why: string } {
   const offered = config_value(file, "vendors").split(",").map((v) => v.trim());
   const models = config_value(file, "models").split(",").map((m) => m.trim());
   const model = (v: Vendor) => (models.includes(DEFAULT_MODEL[v]) ? DEFAULT_MODEL[v] : Pick.models([v], models)[0]?.[1].label);
