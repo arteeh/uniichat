@@ -56,25 +56,33 @@ type Check = { call: Call; goal: string };
 type Kept  = { a: number; b: number; said: number; spent: number };
 type Batch = Kept & { micros: number[][]; open: number[]; left: number; all: number };
 
-type Chat = {
+type Parts = {
   mem   : Memory;
   tools : Tools;
-  pick  : Pick;
   socks : Set<Sock>;
-  acts  : Map<string, Promise<Answer>>;
   main  : Run<Pending, Msg>;
-  model : string;
-  check : Check | null;
-  asked : boolean;
-  open  : number;
+  pick  : Pick;
   eye   : Eye;
-  after : Promise<void>;
   batch : Batch | null;
+};
+
+type Doing = {
+  acts  : Map<string, Promise<Answer>>;
   writes: Promise<unknown>;
   held  : Array<() => void> | null;
+  after : Promise<void>;
+};
+
+type Turn = {
+  model : string;
+  asked : boolean;
+  open  : number;
+  check : Check | null;
   back  : number;
   sums  : { from: number; total: number } | null;
 };
+
+type Chat = Parts & Doing & Turn;
 
 const LOCK       = config.DIR + "/lock";
 const LOCK_PID   = LOCK + ".pid";
@@ -147,10 +155,11 @@ const WEB: Record<string, string> = {
 WEB["/settings"] = WEB["/"];
 WEB["/tree"]     = WEB["/"];
 
-const SHELL      = [app_js, style_css, PAGE, sw_js, manifest];
-const BUILD      = Bun.hash(SHELL.map((f) => fs.readFileSync(f, "utf8")).join("\0")).toString(36);
+const HASHED_INTO_BUILD = [app_js, style_css, PAGE, sw_js, manifest];
+const BUILD      = Bun.hash(HASHED_INTO_BUILD.map((f) => fs.readFileSync(f, "utf8")).join("\0")).toString(36);
 const INDEX      = fs.readFileSync(PAGE, "utf8").replace("<html ", `<html data-build="${BUILD}" `);
 const WORKER     = fs.readFileSync(sw_js, "utf8").replace("{build}", BUILD);
+const STAMPED_WITH_BUILD = new Map([[PAGE, INDEX], [sw_js, WORKER]]);
 
 let held = 0;
 
@@ -516,11 +525,19 @@ export namespace Chat {
     return { id: roots[0].i, end: chat.mem.count };
   }
 
-  export function flush(chat: Chat, run: Talk, upto?: string): void {
+  export function started_unlogged(run: Talk, upto?: string) {
     const ids = [...run.calls.keys()];
     const end = upto === undefined ? ids.length : ids.indexOf(upto) + 1 || ids.length;
-    const left = [...run.calls].slice(0, end).filter(([, call]) => !call.logged && call.started);
-    if (left.length === 0 || (run === chat.main && chat.mem.open > 0)) {
+    return [...run.calls].slice(0, end).filter(([, call]) => !call.logged && call.started);
+  }
+
+  export function mid_message(chat: Chat, run: Talk): boolean {
+    return run === chat.main && chat.mem.open > 0;
+  }
+
+  export function flush(chat: Chat, run: Talk, upto?: string): void {
+    const left = Chat.started_unlogged(run, upto);
+    if (left.length === 0 || Chat.mid_message(chat, run)) {
       return;
     }
     for (const [of, call] of left) {
@@ -1115,25 +1132,32 @@ export namespace Chat {
     if (msg.req instanceof Request && typeof msg.$ === "string" && BODIES.includes(msg.$)) {
       return Chat.post(chat, id, msg.$, msg.req, msg);
     }
+    if (msg.$ === "stop") {
+      return Chat.stop_recorded(chat, id, msg.name === undefined ? null : text_of(msg.name, "null"));
+    }
+    return Chat.set_state(chat, msg, device);
+  }
+
+  export function stop_recorded(chat: Chat, id: string, name: string | null): Answer {
+    const what = Chat.running(chat).filter((w) => name === null || w === name);
+    const why = "Stopped by the user: " + what.join(", ") + ".";
+    const turn = what.includes(TURN);
+    if (what.length === 0) {
+      return {};
+    }
+    Chat.mark(chat, id, {});
+    if (turn) {
+      Chat.interrupt(chat, why);
+    }
+    what.forEach((w) => Tools.stop(chat.tools, w));
+    if (!turn) {
+      Chat.note(chat, why);
+    }
+    return {};
+  }
+
+  export function set_state(chat: Chat, msg: Record<string, unknown>, device: string): Answer | Promise<Answer> {
     switch (msg.$) {
-      case "stop": {
-        const name = msg.name === undefined ? null : text_of(msg.name, "null");
-        const what = Chat.running(chat).filter((w) => name === null || w === name);
-        const why = "Stopped by the user: " + what.join(", ") + ".";
-        const turn = what.includes(TURN);
-        if (what.length === 0) {
-          return {};
-        }
-        Chat.mark(chat, id, {});
-        if (turn) {
-          Chat.interrupt(chat, why);
-        }
-        what.forEach((w) => Tools.stop(chat.tools, w));
-        if (!turn) {
-          Chat.note(chat, why);
-        }
-        return {};
-      }
       case "goal": {
         const goal = msg.text === null ? null : text_of(msg.text, "undefined");
         if (goal === chat.mem.goal) {
@@ -1256,16 +1280,20 @@ export namespace Chat {
     return { parts, from };
   }
 
+  export function import_cover(chat: Chat, count: number): [number, number] {
+    const [a, hi] = chat.batch === null ? [0, 0] : [chat.batch.a, chat.batch.b];
+    const root = Memory.roots(count).find((part) => Memory.span(part)[1] >= a);
+    const lo = root === undefined ? a : Memory.span(root)[0];
+    const near = chat.eye.parts.filter(([id, n]) => id < hi && id + n > lo);
+    return [Math.min(lo, ...near.map(([id]) => id)), Math.max(hi, ...near.map(([id, n]) => id + n))];
+  }
+
   export function show(chat: Chat, sock: Sock): void {
     if (sock.data.host !== null) {
       return;
     }
     const [from, count] = [chat.eye.from, chat.mem.count];
-    const [a, hi] = chat.batch === null ? [0, 0] : [chat.batch.a, chat.batch.b];
-    const root = Memory.roots(count).find((part) => Memory.span(part)[1] >= a);
-    const lo = root === undefined ? a : Memory.span(root)[0];
-    const near = chat.eye.parts.filter(([id, n]) => id < hi && id + n > lo);
-    const cover: [number, number] = [Math.min(lo, ...near.map(([id]) => id)), Math.max(hi, ...near.map(([id, n]) => id + n))];
+    const cover = Chat.import_cover(chat, count);
     const eye = chat.eye.parts.filter(([id, n]) => id + n <= cover[0] || id >= cover[1]);
     const tree = Memory.roots(count).flatMap((part) => Chat.blocks(part, cover));
     const ids = (a: number, b: number) => Array.from({ length: Math.max(0, b - a) }, (_, k): Part => [a + k, 1]);
@@ -1374,14 +1402,14 @@ export namespace Main {
     if (file === undefined) {
       return new Response("not found", { status: 404 });
     }
-    if (!SHELL.includes(file)) {
+    if (!HASHED_INTO_BUILD.includes(file)) {
       return new Response(Bun.file(file));
     }
     const headers = { "cache-control": "no-cache", etag: `"${BUILD}"` };
     if (req.headers.get("if-none-match") === headers.etag) {
       return new Response(null, { status: 304, headers });
     }
-    const made = file === PAGE ? INDEX : file === sw_js ? WORKER : null;
+    const made = STAMPED_WITH_BUILD.get(file) ?? null;
     const type = file === PAGE ? "text/html;charset=utf-8" : "text/javascript;charset=utf-8";
     return made === null ? new Response(Bun.file(file), { headers }) : new Response(made, { headers: { ...headers, "content-type": type } });
   }
@@ -1427,8 +1455,9 @@ export namespace Main {
         return new Response(Main.stream(Memory.dump(mem)), { headers: json });
       }
       case "/api/act": {
-        if (req.method !== "POST") {
-          return new Response("an act is a POST", { status: 405 });
+        const refused = Main.csrf_guard(req);
+        if (refused !== null) {
+          return refused;
         }
         const msg = { ...Object.fromEntries(new URL(req.url).searchParams), req };
         const out = await Chat.apply(chat, msg, "");
@@ -1578,6 +1607,10 @@ export namespace Main {
     } catch (err) {
       return Response.json({ error: err_why(err) }, { status: 500 });
     }
+  }
+
+  export function csrf_guard(req: Request): Response | null {
+    return req.method === "POST" ? null : new Response("an act is a POST", { status: 405 });
   }
 
   export function event(what: string, run: () => void, fail: () => void = () => {}): void {
