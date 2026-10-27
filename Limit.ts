@@ -91,18 +91,22 @@ export namespace Limit {
     try {
       await Limit.wait(vendor, ms, until);
       if (parked && l.ask.agent === true && !until.aborted && ANSWERING().queued) {
-        const end = Date.now() + STAGGER;
-        const answering = () => ANSWERING().queued || ANSWERING().busy;
-        l.on({ $: "Limit", limit: { until: end, known: false, vendor } });
-        while (!until.aborted && answering() && Date.now() < end) {
-          await Machine.nap(STAGGER_LOOK, until);
-        }
+        await Limit.let_unii_answer_first(l, until);
       }
     } finally {
       l.poke = () => {};
       if (parked) {
         l.on({ $: "Limit", limit: null });
       }
+    }
+  }
+
+  export async function let_unii_answer_first(l: Limit, until: AbortSignal): Promise<void> {
+    const end = Date.now() + STAGGER;
+    const answering = () => ANSWERING().queued || ANSWERING().busy;
+    l.on({ $: "Limit", limit: { until: end, known: false, vendor: l.ask.vendor } });
+    while (!until.aborted && answering() && Date.now() < end) {
+      await Machine.nap(STAGGER_LOOK, until);
     }
   }
 
