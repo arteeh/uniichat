@@ -323,7 +323,7 @@ export namespace ClaudeSub {
     if (server === "") {
       return null;
     }
-    const out = await Agent.race(code.q.setMcpServers(ClaudeSub.mcp(server)), signal);
+    const out = await Agent.unless_stopped(code.q.setMcpServers(ClaudeSub.mcp(server)), signal);
     const err = out?.errors?.unii;
     return err === undefined ? null : "claude-sub couldn't reach UniiChat's tools: " + err;
   }

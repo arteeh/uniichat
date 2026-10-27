@@ -23,7 +23,9 @@ type Doing = {
 
 type Back = { id: string; out: Out };
 
-type Room = { busy: number; asking: number; wait: Array<() => void> };
+type Room = { holders: number; retrying: number; wait: Array<() => void> };
+
+type Seat = { model: string; room: string; yields: boolean; held: boolean };
 
 export type Item =
   | { $: "User"; parts: Block[]; imgs: Img[] }
@@ -135,10 +137,7 @@ export namespace Agent {
     const items: Item[] = [{ $: "User", parts, imgs: ask.imgs ?? [] }];
     while (!signal.aborted) {
       const step = await Agent.step(wire, run, key, (max) => wire.body(ask, items, tools, max), items);
-      const ours = new Set(step.uses.map((use) => use.id));
-      for (const entry of step.entries) {
-        on({ $: "Entry", ...entry, ...(entry.kind === "tool" && entry.of !== undefined && ours.has(entry.of) ? { queued: true } : {}) });
-      }
+      Agent.entries_queued_till_started(step).forEach(on);
       if (step.stop === "down" || step.stop === "lost" || step.stop === "fail") {
         end.text ||= step.stop === "down" ? step.refusal?.say ?? BUSY : step.why;
         end.why = step.why;
@@ -180,21 +179,20 @@ export namespace Agent {
   export async function step<S, E>(wire: Wire<S, E>, run: Doing, key: string, make: (max: number) => unknown, items: Item[]): Promise<Step> {
     const signal = run.abort.signal;
     const model = run.ask.model;
-    const own = run.ask.yields === undefined ? model : model + " " + run.ask.yields;
+    const seat = Agent.seat(run.ask);
     const tries = run.ask.probe === true && items.length === 1 ? 1 : TRIES;
-    let asking = false;
     let refused: string | undefined;
     try {
       run.limit.n = run.ask.limits ?? 0;
       for (let k = 0; !signal.aborted; ) {
-        await Agent.yielded(run, own, asking);
+        await Agent.give_way(seat, signal);
         const seen: Entry[] = [];
-        const token = await Agent.race(Agent.token(wire, key, refused), signal);
+        const token = await Agent.unless_stopped(Agent.token(wire, key, refused), signal);
         if (token === null) {
           return Agent.fail("stopped", seen);
         }
         const sent = typeof token === "string" ? Agent.request(wire, run, token, make(MAX), seen) : Promise.resolve({ res: null, step: token });
-        const got = await Agent.race(sent, signal);
+        const got = await Agent.unless_stopped(sent, signal);
         if (got === null) {
           return Agent.fail("stopped", seen);
         }
@@ -212,13 +210,10 @@ export namespace Agent {
         if (!limit && (step.stop !== "busy" || k >= tries)) {
           return step.stop === "busy" ? { ...step, stop: "down", off: true } : step;
         }
-        if (!asking && own !== model && (ROOMS.get(own)?.busy ?? 0) > 0) {
+        if (Agent.import_seated_elsewhere(seat)) {
           continue;
         }
-        if (!asking) {
-          Agent.hold(model, own, step.why);
-          asking = true;
-        }
+        Agent.take_seat(seat, step.why);
         if (limit) {
           const off = await Limit.hit(run.limit, step.until ?? Agent.reset(res, Date.now()), run.end.acted === true, step.why);
           if (off !== null) {
@@ -233,13 +228,16 @@ export namespace Agent {
       }
       return Agent.fail("stopped", []);
     } finally {
-      if (asking) {
-        Agent.free(model, own);
-      }
+      Agent.leave_seat(seat);
     }
   }
 
-  export function race<T>(go: Promise<T>, signal: AbortSignal): Promise<T | null> {
+  export function entries_queued_till_started(step: Step): Event[] {
+    const ours = new Set(step.uses.map((use) => use.id));
+    return step.entries.map((entry) => ({ $: "Entry", ...entry, ...(entry.kind === "tool" && entry.of !== undefined && ours.has(entry.of) ? { queued: true } : {}) }));
+  }
+
+  export function unless_stopped<T>(go: Promise<T>, signal: AbortSignal): Promise<T | null> {
     go.catch(() => {});
     let drop = () => {};
     const stopped = new Promise<null>((done) => {
@@ -282,42 +280,59 @@ export namespace Agent {
   }
 
   export function room(key: string): Room {
-    const room = ROOMS.get(key) ?? { busy: 0, asking: 0, wait: [] };
+    const room = ROOMS.get(key) ?? { holders: 0, retrying: 0, wait: [] };
     ROOMS.set(key, room);
     return room;
   }
 
-  export function hold(model: string, own: string, why: string): void {
-    if (Agent.room(model).asking++ === 0) {
-      console.error(model + ": " + why.slice(0, 300) + ": its requests ask again");
-    }
-    Agent.room(own).busy += 1;
+  export function seat(ask: Ask): Seat {
+    const yields = ask.yields !== undefined;
+    return { model: ask.model, room: yields ? ask.model + " " + ask.yields : ask.model, yields, held: false };
   }
 
-  export function free(model: string, own: string): void {
-    const room = Agent.room(own);
-    room.busy -= 1;
-    if (room.busy === 0) {
+  export function import_seated_elsewhere(seat: Seat): boolean {
+    return seat.yields && !seat.held && (ROOMS.get(seat.room)?.holders ?? 0) > 0;
+  }
+
+  export function take_seat(seat: Seat, why: string): void {
+    if (seat.held) {
+      return;
+    }
+    seat.held = true;
+    if (Agent.room(seat.model).retrying++ === 0) {
+      console.error(seat.model + ": " + why.slice(0, 300) + ": its requests ask again");
+    }
+    Agent.room(seat.room).holders += 1;
+  }
+
+  export function leave_seat(seat: Seat): void {
+    if (!seat.held) {
+      return;
+    }
+    seat.held = false;
+    const room = Agent.room(seat.room);
+    room.holders -= 1;
+    if (room.holders === 0) {
       room.wait.splice(0).forEach((ok) => ok());
     }
-    if (--Agent.room(model).asking === 0) {
-      console.error(model + ": none asks again");
+    if (--Agent.room(seat.model).retrying === 0) {
+      console.error(seat.model + ": none asks again");
     }
-    for (const key of [own, model]) {
-      if (ROOMS.get(key)?.busy === 0 && ROOMS.get(key)?.asking === 0) {
+    for (const key of [seat.room, seat.model]) {
+      if (ROOMS.get(key)?.holders === 0 && ROOMS.get(key)?.retrying === 0) {
         ROOMS.delete(key);
       }
     }
   }
 
-  export async function yielded(run: Doing, own: string, asking: boolean): Promise<void> {
-    const keys = run.ask.yields === undefined ? [] : asking ? [run.ask.model] : [run.ask.model, own];
+  export async function give_way(seat: Seat, signal: AbortSignal): Promise<void> {
+    const before = !seat.yields ? [] : seat.held ? [seat.model] : [seat.model, seat.room];
     for (;;) {
-      const room = keys.map((key) => ROOMS.get(key)).find((room) => (room?.busy ?? 0) > 0);
-      if (room === undefined || run.abort.signal.aborted) {
+      const room = before.map((key) => ROOMS.get(key)).find((room) => (room?.holders ?? 0) > 0);
+      if (room === undefined || signal.aborted) {
         return;
       }
-      await Agent.race(new Promise<void>((ok) => room.wait.push(ok)), run.abort.signal);
+      await Agent.unless_stopped(new Promise<void>((ok) => room.wait.push(ok)), signal);
     }
   }
 
