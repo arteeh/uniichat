@@ -3,11 +3,11 @@ import type { Pick } from "./Pick.ts";
 import type { Live } from "./View.ts";
 import { err_stack, err_why } from "./Err.ts";
 
-export type Waiting = { text: string; tool: string; logged: boolean; started: boolean };
+type Waiting = { text: string; tool: string; logged: boolean; started: boolean };
 
 export type Heard = Event | { $: "Ended" };
 
-export type Queued<Q> = { q: Q; done: (why: string | null) => void };
+type Queued<Q> = { q: Q; done: (why: string | null) => void };
 
 export type Run<Q, M> = {
   name  : string;
@@ -24,7 +24,7 @@ export type Run<Q, M> = {
   fell  : string | null;
 };
 
-export type Kind<Q, M> = {
+type Kind<Q, M> = {
   pick   : () => Pick;
   begin  : (run: Run<Q, M>) => void;
   log    : (run: Run<Q, M>, q: Q) => M | Promise<M>;

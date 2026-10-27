@@ -22,7 +22,7 @@ const TIERS: Record<string, string> = { slow: "default", fast: "fast", ultrafast
 
 const MARK = { mode: "explicit" };
 
-export const TRANSCRIBER = "gpt-transcribe";
+const TRANSCRIBER = "gpt-transcribe";
 
 export namespace OpenAI {
 

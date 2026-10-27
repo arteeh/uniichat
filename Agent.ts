@@ -21,7 +21,7 @@ type Doing = {
   limit : Limit;
 };
 
-export type Back = { id: string; out: Out };
+type Back = { id: string; out: Out };
 
 type Room = { busy: number; asking: number; wait: Array<() => void> };
 
@@ -51,7 +51,7 @@ export type Refusal = { why: string; say: string; until?: number };
 
 export type Emit = (kind: Kind, text: string, fresh?: boolean) => void;
 
-export type Part = { type: string; text?: string; mimeType?: string; data?: string };
+type Part = { type: string; text?: string; mimeType?: string; data?: string };
 
 type Listed = { tools: { name: string; description: string; inputSchema: object }[]; notes?: unknown };
 

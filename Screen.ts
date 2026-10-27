@@ -123,7 +123,7 @@ function screen_erase(scr: Screen): string {
   return "\r" + up + "\x1b[J";
 }
 
-export function screen_feed(scr: Screen, data: string): void {
+function screen_feed(scr: Screen, data: string): void {
   data = scr.rest + data;
   let n = 1;
   while (data !== "" && n > 0) {
@@ -270,7 +270,7 @@ export function ed_type(ed: Ed, s: string): void {
   ed.pos += s.length;
 }
 
-export function ed_key(ed: Ed, key: string): boolean {
+function ed_key(ed: Ed, key: string): boolean {
   const { places, at } = ed_layout(ed);
   const back = places[Math.max(0, at - 1)].pos;
   const next = places[Math.min(places.length - 1, at + 1)].pos;

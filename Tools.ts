@@ -30,11 +30,11 @@ type Device = {
 
 type Running = { term: string; job: Job; out: Promise<Out>; end: (out: Out) => void };
 
-export type Link = { send: (msg: object) => void; live: () => boolean; work: string; scratch: string | null; shell: string | null };
+type Link = { send: (msg: object) => void; live: () => boolean; work: string; scratch: string | null; shell: string | null };
 
-export type Spawn = { task: string; role: Agent["role"] };
+type Spawn = { task: string; role: Agent["role"] };
 
-export type Agent = {
+type Agent = {
   name    : string;
   role    : { effort: string | null; model: string | null };
   why     : string | null;

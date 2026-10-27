@@ -2,9 +2,9 @@ import type { Kind } from "./AskAI.ts";
 import { clip_pages, stream_lines } from "./Clip.ts";
 import { get, list, text_of } from "./Json.ts";
 
-export type Msg = { kind: Kind; text: string; date: string; more?: boolean };
+type Msg = { kind: Kind; text: string; date: string; more?: boolean };
 
-export type Head = { kind: Kind; date: string; size: number; n: number };
+type Head = { kind: Kind; date: string; size: number; n: number };
 
 export type Form = "log" | "msgs";
 
@@ -16,7 +16,7 @@ export type Want = { off: string[]; since: string; tools: boolean };
 
 export type Plan = { sessions: Session[]; picked: Session[]; msgs: number; first: string; sizes: number[] };
 
-export type Node = { bytes: number; depth: number };
+type Node = { bytes: number; depth: number };
 
 const NODE = 512;
 
@@ -88,7 +88,7 @@ export async function import_session(file: Blob, form: Form, app = "", where = "
   return s.heads.length > 0 ? s : null;
 }
 
-export async function* import_read(s: Session): AsyncGenerator<Msg> {
+async function* import_read(s: Session): AsyncGenerator<Msg> {
   let date = "";
   for await (const lines of stream_lines(s.file.stream())) {
     for (const line of lines) {
@@ -151,7 +151,7 @@ function count_short(n: number): string {
   return COUNT.format(n).toLowerCase();
 }
 
-export function path_short(path: string): string {
+function path_short(path: string): string {
   const parts = path.replace(/^\/(Users|home)\/[^/]+(?=\/|$)/, "~").split("/");
   const head  = parts[0] === "" ? 2 : 1;
   return parts.length - head > 3 ? [...parts.slice(0, head + 1), "…", ...parts.slice(-2)].join("/") : parts.join("/");
@@ -198,7 +198,7 @@ export function import_guess(a: number, sizes: number[]): number[][] {
   return usd;
 }
 
-export function import_size(m: { kind: Kind; text: string }): number {
+function import_size(m: { kind: Kind; text: string }): number {
   return new TextEncoder().encode(m.kind + ": " + m.text).length;
 }
 
@@ -276,7 +276,7 @@ function chat_claude(chat: Chat): Msg[] {
   });
 }
 
-export async function zip_file(zip: Blob, name: string): Promise<Blob | null> {
+async function zip_file(zip: Blob, name: string): Promise<Blob | null> {
   const view = async (at: number, n: number) => new DataView(await zip.slice(at, at + n).arrayBuffer());
   const back = Math.min(zip.size, 65577);
   const tail = await view(zip.size - back, back);

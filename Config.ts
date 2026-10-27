@@ -172,7 +172,7 @@ export function config_keep(vendors: string[]): void {
 // openai-api with a key. Claude Code keeps its sign-in in its config dir:
 // .credentials.json, or (macOS, in the keychain) only its account in
 // .claude.json
-export function config_usable(): Vendor[] {
+function config_usable(): Vendor[] {
   const field = (file: string, ...keys: string[]): unknown => {
     let at: unknown;
     try {
@@ -230,7 +230,7 @@ export function config_get(key: string, def: string): string {
   return config_env_value(key) ?? config_str(FILE[key]) ?? def;
 }
 
-export function config_file(): Record<string, unknown> {
+function config_file(): Record<string, unknown> {
   return config_file_of(config_text(FILE_PATH));
 }
 
@@ -245,7 +245,7 @@ export function config_file_of(text: string | null): Record<string, unknown> {
   return json;
 }
 
-export function config_text(file: string): string | null {
+function config_text(file: string): string | null {
   try {
     return fs.readFileSync(file, "utf8");
   } catch (err) {
@@ -301,7 +301,7 @@ function config_run(key: string, text: string, offer: Offer): Pick {
   return pick;
 }
 
-export function config_profiles(file: Record<string, unknown>, offer: Offer): Record<string, Fall[]> {
+function config_profiles(file: Record<string, unknown>, offer: Offer): Record<string, Fall[]> {
   const env = process.env.UNII_PROFILES;
   const all: unknown = env === undefined ? file.profiles ?? {} : JSON.parse(env);
   if (!rec(all)) {
@@ -445,7 +445,7 @@ export function config_snapshot(): Snapshot {
   return { file, keys, version: hash.digest("hex").slice(0, 32) };
 }
 
-export function keys_read(): Record<string, string> {
+function keys_read(): Record<string, string> {
   return keys_of(config_text(KEYS_PATH));
 }
 

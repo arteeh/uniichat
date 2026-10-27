@@ -17,7 +17,7 @@ export type Pending = Queued & { images: string[]; act?: string };
 
 export type Of = { tool: string; apart: boolean };
 
-export type Node = { text: string; to: string };
+type Node = { text: string; to: string };
 
 export type Live = { kind: Kind; text: string };
 
@@ -34,7 +34,7 @@ export type Wait = string;
 
 export type Sums = { done: number; total: number };
 
-export type State = {
+type State = {
   busy      : boolean;
   wait      : Wait;
   agents    : string[];
@@ -78,7 +78,7 @@ export type View = State & {
   flush : () => void;
 };
 
-export type Pack = { nodes?: Record<string, Node>; whole?: Record<string, Entry> };
+type Pack = { nodes?: Record<string, Node>; whole?: Record<string, Entry> };
 
 export type Server =
   | ({ $: "know" } & Pack)
@@ -100,8 +100,8 @@ export type Sent = { text: string; images?: Blob[] };
 
 export type Answer = { error?: string; status?: number; text?: string; going?: boolean };
 // Bun's fetch takes an async iterable too (the terminal's import)
-export type Upload = BodyInit | AsyncIterable<string>;
-export type Body   = () => Upload | Promise<Upload>;
+type Upload = BodyInit | AsyncIterable<string>;
+type Body   = () => Upload | Promise<Upload>;
 
 export type Client =
   | { $: "say"; sizes: number[]; body: Body }
@@ -119,7 +119,7 @@ export type Client =
   | { $: "root" }
   | { $: "agent"; name: string };
 
-export type Post = { msg: Client & { id: string }; ws: WebSocket | null; done: (a: Answer) => void; said: string };
+type Post = { msg: Client & { id: string }; ws: WebSocket | null; done: (a: Answer) => void; said: string };
 
 export type Link = {
   open : (query: string) => WebSocket;
@@ -193,7 +193,7 @@ export const HEAD   = 12;
 export const IMAGES = "Images are png, jpeg, gif or webp.";
 
 export const MEDIA = Md.MEDIA;
-export const MEDIA_AS = Md.MEDIA_AS;
+const MEDIA_AS = Md.MEDIA_AS;
 
 export const STORED = /^[0-9a-f]{16}\.([a-z0-9]{1,10})$/;
 
@@ -488,7 +488,7 @@ export function view_tail(v: View, live = view_stream(v)): Row[] {
   return [Cap(v.wait === SUMMARIES ? sums_show(v.sums, v.again) : "waiting for " + v.wait + "…"), ...after];
 }
 
-export function sums_show(sums: Sums | null, again: Again | null, now = Date.now()): string {
+function sums_show(sums: Sums | null, again: Again | null, now = Date.now()): string {
   const head = sums === null ? SUMS : SUMS.replace(/…$/, "") + ": " + sums.done + " of " + sums.total;
   if (again === null) {
     return head;
@@ -500,7 +500,7 @@ export function sums_show(sums: Sums | null, again: Again | null, now = Date.now
   return head + " · compactor: " + why + ", asking again " + when;
 }
 
-export function limit_show(limit: Parked, now = Date.now()): string {
+function limit_show(limit: Parked, now = Date.now()): string {
   const at  = new Date(limit.until);
   const day = at.toDateString() === new Date(now).toDateString() ? {} : { weekday: "short" as const };
   return "waiting for the usage limit, " + (limit.known ? "resumes" : "tries again") + " at " + at.toLocaleString(undefined, { ...day, hour: "2-digit", minute: "2-digit" });
@@ -681,12 +681,12 @@ export function link_send(v: View, msg: Client, done = (a: Answer) => link_note(
 
 // a random id, as crypto.randomUUID makes one: that is only in a secure
 // context, and a page on a LAN's plain http is none
-export function uuid(): string {
+function uuid(): string {
   const hex = [...crypto.getRandomValues(new Uint8Array(16))].map((b, k) => (k === 6 ? (b & 15) | 64 : k === 8 ? (b & 63) | 128 : b).toString(16).padStart(2, "0")).join("");
   return [hex.slice(0, 8), hex.slice(8, 12), hex.slice(12, 16), hex.slice(16, 20), hex.slice(20)].join("-");
 }
 
-export function link_note(v: View, a: Answer): void {
+function link_note(v: View, a: Answer): void {
   if (a.error !== undefined) {
     v.notes.push(a.error);
   }

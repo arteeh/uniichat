@@ -19,9 +19,9 @@ import { write_whole } from "./Write.ts";
 import { err_why } from "./Err.ts";
 import { get, text_of } from "./Json.ts";
 
-export type Sub = { endpoint: string; p256dh: string; auth: string };
+type Sub = { endpoint: string; p256dh: string; auth: string };
 
-export type Keys = { jwk: JsonWebKey; public: string };
+type Keys = { jwk: JsonWebKey; public: string };
 
 const FILE   = config.DIR + "/vapid.json";
 

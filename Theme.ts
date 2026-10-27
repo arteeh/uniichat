@@ -19,7 +19,7 @@ export const KIND: Record<Kind, Look> = {
 export const FILLED: Kind[] = ["tool"];
 export const FRAMED: Kind[] = ["user", "work"];
 
-export const TOOL: Record<string, string> = {
+const TOOL: Record<string, string> = {
   zoom       : "🔍",
   date       : "📅",
   shell      : "⌨️",
@@ -33,7 +33,7 @@ export const TOOL: Record<string, string> = {
   schedules  : "⏰",
   unschedule : "⏰",
 };
-export const TOOL_ANY = "🔧";
+const TOOL_ANY = "🔧";
 
 export const GLYPH = {
   tab   : "◯",

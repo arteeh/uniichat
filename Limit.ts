@@ -13,13 +13,13 @@ export type Limit = {
 
 export type Off = { why: string; say: string; until?: number; limits: number };
 
-export const LONG  = 60e3;
+const LONG  = 60e3;
 export const LIMIT = 1800e3;
 
-export const POLL = 300e3;
+const POLL = 300e3;
 
-export const STAGGER      = 600e3;
-export const STAGGER_LOOK = 1e3;
+const STAGGER      = 600e3;
+const STAGGER_LOOK = 1e3;
 
 let ANSWERING: () => { queued: boolean; busy: boolean } = () => ({ queued: false, busy: false });
 

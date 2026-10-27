@@ -83,7 +83,7 @@ const WEEK = 7 * 86400e3;
 // counts it: claude-api's and claude-sub's marks are all an hour's
 // (Anthropic.ts HOUR; Claude Code's own by ClaudeSub.ts ENV); OpenAI's
 // default is 30 minutes, and openai-sub's backend tells none
-export const TTL: Record<Vendor, number> = {
+const TTL: Record<Vendor, number> = {
   "claude-api" : 3600e3,
   "openai-api" : 1800e3,
   "openai-sub" : 1800e3,

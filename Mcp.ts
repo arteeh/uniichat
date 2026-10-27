@@ -29,10 +29,10 @@ export type Server = {
   gone  : boolean;
 };
 
-export type Run = (device: string, job: Job, signal: AbortSignal) => Promise<Out>;
+type Run = (device: string, job: Job, signal: AbortSignal) => Promise<Out>;
 export type Servers = { all: Map<string, Server>; note: (text: string) => void; run: Run; open: (device: string) => boolean };
 
-export const LIMITS = { start: 60e3, again: 30e3, kill: 3e3, msg: 16 * 2 ** 20, img: 5 * 2 ** 20 };
+const LIMITS = { start: 60e3, again: 30e3, kill: 3e3, msg: 16 * 2 ** 20, img: 5 * 2 ** 20 };
 
 const EXPIRED = "ended its session (HTTP 404)";
 

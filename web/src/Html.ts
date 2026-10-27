@@ -91,7 +91,7 @@ function images_html(names: string[]): string {
   return names.length === 0 ? "" : `<div class="pics">${pics.join("")}</div>`;
 }
 
-export const MODES: Array<[string, string]> = [
+const MODES: Array<[string, string]> = [
   ["standard", "Each message is summarized for Unii's memory. Cheapest, good for long working sessions."],
   ["conversation", "Messages stay word-for-word in Unii's view until you switch back. Use it for discussions. It costs more per turn."],
 ];
@@ -333,7 +333,7 @@ function section_html(title: string, body: string): string {
   return `<section><h2>${esc(title)}</h2>${body}</section>`;
 }
 
-export function block_html(b: Md.Block): string {
+function block_html(b: Md.Block): string {
   switch (b.$) {
     case "Para": {
       return `<p>${spans_html(b.x)}</p>`;

@@ -7,7 +7,7 @@ type Cron = { sets: Array<Set<number>>; day: boolean; week: boolean };
 type Wall = { y: number; mo: number; d: number; h: number; mi: number; wd: number };
 
 export const TIMERS = 50;
-export const TEXT   = 2000;
+const TEXT   = 2000;
 
 const LATE  = 60000;
 
@@ -15,7 +15,7 @@ const AHEAD = 8 * 366;
 
 const MINUTE = 60000;
 
-export const GAP = 5;
+const GAP = 5;
 
 const FIELDS: Array<[number, number, string[]]> = [
   [0, 59, []],
@@ -44,11 +44,11 @@ function clock(zone: string): Intl.DateTimeFormat | null {
   }
 }
 
-export function zone_ok(zone: string): boolean {
+function zone_ok(zone: string): boolean {
   return zone !== "" && clock(zone) !== null;
 }
 
-export function wall(ms: number, zone: string): Wall {
+function wall(ms: number, zone: string): Wall {
   const c = clock(zone);
   if (c === null) {
     throw new Error("no time zone " + zone);
@@ -61,17 +61,17 @@ function wall_key(w: Wall): number {
   return (((w.y * 100 + w.mo) * 100 + w.d) * 100 + w.h) * 100 + w.mi;
 }
 
-export function wall_show(ms: number, zone: string): string {
+function wall_show(ms: number, zone: string): string {
   const w = wall(ms, zone);
   const two = (n: number) => String(n).padStart(2, "0");
   return w.y + "-" + two(w.mo) + "-" + two(w.d) + " " + two(w.h) + ":" + two(w.mi);
 }
 
-export function wall_time(w: Omit<Wall, "wd">, zone: string): number | null {
+function wall_time(w: Omit<Wall, "wd">, zone: string): number | null {
   return wall_times(w, zone)[0] ?? null;
 }
 
-export function wall_times(w: Omit<Wall, "wd">, zone: string): number[] {
+function wall_times(w: Omit<Wall, "wd">, zone: string): number[] {
   const want = Date.UTC(w.y, w.mo - 1, w.d, w.h, w.mi);
   const key = wall_key({ ...w, wd: 0 });
   const off = (ms: number) => {
@@ -83,7 +83,7 @@ export function wall_times(w: Omit<Wall, "wd">, zone: string): number[] {
   return [...new Set(times)].sort((a, b) => a - b);
 }
 
-export function cron_read(expr: string): Cron | string {
+function cron_read(expr: string): Cron | string {
   const fields = expr.trim().toLowerCase().split(/\s+/);
   if (fields.length !== 5) {
     return "A cron has five fields (minute hour day month weekday), not " + fields.length + ".";
@@ -124,7 +124,7 @@ function cron_day(c: Cron, w: Wall): boolean {
   return c.sets[3].has(w.mo) && (c.day && c.week ? day || week : day && week);
 }
 
-export function cron_next(c: Cron, zone: string, after: number): number | null {
+function cron_next(c: Cron, zone: string, after: number): number | null {
   const w = wall(after, zone);
   const [hours, minutes] = [c.sets[1], c.sets[0]].map((set) => [...set].sort((a, b) => a - b));
   for (let k = 0; k <= AHEAD; k++) {
@@ -145,13 +145,13 @@ export function cron_next(c: Cron, zone: string, after: number): number | null {
   return null;
 }
 
-export function cron_gap(c: Cron): number {
+function cron_gap(c: Cron): number {
   const times = [...c.sets[1]].flatMap((h) => [...c.sets[0]].map((mi) => h * 60 + mi)).sort((a, b) => a - b);
   const gaps = times.map((_, k) => (k === 0 ? times[times.length - 1] - 1440 : times[k - 1])).map((prev, k) => times[k] - prev);
   return Math.min(...gaps);
 }
 
-export function at_read(text: string, zone: string): number | string {
+function at_read(text: string, zone: string): number | string {
   const m = /^(\d{4})-(\d\d)-(\d\d)[T ](\d\d):(\d\d)(?::\d\d(?:\.\d+)?)?\s*(Z|[+-]\d\d:?\d\d)?$/i.exec(text.trim());
   const [y, mo, d, h, mi] = (m ?? []).slice(1, 6).map(Number);
   const day = new Date(Date.UTC(y, mo - 1, d));

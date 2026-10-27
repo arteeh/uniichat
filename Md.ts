@@ -68,11 +68,11 @@ let COLLECT = false;
 
 let UNSHUT: { lines: string[]; from: Map<string, [number, number]> } = { lines: [], from: new Map() };
 
-export function Text(x: string): Span {
+function Text(x: string): Span {
   return { $: "Text", x };
 }
 
-export function Name(x: string): Span {
+function Name(x: string): Span {
   return { $: "Name", x };
 }
 
@@ -97,7 +97,7 @@ type Node = { x: Span; m: Mark | null; prev: Node | null; next: Node | null };
 
 type Mark = { c: string; n: number; len: number; open: boolean; close: boolean; at: number; node: Node; prev: Mark | null; next: Mark | null };
 
-export function span_parse(s: string): Span[] {
+function span_parse(s: string): Span[] {
   if (COLLECT) {
     return [];
   }
@@ -507,7 +507,7 @@ function title_end(s: string, j: number, q: string, unshut: Map<string, number>)
   return -1;
 }
 
-export function link_safe(k: string): boolean {
+function link_safe(k: string): boolean {
   return /^(?:https?:\/\/|mailto:)[^\s\x00-\x1f]*$/i.test(k) || /^\/(?![\/\\])[^\s\x00-\x1f]*$/.test(k) || k === "/";
 }
 

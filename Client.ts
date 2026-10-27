@@ -4,8 +4,8 @@ import { get, rec, text_of } from "./Json.ts";
 import * as View from "./View.ts";
 import { write_whole } from "./Write.ts";
 
-export const DIR   = (process.env.XDG_CONFIG_HOME || os.homedir() + "/.config") + "/unii";
-export const LOCAL = "http://127.0.0.1:8788";
+const DIR   = (process.env.XDG_CONFIG_HOME || os.homedir() + "/.config") + "/unii";
+const LOCAL = "http://127.0.0.1:8788";
 
 // lib dom's WebSocket type hides the options Bun's takes
 export const Socket = WebSocket as unknown as new (url: string, options: Bun.WebSocketOptions) => WebSocket;

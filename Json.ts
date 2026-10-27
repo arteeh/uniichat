@@ -1,4 +1,4 @@
-export function has<K extends string>(x: unknown, k: K): x is Record<K, unknown> {
+function has<K extends string>(x: unknown, k: K): x is Record<K, unknown> {
   return typeof x === "object" && x !== null && k in x;
 }
 
