@@ -95,6 +95,7 @@ export namespace Agent {
 
   export function cached(ask: Ask, read: number, write: number | null, input: number): void {
     console.error("cache " + ask.vendor + " " + ask.model + " " + (ask.who ?? "main") + ": read " + read + (write === null ? "" : ", write " + write) + ", uncached " + input);
+    ask.used?.(read + (write ?? 0) + input);
   }
 
   export function ask(ask: Ask, on: (ev: Event) => void): Try {

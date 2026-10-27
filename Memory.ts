@@ -33,7 +33,7 @@ type End = [number, number];
 
 type Kept = { parts: Array<[number, number]>; batch: boolean };
 
-type Saved = Kept & { seen?: Kept; main: End; tree: End; pick: object | null; goal?: string | null; work?: string[]; timers?: Timer[]; off?: string[]; talk?: number | null };
+type Saved = Kept & { seen?: Kept; main: End; tree: End; pick: object | null; goal?: string | null; work?: string[]; timers?: Timer[]; off?: string[]; talk?: number | null; used?: number | null };
 
 type Queues = { main: Pending[]; agents: Record<string, string[]> };
 
@@ -56,6 +56,7 @@ type Chosen = {
   off    : string[];
   talk   : number | null;
   talked : Map<number, number>;
+  used   : number | null;
   work   : string[];
   timers : Timer[];
 };
@@ -142,7 +143,7 @@ export namespace Memory {
 
   export function load(dir: string, share: Memory["share"], acted: Memory["acted"] = () => {}): Memory {
     const mem: Memory = {
-      dir, fds: new Map(), count: 0, open: 0, pick: null, goal: null, off: [], talk: null, talked: new Map(), work: [], timers: [], queue: [], tells: {}, nodes: new Map(), agents: new Map(), ready: [[], []], ends: { main: [0, 0], tree: [0, 0] },
+      dir, fds: new Map(), count: 0, open: 0, pick: null, goal: null, off: [], talk: null, talked: new Map(), used: null, work: [], timers: [], queue: [], tells: {}, nodes: new Map(), agents: new Map(), ready: [[], []], ends: { main: [0, 0], tree: [0, 0] },
       view: { parts: [], size: 0, batch: false, high: VIEW_HIGH }, seen: { parts: [], size: 0, batch: false, high: config.COMPACTOR_CONTEXT },
       busy: new Map(), sides: new Map(), calls: new Map(), hold: [null, "paused"], done: false, wait: new Set(), share, acted, again: null,
     };
@@ -151,6 +152,7 @@ export namespace Memory {
     mem.goal = saved?.goal ?? null;
     mem.off  = saved?.off ?? [];
     mem.talk = saved?.talk ?? null;
+    mem.used = saved?.used ?? null;
     mem.work = saved?.work ?? [];
     mem.timers = saved?.timers ?? [];
     const queues = Memory.queues(dir);
@@ -188,7 +190,7 @@ export namespace Memory {
   export function save(mem: Memory): void {
     const file = mem.dir + "/view.json";
     const [chat, seen] = [mem.view, mem.seen].map((view): Kept => ({ parts: view.parts.map((part) => [part.l, part.i]), batch: view.batch }));
-    fs.writeFileSync(file + ".new", JSON.stringify({ ...chat, seen, pick: mem.pick, goal: mem.goal, off: mem.off, talk: mem.talk, work: mem.work, timers: mem.timers, ...mem.ends }));
+    fs.writeFileSync(file + ".new", JSON.stringify({ ...chat, seen, pick: mem.pick, goal: mem.goal, off: mem.off, talk: mem.talk, used: mem.used, work: mem.work, timers: mem.timers, ...mem.ends }));
     move_over(file + ".new", file);
     void Disk.wrote(file);
   }
@@ -806,13 +808,15 @@ ${Memory.cut(line)}| ← LIMIT`;
     Memory.reach(mem, mem.seen, Math.min(mem.count, ...sides));
     for (const view of [mem.view, mem.seen]) {
       const [parts, batch] = [view.parts.length, view.batch];
-      if (view.size > view.high || (next && view.batch)) {
-        const merged = Memory.merge(mem, view);
-        if (next || merged.size <= Math.max(view.high / 2, view.size - view.high)) {
+      const talk = view === mem.view ? mem.talk : null;
+      const hidden = talk === null ? 0 : Memory.unshown(mem, view, talk);
+      if (view.size - hidden > view.high || (next && view.batch)) {
+        const merged = Memory.merge(mem, view, talk ?? Infinity, hidden);
+        if (next || merged.size - hidden <= Math.max(view.high / 2, view.size - hidden - view.high)) {
           [view.parts, view.size] = [merged.parts, merged.size];
           gone.push(...merged.gone);
         }
-        view.batch = view.size > view.high / 2;
+        view.batch = view.size - hidden > view.high / 2;
       }
       changed ||= view.parts.length !== parts || view.batch !== batch;
     }
@@ -831,6 +835,12 @@ ${Memory.cut(line)}| ← LIMIT`;
       view.parts.push({ l: 0, i });
       view.size += Memory.size(mem, { l: 0, i });
     }
+  }
+
+  // the parts conversation mode doesn't show: those from message talk on
+  // (Memory.talking)
+  export function unshown(mem: Memory, view: View, talk: number): number {
+    return view.parts.slice(Memory.cover(view, talk)).filter((part) => Memory.span(part)[0] >= talk).reduce((n, part) => n + Memory.size(mem, part), 0);
   }
 
   export function end({ parts }: View): number {
@@ -858,8 +868,8 @@ ${Memory.cut(line)}| ← LIMIT`;
     return age_in_its_halves - pair.i;
   }
 
-  export function merge(mem: Memory, from: View): { parts: Part[]; size: number; gone: Part[] } {
-    const [t, low] = [Memory.end(from), from.high / 2];
+  export function merge(mem: Memory, from: View, upto = Infinity, hidden = 0): { parts: Part[]; size: number; gone: Part[] } {
+    const [t, low] = [Memory.end(from), from.high / 2 + hidden];
     const view: Array<Part | null> = [...from.parts];
     const gone: Part[] = [];
     const next = view.map((_, k) => k + 1);
@@ -869,7 +879,7 @@ ${Memory.cut(line)}| ← LIMIT`;
     const swap = (x: number, y: number) => ([heap[x], heap[y]] = [heap[y], heap[x]]);
     const offer = (k: number) => {
       const [a, b] = [view[k], view[next[k]]];
-      if (k < 0 || !a || !b || a.i % 2 !== 0 || b.l !== a.l || b.i !== a.i + 1 || !Memory.built(mem, a.l + 1, a.i / 2)) {
+      if (k < 0 || !a || !b || a.i % 2 !== 0 || b.l !== a.l || b.i !== a.i + 1 || Memory.span(b)[1] >= upto || !Memory.built(mem, a.l + 1, a.i / 2)) {
         return;
       }
       heap.push({ d: Memory.due(t, a), k, a, b });

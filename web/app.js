@@ -2074,10 +2074,12 @@ var FOLD = "The whole chat, folded into the fewest blocks.";
 function Cap(text) {
   return { $: "Cap", text };
 }
-var TOKEN = 3;
+function talk_percent(talk) {
+  return Math.ceil(talk.used * 100);
+}
 function talk_tokens(talk) {
-  const k = (bytes) => Math.round(bytes / TOKEN / 1000) + "K";
-  return "about " + k(talk.size) + " of " + k(talk.room) + " tokens";
+  const k = (n) => n >= 1e6 ? +(n / 1e6).toFixed(1) + "M" : n >= 1000 ? Math.round(n / 1000) + "K" : String(n);
+  return "about " + k(talk.tokens) + " of " + talk.model + "'s " + k(talk.window) + " tokens" + (talk.guess ? ", guessed: no request yet" : ", in its last request");
 }
 function view_new() {
   return {
@@ -3189,9 +3191,9 @@ function pick_html(fold, on, knobs, talk) {
   };
   const [now, about] = MODES[talk == null ? 0 : 1];
   const modes = talk === undefined ? [] : knob("mode", about, now, MODES.map(mode).join(""));
-  const used = talk == null ? 0 : Math.round(talk.used * 100);
+  const used = talk == null ? 0 : talk_percent(talk);
   const heat = used >= 80 ? " hot" : used >= 50 ? " warm" : "";
-  const rule = talk == null ? `<span class="rule"></span>` : `<span class="rule meter${heat}" style="--used:${used}%" title="Conversation: ${used}% of space used (${talk_tokens(talk)})" role="meter" aria-valuenow="${used}" aria-valuemin="0" aria-valuemax="100" aria-label="Conversation space used"></span>`;
+  const rule = talk == null ? `<span class="rule"></span>` : `<span class="rule meter${heat}" style="--used:${used}%" title="Context: ${used}% used (${talk_tokens(talk)})" role="meter" aria-valuenow="${used}" aria-valuemin="0" aria-valuemax="100" aria-label="Context used"></span>`;
   const dot = `<span class="dot">·</span>`;
   const join = (groups) => groups.filter((g) => g.length > 0).flatMap((g, i) => i === 0 ? g : [dot, ...g]);
   return [...join([all, modes]), rule, ...join(parts)];

@@ -23,7 +23,7 @@ import { Run, type Heard } from "./Run.ts";
 import * as Service from "./Service.ts";
 import * as Timer from "./Timer.ts";
 import { PROMPTS, SEARCHES, Tools } from "./Tools.ts";
-import { ACTIVE, FRAME, IDLE, IMAGES, live_push, MEDIA, PING, QUIT, SUMMARIES, TICK, TURN, WIRE, type Answer, type Live, type Part, type Pending, type Queued, type Server as Out, type Sums, type Wait } from "./View.ts";
+import { ACTIVE, FRAME, IDLE, IMAGES, live_push, MEDIA, PING, QUIT, SUMMARIES, TICK, TURN, WIRE, type Answer, type Live, type Part, type Pending, type Queued, type Server as Out, type Sums, type Talk as Meter, TOKEN, type Wait } from "./View.ts";
 import * as config from "./Config.ts";
 import { err_code, err_stack, err_why } from "./Err.ts";
 import { get, rec, text_of } from "./Json.ts";
@@ -434,7 +434,7 @@ export namespace Chat {
     chat.eye = Chat.eye(mem, from);
     chat.socks.forEach((sock) => Chat.show(chat, sock));
     const blocks = [...view, Tools.devices(chat.tools), Tools.skills(chat.tools), Tools.at_work(chat.tools), { text: HEAD + text, mark: true }];
-    const ask = { ...Chat.share(chat, Tools.prompt("prompt")), searches: SEARCHES, server, blocks, imgs, talk: mem.talk !== null, who: "main" };
+    const ask = { ...Chat.share(chat, Tools.prompt("prompt")), searches: SEARCHES, server, blocks, imgs, talk: mem.talk !== null, who: "main", used: (tokens: number) => Chat.used(chat, tokens) };
     chat.model = chat.pick.model;
     chat.asked = true;
     chat.open = 0;
@@ -562,6 +562,33 @@ export namespace Chat {
     const from = chat.mem.talk;
     Chat.talk(chat, null);
     Chat.note(chat, why.replace("{id}", String(from)).replace("{model}", Chat.model_name(chat)));
+  }
+
+  export function used(chat: Chat, tokens: number): void {
+    chat.mem.used = tokens;
+    if (chat.mem.talk !== null) {
+      Memory.save(chat.mem);
+      Chat.all(chat, Chat.state(chat));
+    }
+  }
+
+  // the main's context as its last request had it, against the model's
+  // window; before any request, a guess from what the next one would send
+  export function meter(chat: Chat): Meter | null {
+    const mem = chat.mem;
+    if (mem.talk === null) {
+      return null;
+    }
+    const window = Pick.window(chat.pick, config.OFFER);
+    const tokens = mem.used ?? Chat.guess(chat);
+    return { from: mem.talk, used: Math.min(1, tokens / window), tokens, window, model: Chat.model_name(chat), guess: mem.used === null };
+  }
+
+  export function guess(chat: Chat): number {
+    const mem = chat.mem;
+    const blocks = [...Memory.view(mem, mem.count, mem.view.parts, mem.talk), Tools.devices(chat.tools), Tools.skills(chat.tools), Tools.at_work(chat.tools)];
+    const texts = [Tools.prompt("prompt"), JSON.stringify(Tools.list("main")), ...blocks.map((b) => b.text)];
+    return Math.ceil(texts.reduce((n, text) => n + Memory.bytes(text), 0) / TOKEN);
   }
 
   export function room(chat: Chat): number {
@@ -978,9 +1005,7 @@ export namespace Chat {
     const importing = batch && { done: batch.all - Chat.time(batch), total: batch.all, why, msgs: batch.b - batch.a, open: batch.open };
     const timers = chat.mem.timers.map((t) => ({ ...t, text: t.text.length > TIMER_TEXT ? t.text.slice(0, TIMER_TEXT) + "…" : t.text }));
     const mcp = [...chat.tools.mcp.all.keys()].map((name) => ({ name, on: !chat.mem.off.includes(name) }));
-    const room = Chat.room(chat);
-    const size = chat.mem.talk === null ? 0 : Memory.talk_size(chat.mem);
-    const talk = chat.mem.talk === null ? null : { from: chat.mem.talk, used: Math.min(1, size / room), size, room };
+    const talk = Chat.meter(chat);
     const limits: Record<string, Parked> = {};
     const queue: Record<string, Queued[]> = {};
     const shown = (text: string): string => (text.length > QUEUED_TEXT ? text.slice(0, QUEUED_TEXT) + "…" : text);

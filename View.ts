@@ -69,7 +69,7 @@ type ServerSays = {
 
 type State = Turning & ByRun & Offered & ChatSet & ServerSays;
 
-export type Talk = { from: number; used: number; size: number; room: number };
+export type Talk = { from: number; used: number; tokens: number; window: number; model: string; guess: boolean };
 
 export type Plug = { name: string; on: boolean };
 
@@ -250,9 +250,14 @@ export function Cap(text: string): Row {
 
 export const TOKEN = 3;
 
+// rounded up, so any use shows
+export function talk_percent(talk: Talk): number {
+  return Math.ceil(talk.used * 100);
+}
+
 export function talk_tokens(talk: Talk): string {
-  const k = (bytes: number) => Math.round(bytes / TOKEN / 1000) + "K";
-  return "about " + k(talk.size) + " of " + k(talk.room) + " tokens";
+  const k = (n: number) => (n >= 1e6 ? +(n / 1e6).toFixed(1) + "M" : n >= 1e3 ? Math.round(n / 1e3) + "K" : String(n));
+  return "about " + k(talk.tokens) + " of " + talk.model + "'s " + k(talk.window) + " tokens" + (talk.guess ? ", guessed: no request yet" : ", in its last request");
 }
 
 export function view_new(): View {

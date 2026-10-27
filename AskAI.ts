@@ -32,6 +32,7 @@ export type Ask = Pick & {
   fallback? : boolean;
   talk?     : boolean;
   repick?   : () => Pick;
+  used?     : (tokens: number) => void;
   limits?   : number;
   who?      : string;
 };
