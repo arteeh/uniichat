@@ -414,7 +414,8 @@ export namespace ClaudeSub {
           return got === null ? {} : { ...got, acted: acted.v };
         }
         limit.n += 1;
-        if (!ClaudeSub.keeps_code_across_limit(acted.v)) {
+        const keep_code_across_limit = acted.v;
+        if (!keep_code_across_limit) {
           void ClaudeSub.close(code);
           code = null;
         }
@@ -450,10 +451,6 @@ export namespace ClaudeSub {
 
   export function go_on_after_limit(code: Code): void {
     code.box.put([GO_ON_AFTER_LIMIT], []);
-  }
-
-  export function keeps_code_across_limit(acted: boolean): boolean {
-    return acted;
   }
 
   export function died_before_saying(err: unknown, said: boolean, signal: AbortSignal): boolean {
