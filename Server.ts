@@ -227,6 +227,7 @@ export namespace Chat {
     const saved = mem.pick === null ? null : Chat.pick_name(mem.pick as Pick);
     if (saved !== null && saved !== Chat.pick_name(pick)) {
       mem.pick = pick;
+      mem.used = null;
       Memory.save(mem);
       Chat.keep_pick(mem.pick);
       Chat.note(chat, saved + " isn't offered here, so the chat now runs on " + Chat.pick_name(pick) + ".");
@@ -1037,6 +1038,7 @@ export namespace Chat {
     chat.pick = pick;
     if (saved !== null && saved !== Chat.pick_name(pick)) {
       chat.mem.pick = pick;
+      chat.mem.used = null;
       Memory.save(chat.mem);
       Chat.keep_pick(chat.mem.pick);
       Chat.note(chat, saved + " isn't offered here, so the chat now runs on " + Chat.pick_name(pick) + ".");
@@ -1201,6 +1203,9 @@ export namespace Chat {
         const pick = Pick.read(msg.to, config.OFFER);
         if (pick === null) {
           return { error: "No pick " + JSON.stringify(msg.to) + "." };
+        }
+        if (pick.model !== chat.pick.model) {
+          chat.mem.used = null;
         }
         chat.pick = chat.mem.pick = pick;
         chat.main.fell = null;
