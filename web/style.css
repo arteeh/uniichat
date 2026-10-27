@@ -232,7 +232,7 @@ header > .imping { display: flex; flex-direction: column; justify-content: cente
 .msg.long > .unfold:hover { color: var(--ink); }
 .msg.long:not(.shown) > .cut { max-height: 8lh; overflow: hidden; cursor: pointer; -webkit-mask-image: linear-gradient(#000 calc(100% - 3lh), transparent); mask-image: linear-gradient(#000 calc(100% - 3lh), transparent); }
 
-.msg { position: relative; overflow-wrap: anywhere; font: 17.5px/1.68 var(--serif); color: var(--fg); font-style: var(--it); }
+.msg { position: relative; border-width: 0; overflow-wrap: anywhere; font: 17.5px/1.68 var(--serif); color: var(--fg); font-style: var(--it); }
 .msg > :first-child, .msg > .copy + * { margin-top: 0; }
 .msg > :last-child { margin-bottom: 0; }
 .msg p, .msg ul, .msg ol, .msg pre, .msg blockquote { margin: 0 0 .85em; }
