@@ -3193,7 +3193,7 @@ function pick_html(fold, on, knobs, talk) {
   const modes = talk === undefined ? [] : knob("mode", about, now, MODES.map(mode).join(""));
   const used = talk == null ? 0 : talk_percent(talk);
   const heat = used >= 80 ? " hot" : used >= 50 ? " warm" : "";
-  const rule = talk == null ? `<span class="rule"></span>` : `<span class="rule meter${heat}" style="--used:${used}%" title="Context: ${used}% used (${talk_tokens(talk)})" role="meter" aria-valuenow="${used}" aria-valuemin="0" aria-valuemax="100" aria-label="Context used"></span>`;
+  const rule = talk == null ? `<span class="rule"></span>` : `<span class="rule meter${heat}" style="--used:${used}%" title="Context: ${used}% used (${esc(talk_tokens(talk))})" role="meter" aria-valuenow="${used}" aria-valuemin="0" aria-valuemax="100" aria-label="Context used"></span>`;
   const dot = `<span class="dot">·</span>`;
   const join = (groups) => groups.filter((g) => g.length > 0).flatMap((g, i) => i === 0 ? g : [dot, ...g]);
   return [...join([all, modes]), rule, ...join(parts)];
