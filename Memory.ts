@@ -837,8 +837,10 @@ ${Memory.cut(line)}| ← LIMIT`;
     }
   }
 
-  // the parts conversation mode doesn't show: those from message talk on
-  // (Memory.talking)
+  export function fitted(mem: Memory): Part[] {
+    return mem.talk === null || mem.view.size <= mem.view.high ? mem.view.parts : Memory.merge(mem, mem.view).parts;
+  }
+
   export function unshown(mem: Memory, view: View, talk: number): number {
     return view.parts.slice(Memory.cover(view, talk)).filter((part) => Memory.span(part)[0] >= talk).reduce((n, part) => n + Memory.size(mem, part), 0);
   }

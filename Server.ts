@@ -467,7 +467,7 @@ export namespace Chat {
       const msg = Memory.at(mem, i);
       return Memory.line({ l: 0, i }, msg.kind + ": " + msg.text) + "\n";
     });
-    const blocks = [...Memory.view(mem, at), { text: tail.join("") + GOAL_ASK + goal, mark: true }];
+    const blocks = [...Memory.view(mem, at, Memory.fitted(mem)), { text: tail.join("") + GOAL_ASK + goal, mark: true }];
     return { call: AskAI.ask({ ...Chat.share(chat, GOAL), blocks, who: "goal" }, (ev) => Chat.checking(chat, ev)), goal };
   }
 

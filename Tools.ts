@@ -830,7 +830,7 @@ export namespace Tools {
 
   export async function view(tools: Tools): Promise<Block[] | string> {
     const why = await Memory.settle(tools.mem, tools.mem.count, tools.main.halt.signal);
-    return why ?? Memory.view(tools.mem);
+    return why ?? Memory.view(tools.mem, tools.mem.count, Memory.fitted(tools.mem));
   }
 
   export function working(tools: Tools): Agent[] {
