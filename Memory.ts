@@ -1,5 +1,5 @@
 import * as fs from "node:fs";
-import { AskAI, type Again, type Ask, type Block, type Call, type Event, type Img, type Kind, type Say } from "./AskAI.ts";
+import { AskAI, type Again, type Ask, type Block, type Call, type End as Answered, type Event, type Img, type Kind, type Say } from "./AskAI.ts";
 import { clip_page, clip_pages } from "./Clip.ts";
 import * as config from "./Config.ts";
 import { Disk } from "./Disk.ts";
@@ -42,11 +42,16 @@ type Rec = { i?: number; l?: number; act?: string; ans?: object };
 
 type Recs = { main: Root; tree: { text: string } };
 
-export type Memory = {
+type Logs = {
   dir    : string;
   fds    : Map<string, number>;
   count  : number;
   open   : number;
+  ends   : Record<Stream, End>;
+  agents : Map<string, number>;
+};
+
+type Chosen = {
   pick   : object | null;
   goal   : string | null;
   off    : string[];
@@ -54,25 +59,34 @@ export type Memory = {
   talked : Map<number, number>;
   work   : string[];
   timers : Timer[];
+};
+
+type Unlogged = {
   queue  : Pending[];
   tells  : Record<string, string[]>;
+};
+
+type Tree = {
   nodes  : Map<number, string>;
-  agents : Map<string, number>;
   view   : View;
   seen   : View;
   ready  : number[][][];
-  ends   : Record<Stream, End>;
   busy   : Map<number, number>;
   sides  : Map<number, number>;
   calls  : Map<Call, Sum>;
   hold   : Array<string | null>;
   done   : boolean;
   wait   : Set<() => void>;
+  again  : Again | null;
+};
+
+type Hooks = {
   share  : () => Omit<Share, keyof Pick>;
   made?  : (l: number, i: number) => void;
   acted  : (id: string, ans: object) => void;
-  again  : Again | null;
 };
+
+export type Memory = Logs & Chosen & Unlogged & Tree & Hooks;
 
 const NODE  = 512;
 export const JOBS = 64;
@@ -81,7 +95,9 @@ const LOGGED = 60e3;
 
 const FAILED = new Map<string, number>();
 const TRIES = 5;
-const HIGH  = 128000;
+const VIEW_HIGH = 128000;
+
+const TALK_SHARE_OF_WINDOW = 3 / 4;
 const BLOCK = 4;
 
 const SLOT  = 16;
@@ -95,7 +111,7 @@ const PICS   = 20;
 
 const PIECE = 2 ** 20;
 
-const SCALE = "-".repeat(NODE);
+const NODE_RULER = "-".repeat(NODE);
 
 const WAIT = "(not summarized yet: zoom it)";
 
@@ -111,13 +127,13 @@ const AGENTS = "/docs/agent/";
 
 const LEAF = `Compaction: compress message {id} into one line of at most ${NODE} bytes
 (about 70 words), the length of this ruler:
-${SCALE}
+${NODE_RULER}
 <input>
 `;
 
 const MERGE = `Compaction: merge lines {a} and {b}, adjacent, into one line of at most
 ${NODE} bytes (about 70 words), the length of this ruler:
-${SCALE}
+${NODE_RULER}
 <chat> may hold their messages, {id} to {end}, in more detail: take details
 of them from there too.
 <input>
@@ -128,7 +144,7 @@ export namespace Memory {
   export function load(dir: string, share: Memory["share"], acted: Memory["acted"] = () => {}): Memory {
     const mem: Memory = {
       dir, fds: new Map(), count: 0, open: 0, pick: null, goal: null, off: [], talk: null, talked: new Map(), work: [], timers: [], queue: [], tells: {}, nodes: new Map(), agents: new Map(), ready: [[], []], ends: { main: [0, 0], tree: [0, 0] },
-      view: { parts: [], size: 0, batch: false, high: HIGH }, seen: { parts: [], size: 0, batch: false, high: config.COMPACTOR_CONTEXT },
+      view: { parts: [], size: 0, batch: false, high: VIEW_HIGH }, seen: { parts: [], size: 0, batch: false, high: config.COMPACTOR_CONTEXT },
       busy: new Map(), sides: new Map(), calls: new Map(), hold: [null, "paused"], done: false, wait: new Set(), share, acted, again: null,
     };
     const saved = Memory.saved(dir);
@@ -402,7 +418,7 @@ export namespace Memory {
       const root = Memory.at(mem, k - 1);
       size += root.size;
       pics += root.images?.length ?? 0;
-      if (k < mem.count && (size > HIGH || pics > PICS)) {
+      if (k < mem.count && (size > VIEW_HIGH || pics > PICS)) {
         return k;
       }
     }
@@ -585,17 +601,21 @@ export namespace Memory {
   }
 
   export function pump(mem: Memory): void {
-    let built = false;
-    for (let free = Memory.starts(mem); free.length > 0 && !mem.done; free = Memory.starts(mem)) {
-      Memory.store(mem, free);
-      built = true;
-    }
-    if (built) {
+    if (Memory.store_fitting_at_once(mem)) {
       Memory.fit(mem);
     }
   }
 
-  export function starts(mem: Memory): Array<Part & { text: string }> {
+  export function store_fitting_at_once(mem: Memory): boolean {
+    let stored = false;
+    for (let fitting = Memory.start_jobs(mem); fitting.length > 0 && !mem.done; fitting = Memory.start_jobs(mem)) {
+      Memory.store(mem, fitting);
+      stored = true;
+    }
+    return stored;
+  }
+
+  export function start_jobs(mem: Memory): Array<Part & { text: string }> {
     const free: Array<Part & { text: string }> = [];
     for (const side of [0, 1].filter((side) => mem.hold[side] === null)) {
       const end = Memory.first(mem, JOBS - 1, side);
@@ -662,6 +682,18 @@ export namespace Memory {
     const task = { text: Memory.task(l, i) + text + "\n</input>", mark: false };
     const upto = Math.min(Memory.ctx(l, i), Memory.first(mem, 0, Memory.side(mem, l, i)));
     const blocks = [...Memory.view(mem, upto, Memory.last(mem, Memory.before(mem.seen.parts, upto), config.COMPACTOR_CONTEXT)), task];
+    const { lines, end } = await Memory.ask_till_fits(mem, l, i, blocks);
+    if (lines.length === 0 && Memory.cut_short(end)) {
+      throw new Error(end.text);
+    }
+    if (lines.length === 0) {
+      console.error("compactor: node " + l + "/" + i + ": " + (end.ok ? "an empty line" : end.text) + "; clipped");
+    }
+    const line = lines.length === 0 ? Memory.cut(Memory.flat(text)) : Memory.shortest(lines);
+    Memory.store(mem, [{ l, i, text: line }]);
+  }
+
+  export async function ask_till_fits(mem: Memory, l: number, i: number, blocks: Block[]): Promise<{ lines: string[]; end: Answered }> {
     const lines: string[] = [];
     let end = await Memory.compact(mem, l, i, Memory.ask(mem, l, i, blocks));
     while (end.ok && end.text.trim() !== "") {
@@ -673,14 +705,15 @@ export namespace Memory {
       const note = { text: Memory.over(line), mark: false };
       end = await Memory.compact(mem, l, i, Memory.ask(mem, l, i, [...blocks, note]));
     }
-    if (lines.length === 0 && !end.ok && end.stop !== "fail") {
-      throw new Error(end.text);
-    }
-    if (lines.length === 0) {
-      console.error("compactor: node " + l + "/" + i + ": " + (end.ok ? "an empty line" : end.text) + "; clipped");
-    }
-    const line = lines.length === 0 ? Memory.cut(Memory.flat(text)) : lines.reduce((a, b) => (Memory.bytes(b) < Memory.bytes(a) ? b : a));
-    Memory.store(mem, [{ l, i, text: line }]);
+    return { lines, end };
+  }
+
+  export function cut_short(end: Answered): boolean {
+    return !end.ok && end.stop !== "fail";
+  }
+
+  export function shortest(lines: string[]): string {
+    return lines.reduce((a, b) => (Memory.bytes(b) < Memory.bytes(a) ? b : a));
   }
 
   export function served(mem: Memory, l: number, i: number): Served {
@@ -821,6 +854,11 @@ ${Memory.cut(line)}| ← LIMIT`;
     });
   }
 
+  export function due(end: number, pair: Part): number {
+    const age_in_its_halves = (end + 1) / 2 ** pair.l;
+    return age_in_its_halves - pair.i;
+  }
+
   export function merge(mem: Memory, from: View): { parts: Part[]; size: number; gone: Part[] } {
     const [t, low] = [Memory.end(from), from.high / 2];
     const view: Array<Part | null> = [...from.parts];
@@ -835,7 +873,7 @@ ${Memory.cut(line)}| ← LIMIT`;
       if (k < 0 || !a || !b || a.i % 2 !== 0 || b.l !== a.l || b.i !== a.i + 1 || !Memory.built(mem, a.l + 1, a.i / 2)) {
         return;
       }
-      heap.push({ d: (t + 1) / 2 ** a.l - a.i, k, a, b });
+      heap.push({ d: Memory.due(t, a), k, a, b });
       for (let x = heap.length - 1; x > 0 && over(heap[x], heap[(x - 1) >> 1]); x = (x - 1) >> 1) {
         swap(x, (x - 1) >> 1);
       }
@@ -935,7 +973,7 @@ ${Memory.cut(line)}| ← LIMIT`;
     const whole = Math.floor(lines.length / BLOCK);
     const blocks: Block[] = [{ text: "<chat>\n", mark: whole === 0 }];
     for (let k = 0; k < whole; k++) {
-      blocks.push({ text: lines.slice(k * BLOCK, (k + 1) * BLOCK).join(""), mark: k === whole - 1, ...(k === back && k < whole - 1 ? { back: true } : {}) });
+      blocks.push({ text: lines.slice(k * BLOCK, (k + 1) * BLOCK).join(""), ...Memory.cache_marks(k, whole, back) });
     }
     blocks.push({ text: lines.slice(whole * BLOCK).join("") + "</chat>\n", mark: false });
     return blocks;
@@ -972,8 +1010,14 @@ ${Memory.cut(line)}| ← LIMIT`;
     return Memory.said(root) ? Memory.ref(part) + "|" + Memory.show(root).replace(/<\/chat>/gi, "<\\/chat>") : Memory.line(part, Memory.node(mem, part) ?? WAIT);
   }
 
+  export function cache_marks(k: number, whole: number, back: number): { mark: boolean; back?: true } {
+    const last = k === whole - 1;
+    return { mark: last, ...(k === back && !last ? { back: true } : {}) };
+  }
+
   export function talk_room(window: number): number {
-    return (window * TOKEN * 3) / 4 - HIGH;
+    const window_bytes = window * TOKEN;
+    return window_bytes * TALK_SHARE_OF_WINDOW - VIEW_HIGH;
   }
 
   export function talk_size(mem: Memory, end = mem.count): number {
