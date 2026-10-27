@@ -47,7 +47,7 @@ const SKIP = /^(<command-|<local-command|\[Request interrupted)/;
 
 type Block = { type?: string; text?: unknown; name?: string; input?: unknown; content?: unknown };
 
-type GptMsg = { author?: { role?: string }; recipient?: string; content: { content_type?: string; parts?: unknown[]; text?: unknown }; metadata?: { is_visually_hidden_from_conversation?: boolean }; create_time?: unknown };
+type GptMsg = { author?: { role?: string }; recipient?: string; content?: { content_type?: string; parts?: unknown[]; text?: unknown }; metadata?: { is_visually_hidden_from_conversation?: boolean }; create_time?: unknown };
 
 type Chat = {
   mapping?       : Record<string, { parent?: string; message?: GptMsg | null } | undefined>;
@@ -264,11 +264,11 @@ function chat_openai(chat: Chat, mapping: NonNullable<Chat["mapping"]>): Msg[] {
       return [];
     }
     const role = m.author?.role;
-    const type = String(m.content.content_type);
+    const type = String(m.content?.content_type);
     const kind = role === "user" ? "user" : role === "assistant" ? (m.recipient === "all" ? "unii" : "tool") : role === "tool" ? "echo" : null;
     const skip = kind === null || m.metadata?.is_visually_hidden_from_conversation === true || type === "thoughts" || type === "reasoning_recap";
     date = import_date(m.create_time, date);
-    return skip ? [] : msgs_of(kind, (kind === "tool" ? String(m.recipient) + " " : "") + parts_text(m.content.parts ?? [m.content.text]), date);
+    return skip ? [] : msgs_of(kind, (kind === "tool" ? String(m.recipient) + " " : "") + parts_text(m.content?.parts ?? [m.content?.text]), date);
   });
 }
 
