@@ -59,9 +59,11 @@ const FAILED = "error: ";
 const HUNK  = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/;
 const MARKS = /^(?:\s*(?:[-*+]|\d{1,9}[.)])(?:[ \t]+|$)|\s*>\s?)*/;
 
-const DEPTH = 32;
+const LINK_PARENS_MAX = 32;
 
-const DEEP  = 16;
+const NESTING_MAX = 16;
+
+const LABEL_SCAN_MAX = 1000;
 
 let DEFS = new Map<string, { k: string; t: string }>();
 let COLLECT = false;
@@ -461,7 +463,7 @@ function link_tail(s: string, i: number, unshut: Map<string, number>): { k: stri
     for (; j < s.length && !/[\s\x00-\x1f]/.test(s[j]); j++) {
       if (s[j] === "\\" && j + 1 < s.length) {
         j++;
-      } else if (s[j] === "(" && ++depth > DEPTH) {
+      } else if (s[j] === "(" && ++depth > LINK_PARENS_MAX) {
         return null;
       } else if (s[j] === ")" && depth-- === 0) {
         break;
@@ -568,10 +570,7 @@ export function md_pasted(s: string): Array<[number, number, string, string]> {
   for (let k = s.indexOf("](/media/"); k >= 0; k = s.indexOf("](/media/", k + 1)) {
     MEDIA_URL.lastIndex = k + 2;
     const url = MEDIA_URL.exec(s);
-    let a = k - 1;
-    while (a >= 0 && k - a <= 1000 && s[a] !== "[" && s[a] !== "]" && s[a] !== "\n") {
-      a--;
-    }
+    const a = label_open(s, k);
     const bang = s[a - 1] === "!";
     const from = bang ? a - 1 : a;
     const file = url !== null && !MEDIA.has(url[0].slice(url[0].lastIndexOf(".") + 1));
@@ -601,10 +600,18 @@ export function md_output(s: string, name = "result"): Block[] {
   return [...out, ...output_lines(lines.slice(at), name)];
 }
 
+function label_open(s: string, close: number): number {
+  let a = close - 1;
+  while (a >= 0 && close - a <= LABEL_SCAN_MAX && s[a] !== "[" && s[a] !== "]" && s[a] !== "\n") {
+    a--;
+  }
+  return a;
+}
+
 export function md_shown(s: string, name = "result"): Block[] {
   const out: Block[] = [];
   const failed = s.startsWith(FAILED);
-  let marked = !failed;
+  let error_owed = failed;
   let rest: string[] = [];
   const said = () => {
     out.push(...md_output(rest.join("\n"), name));
@@ -616,11 +623,11 @@ export function md_shown(s: string, name = "result"): Block[] {
       said();
       out.push({ $: "Para", x: [{ $: "Pict", x: media[0][2], k: media[0][3], t: "" }] });
     } else {
-      rest.push(marked ? line : FAILED + line);
-      marked = true;
+      rest.push(error_owed ? FAILED + line : line);
+      error_owed = false;
     }
   }
-  rest.push(...(marked ? [] : [FAILED.trim()]));
+  rest.push(...(error_owed ? [FAILED.trim()] : []));
   said();
   return out;
 }
@@ -822,7 +829,7 @@ function block_parse(lines: string[], i: number, d: number): [Block | null | und
   if (is_rule(line)) {
     return [{ $: "Rule" }, i + 1];
   }
-  if (QUOT.test(line) && d < DEEP) {
+  if (QUOT.test(line) && d < NESTING_MAX) {
     // its lines, and those right under its paragraph that start no block
     // (GFM's lazy lines)
     let [para, fenced] = item_line(line.replace(QUOT, ""), false);
@@ -836,7 +843,7 @@ function block_parse(lines: string[], i: number, d: number): [Block | null | und
     const body = lines.slice(i, end).map((l) => l.replace(QUOT, ""));
     return [{ $: "Quot", x: blocks_parse(body, d + 1)[0] }, end];
   }
-  if (list_kind(line) !== null && d < DEEP) {
+  if (list_kind(line) !== null && d < NESTING_MAX) {
     return list_parse(lines, i, d);
   }
   const a = table_head(lines, i);
