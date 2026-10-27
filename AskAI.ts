@@ -36,7 +36,7 @@ export type Ask = Pick & {
   who?      : string;
 };
 
-type Cached = { until: number; ready: Promise<void> | null };
+type Prefix = { warm_until: number; writing: Promise<void> | null };
 
 export type Flight = { begun: () => void; end: () => void };
 
@@ -90,7 +90,9 @@ const TTL: Record<Vendor, number> = {
   "claude-sub" : 3600e3,
 };
 
-const CACHE = new Map<string, Cached>();
+const PREFIXES = new Map<string, Prefix>();
+
+const UNLED: Flight = { begun: () => {}, end: () => {} };
 
 const COOL = 60e3;
 
@@ -154,7 +156,7 @@ export namespace AskAI {
           const ms = Math.min(WEEK, Math.max(AGAIN, (end.until ?? 0) - Date.now()));
           const why = left.vendor + ":" + Pick.named(left).model + ": " + (limited ? "usage limit" : end.why ?? end.text);
           on({ $: "Again", again: { why, until: Date.now() + ms, limit: limited } });
-          await AskAI.nap(ask, picks, limited ? left.vendor : null, ms, halt.signal);
+          await AskAI.nap_till_woken(ask, picks, limited ? left.vendor : null, ms, halt.signal);
           const now = ask.repick === undefined || halt.signal.aborted ? picks : AskAI.falls(ask.repick());
           if (!AskAI.same(now, picks)) {
             picks = now;
@@ -186,7 +188,17 @@ export namespace AskAI {
     return a.map(Pick.label).join() === b.map(Pick.label).join();
   }
 
-  export async function nap(ask: Ask, picks: Pick[], vendor: Vendor | null, ms: number, signal: AbortSignal): Promise<void> {
+  export async function nap_till_woken(ask: Ask, picks: Pick[], vendor: Vendor | null, ms: number, stopped: AbortSignal): Promise<void> {
+    const repicked = AskAI.repicked(ask, picks);
+    try {
+      const woken = AbortSignal.any([stopped, repicked.signal]);
+      await (vendor === null ? Machine.nap(ms, woken) : Limit.wait(vendor, ms, woken));
+    } finally {
+      repicked.done();
+    }
+  }
+
+  export function repicked(ask: Ask, picks: Pick[]): { signal: AbortSignal; done: () => void } {
     const moved = new AbortController();
     const reread = () => {
       if (ask.repick !== undefined && !AskAI.same(AskAI.falls(ask.repick()), picks)) {
@@ -194,12 +206,7 @@ export namespace AskAI {
       }
     };
     config.RELOADED.add(reread);
-    try {
-      const both = AbortSignal.any([signal, moved.signal]);
-      await (vendor === null ? Machine.nap(ms, both) : Limit.wait(vendor, ms, both));
-    } finally {
-      config.RELOADED.delete(reread);
-    }
+    return { signal: moved.signal, done: () => config.RELOADED.delete(reread) };
   }
 
   export function start(ask: Ask, on: (ev: Event) => void): Try {
@@ -237,7 +244,7 @@ export namespace AskAI {
     return run.vendor + ":" + run.model;
   }
 
-  export function keys(ask: Ask): string[] {
+  export function prefix_keys(ask: Ask): string[] {
     const last = ask.blocks.slice(0, -1).findLastIndex((b) => b.mark);
     // OpenAI caches per session (OpenAI.session)
     const head = [ask.vendor, ask.model, ask.effort, ask.speed, ask.system, ask.searches > 0, ask.vendor.startsWith("openai") ? OpenAI.sharer(ask) : null];
@@ -245,52 +252,61 @@ export namespace AskAI {
     return ask.blocks.slice(0, last + 1).map((b) => String((key = Bun.hash(b.text, key))));
   }
 
-  export async function wait(ask: Ask): Promise<Flight> {
-    const keys = AskAI.keys(ask);
+  export async function single_flight(ask: Ask): Promise<Flight> {
+    const keys = AskAI.prefix_keys(ask);
     const ttl = TTL[ask.vendor];
     for (;;) {
       const now = Date.now();
-      const live = (key: string) => (CACHE.get(key)?.ready ?? null) !== null || (CACHE.get(key)?.until ?? 0) > now;
-      const k = keys.findLastIndex(live);
-      const got = k < 0 ? null : CACHE.get(keys[k]) ?? null;
-      if (got !== null && got.ready !== null) {
-        await got.ready;
+      const k = keys.findLastIndex((key) => AskAI.warm_or_writing(key, now));
+      const got = k < 0 ? null : PREFIXES.get(keys[k]) ?? null;
+      if (got !== null && got.writing !== null) {
+        await got.writing;
         continue;
       }
       if (got !== null) {
-        got.until = now + ttl;
-        CACHE.delete(keys[k]);
-        CACHE.set(keys[k], got);
+        AskAI.rewarm(keys[k], got, now + ttl);
       }
-      if (k === keys.length - 1) {
-        return { begun: () => {}, end: () => {} };
-      }
-      return AskAI.lead(keys[keys.length - 1], ttl, now);
+      return k === keys.length - 1 ? UNLED : AskAI.lead_flight(keys[keys.length - 1], ttl, now);
     }
   }
 
-  export function lead(key: string, ttl: number, now: number): Flight {
-    for (const [k, c] of CACHE) {
-      if (c.ready !== null || c.until >= now) {
+  export function warm_or_writing(key: string, now: number): boolean {
+    const got = PREFIXES.get(key);
+    return got !== undefined && (got.writing !== null || got.warm_until > now);
+  }
+
+  export function rewarm(key: string, prefix: Prefix, until: number): void {
+    prefix.warm_until = until;
+    PREFIXES.delete(key);
+    PREFIXES.set(key, prefix);
+  }
+
+  export function drop_cold(now: number): void {
+    for (const [k, c] of PREFIXES) {
+      if (c.writing !== null || c.warm_until >= now) {
         break;
       }
-      CACHE.delete(k);
+      PREFIXES.delete(k);
     }
-    let free = () => {};
-    const own: Cached = { until: 0, ready: new Promise((ok) => (free = ok)) };
-    CACHE.set(key, own);
+  }
+
+  export function lead_flight(key: string, ttl: number, now: number): Flight {
+    AskAI.drop_cold(now);
+    let written = () => {};
+    const own: Prefix = { warm_until: 0, writing: new Promise((ok) => (written = ok)) };
+    PREFIXES.set(key, own);
     const begun = () => {
-      if (own.ready !== null) {
-        own.ready = null;
-        own.until = Date.now() + ttl;
-        free();
+      if (own.writing !== null) {
+        own.writing = null;
+        own.warm_until = Date.now() + ttl;
+        written();
       }
     };
     const end = () => {
-      if (own.ready !== null) {
-        CACHE.delete(key);
-        own.ready = null;
-        free();
+      if (own.writing !== null) {
+        PREFIXES.delete(key);
+        own.writing = null;
+        written();
       }
     };
     return { begun, end };

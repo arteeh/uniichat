@@ -337,7 +337,7 @@ export namespace Agent {
   }
 
   export async function request<S, E>(wire: Wire<S, E>, run: Doing, key: string, body: unknown, seen: Entry[]): Promise<{ res: Response | null; step: Step }> {
-    const flight = await AskAI.wait(run.ask);
+    const flight = await AskAI.single_flight(run.ask);
     if (run.abort.signal.aborted) {
       flight.end();
       return { res: null, step: Agent.fail("stopped", []) };
