@@ -34,26 +34,40 @@ export type Wait = string;
 
 export type Sums = { done: number; total: number };
 
-type State = {
+type Turning = {
   busy      : boolean;
   wait      : Wait;
+  sums      : Sums | null;
+  again     : Again | null;
+  importing : Progress | null;
+};
+
+type ByRun = {
   agents    : string[];
   runs      : Record<string, Pick>;
+  limits    : Record<string, Parked>;
+  queue     : Record<string, Queued[]>;
+};
+
+type Offered = {
   pick      : Pick | null;
   vendors   : Vendor[];
   models    : string[];
   profiles? : Record<string, Fall[]>;
-  importing : Progress | null;
-  limits    : Record<string, Parked>;
-  queue     : Record<string, Queued[]>;
-  sums      : Sums | null;
-  again     : Again | null;
+};
+
+type ChatSet = {
   timers    : Timer[];
   mcp       : Plug[];
   talk      : Talk | null;
+};
+
+type ServerSays = {
   build?    : string;
   site?     : string;
 };
+
+type State = Turning & ByRun & Offered & ChatSet & ServerSays;
 
 export type Talk = { from: number; used: number; size: number; room: number };
 
