@@ -308,6 +308,28 @@ async function win_start(part: Part, args: string[]): Promise<void> {
   say(part, now, "the Scheduled Task " + n + ", started at logon");
 }
 
+function win_task_unii_made(part: Part, n: string, had: string | null): boolean {
+  if (had === null) {
+    console.log("unii " + part + " isn't set up as a background service here: nothing to stop.");
+    return false;
+  }
+  if (!had.includes(MARK)) {
+    fail(n + " isn't unii's: that Scheduled Task isn't one unii made, so unii leaves it as it is.");
+  }
+  return true;
+}
+
+function forget_run(part: Part): void {
+  fs.rmSync(LOGS + "/" + part + ".pid", { force: true });
+  fs.rmSync(LOGS + "/" + part + ".up", { force: true });
+}
+
+function win_end_task(n: string): void {
+  // ended whatever its state (schtasks shows that in the system's
+  // language); on an idle task /end only fails, which is fine
+  run(["schtasks", "/end", "/tn", "\\" + n]);
+}
+
 async function win_stop(part: Part): Promise<void> {
   const n = name(part);
   const step = clock(part, "stop");
@@ -316,19 +338,12 @@ async function win_stop(part: Part): Promise<void> {
   step("processes looked up");
   const had = win_task(n);
   step("task looked up");
-  if (had === null) {
-    console.log("unii " + part + " isn't set up as a background service here: nothing to stop.");
+  if (!win_task_unii_made(part, n, had)) {
     return;
   }
-  if (!had.includes(MARK)) {
-    fail(n + " isn't unii's: that Scheduled Task isn't one unii made, so unii leaves it as it is.");
-  }
-  fs.rmSync(LOGS + "/" + part + ".pid", { force: true });
-  fs.rmSync(LOGS + "/" + part + ".up", { force: true });
-  // ended whatever its state (schtasks shows that in the system's
-  // language); on an idle task /end only fails, which is fine
+  forget_run(part);
   if (mine.length === 0) {
-    run(["schtasks", "/end", "/tn", "\\" + n]);
+    win_end_task(n);
     step("task ended");
   }
   schtasks("/delete", "/tn", "\\" + n, "/f");
@@ -397,6 +412,23 @@ export async function supervise(part: Part, args: string[]): Promise<never> {
   fs.mkdirSync(LOGS, { recursive: true, mode: 0o700 });
   fs.rmSync(LOGS + "/" + part + ".stop", { force: true });
   const file = LOGS + "/" + part + ".pid";
+  await end_earlier_supervisors(part);
+  const log = logger(LOGS + "/" + part + ".log");
+  const run: Supervised = { child: null, stopping: false };
+  for (const sig of STOP_SIGNALS) {
+    process.on(sig, () => {
+      run.stopping = true;
+      run.child?.kill();
+    });
+  }
+  const code = await run_restarting(part, args, file, log, run);
+  fs.rmSync(file, { force: true });
+  process.exit(run.stopping ? 0 : code);
+}
+
+type Supervised = { child: ReturnType<typeof Bun.spawn> | null; stopping: boolean };
+
+async function end_earlier_supervisors(part: Part): Promise<void> {
   const before = pids(part);
   const old = ours(part, before.filter((pid) => pid !== process.pid));
   if (WIN) {
@@ -410,33 +442,25 @@ export async function supervise(part: Part, args: string[]): Promise<never> {
       process.kill(pid);
     } catch {}
   }
-  const log = logger(LOGS + "/" + part + ".log");
-  let child: ReturnType<typeof Bun.spawn> | null = null;
-  let stopping = false;
-  for (const sig of ["SIGTERM", "SIGINT", "SIGHUP"] as const) {
-    process.on(sig, () => {
-      stopping = true;
-      child?.kill();
-    });
-  }
+}
+
+async function run_restarting(part: Part, args: string[], file: string, log: (line: string) => void, run: Supervised): Promise<number> {
   let [tries, code] = [0, 0];
   while (true) {
     const began = Date.now();
     const env = { ...process.env, UNII_SERVICE: part, UNII_SUPERVISOR: String(process.pid) };
-    child = Bun.spawn([...command(), part, ...args], { env, stdin: "ignore", stdout: "pipe", stderr: "pipe", windowsHide: true });
+    const child = (run.child = Bun.spawn([...command(), part, ...args], { env, stdin: "ignore", stdout: "pipe", stderr: "pipe", windowsHide: true }));
     fs.writeFileSync(file, process.pid + " " + child.pid + "\n");
-    await Promise.all([lines(child.stdout as ReadableStream<Uint8Array>, log), lines(child.stderr as ReadableStream<Uint8Array>, log), child.exited]);
+    await Promise.all([lines(child.stdout, log), lines(child.stderr, log), child.exited]);
     code = child.exitCode ?? 1;
     log("unii " + part + " ended (exit " + code + ")");
     tries = Date.now() - began > RAN ? 1 : tries + 1;
-    if (code === 0 || stopping || tries > RESTARTS) {
-      break;
+    if (code === 0 || run.stopping || tries > RESTARTS) {
+      return code;
     }
     log("starting it again in a minute (" + tries + " of " + RESTARTS + ")");
     await Bun.sleep(AFTER);
   }
-  fs.rmSync(file, { force: true });
-  process.exit(stopping ? 0 : code);
 }
 
 function logger(file: string): (text: string) => void {
