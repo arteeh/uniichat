@@ -11,6 +11,8 @@ import { FIT, HEAD, IMAGE, image_kind, PIXELS } from "./View.ts";
 export type Job = { name: string; input: Record<string, unknown>; cwd: string };
 
 // what ffprobe -of json tells of a video, as far as it is read here
+type Stream = NonNullable<Probe["streams"]>[number];
+
 type Probe = {
   streams? : { index?: number; codec_name?: string; width?: number; height?: number; sample_aspect_ratio?: string; avg_frame_rate?: string; r_frame_rate?: string; nb_frames?: string; duration?: string; side_data_list?: { rotation?: number }[] }[];
   format?  : { duration?: string; format_name?: string; start_time?: string };
@@ -146,11 +148,40 @@ export namespace Machine {
   }
 
   export async function shell(cwd: string, command: string, ms: number, signal: AbortSignal): Promise<Out> {
-    SHELLS.forEach((_, p) => Machine.group(p) || SHELLS.delete(p));
+    SHELLS.forEach((_, p) => Machine.group_may_hold_job(p) || SHELLS.delete(p));
     const agent = path.basename(cwd);
     const start = performance.now();
+    const proc = Machine.spawn_in_group_marked(cwd, command, agent);
+    const out = clip();
+    SHELLS.set(proc, agent);
+    const readers = Machine.decoded_output(proc);
+    const kill = () => {
+      if (!WIN || Machine.group_may_hold_job(proc)) {
+        Machine.kill(-proc.pid);
+      }
+      readers.forEach((r) => {
+        r.cancel().catch(() => undefined);
+      });
+    };
+    signal.addEventListener("abort", kill, { once: true });
+    const reading = { kept: true };
+    const read = Machine.read_into(readers, out, reading).then(() => proc.exited);
+    const ended = await Machine.within(read, ms);
+    signal.removeEventListener("abort", kill);
+    const secs = (performance.now() - start) / 1000;
+    const text = (WIN ? out.text().replace(/\r\n/g, "\n") : out.text()).replace(/\n$/, "");
+    if (ended === "late" && !signal.aborted) {
+      reading.kept = false;
+      return { text: (text === "" ? "" : text + "\n") + "(still running after " + Math.round(secs) + " s, pid " + proc.pid + "; not killed)", fail: false };
+    }
+    const code = await proc.exited;
+    const exit = signal.aborted ? "stopped" : proc.signalCode ? "killed by " + proc.signalCode : "exit " + code;
+    return { text: (text === "" ? "" : text + "\n") + "(" + exit + " in " + secs.toFixed(1) + " s)", fail: exit !== "exit 0" };
+  }
+
+  export function spawn_in_group_marked(cwd: string, command: string, agent: string): Bun.Subprocess<"ignore", "pipe", "pipe" | "ignore"> {
     const argv = WIN ? [SHELL, "-NoProfile", "-NonInteractive", "-Command", PWSH + command] : [SHELL, "-c", "exec 2>&1\n" + command];
-    const proc = Bun.spawn(argv, {
+    return Bun.spawn(argv, {
       cwd         : cwd,
       env         : { ...process.env, UNII_RUN: RUN, UNII_AGENT: agent },
       stdin       : "ignore",
@@ -159,45 +190,36 @@ export namespace Machine {
       detached    : !WIN,
       windowsHide : true,
     });
-    const out = clip();
-    SHELLS.set(proc, agent);
-    const readers = [proc.stdout, ...(WIN ? [proc.stderr as typeof proc.stdout] : [])].map((s) => s.pipeThrough(new TextDecoderStream()).getReader());
-    const kill = () => {
-      if (!WIN || Machine.group(proc)) {
-        Machine.kill(-proc.pid);
-      }
-      readers.forEach((r) => {
-        r.cancel().catch(() => undefined);
-      });
-    };
-    signal.addEventListener("abort", kill, { once: true });
-    let kept = true;
-    const read = Promise.all(readers.map(async (reader) => {
+  }
+
+  export function decoded_output(proc: Bun.Subprocess<"ignore", "pipe", "pipe" | "ignore">): ReadableStreamDefaultReader<string>[] {
+    const streams = [proc.stdout, ...(WIN && proc.stderr instanceof ReadableStream ? [proc.stderr] : [])];
+    return streams.map((s) => s.pipeThrough(new TextDecoderStream()).getReader());
+  }
+
+  export async function read_into(readers: ReadableStreamDefaultReader<string>[], out: { add: (str: string) => void }, reading: { kept: boolean }): Promise<void> {
+    await Promise.all(readers.map(async (reader) => {
       try {
         for (let got = await reader.read(); !got.done; got = await reader.read()) {
-          if (kept) {
+          if (reading.kept) {
             out.add(got.value);
           }
         }
       } catch {}
-    })).then(() => proc.exited);
-    let timer: Timer | undefined;
-    const late = new Promise<"late">((ok) => (timer = setTimeout(() => ok("late"), ms)));
-    const ended = await Promise.race([read, late]);
-    clearTimeout(timer);
-    signal.removeEventListener("abort", kill);
-    const secs = (performance.now() - start) / 1000;
-    const text = (WIN ? out.text().replace(/\r\n/g, "\n") : out.text()).replace(/\n$/, "");
-    if (ended === "late" && !signal.aborted) {
-      kept = false;
-      return { text: (text === "" ? "" : text + "\n") + "(still running after " + Math.round(secs) + " s, pid " + proc.pid + "; not killed)", fail: false };
-    }
-    const code = await proc.exited;
-    const exit = signal.aborted ? "stopped" : proc.signalCode ? "killed by " + proc.signalCode : "exit " + code;
-    return { text: (text === "" ? "" : text + "\n") + "(" + exit + " in " + secs.toFixed(1) + " s)", fail: exit !== "exit 0" };
+    }));
   }
 
-  export function group(proc: Bun.Subprocess): boolean {
+  export async function within<T>(go: Promise<T>, ms: number): Promise<T | "late"> {
+    let timer: Timer | undefined;
+    const late = new Promise<"late">((ok) => (timer = setTimeout(() => ok("late"), ms)));
+    try {
+      return await Promise.race([go, late]);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  export function group_may_hold_job(proc: Bun.Subprocess): boolean {
     const ended = proc.exitCode !== null || proc.signalCode !== null;
     // Windows has no groups, and an ended shell's id may be reused
     return !ended || (!WIN && !Machine.alive(proc.pid) && Machine.alive(-proc.pid));
@@ -238,7 +260,7 @@ export namespace Machine {
 
   export function sweep(agent: string | null): number | null {
     for (const [proc, who] of SHELLS) {
-      if ((agent === null || who === agent) && Machine.group(proc)) {
+      if ((agent === null || who === agent) && Machine.group_may_hold_job(proc)) {
         Machine.kill(-proc.pid);
       }
     }
@@ -300,22 +322,35 @@ export namespace Machine {
     }
     const k = Math.min(1, side / Math.max(w0, h0));
     const kinds = kind === "image/jpeg" ? ["jpeg"] : ["png", "webp", "jpeg"];
-    for (let [w, h] = [Math.max(1, Math.round(w0 * k)), Math.max(1, Math.round(h0 * k))]; ; [w, h] = [Math.max(1, Math.round(w * 0.75)), Math.max(1, Math.round(h * 0.75))]) {
+    const smaller = ([w, h]: [number, number]): [number, number] => [Math.max(1, Math.round(w * 0.75)), Math.max(1, Math.round(h * 0.75))];
+    for (let [w, h] = [Math.max(1, Math.round(w0 * k)), Math.max(1, Math.round(h0 * k))]; ; [w, h] = smaller([w, h])) {
       for (const as of kinds) {
-        const fit = new Bun.Image(data).resize(w, h);
-        const out = await (as === "png" ? fit.png() : as === "webp" ? fit.webp({ quality: 85 }) : fit.jpeg({ quality: 85 })).bytes().catch(() => null);
+        const out = await Machine.encoded(data, w, h, as);
         if (out === null) {
           return null;
         }
         if (k === 1 && w === w0 && kind !== "image/gif" && data.length <= IMAGE) {
-          return { text: "[image " + w0 + "x" + h0 + "]", fail: false, imgs: [{ type: kind, data: data.toString("base64") }] };
+          return Machine.image_as_is(data, kind, w0, h0);
         }
         if (out.length <= IMAGE || w * h <= 64) {
-          const how = w === w0 && h === h0 ? "" : ", scaled from " + w0 + "x" + h0;
-          return { text: "[image " + w + "x" + h + how + "]", fail: false, imgs: [{ type: "image/" + as, data: Buffer.from(out).toString("base64") }] };
+          return Machine.image_scaled(out, as, [w, h], [w0, h0]);
         }
       }
     }
+  }
+
+  export function encoded(data: Buffer, w: number, h: number, as: string): Promise<Uint8Array | null> {
+    const fit = new Bun.Image(data).resize(w, h);
+    return (as === "png" ? fit.png() : as === "webp" ? fit.webp({ quality: 85 }) : fit.jpeg({ quality: 85 })).bytes().catch(() => null);
+  }
+
+  export function image_as_is(data: Buffer, kind: string, w0: number, h0: number): Out {
+    return { text: "[image " + w0 + "x" + h0 + "]", fail: false, imgs: [{ type: kind, data: data.toString("base64") }] };
+  }
+
+  export function image_scaled(out: Uint8Array, as: string, [w, h]: [number, number], [w0, h0]: [number, number]): Out {
+    const how = w === w0 && h === h0 ? "" : ", scaled from " + w0 + "x" + h0;
+    return { text: "[image " + w + "x" + h + how + "]", fail: false, imgs: [{ type: "image/" + as, data: Buffer.from(out).toString("base64") }] };
   }
 
   export async function video(file: string, input: Record<string, unknown>, signal: AbortSignal): Promise<Out> {
@@ -323,27 +358,15 @@ export namespace Machine {
     if (ffmpeg === null || ffprobe === null) {
       return { text: "view_video needs ffmpeg and ffprobe, which aren't installed on this device. Install ffmpeg (e.g. apt install ffmpeg / brew install ffmpeg / winget install ffmpeg) and try again.", fail: true };
     }
-    const shown = "stream=index,codec_name,width,height,sample_aspect_ratio,avg_frame_rate,r_frame_rate,nb_frames,duration:stream_side_data=rotation:format=duration,format_name,start_time";
-    const probe = await Machine.exec([ffprobe, "-v", "error", "-select_streams", "V:0", "-show_entries", shown, "-of", "json", file], signal);
-    if (probe.code !== 0) {
-      return { text: "ffprobe: " + probe.err.trim(), fail: true };
+    const probed = await Machine.video_probe(ffprobe, file, String(input.path), signal);
+    if ("text" in probed) {
+      return probed;
     }
-    const json   = JSON.parse(probe.out.toString()) as Probe;
-    const stream = json.streams?.[0];
-    if (stream === undefined || !((stream.width ?? 0) > 0 && (stream.height ?? 0) > 0)) {
-      return { text: "No video stream in " + String(input.path) + ".", fail: true };
-    }
+    const { json, stream } = probed;
     const sec    = input.unit === "second";
     const given  = (x: unknown) => x !== undefined && x !== null;
     const [s0, s1] = [given(input.start) ? Number(input.start) : 0, given(input.end) ? Number(input.end) : Infinity];
-    const upto   = s1 === Infinity ? [] : ["-read_intervals", sec ? "%+" + (s1 + 1) : "%+#" + (Math.round(s1) + 1 + REORDER)];
-    const packs  = await Machine.exec([ffprobe, "-v", "error", "-select_streams", String(stream.index), ...upto, "-show_entries", "packet=pts_time", "-of", "csv=p=0", file], signal);
-    const lines  = packs.out.toString().split("\n").filter((l) => l.trim() !== "");
-    const zero   = Number(json.format?.start_time) || 0;
-    const read   = packs.code === 0 && lines.length > 0 && lines.every((l) => Number.isFinite(parseFloat(l)));
-    const sorted = read ? lines.map((l) => parseFloat(l) - zero).sort((a, b) => a - b) : null;
-    const whole  = upto.length === 0 || (sec ? sorted !== null && sorted[sorted.length - 1] < s1 + 0.5 : lines.length < Math.round(s1) + 1 + REORDER);
-    const times  = sorted === null || whole ? sorted : sec ? sorted.filter((t) => t <= s1 + 0.5) : sorted.slice(0, sorted.length - REORDER);
+    const { times, whole } = await Machine.frame_times(ffprobe, file, stream.index, Number(json.format?.start_time) || 0, sec, s1, signal);
     const fps    = Machine.rate(stream.avg_frame_rate) || Machine.rate(stream.r_frame_rate);
     const secs   = Number(stream.duration ?? json.format?.duration);
     const nb     = Number(stream.nb_frames) > 0 ? Number(stream.nb_frames) : times !== null && whole ? times.length : 0;
@@ -369,30 +392,21 @@ export namespace Machine {
     if (count > SHEET) {
       return { text: about + "\n" + count + " frames: at most " + SHEET + " fit one sheet. Raise step, narrow the range, or call again on consecutive ranges.", fail: true };
     }
-    const side  = Machine.side(input.max_side);
-    const fits  = (c: number) => Math.min((side - GAP * (c + 1)) / (c * w0), (side - GAP * (Math.ceil(count / c) + 1)) / (Math.ceil(count / c) * h0));
-    let cols    = 1;
-    for (let c = 2; c <= count; c++) {
-      cols = fits(c) > fits(cols) ? c : cols;
+    const layout = Machine.sheet_layout(count, w0, h0, Machine.side(input.max_side));
+    if (typeof layout === "string") {
+      return { text: about + "\n" + layout, fail: true };
     }
-    const rows  = Math.ceil(count / cols);
-    const k     = Math.min(1, fits(cols));
-    const [w, h] = [2 * Math.floor((w0 * k) / 2), 2 * Math.floor((h0 * k) / 2)];
-    if (Math.min(w, h) < CELL) {
-      return { text: about + "\nmax_side " + side + " is too small for " + count + " frames (each under " + CELL + " px): raise max_side or take fewer frames.", fail: true };
-    }
+    const { cols, rows, w, h } = layout;
     const font  = Math.max(10, Math.round(Math.min(h / 10, w / 8)));
     const label = ":fontsize=" + font + ":fontcolor=white:box=1:boxcolor=black@0.6:boxborderw=2:x=2";
-    const seeks = times !== null && INDEXED.test(json.format?.format_name ?? "");
+    const takes = Array.from({ length: count }, (_, i) => start + i * step);
+    const { seeks, at, apart } = Machine.seek_plan(times, json.format?.format_name ?? "", takes);
     const known = times ?? [];
-    const at    = (f: number) => (seeks && f > 0 ? (known[f - 1] + known[f]) / 2 : 0);
     const from  = (f: number) => (at(f) > 0 ? ["-ss", at(f).toFixed(6)] : []);
     const hms   = (t: number) => new Date(Math.max(0, t) * 1000).toISOString().slice(11, 23);
     const out   = ["-frames:v", "1", "-f", "image2pipe", "-c:v", "mjpeg", "-q:v", "3", "pipe:1"];
     const fit   = "scale=" + w + ":" + h + ",setsar=1";
     const grid  = "tile=" + cols + "x" + rows + ":nb_frames=" + count + ":padding=" + GAP + ":margin=" + GAP + ":color=white";
-    const takes = Array.from({ length: count }, (_, i) => start + i * step);
-    const apart = seeks && count > 1 && (known[takes[count - 1]] - known[start]) / (count - 1) > SPARSE;
     const sheet = async (stamp: boolean) => {
       const marks = (n: string, t: string) => (stamp ? ",drawtext=text='" + n + "'" + label + ":y=2,drawtext=text='" + t + "'" + label + ":y=h-th-4" : "");
       if (apart) {
@@ -426,6 +440,55 @@ export namespace Machine {
   }
 
   // a frame rate as ffprobe gives it ("30000/1001"); 0 if none
+  export async function video_probe(ffprobe: string, file: string, shown: string, signal: AbortSignal): Promise<{ json: Probe; stream: Stream } | Out> {
+    const entries = "stream=index,codec_name,width,height,sample_aspect_ratio,avg_frame_rate,r_frame_rate,nb_frames,duration:stream_side_data=rotation:format=duration,format_name,start_time";
+    const probe = await Machine.exec([ffprobe, "-v", "error", "-select_streams", "V:0", "-show_entries", entries, "-of", "json", file], signal);
+    if (probe.code !== 0) {
+      return { text: "ffprobe: " + probe.err.trim(), fail: true };
+    }
+    const json   = JSON.parse(probe.out.toString()) as Probe;
+    const stream = json.streams?.[0];
+    if (stream === undefined || !((stream.width ?? 0) > 0 && (stream.height ?? 0) > 0)) {
+      return { text: "No video stream in " + shown + ".", fail: true };
+    }
+    return { json, stream };
+  }
+
+  export async function frame_times(ffprobe: string, file: string, index: number | undefined, zero: number, sec: boolean, s1: number, signal: AbortSignal): Promise<{ times: number[] | null; whole: boolean }> {
+    const upto   = s1 === Infinity ? [] : ["-read_intervals", sec ? "%+" + (s1 + 1) : "%+#" + (Math.round(s1) + 1 + REORDER)];
+    const packs  = await Machine.exec([ffprobe, "-v", "error", "-select_streams", String(index), ...upto, "-show_entries", "packet=pts_time", "-of", "csv=p=0", file], signal);
+    const lines  = packs.out.toString().split("\n").filter((l) => l.trim() !== "");
+    const read   = packs.code === 0 && lines.length > 0 && lines.every((l) => Number.isFinite(parseFloat(l)));
+    const sorted = read ? lines.map((l) => parseFloat(l) - zero).sort((a, b) => a - b) : null;
+    const whole  = upto.length === 0 || (sec ? sorted !== null && sorted[sorted.length - 1] < s1 + 0.5 : lines.length < Math.round(s1) + 1 + REORDER);
+    const times  = sorted === null || whole ? sorted : sec ? sorted.filter((t) => t <= s1 + 0.5) : sorted.slice(0, sorted.length - REORDER);
+    return { times, whole };
+  }
+
+  export function sheet_layout(count: number, w0: number, h0: number, side: number): { cols: number; rows: number; w: number; h: number } | string {
+    const fits  = (c: number) => Math.min((side - GAP * (c + 1)) / (c * w0), (side - GAP * (Math.ceil(count / c) + 1)) / (Math.ceil(count / c) * h0));
+    let cols    = 1;
+    for (let c = 2; c <= count; c++) {
+      cols = fits(c) > fits(cols) ? c : cols;
+    }
+    const rows  = Math.ceil(count / cols);
+    const k     = Math.min(1, fits(cols));
+    const [w, h] = [2 * Math.floor((w0 * k) / 2), 2 * Math.floor((h0 * k) / 2)];
+    if (Math.min(w, h) < CELL) {
+      return "max_side " + side + " is too small for " + count + " frames (each under " + CELL + " px): raise max_side or take fewer frames.";
+    }
+    return { cols, rows, w, h };
+  }
+
+  export function seek_plan(times: number[] | null, format: string, takes: number[]): { seeks: boolean; at: (f: number) => number; apart: boolean } {
+    const seeks = times !== null && INDEXED.test(format);
+    const known = times ?? [];
+    const at    = (f: number) => (seeks && f > 0 ? (known[f - 1] + known[f]) / 2 : 0);
+    const count = takes.length;
+    const apart = seeks && count > 1 && (known[takes[count - 1]] - known[takes[0]]) / (count - 1) > SPARSE;
+    return { seeks, at, apart };
+  }
+
   export function rate(text: unknown): number {
     const [a, b = 1] = String(text).split("/").map(Number);
     return a > 0 && b > 0 ? a / b : 0;
