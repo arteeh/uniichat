@@ -32,6 +32,8 @@ type Cmd = [use: string, keys: string, text: string, run: (t: Term, arg: string)
 
 const WIN = process.platform === "win32";
 
+const TOP_ROW_KEPT_FREE = 1;
+
 const MARGIN = 2;
 
 const FRAME = 16;
@@ -287,6 +289,10 @@ function term_help(t: Term): void {
   t.out = t.out.concat(term_inset([[], ...term_groups().flatMap(group), [Paint.Run("Editing", bold)], ...edit]));
 }
 
+function blob_of_bytes_read_now(bytes: Uint8Array<ArrayBuffer>): Blob {
+  return new Blob([bytes]);
+}
+
 async function term_image(t: Term, arg: string): Promise<void> {
   const file = arg.replace(/^(['"])(.*)\1$/, "$2").replace(/\\(.)/g, "$1").replace(/^~(?=\/|$)/, os.homedir());
   if (!fs.existsSync(file) || !fs.statSync(file).isFile()) {
@@ -298,7 +304,7 @@ async function term_image(t: Term, arg: string): Promise<void> {
     term_note(t, "Not attached: " + arg + " is no image. " + View.IMAGES);
     return;
   }
-  t.imgs.push(new Blob([bytes]));
+  t.imgs.push(blob_of_bytes_read_now(bytes));
   term_note(t, "Attached " + arg + "; it goes with the next message (" + t.imgs.length + " waiting).");
 }
 
@@ -687,7 +693,7 @@ function term_paint(t: Term): void {
   term_flow(t);
   const w     = Screen.screen_width();
   const iw    = term_inner();
-  const room  = (process.stdout.rows || 24) - 1;
+  const room  = (process.stdout.rows || 24) - TOP_ROW_KEPT_FREE;
   const off   = t.scr.off;
   const input = off ? null : Screen.screen_input(t.scr, iw, room - 3, View.HINT + " · /help");
   const under = off && t.v.up ? [] : [Paint.rule_text(t.v.up ? "" : "offline", iw)];
