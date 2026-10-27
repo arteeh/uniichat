@@ -87,9 +87,24 @@ function update(): void {
   }
   const cmd = Update.update_cmd(process.execPath, WIN);
   console.error(cmd);
-  const run = WIN ? [Bun.which("pwsh") ?? "powershell.exe", "-NoProfile", "-Command", "$ErrorActionPreference = 'Stop'; $global:LASTEXITCODE = 1; " + cmd + "; exit $LASTEXITCODE"] : ["sh", "-c", cmd];
-  const env = { ...process.env, UNII_UPDATER: String(process.pid) };
-  process.exitCode = child.spawnSync(run[0], run.slice(1), { stdio: "inherit", env }).status ?? 1;
+  const run = WIN ? powershell_exiting_as_installer(cmd) : ["sh", "-c", cmd];
+  process.exitCode = child.spawnSync(run[0], run.slice(1), { stdio: "inherit", env: env_naming_updater() }).status ?? 1;
+}
+
+const FAILED_TILL_INSTALLER_EXITS = "$global:LASTEXITCODE = 1; ";
+
+function powershell_exiting_as_installer(cmd: string): string[] {
+  return [Bun.which("pwsh") ?? "powershell.exe", "-NoProfile", "-Command", "$ErrorActionPreference = 'Stop'; " + FAILED_TILL_INSTALLER_EXITS + cmd + "; exit $LASTEXITCODE"];
+}
+
+function env_naming_updater(): Record<string, string | undefined> {
+  return { ...process.env, UNII_UPDATER: String(process.pid) };
+}
+
+function unmark_from_parent_shell(): void {
+  for (const k of ["UNII_RUN", "UNII_AGENT", "INVOCATION_ID"]) {
+    delete process.env[k];
+  }
 }
 
 // on Windows a running unii.exe can't be replaced, only renamed: the
@@ -123,9 +138,7 @@ if (SUPERVISOR > 0) {
 }
 
 if (part !== null && (FLAG.has("-d") || sub === "stop")) {
-  for (const k of ["UNII_RUN", "UNII_AGENT", "INVOCATION_ID"]) {
-    delete process.env[k];
-  }
+  unmark_from_parent_shell();
 }
 
 if ((SETS.length > 0 && !FLAG.has("--service")) || (FLAG.size > 0 && !runs && !(part !== null && sub === "logs" && flags("-f")))) {
