@@ -46,20 +46,32 @@ export function runs_wrap(runs: Line, w: number, hard: boolean): Line[] {
   let col = 0;
   for (const r of runs) {
     const whole  = col + text_width(r.x) <= w && (col > 0 || out.length === 1);
-    const pieces = whole ? [r.x] : hard ? text_graphemes(r.x) : r.x.split(/(\s+)/).flatMap((p) => (text_width(p) <= w || /^https?:\/\//.test(p) ? [p] : text_graphemes(p)));
+    const pieces = whole ? [r.x] : hard ? text_graphemes(r.x) : prose_pieces(r.x, w);
     for (const p of pieces) {
       const pw = text_width(p);
       if (col > 0 && col + pw > w) {
         out.push([]);
         col = 0;
       }
-      if (!(!hard && /^\s+$/.test(p) && col === 0 && out.length > 1)) {
+      if (!(!hard && space_at_a_break(p, col, out.length))) {
         out[out.length - 1].push(Run(p, r.s));
         col += pw;
       }
     }
   }
   return out;
+}
+
+function prose_pieces(text: string, w: number): string[] {
+  return text.split(/(\s+)/).flatMap((p) => (text_width(p) <= w || is_link(p) ? [p] : text_graphemes(p)));
+}
+
+function is_link(word: string): boolean {
+  return /^https?:\/\//.test(word);
+}
+
+function space_at_a_break(piece: string, col: number, lines: number): boolean {
+  return /^\s+$/.test(piece) && col === 0 && lines > 1;
 }
 
 function line_width(l: Line): number {
