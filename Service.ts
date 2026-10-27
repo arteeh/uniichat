@@ -458,7 +458,9 @@ export async function supervise(part: Part, args: string[]): Promise<never> {
     });
   }
   const code = await run_restarting(part, args, file, log, run);
-  fs.rmSync(file, { force: true });
+  if (read(file)?.startsWith(process.pid + " ")) {
+    fs.rmSync(file, { force: true });
+  }
   process.exit(run.stopping ? 0 : code);
 }
 
