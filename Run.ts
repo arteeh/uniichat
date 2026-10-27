@@ -9,35 +9,48 @@ export type Heard = Event | { $: "Ended" };
 
 type Queued<Q> = { q: Q; done: (why: string | null) => void };
 
-export type Run<Q, M> = {
-  name  : string;
-  kind  : Kind<Q, M>;
+type Loop = {
   busy  : boolean;
   going : Promise<void>;
-  call  : Call | null;
+  halt  : AbortController;
+};
+
+type Inbox<Q, M> = {
   queue : Queued<Q>[];
   wait  : M[];
-  halt  : AbortController;
+};
+
+type Calling = {
+  call  : Call | null;
   live  : Live[];
   calls : Map<string, Waiting>;
   limit : Parked | null;
   fell  : string | null;
 };
 
-type Kind<Q, M> = {
-  pick   : () => Pick;
+export type Run<Q, M> = { name: string; kind: Kind<Q, M> } & Loop & Inbox<Q, M> & Calling;
+
+type LoopHooks<Q, M> = {
   begin  : (run: Run<Q, M>) => void;
-  log    : (run: Run<Q, M>, q: Q) => M | Promise<M>;
-  ask    : (run: Run<Q, M>, take: () => M[]) => Ask | null | Promise<Ask | null>;
-  queued : (run: Run<Q, M>) => void;
-  again  : (q: Q) => boolean;
-  ended  : (run: Run<Q, M>, end: End) => boolean | Promise<boolean>;
   failed : (run: Run<Q, M>, why: string) => void;
   ending : (run: Run<Q, M>) => void;
   finish : (run: Run<Q, M>) => void;
-  on     : (run: Run<Q, M>, ev: Heard) => void;
-  change : () => void;
 };
+
+type InboxHooks<Q, M> = {
+  log    : (run: Run<Q, M>, q: Q) => M | Promise<M>;
+  queued : (run: Run<Q, M>) => void;
+  again  : (q: Q) => boolean;
+};
+
+type CallHooks<Q, M> = {
+  pick   : () => Pick;
+  ask    : (run: Run<Q, M>, take: () => M[]) => Ask | null | Promise<Ask | null>;
+  ended  : (run: Run<Q, M>, end: End) => boolean | Promise<boolean>;
+  on     : (run: Run<Q, M>, ev: Heard) => void;
+};
+
+type Kind<Q, M> = LoopHooks<Q, M> & InboxHooks<Q, M> & CallHooks<Q, M> & { change: () => void };
 
 export namespace Run {
 
