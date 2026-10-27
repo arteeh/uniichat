@@ -119,7 +119,7 @@ export namespace Mcp {
       s.up = Mcp.open(servers, s);
     } else if (s.stale) {
       s.stale = false;
-      s.up = s.up.then(() => Mcp.listed(servers, s, AbortSignal.timeout(START_MS))).catch((err: unknown) => "failed to list its tools: " + Mcp.why(err));
+      s.up = s.up.then(() => Mcp.listed(servers, s, AbortSignal.timeout(START_MS))).catch((err: unknown) => "failed to list its tools: " + err_why(err));
     }
     const up = s.up;
     const got = await up;
@@ -156,7 +156,7 @@ export namespace Mcp {
       up = true;
       return specs;
     } catch (err) {
-      return timer.aborted ? "didn't start within " + START_MS / 1e3 + " s" : "failed to start: " + Mcp.why(err);
+      return timer.aborted ? "didn't start within " + START_MS / 1e3 + " s" : "failed to start: " + err_why(err);
     }
   }
 
@@ -266,7 +266,7 @@ export namespace Mcp {
             continue;
           }
           const next = why === "was ended by unii" ? "." : "; the next call starts it again.";
-          return fail(head + (why === null ? "failed: " + Mcp.why(err) + "." : why + next));
+          return fail(head + (why === null ? "failed: " + err_why(err) + "." : why + next));
         }
       }
     } finally {
@@ -313,10 +313,6 @@ export namespace Mcp {
 
   export function name(server: string, tool: string): string {
     return (server + "__" + tool).replace(/[^A-Za-z0-9_-]/g, "_");
-  }
-
-  export function why(err: unknown): string {
-    return err_why(err);
   }
 
   export function reason(signal: AbortSignal): Error {
@@ -418,7 +414,7 @@ export namespace Mcp {
         lines.forEach((line) => line.trim() !== "" && heard(line));
       }
     })().catch((err: unknown) => {
-      fail(Mcp.why(err) + "; unii ended it");
+      fail(err_why(err) + "; unii ended it");
       end();
     });
     const err = (async () => {
@@ -544,7 +540,7 @@ export namespace Mcp {
           throw new Error("needs a url");
         }
       } catch (err) {
-        return answer({ dead: Mcp.why(err) });
+        return answer({ dead: err_why(err) });
       }
       const run = { link: null as unknown as Link, changed: false };
       const changed = () => (run.changed = true);
@@ -562,7 +558,7 @@ export namespace Mcp {
       if (dead !== null) {
         HERE.delete(key);
       }
-      return answer(dead !== null ? { dead } : { error: Mcp.why(err) });
+      return answer(dead !== null ? { dead } : { error: err_why(err) });
     }
   }
 
@@ -664,8 +660,8 @@ export namespace Mcp {
         version = method === "initialize" ? text_of(get(get(msg, "result"), "protocolVersion"), VERSION) : version;
         return get(msg, "result");
       } catch (err) {
-        if (Mcp.why(err).startsWith("sent a message over")) {
-          end(Mcp.why(err) + "; unii ended it");
+        if (err_why(err).startsWith("sent a message over")) {
+          end(err_why(err) + "; unii ended it");
         }
         throw dead !== null ? new Error(dead) : err;
       } finally {
