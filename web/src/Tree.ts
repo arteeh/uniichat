@@ -15,7 +15,7 @@ type Base = [number, number, number, number, number, number, number];
 // and its links to the column before (Tree's link), its span's top and bottom
 type Q = [...Base, number[], number, number];
 
-type Plan = { F: [number, number][]; A: number[]; P: Float64Array; slot: number[]; find: (m: number) => number; cards: Q[][]; total: number };
+type Plan = { level: [number, number][]; A: number[]; P: Float64Array; slot: number[]; find: (m: number) => number; cards: Q[][]; total: number };
 
 type Old = Map<string, number[]> & { total?: number };
 
@@ -119,9 +119,9 @@ const step = () => cols[1].offsetLeft - cols[0].offsetLeft || 1;
 const got = new Map<string, Got | null>(), shown = new Map<string, Card>();
 let L = vt, plan!: Plan, moving = 0, wait: ReturnType<typeof setTimeout> | undefined, width = 0, started = false, left = 0, sliding = false, done: () => void = () => {}, goal: number | null = null, big: Card | null = null;
 const height = (_l: number, _i: number) => HC;
-const frontier = (L: number) => Array.from({ length: L < 0 ? N : B[L].length }, (_, i) => [L, i] as [number, number]);
+const level_nodes = (L: number) => Array.from({ length: L < 0 ? N : B[L].length }, (_, i) => [L, i] as [number, number]);
 const layout = (L: number): Plan => {
-  const F = frontier(L), A = F.map((p) => at(...p)), slot = F.map((p) => height(...p) + G), P = new Float64Array(F.length + 1);
+  const level = level_nodes(L), A = level.map((p) => at(...p)), slot = level.map((p) => height(...p) + G), P = new Float64Array(level.length + 1);
   const find = (m: number) => lo(A, (a) => a > m) - 1;
   const sums = () => slot.forEach((s, k) => (P[k + 1] = P[k] + s));
   const ups: [number, number, number][][] = [];
@@ -146,7 +146,7 @@ const layout = (L: number): Plan => {
       halves(l - 1, c, t, k, d + 1);
     }
   };
-  F.forEach(([l, i], k) => {
+  level.forEach(([l, i], k) => {
     const t = P[k] + (slot[k] - G - height(l, i)) / 2;
     bases[L + 1].push([l, i, t, height(l, i), A[k], A[k] + len(l), 0]);
     halves(l, i, t, height(l, i), 1);
@@ -156,7 +156,7 @@ const layout = (L: number): Plan => {
     const v = link(bases, c, x);
     return [...q, v, v[2] < 0 ? q[2] : Math.min(q[2], q[2] + v[1]), v[2] < 0 ? q[2] + q[3] : Math.max(q[2] + q[3], q[2] + v[1] + v[2] + 1)];
   }));
-  return { F, A, P, slot, find, cards, total: P[F.length] };
+  return { level, A, P, slot, find, cards, total: P[level.length] };
 };
 const link = (cards: Base[][], c: number, x: number) => {
   const [l, i, y, h, a, b] = cards[c][x], mid = y + h / 2, kids = cards[c - 1] ?? [];
@@ -324,12 +324,12 @@ const press = (s: Card) => {
   s.classList.contains("more") && grow(s);
 };
 const anchor = () => {
-  const { F, A, P, slot } = plan, k = Math.max(0, Math.min(plan.F.length - 1, lo(P, (z) => z > tree.scrollTop) - 1)), d = tree.scrollTop - P[k];
-  return F.length ? { key: F[k].join("."), d, m: A[k] + Math.min(.999, d / slot[k]) * len(F[k][0]) } : null;
+  const { level, A, P, slot } = plan, k = Math.max(0, Math.min(plan.level.length - 1, lo(P, (z) => z > tree.scrollTop) - 1)), d = tree.scrollTop - P[k];
+  return level.length ? { key: level[k].join("."), d, m: A[k] + Math.min(.999, d / slot[k]) * len(level[k][0]) } : null;
 };
 const place = (a: ReturnType<typeof anchor>, p: Plan) => {
   if (!a) return 0;
-  const k = p.find(Math.floor(a.m)), [l, i] = p.F[k];
+  const k = p.find(Math.floor(a.m)), [l, i] = p.level[k];
   return p.P[k] + (l + "." + i === a.key ? Math.min(a.d, p.slot[k]) : ((a.m - p.A[k]) / len(l)) * p.slot[k]);
 };
 // (not while sliding to another column: setting scrollTop would stop it;
