@@ -1455,7 +1455,7 @@ export namespace Main {
         return new Response(Main.stream(Memory.dump(mem)), { headers: json });
       }
       case "/api/act": {
-        const refused = Main.csrf_guard(req);
+        const refused = Main.post_only(req);
         if (refused !== null) {
           return refused;
         }
@@ -1609,7 +1609,7 @@ export namespace Main {
     }
   }
 
-  export function csrf_guard(req: Request): Response | null {
+  export function post_only(req: Request): Response | null {
     return req.method === "POST" ? null : new Response("an act is a POST", { status: 405 });
   }
 
