@@ -107,6 +107,7 @@ if (WIN && !BUN) {
 }
 
 async function run_here(part: Part): Promise<void> {
+  not_by_sudo(part);
   const Service = await import("./Service.ts");
   if (SERVICE === undefined) {
     Service.foreground(part);
@@ -117,16 +118,16 @@ async function run_here(part: Part): Promise<void> {
 
 function service(part: Part, run: (arg?: string) => unknown): Cmd[] {
   return [
-    { use: "-d", about: "the same, as a service that starts at login", arg: part === "serve" ? PORT : undefined, url: part === "device", run: (arg) => { not_by_sudo(part); return run(arg); } },
+    { use: "-d", about: "the same, as a service that starts at login", arg: part === "serve" ? PORT : undefined, url: part === "device", run: (arg) => { not_by_sudo(part + " -d"); return run(arg); } },
     { use: "stop", about: "stop and remove that service", run: async () => { unmark_from_parent_shell(); await (await import("./Service.ts")).stop(part); } },
     { use: "logs [-f]", about: "its output (-f: keep following)", follow: true, run: async () => (await import("./Service.ts")).logs(part, FLAG.has("-f")) },
   ];
 }
 
-function not_by_sudo(part: Part): void {
+function not_by_sudo(cmd: string): void {
   const user = process.env.SUDO_USER;
   if (!WIN && process.getuid?.() === 0 && user !== undefined) {
-    fail("`sudo unii " + part + " -d` would run it as root, with root's own settings and sign-in: run it without sudo. To give Unii root, allow passwordless sudo for " + user + " (a sudoers line `" + user + " ALL=(ALL) NOPASSWD: ALL`); then what it runs can use sudo.");
+    fail("Run `unii " + cmd + "` without sudo. To give the agent admin rights, set up passwordless sudo for " + user + ".");
   }
 }
 
