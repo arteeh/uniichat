@@ -291,6 +291,9 @@ export namespace Mcp {
   export async function call(servers: Servers, s: Server, name: string, args: object, signal: AbortSignal): Promise<Out> {
     const head = "MCP server " + s.conf.name + " ";
     const fail = (text: string): Out => ({ text, fail: true });
+    // a Stop ends this call's wait for the start, not the start, which
+    // the list and other calls share
+    const stopped = new Promise<null>((ok) => (signal.aborted ? ok(null) : signal.addEventListener("abort", () => ok(null), { once: true })));
     s.calls += 1;
     try {
       for (let again = true; ; again = false) {
@@ -298,7 +301,10 @@ export namespace Mcp {
           return fail(head + "can't run: device " + s.conf.device + " isn't open.");
         }
         if (s.link === null || s.link.dead() !== null || !s.names.has(name)) {
-          const got = await Mcp.start(servers, s);
+          const got = await Promise.race([Mcp.start(servers, s), stopped]);
+          if (got === null) {
+            return fail("Stopped.");
+          }
           if (typeof got === "string") {
             return fail(head + got + ".");
           }
