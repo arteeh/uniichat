@@ -3,7 +3,7 @@
 import * as fs from "node:fs";
 import * as net from "node:net";
 import type { ServerWebSocket } from "bun";
-import { AskAI, type Ask, type Call, type End, type Event, type Kind, type Parked, type Say } from "./AskAI.ts";
+import { AskAI, type Ask, type Call, type End, type Event, type Kind, type Parked, type Say, type Vendor } from "./AskAI.ts";
 import { clip_pages } from "./Clip.ts";
 import { Disk } from "./Disk.ts";
 import { Mcp } from "./Mcp.ts";
@@ -80,8 +80,8 @@ type Turn = {
   check : Check | null;
   back  : number;
   sums  : { from: number; total: number } | null;
-  resume: ReturnType<typeof setTimeout> | null;
-  limits: number;
+  resume: { wake: AbortController; goal: string | null } | null;
+  limits: { vendor: Vendor; n: number } | null;
 };
 
 type Chat = Parts & Doing & Turn;
@@ -225,7 +225,7 @@ export namespace Chat {
     const pick = Pick.load(mem.pick, config.OFFER, config.PICK);
     const chat: Chat = {
       mem, tools, pick, socks: new Set(), acts: new Map(), main, model: "", check: null, asked: false, open: 0,
-      eye: { parts: [], from: 0 }, after: Promise.resolve(), batch: null, writes: Promise.resolve(), held: null, back: -1, sums: null, resume: null, limits: 0,
+      eye: { parts: [], from: 0 }, after: Promise.resolve(), batch: null, writes: Promise.resolve(), held: null, back: -1, sums: null, resume: null, limits: null,
     };
     const saved = mem.pick === null ? null : Chat.pick_name(mem.pick as Pick);
     if (saved !== null && saved !== Chat.pick_name(pick)) {
@@ -396,8 +396,7 @@ export namespace Chat {
   export async function call(chat: Chat, take: () => Msg[]): Promise<Ask | null> {
     const mem = chat.mem;
     const halt = chat.main.halt;
-    const limits = chat.limits;
-    chat.limits = 0;
+    const limits = Chat.limits(chat);
     Chat.unpark(chat);
     if (halt.signal.aborted) {
       return null;
@@ -451,6 +450,9 @@ export namespace Chat {
   export async function ended(chat: Chat, end: End): Promise<boolean> {
     const main = chat.main;
     const halt = main.halt;
+    if (end.ok) {
+      chat.limits = null;
+    }
     if (!end.ok && !halt.signal.aborted) {
       if (end.limits === undefined) {
         Chat.failed(chat, end.text);
@@ -507,31 +509,42 @@ export namespace Chat {
     Chat.note(chat, "No reply: " + why.replace(/\.$/, "") + ". Send a message to try again.");
   }
 
+  export function limits(chat: Chat): number {
+    return chat.limits?.vendor === chat.pick.vendor ? chat.limits.n : 0;
+  }
+
   export function park(chat: Chat, end: End): void {
-    const limits = end.limits ?? 0;
-    const known = end.until !== undefined;
-    const until = end.until ?? Date.now() + Limit.wait_for(null, limits, LIMIT).ms;
+    const n = end.limits ?? 0;
+    const vendor = end.vendor ?? chat.pick.vendor;
+    const { ms, known } = Limit.wait_for(end.until ?? null, n, LIMIT);
+    const until = Date.now() + ms;
     Chat.unpark(chat);
-    chat.main.limit = { until, known, vendor: chat.pick.vendor };
-    const go_on = () => {
-      Chat.unpark(chat);
-      chat.limits = limits;
-      void Run.take(chat.main, { kind: "note", text: GO_ON, images: [] });
-    };
-    chat.resume = setTimeout(go_on, Math.max(0, until - Date.now()));
+    const wake = new AbortController();
+    chat.resume = { wake, goal: null };
+    chat.limits = { vendor, n };
+    chat.main.limit = { until, known, vendor };
+    void Limit.wait(vendor, ms, wake.signal).then(() => Chat.go_on(chat, wake));
     const said = end.text.replace(/\.$/, "");
-    const when = !known ? "Trying again at " + Limit.utc(until) : said.includes(Limit.utc(until)) ? "Going on then" : "Going on at " + Limit.utc(until);
-    Chat.note(chat, said[0].toUpperCase() + said.slice(1) + ". " + when + "; a message goes on sooner, Stop cancels.");
+    Chat.note(chat, said[0].toUpperCase() + said.slice(1) + ". " + (known ? "Going on" : "Trying again") + " at " + Limit.utc(until) + "; a message goes on sooner, Stop cancels.");
     Chat.change(chat);
   }
 
+  export function go_on(chat: Chat, wake: AbortController): void {
+    if (wake.signal.aborted) {
+      return;
+    }
+    Chat.unpark(chat);
+    void Run.take(chat.main, { kind: "note", text: GO_ON, images: [] });
+  }
+
   export function unpark(chat: Chat): boolean {
-    if (chat.resume === null) {
+    const parked = chat.resume;
+    if (parked === null) {
       return false;
     }
-    clearTimeout(chat.resume);
     chat.resume = null;
     chat.main.limit = null;
+    parked.wake.abort();
     return true;
   }
 

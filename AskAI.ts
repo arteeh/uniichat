@@ -65,6 +65,7 @@ export type End = {
   until? : number;
   long?  : boolean;
   limits?: number;
+  vendor?: Vendor;
 };
 
 export type Try = {
@@ -122,7 +123,7 @@ export namespace AskAI {
     };
     let k = skip(0);
     let limits = ask.limits ?? 0;
-    let reset: number | undefined;
+    let reset: { until: number; vendor: Vendor } | undefined;
     const go = (): Try => {
       const run = picks[k];
       const from = k > 0 ? picks[k - 1] : null;
@@ -155,8 +156,8 @@ export namespace AskAI {
         const wait = failed && !next && ask.patient === true;
         const left = picks[k];
         const limited = wait && end.limits !== undefined;
-        if (end.limits !== undefined && end.until !== undefined) {
-          reset = Math.min(reset ?? Infinity, end.until);
+        if (end.limits !== undefined && end.until !== undefined && end.until < (reset?.until ?? Infinity)) {
+          reset = { until: end.until, vendor: left.vendor };
         }
         if (wait) {
           const ms = Math.min(WEEK, Math.max(AGAIN, (end.until ?? 0) - Date.now()));
@@ -174,8 +175,9 @@ export namespace AskAI {
         }
         if (halt.signal.aborted || (!next && !wait)) {
           const all = whys.flatMap((why, i) => (why === null ? [] : [picks[i].vendor + ":" + Pick.named(picks[i]).model + ": " + why]));
-          const until = end.limits === undefined ? end.until : reset;
-          return failed && all.length > 1 ? { ...end, until, text: "no model answered; " + all.join("; ") } : end;
+          const until = end.limits === undefined ? end.until : reset?.until;
+          const vendor = end.limits === undefined ? undefined : reset?.vendor ?? left.vendor;
+          return failed && all.length > 1 ? { ...end, until, vendor, text: "no model answered; " + all.join("; ") } : { ...end, vendor };
         }
         k = skip(next ? k + 1 : 0);
         limits = limited && picks[k] === left ? end.limits ?? 0 : 0;
