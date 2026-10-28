@@ -92,25 +92,29 @@ export namespace Mcp {
     const on = [...servers.all.values()].filter((s) => !s.gone && !off().includes(s.conf.name)).sort((a, b) => Mcp.by_name(a.conf.name, b.conf.name));
     const waited = new AbortController();
     const late = Machine.nap(LIST_MS, waited.signal).then(() => null);
+    const now = Machine.nap(0, waited.signal).then(() => null);
     try {
-      const lists = await Promise.all(on.map(async (s) => ({ s, got: await Mcp.tools(servers, s, late) })));
-      const now = off();
-      return lists.flatMap(({ s, got }) => (servers.all.get(s.conf.name) === s && !now.includes(s.conf.name) ? got : []));
+      const lists = await Promise.all(on.map(async (s) => ({ s, got: await Mcp.tools(servers, s, Mcp.kept(s) === null || s.stale ? late : now) })));
+      const still = off();
+      return lists.flatMap(({ s, got }) => (servers.all.get(s.conf.name) === s && !still.includes(s.conf.name) ? got : []));
     } finally {
       waited.abort();
     }
   }
 
-  export async function tools(servers: Servers, s: Server, late: Promise<null>): Promise<Spec[]> {
-    const got = await Promise.race([Mcp.start(servers, s), late]);
+  // a server's tools once up or failed by `wait`'s end; else it goes on
+  // starting, and its tools kept from the last hour stand for it. One with
+  // some waits only for `now`, a 0 ms timer, which one already up beats
+  export async function tools(servers: Servers, s: Server, wait: Promise<null>): Promise<Spec[]> {
+    const got = await Promise.race([Mcp.start(servers, s), wait]);
     return got === null ? Mcp.starting(servers, s) : typeof got === "string" ? Mcp.kept(s) ?? [] : got;
   }
 
-  // a server not up within LIST_MS goes on starting; the list doesn't wait
+  // the model is told only of tools left out
   export function starting(servers: Servers, s: Server): Spec[] {
     const kept = Mcp.kept(s);
-    if (s.said === null) {
-      Mcp.tell(servers, s, "is still starting; " + (kept === null ? "its tools are left out until it is up" : "its tools stay listed, and calls wait for it"), false);
+    if (kept === null && s.said === null) {
+      Mcp.tell(servers, s, "is still starting; its tools are left out until it is up", false);
     }
     return kept ?? [];
   }
