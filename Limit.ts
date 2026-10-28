@@ -18,6 +18,11 @@ export const LIMIT = 1800e3;
 
 const POLL = 300e3;
 
+const STAGGER      = 600e3;
+const STAGGER_LOOK = 1e3;
+
+let ANSWERING: () => { queued: boolean; busy: boolean } = () => ({ queued: false, busy: false });
+
 const LIMITS = new Map<string, number>();
 
 const PARKED = new Set<{ vendor: Vendor; poke: () => void }>();
@@ -62,6 +67,10 @@ export namespace Limit {
     return ms >= LONG && (ask.no_wait === true || ((ask.fallback === true || ask.repick !== undefined) && !acted));
   }
 
+  export function answering(turn: () => { queued: boolean; busy: boolean }): void {
+    ANSWERING = turn;
+  }
+
   export function utc(at: number): string {
     return new Date(at).toISOString().slice(0, 16).replace("T", " ") + " UTC";
   }
@@ -85,11 +94,23 @@ export namespace Limit {
     const until = AbortSignal.any([l.signal, wake.signal]);
     try {
       await Limit.wait(vendor, ms, until);
+      if (parked && l.ask.agent === true && !until.aborted && ANSWERING().queued) {
+        await Limit.let_unii_answer_first(l, until);
+      }
     } finally {
       l.poke = () => {};
       if (parked) {
         l.on({ $: "Limit", limit: null });
       }
+    }
+  }
+
+  export async function let_unii_answer_first(l: Limit, until: AbortSignal): Promise<void> {
+    const end = Date.now() + STAGGER;
+    const answering = () => ANSWERING().queued || ANSWERING().busy;
+    l.on({ $: "Limit", limit: { until: end, known: false, vendor: l.ask.vendor } });
+    while (!until.aborted && answering() && Date.now() < end) {
+      await Machine.nap(STAGGER_LOOK, until);
     }
   }
 

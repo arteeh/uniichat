@@ -199,6 +199,7 @@ export namespace Chat {
   export function open(): Chat {
     const mem = Memory.load(CHAT, () => ({ system: Tools.prompt("compact"), searches: 0, server: "" }), Owner.act_put);
     const cut = mem.work;
+    Limit.answering(() => ({ queued: chat.main.queue.length > 0, busy: chat.main.busy }));
     const main = Run.make<Pending, Msg>(TURN, {
       pick   : () => chat.pick,
       begin  : () => Chat.begin(chat),
