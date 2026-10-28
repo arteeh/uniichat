@@ -42,7 +42,6 @@ type Run = (device: string, job: Job, signal: AbortSignal) => Promise<Out>;
 export type Servers = { all: Map<string, Server>; note: (text: string) => void; run: Run; open: (device: string) => boolean };
 
 const START_MS = 60e3;
-// an offline device's last tools stay listed while the prompt cache holding them may (AskAI.ts TTL)
 const KEEP_MS = 3600e3;
 const RETRY_FAILED_START_MS = 30e3;
 const KILL_AFTER_TERM_MS = 3e3;
@@ -90,6 +89,15 @@ export namespace Mcp {
     const on = [...servers.all.values()].filter((s) => !s.gone && !off.includes(s.conf.name)).sort((a, b) => Mcp.by_name(a.conf.name, b.conf.name));
     const lists = await Promise.all(on.map((s) => Mcp.start(servers, s)));
     return lists.flatMap((list) => (typeof list === "string" ? [] : list));
+  }
+
+  export function used(servers: Servers): void {
+    const now = Date.now();
+    for (const s of servers.all.values()) {
+      if (s.kept !== null) {
+        s.kept.at = now;
+      }
+    }
   }
 
   export function heard(servers: Servers, off: string[], who: string, viewed = false): string[] {

@@ -249,8 +249,7 @@ export namespace Tools {
   }
 
   export function at_work(tools: Tools): Block {
-    const when = (at: number) => new Date(at).toISOString().slice(0, 16).replace("T", " ") + " UTC";
-    const names = Tools.working(tools).map(({ name, run }) => (run.limit === null ? name : name + " (waiting for the usage limit on " + run.limit.vendor + ", " + (run.limit.known ? "resumes " : "tries again ") + when(run.limit.until) + ")"));
+    const names = Tools.working(tools).map(({ name, run }) => (run.limit === null ? name : name + " (waiting for the usage limit on " + run.limit.vendor + ", " + (run.limit.known ? "resumes " : "tries again ") + Limit.utc(run.limit.until) + ")"));
     return { text: "Agents at work now: " + (names.length === 0 ? "none." : names.join(", ") + ".") + "\n\n", mark: false };
   }
 
@@ -315,6 +314,9 @@ export namespace Tools {
         const args = rec(params.arguments) ? params.arguments : {};
         const has = Tools.list(who).some((t) => t.name === name);
         const mcp = has ? null : Tools.mcp(tools, who, name);
+        if (Tools.plugged(tools, who)) {
+          Mcp.used(tools.mcp);
+        }
         const no: Out = { text: "No tool " + name + ".", fail: true };
         const out = has ? await Tools.call(tools, who, name, args, signal, id) : mcp !== null ? await Mcp.call(tools.mcp, mcp, name, args, signal) : no;
         const imgs = (out.imgs ?? []).map((img) => ({ type: "image", data: img.data, mimeType: img.type }));
