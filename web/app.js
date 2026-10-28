@@ -4795,8 +4795,9 @@ function connect() {
   });
 }
 function notes_close() {
-  if (APP === null && document.visibilityState === "visible") {
-    navigator.serviceWorker?.ready.then((reg) => reg.getNotifications({ tag: "unii" })).then((notes) => notes.forEach((n) => n.close())).catch(() => {});
+  const seen = () => APP === null && document.visibilityState === "visible";
+  if (seen()) {
+    navigator.serviceWorker?.ready.then((reg) => reg.getNotifications({ tag: "unii" })).then((notes) => notes.forEach((n) => seen() && n.close())).catch(() => {});
   }
 }
 function in_use(off = false) {
