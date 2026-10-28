@@ -5397,7 +5397,7 @@ function settings_draw(page) {
   const form = $2("#account form.settings", HTMLFormElement);
   const rows = new Map(page.settings.map((r) => [r.key, r]));
   const unset = new Set;
-  const profs = Object.entries(page.profiles ?? {});
+  const profs = Object.entries(page.profiles ?? {}).map(([name, list]) => [name, [...list]]);
   const box = form.querySelector(".profiles .field");
   const names = () => profs.map(([name]) => name.trim()).filter((name) => name !== "");
   const listed = (key) => {
