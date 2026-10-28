@@ -18,7 +18,7 @@ export const LIMIT = 1800e3;
 
 const POLL = 300e3;
 
-const STAGGER      = 600e3;
+const STAGGER      = 60e3;
 const STAGGER_LOOK = 1e3;
 
 let ANSWERING: () => { queued: boolean; busy: boolean } = () => ({ queued: false, busy: false });
