@@ -100,6 +100,7 @@ const TALK_SMALL = "Conversation mode switched itself off: too long for {model}.
 const TALK_LONG  = "Conversation mode switched itself off: {model} refused the turn as too long.";
 const TALK_BIG   = "Conversation mode can't start: the messages since message {id} already fill its space in Unii's view.";
 const TALK_IMP   = "Conversation mode switched itself off: the import filled it.";
+const TALK_OFF_AT = 0.9;
 const FULL       = "UniiChat's disk is full; try again soon.";
 const BATCH      = "/import.json";
 const SPARE      = 2 ** 30;
@@ -553,7 +554,8 @@ export namespace Chat {
     if (mem.talk === null) {
       return;
     }
-    if (Memory.talk_size(mem) <= Chat.room(chat)) {
+    const meter = Chat.meter(chat);
+    if (meter === null || meter.tokens < meter.window * TALK_OFF_AT) {
       return Chat.all(chat, Chat.state(chat));
     }
     Chat.talk_off(chat, why);
@@ -567,9 +569,10 @@ export namespace Chat {
 
   export function used(chat: Chat, tokens: number): void {
     chat.mem.used = tokens;
+    chat.mem.used_at = chat.mem.count;
     if (chat.mem.talk !== null) {
       Memory.save(chat.mem);
-      Chat.all(chat, Chat.state(chat));
+      Chat.talked(chat);
     }
   }
 
@@ -579,7 +582,7 @@ export namespace Chat {
       return null;
     }
     const window = Pick.window(chat.pick, config.OFFER);
-    const tokens = mem.used ?? Chat.guess(chat);
+    const tokens = mem.used === null ? Chat.guess(chat) : mem.used + Math.ceil(Memory.talk_size(mem, mem.count, mem.used_at) / TOKEN);
     return { from: mem.talk, used: Math.min(1, tokens / window), tokens, window, model: Chat.model_name(chat), guess: mem.used === null };
   }
 

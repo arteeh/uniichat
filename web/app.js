@@ -2079,7 +2079,7 @@ function talk_percent(talk) {
 }
 function talk_tokens(talk) {
   const k = (n) => n >= 1e6 ? +(n / 1e6).toFixed(1) + "M" : n >= 1000 ? Math.round(n / 1000) + "K" : String(n);
-  return "about " + k(talk.tokens) + " of " + talk.model + "'s " + k(talk.window) + " tokens" + (talk.guess ? ", guessed: no request yet" : ", in its last request");
+  return "about " + k(talk.tokens) + " of " + talk.model + "'s " + k(talk.window) + " tokens" + (talk.guess ? ", guessed: no request yet" : ", in its last request and the messages since");
 }
 function view_new() {
   return {

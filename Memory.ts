@@ -33,7 +33,7 @@ type End = [number, number];
 
 type Kept = { parts: Array<[number, number]>; batch: boolean };
 
-type Saved = Kept & { seen?: Kept; main: End; tree: End; pick: object | null; goal?: string | null; work?: string[]; timers?: Timer[]; off?: string[]; talk?: number | null; used?: number | null };
+type Saved = Kept & { seen?: Kept; main: End; tree: End; pick: object | null; goal?: string | null; work?: string[]; timers?: Timer[]; off?: string[]; talk?: number | null; used?: number | null; used_at?: number };
 
 type Queues = { main: Pending[]; agents: Record<string, string[]> };
 
@@ -57,6 +57,7 @@ type Chosen = {
   talk   : number | null;
   talked : Map<number, number>;
   used   : number | null;
+  used_at: number;
   work   : string[];
   timers : Timer[];
 };
@@ -143,7 +144,7 @@ export namespace Memory {
 
   export function load(dir: string, share: Memory["share"], acted: Memory["acted"] = () => {}): Memory {
     const mem: Memory = {
-      dir, fds: new Map(), count: 0, open: 0, pick: null, goal: null, off: [], talk: null, talked: new Map(), used: null, work: [], timers: [], queue: [], tells: {}, nodes: new Map(), agents: new Map(), ready: [[], []], ends: { main: [0, 0], tree: [0, 0] },
+      dir, fds: new Map(), count: 0, open: 0, pick: null, goal: null, off: [], talk: null, talked: new Map(), used: null, used_at: 0, work: [], timers: [], queue: [], tells: {}, nodes: new Map(), agents: new Map(), ready: [[], []], ends: { main: [0, 0], tree: [0, 0] },
       view: { parts: [], size: 0, batch: false, high: VIEW_HIGH }, seen: { parts: [], size: 0, batch: false, high: config.COMPACTOR_CONTEXT },
       busy: new Map(), sides: new Map(), calls: new Map(), hold: [null, "paused"], done: false, wait: new Set(), share, acted, again: null,
     };
@@ -164,6 +165,7 @@ export namespace Memory {
     while (Memory.message(mem, mem.count - 1)?.more) {
       mem.count -= 1;
     }
+    mem.used_at = saved?.used_at ?? mem.count;
     Memory.open(mem, mem.view, saved);
     Memory.open(mem, mem.seen, saved?.seen ?? saved);
     Memory.roots(mem.count).flatMap((part) => Memory.todo(mem, part)).forEach((part) => Memory.ready(mem, part, true));
@@ -190,7 +192,7 @@ export namespace Memory {
   export function save(mem: Memory): void {
     const file = mem.dir + "/view.json";
     const [chat, seen] = [mem.view, mem.seen].map((view): Kept => ({ parts: view.parts.map((part) => [part.l, part.i]), batch: view.batch }));
-    fs.writeFileSync(file + ".new", JSON.stringify({ ...chat, seen, pick: mem.pick, goal: mem.goal, off: mem.off, talk: mem.talk, used: mem.used, work: mem.work, timers: mem.timers, ...mem.ends }));
+    fs.writeFileSync(file + ".new", JSON.stringify({ ...chat, seen, pick: mem.pick, goal: mem.goal, off: mem.off, talk: mem.talk, used: mem.used, used_at: mem.used_at, work: mem.work, timers: mem.timers, ...mem.ends }));
     move_over(file + ".new", file);
     void Disk.wrote(file);
   }
@@ -1031,9 +1033,9 @@ ${Memory.cut(line)}| ← LIMIT`;
     return window_bytes * TALK_SHARE_OF_WINDOW - VIEW_HIGH;
   }
 
-  export function talk_size(mem: Memory, end = mem.count): number {
+  export function talk_size(mem: Memory, end = mem.count, from = mem.talk ?? end): number {
     let size = 0;
-    for (let i = mem.talk ?? end; i < end; i++) {
+    for (let i = from; i < end; i++) {
       let n = mem.talked.get(i);
       if (n === undefined) {
         const done = Memory.said(Memory.at(mem, i)) || Memory.node(mem, { l: 0, i }) !== null;

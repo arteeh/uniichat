@@ -256,7 +256,7 @@ export function talk_percent(talk: Talk): number {
 
 export function talk_tokens(talk: Talk): string {
   const k = (n: number) => (n >= 1e6 ? +(n / 1e6).toFixed(1) + "M" : n >= 1e3 ? Math.round(n / 1e3) + "K" : String(n));
-  return "about " + k(talk.tokens) + " of " + talk.model + "'s " + k(talk.window) + " tokens" + (talk.guess ? ", guessed: no request yet" : ", in its last request");
+  return "about " + k(talk.tokens) + " of " + talk.model + "'s " + k(talk.window) + " tokens" + (talk.guess ? ", guessed: no request yet" : ", in its last request and the messages since");
 }
 
 export function view_new(): View {
