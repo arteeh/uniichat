@@ -975,6 +975,7 @@ var NESTING_MAX = 16;
 var LABEL_SCAN_MAX = 1000;
 var DEFS = new Map;
 var COLLECT = false;
+var SAID = false;
 var UNSHUT = { lines: [], from: new Map };
 function Text(x) {
   return { $: "Text", x };
@@ -1024,13 +1025,13 @@ function span_parse(s) {
   while (i < s.length) {
     const c = s[i];
     if (c === "\\" && i + 1 < s.length && (s[i + 1] === `
-` || PUNCT.test(s[i + 1]) && s.charCodeAt(i + 1) < 128)) {
+` && !SAID || PUNCT.test(s[i + 1]) && s.charCodeAt(i + 1) < 128)) {
       if (s[i + 1] === `
 `) {
         text = text.trimEnd();
         put({ $: "Brk" });
       } else {
-        text += s[i + 1];
+        text += (SAID ? c : "") + s[i + 1];
       }
       i += 2;
     } else if (c === `
@@ -1520,11 +1521,12 @@ function hunk_parse(lines, j, h) {
   }
   return [out, j];
 }
-function md_parse(src) {
+function md_parse(src, said = false) {
   const lines = src.replace(/\r/g, "").split(`
 `);
   try {
-    COLLECT = src.includes("]:");
+    SAID = said;
+    COLLECT = !said && src.includes("]:");
     if (COLLECT) {
       blocks_parse(lines, 0);
       COLLECT = false;
@@ -1532,6 +1534,7 @@ function md_parse(src) {
     return blocks_parse(lines, 0)[0];
   } finally {
     COLLECT = false;
+    SAID = false;
     DEFS = new Map;
     UNSHUT = { lines: [], from: new Map };
   }
@@ -1703,7 +1706,7 @@ function block_parse(lines, i, d) {
     return [{ $: "Code", k: "", x: body.join(`
 `) }, end];
   }
-  const def = def_at(lines, i);
+  const def = SAID ? null : def_at(lines, i);
   if (def !== null) {
     const label = def_label(def.label);
     DEFS.set(label, DEFS.get(label) ?? { k: def.k, t: def.t });
@@ -2551,7 +2554,7 @@ function entry_rows(id, kind, text, images = [], of = { tool: "", apart: false }
 }
 function entry_body(kind, text, label, tool) {
   if (kind !== "echo") {
-    return md_parse(text);
+    return md_parse(text, kind === "user" || kind === "work");
   }
   return tool_name(tool) === "show" ? md_shown(text, label) : md_output(text, label);
 }

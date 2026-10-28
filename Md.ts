@@ -67,6 +67,10 @@ const LABEL_SCAN_MAX = 1000;
 
 let DEFS = new Map<string, { k: string; t: string }>();
 let COLLECT = false;
+// a user's or subagent's own words: a backslash shows, as typed (a path
+// like C:\Users), still keeping the mark after it text; no line is taken
+// for a link definition and hidden
+let SAID = false;
 
 let UNSHUT: { lines: string[]; from: Map<string, [number, number]> } = { lines: [], from: new Map() };
 
@@ -123,12 +127,12 @@ function span_parse(s: string): Span[] {
   };
   while (i < s.length) {
     const c = s[i];
-    if (c === "\\" && i + 1 < s.length && (s[i + 1] === "\n" || (PUNCT.test(s[i + 1]) && s.charCodeAt(i + 1) < 128))) {
+    if (c === "\\" && i + 1 < s.length && ((s[i + 1] === "\n" && !SAID) || (PUNCT.test(s[i + 1]) && s.charCodeAt(i + 1) < 128))) {
       if (s[i + 1] === "\n") {
         text = text.trimEnd();
         put({ $: "Brk" });
       } else {
-        text += s[i + 1];
+        text += (SAID ? c : "") + s[i + 1];
       }
       i += 2;
     } else if (c === "\n") {
@@ -645,10 +649,11 @@ function hunk_parse(lines: string[], j: number, h: RegExpExecArray): [Line[] | n
   return [out, j];
 }
 
-export function md_parse(src: string): Block[] {
+export function md_parse(src: string, said = false): Block[] {
   const lines = src.replace(/\r/g, "").split("\n");
   try {
-    COLLECT = src.includes("]:");
+    SAID = said;
+    COLLECT = !said && src.includes("]:");
     if (COLLECT) {
       blocks_parse(lines, 0);
       COLLECT = false;
@@ -656,6 +661,7 @@ export function md_parse(src: string): Block[] {
     return blocks_parse(lines, 0)[0];
   } finally {
     COLLECT = false;
+    SAID = false;
     DEFS = new Map();
     UNSHUT = { lines: [], from: new Map() };
   }
@@ -826,7 +832,7 @@ function block_parse(lines: string[], i: number, d: number): [Block | null | und
     }
     return [{ $: "Code", k: "", x: body.join("\n") }, end];
   }
-  const def = def_at(lines, i);
+  const def = SAID ? null : def_at(lines, i);
   if (def !== null) {
     const label = def_label(def.label);
     DEFS.set(label, DEFS.get(label) ?? { k: def.k, t: def.t });
