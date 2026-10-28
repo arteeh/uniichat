@@ -441,8 +441,14 @@ export namespace Chat {
     chat.eye = Chat.eye(mem, from);
     chat.socks.forEach((sock) => Chat.show(chat, sock));
     const blocks = [...view, Tools.devices(chat.tools), Tools.skills(chat.tools), Tools.at_work(chat.tools), { text: HEAD + text, mark: true }];
-    const ask = { ...Chat.share(chat, Tools.prompt("prompt")), searches: SEARCHES, server, blocks, imgs, talk: mem.talk !== null, no_wait: true, limits, who: "main", used: (tokens: number) => Chat.used(chat, tokens) };
-    chat.model = chat.pick.model;
+    const model = chat.pick.model;
+    const used = (tokens: number) => {
+      if (chat.pick.model === model) {
+        Chat.used(chat, tokens);
+      }
+    };
+    const ask = { ...Chat.share(chat, Tools.prompt("prompt")), searches: SEARCHES, server, blocks, imgs, talk: mem.talk !== null, no_wait: true, limits, who: "main", used };
+    chat.model = model;
     chat.asked = true;
     chat.open = 0;
     return ask;
