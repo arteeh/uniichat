@@ -20,6 +20,7 @@ type Started = {
   link  : Link | null;
   names : Map<string, string>;
   stale : boolean;
+  kept  : { specs: Spec[]; at: number } | null;
 };
 
 type Told = {
@@ -41,6 +42,8 @@ type Run = (device: string, job: Job, signal: AbortSignal) => Promise<Out>;
 export type Servers = { all: Map<string, Server>; note: (text: string) => void; run: Run; open: (device: string) => boolean };
 
 const START_MS = 60e3;
+// an offline device's last tools stay listed while the prompt cache holding them may (AskAI.ts TTL)
+const KEEP_MS = 3600e3;
 const RETRY_FAILED_START_MS = 30e3;
 const KILL_AFTER_TERM_MS = 3e3;
 const MESSAGE_MAX_CHARS = 16 * 2 ** 20;
@@ -78,13 +81,13 @@ export namespace Mcp {
     }
     for (const conf of want.values()) {
       if (!servers.all.has(conf.name)) {
-        servers.all.set(conf.name, { conf, up: null, fail: null, link: null, names: new Map(), stale: false, said: null, shown: false, heard: new Map(), left: "", calls: 0, gone: false });
+        servers.all.set(conf.name, { conf, up: null, fail: null, link: null, names: new Map(), stale: false, kept: null, said: null, shown: false, heard: new Map(), left: "", calls: 0, gone: false });
       }
     }
   }
 
   export async function list(servers: Servers, off: string[]): Promise<Spec[]> {
-    const on = [...servers.all.values()].filter((s) => !s.gone && !off.includes(s.conf.name));
+    const on = [...servers.all.values()].filter((s) => !s.gone && !off.includes(s.conf.name)).sort((a, b) => Mcp.by_name(a.conf.name, b.conf.name));
     const lists = await Promise.all(on.map((s) => Mcp.start(servers, s)));
     return lists.flatMap((list) => (typeof list === "string" ? [] : list));
   }
@@ -106,8 +109,13 @@ export namespace Mcp {
       Mcp.close(s);
       s.fail = null;
       const why = "can't run: device " + s.conf.device + " isn't open";
-      Mcp.tell(servers, s, why + "; its tools are left out until it is", false);
-      return why;
+      const kept = s.kept !== null && Date.now() - s.kept.at <= KEEP_MS ? s.kept : null;
+      s.kept = kept;
+      if (kept !== null) {
+        kept.at = Date.now();
+      }
+      Mcp.tell(servers, s, why + (kept === null ? "; its tools are left out until it is" : "; its tools stay listed, but calls fail until it is"), false);
+      return kept?.specs ?? why;
     }
     if (s.link !== null && s.link.dead() !== null) {
       Mcp.close(s);
@@ -133,6 +141,7 @@ export namespace Mcp {
       return got;
     }
     s.fail = null;
+    s.kept = { specs: got, at: Date.now() };
     if (s.said !== null) {
       s.said = null;
       if (s.shown) {
@@ -195,7 +204,11 @@ export namespace Mcp {
       }
     }
     s.names = names;
-    return specs;
+    return specs.sort((a, b) => Mcp.by_name(a.name, b.name));
+  }
+
+  export function by_name(a: string, b: string): number {
+    return a < b ? -1 : a > b ? 1 : 0;
   }
 
   // an input schema the vendors take, else why none: an object's, with
@@ -241,7 +254,10 @@ export namespace Mcp {
     s.calls += 1;
     try {
       for (let again = true; ; again = false) {
-        if (s.link === null || s.link.dead() !== null || !s.names.has(name) || !servers.open(s.conf.device)) {
+        if (!servers.open(s.conf.device)) {
+          return fail(head + "can't run: device " + s.conf.device + " isn't open.");
+        }
+        if (s.link === null || s.link.dead() !== null || !s.names.has(name)) {
           const got = await Mcp.start(servers, s);
           if (typeof got === "string") {
             return fail(head + got + ".");

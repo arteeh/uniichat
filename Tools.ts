@@ -220,7 +220,7 @@ export namespace Tools {
   }
 
   export function skills(tools: Tools): Block {
-    const lines = Tools.opened(tools).flatMap(([name, d]) => d.skills.map((s) => "- " + name + ": " + s.name + ": " + s.description.replace(/\s+/g, " ")));
+    const lines = Tools.opened(tools).flatMap(([name, d]) => d.skills.toSorted((a, b) => Mcp.by_name(a.name, b.name)).map((s) => "- " + name + ": " + s.name + ": " + s.description.replace(/\s+/g, " ")));
     return { text: lines.length === 0 ? "" : SKILLS + "\n" + lines.join("\n") + "\n\n", mark: false };
   }
 
@@ -550,9 +550,7 @@ export namespace Tools {
       }
       if (d.mcp.length > 0 && other === undefined) {
         prefix_owner.set(prefix, name);
-        if (Tools.live(d)) {
-          next.push(...d.mcp);
-        }
+        next.push(...d.mcp);
       }
     }
     tools.next = next;
@@ -586,7 +584,7 @@ export namespace Tools {
   }
 
   export function opened(tools: Tools): [string, Device][] {
-    return [...tools.devices].filter(([, d]) => d.terms.size > 0);
+    return [...tools.devices].filter(([, d]) => d.terms.size > 0).sort(([a], [b]) => Mcp.by_name(a, b));
   }
 
   export function open(tools: Tools, device: string): Device | string {
