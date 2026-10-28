@@ -4348,6 +4348,7 @@ async function boot() {
   document.head.insertAdjacentHTML("beforeend", `<style>${theme_css()}</style>`);
   if (APP === null) {
     navigator.serviceWorker?.register("/sw.js").catch(() => {});
+    notes_close();
   }
   const tree = location.pathname === TREE ? TREE + (tree_view() ? "#view" : "") : null;
   const state = history.state;
@@ -4367,9 +4368,13 @@ async function boot() {
   for (const ev of ["keydown", "pointerdown", "pointermove", "wheel", "touchstart"]) {
     addEventListener(ev, () => in_use(), { capture: true, passive: true });
   }
-  addEventListener("focus", () => in_use());
+  addEventListener("focus", () => {
+    in_use();
+    notes_close();
+  });
   document.addEventListener("visibilitychange", () => {
     in_use();
+    notes_close();
     if (document.hidden && RENEW.due && !RENEW.going && renew_free(true)) {
       RENEW.going = true;
       renew(true);
@@ -4785,6 +4790,11 @@ function connect() {
     hear,
     lost
   });
+}
+function notes_close() {
+  if (APP === null && document.visibilityState === "visible") {
+    navigator.serviceWorker?.ready.then((reg) => reg.getNotifications({ tag: "unii" })).then((notes) => notes.forEach((n) => n.close())).catch(() => {});
+  }
 }
 function in_use(off = false) {
   const on = !off && document.visibilityState === "visible" && document.hasFocus();
