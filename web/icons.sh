@@ -30,7 +30,7 @@ icon() {
 
 icon icon-192.png          192 0.80 none  1
 icon icon-512.png          512 0.80 none  1
-icon icon-maskable-192.png 192 0.50 "$BG" 0
-icon icon-maskable-512.png 512 0.50 "$BG" 0
+icon icon-maskable-192.png 192 0.65 "$BG" 0
+icon icon-maskable-512.png 512 0.65 "$BG" 0
 icon apple-touch-icon.png  180 0.60 "$BG" 0
 echo "icons.sh: icon-192.png icon-512.png icon-maskable-192.png icon-maskable-512.png apple-touch-icon.png"
