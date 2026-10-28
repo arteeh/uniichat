@@ -481,7 +481,7 @@ export namespace Chat {
       return Memory.line({ l: 0, i }, msg.kind + ": " + msg.text) + "\n";
     });
     const blocks = [...Memory.view(mem, at, Memory.fitted(mem)), { text: tail.join("") + GOAL_ASK + goal, mark: true }];
-    return { call: AskAI.ask({ ...Chat.share(chat, GOAL), blocks, no_wait: true, who: "goal" }, () => {}), goal };
+    return { call: AskAI.ask({ ...Chat.share(chat, GOAL), blocks, no_wait: true, limits: Chat.limits(chat), who: "goal" }, () => {}), goal };
   }
 
   export async function checked(chat: Chat, check: Check, halt: AbortController): Promise<boolean> {
@@ -491,8 +491,11 @@ export namespace Chat {
     const mem = chat.mem;
     const on = !halt.signal.aborted && mem.goal === goal && chat.main.queue.length === 0;
     chat.check = null;
+    if (end.ok) {
+      chat.limits = null;
+    }
     if (on && !end.ok && end.limits !== undefined) {
-      Chat.park(chat, end);
+      Chat.park(chat, end, goal);
     } else if (on && !end.ok) {
       Chat.note(chat, "No goal check: " + end.text.replace(/\.$/, "") + ". The goal stays; /halt drops it.");
     } else if (on && /^\W*yes\b/i.test(end.text)) {
@@ -513,28 +516,44 @@ export namespace Chat {
     return chat.limits?.vendor === chat.pick.vendor ? chat.limits.n : 0;
   }
 
-  export function park(chat: Chat, end: End): void {
+  export function park(chat: Chat, end: End, goal: string | null = null): void {
     const n = end.limits ?? 0;
     const vendor = end.vendor ?? chat.pick.vendor;
     const { ms, known } = Limit.wait_for(end.until ?? null, n, LIMIT);
     const until = Date.now() + ms;
     Chat.unpark(chat);
     const wake = new AbortController();
-    chat.resume = { wake, goal: null };
+    chat.resume = { wake, goal };
     chat.limits = { vendor, n };
     chat.main.limit = { until, known, vendor };
-    void Limit.wait(vendor, ms, wake.signal).then(() => Chat.go_on(chat, wake));
+    void Limit.wait(vendor, ms, wake.signal).then(() => Chat.go_on(chat, wake, goal));
     const said = end.text.replace(/\.$/, "");
-    Chat.note(chat, said[0].toUpperCase() + said.slice(1) + ". " + (known ? "Going on" : "Trying again") + " at " + Limit.utc(until) + "; a message goes on sooner, Stop cancels.");
+    const at = Limit.utc(until);
+    Chat.note(chat, goal === null
+      ? said[0].toUpperCase() + said.slice(1) + ". " + (known ? "Going on" : "Trying again") + " at " + at + "; a message goes on sooner, Stop cancels."
+      : "No goal check: " + said + ". Checking again at " + at + "; Stop or /halt cancels.");
     Chat.change(chat);
   }
 
-  export function go_on(chat: Chat, wake: AbortController): void {
+  export function go_on(chat: Chat, wake: AbortController, goal: string | null): void {
     if (wake.signal.aborted) {
       return;
     }
-    Chat.unpark(chat);
-    void Run.take(chat.main, { kind: "note", text: GO_ON, images: [] });
+    if (goal === null || chat.mem.goal !== goal) {
+      Chat.unpark(chat);
+      if (goal === null) {
+        void Run.take(chat.main, { kind: "note", text: GO_ON, images: [] });
+      }
+      return Chat.change(chat);
+    }
+    chat.main.limit = null;
+    Chat.change(chat);
+    void Chat.checked(chat, Chat.check(chat, goal), wake).then(() => {
+      if (chat.resume?.wake === wake) {
+        chat.resume = null;
+        Chat.change(chat);
+      }
+    });
   }
 
   export function unpark(chat: Chat): boolean {
@@ -1247,6 +1266,9 @@ export namespace Chat {
         chat.mem.goal = goal;
         Memory.save(chat.mem);
         chat.check?.call.stop();
+        if (chat.resume !== null && chat.resume.goal !== null && Chat.unpark(chat)) {
+          Chat.change(chat);
+        }
         if (goal === null) {
           Chat.note(chat, "Goal halted by the user.");
         }
