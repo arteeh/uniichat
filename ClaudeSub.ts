@@ -37,6 +37,7 @@ const ENV = {
   CLAUDE_CODE_DISABLE_ATTACHMENTS          : "1", // "@path" in a message stays text
   CLAUDE_CODE_DISABLE_GIT_INSTRUCTIONS     : "1",
   DISABLE_AUTO_COMPACT                     : "1",
+  MCP_TIMEOUT                              : "60000", // connecting to unii's tools, whose list takes up to 5 s
   CLAUDE_AGENT_SDK_CLIENT_APP              : "uniichat",
 };
 
