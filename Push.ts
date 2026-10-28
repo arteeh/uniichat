@@ -267,7 +267,7 @@ export namespace Push {
         "content-encoding" : "aes128gcm",
         "content-type"     : "application/octet-stream",
         ttl                : String(TTL),
-        urgency            : "normal",
+        urgency            : "high",
       };
       const body = new Uint8Array(Push.encrypt(sub, Buffer.from(text)));
       const res = await fetch(sub.endpoint, { method: "POST", headers, body, redirect: "manual", signal: AbortSignal.timeout(ANSWER) });
