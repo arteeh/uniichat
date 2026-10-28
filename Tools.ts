@@ -303,7 +303,7 @@ export namespace Tools {
       }
       case "tools/list": {
         const plugged = Tools.plugged(tools, who);
-        const theirs = plugged ? await Mcp.list(tools.mcp, Tools.off(tools)) : [];
+        const theirs = plugged ? await Mcp.list(tools.mcp, () => Tools.off(tools)) : [];
         const notes = plugged ? Mcp.heard(tools.mcp, Tools.off(tools), who) : [];
         const agent = tools.agents.get(who);
         notes.forEach((text) => agent !== undefined && tools.log.push(agent.run, "note", text));

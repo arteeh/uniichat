@@ -86,16 +86,24 @@ export namespace Mcp {
     }
   }
 
-  export async function list(servers: Servers, off: string[]): Promise<Spec[]> {
-    const on = [...servers.all.values()].filter((s) => !s.gone && !off.includes(s.conf.name)).sort((a, b) => Mcp.by_name(a.conf.name, b.conf.name));
+  // the servers' tools; one removed or turned off while the list waited
+  // has none
+  export async function list(servers: Servers, off: () => string[]): Promise<Spec[]> {
+    const on = [...servers.all.values()].filter((s) => !s.gone && !off().includes(s.conf.name)).sort((a, b) => Mcp.by_name(a.conf.name, b.conf.name));
     const waited = new AbortController();
     const late = Machine.nap(LIST_MS, waited.signal).then(() => null);
     try {
-      const lists = await Promise.all(on.map((s) => Promise.race([Mcp.start(servers, s), late]).then((got) => got ?? Mcp.starting(servers, s))));
-      return lists.flatMap((list, i) => (typeof list === "string" ? Mcp.kept(on[i]) ?? [] : list));
+      const lists = await Promise.all(on.map(async (s) => ({ s, got: await Mcp.tools(servers, s, late) })));
+      const now = off();
+      return lists.flatMap(({ s, got }) => (servers.all.get(s.conf.name) === s && !now.includes(s.conf.name) ? got : []));
     } finally {
       waited.abort();
     }
+  }
+
+  export async function tools(servers: Servers, s: Server, late: Promise<null>): Promise<Spec[]> {
+    const got = await Promise.race([Mcp.start(servers, s), late]);
+    return got === null ? Mcp.starting(servers, s) : typeof got === "string" ? Mcp.kept(s) ?? [] : got;
   }
 
   // a server not up within LIST_MS goes on starting; the list doesn't wait
