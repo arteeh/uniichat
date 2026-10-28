@@ -385,7 +385,7 @@ export function view_act(v: View, act: Act): Client[] {
         return [];
       }
       if (text === "" && images.length === 0) {
-        return v.busy ? [{ $: "stop", name: TURN }] : [];
+        return view_stoppable(v) ? [{ $: "stop", name: TURN }] : [];
       }
       if (word === "/halt") {
         return [{ $: "goal", text: null }];
@@ -553,6 +553,10 @@ export function view_fold(v: View): string | null {
 
 export function view_typing(v: View): boolean {
   return v.page === null;
+}
+
+export function view_stoppable(v: View): boolean {
+  return v.busy || v.limits[TURN] !== undefined;
 }
 
 export function view_running(v: View): boolean {

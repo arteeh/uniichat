@@ -2205,7 +2205,7 @@ function view_act(v, act) {
         return [];
       }
       if (text === "" && images.length === 0) {
-        return v.busy ? [{ $: "stop", name: TURN }] : [];
+        return view_stoppable(v) ? [{ $: "stop", name: TURN }] : [];
       }
       if (word === "/halt") {
         return [{ $: "goal", text: null }];
@@ -2359,6 +2359,9 @@ function view_fold(v) {
 }
 function view_typing(v) {
   return v.page === null;
+}
+function view_stoppable(v) {
+  return v.busy || v.limits[TURN] !== undefined;
 }
 function view_pick(v) {
   return v.pick === null ? [] : view_knobs(v, v.pick, true);
@@ -5151,7 +5154,7 @@ function bars() {
     setTimeout(() => void renew());
   }
   const on = view_typing(v);
-  const stop = on && v.busy && box_blank();
+  const stop = on && view_stoppable(v) && box_blank();
   const tabs = view_tabs(v);
   const send = $2(".send", HTMLButtonElement);
   $2(".net").hidden = v.up;

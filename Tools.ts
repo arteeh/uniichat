@@ -173,7 +173,7 @@ const BOSS: Spec[] = [
   spec("schedules", "List the chat's schedules: id, when each comes next, its message.", {}, []),
   spec("unschedule", "Cancel a schedule, by its id.", { id: STR }, ["id"]),
   spec("stop", "Stop a subagent at once, by name, whatever it is doing (mid-call, waiting on a usage limit, running a tool on a device: that job is cancelled). Others keep running. Its report says it was stopped; its chat and scratch folder stay, so a later tell resumes it.", { name: STR, why: { type: "string", description: "Why, for its report." } }, ["name"]),
-  spec("resume", "Wake every call on this server waiting for an AI service's usage limit (your turn, subagents, summaries), when the user says a limit was reset early. Each asks again once; one still limited waits again.", {}, []),
+  spec("resume", "Wake every call on this server waiting for an AI service's usage limit (subagents, summaries), when the user says a limit was reset early. Each asks again once; one still limited waits again.", {}, []),
 ];
 const DEVICE = { device: { type: "string", description: "The name of the device to run on, one listed under Devices." } };
 function kit(who: string): Spec[] {

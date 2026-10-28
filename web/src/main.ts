@@ -912,7 +912,7 @@ function bars(): void {
     setTimeout(() => void renew());
   }
   const on = View.view_typing(v);
-  const stop = on && v.busy && Box.box_blank();
+  const stop = on && View.view_stoppable(v) && Box.box_blank();
   const tabs = View.view_tabs(v);
   const send = $(".send", HTMLButtonElement);
   $(".net").hidden = v.up;

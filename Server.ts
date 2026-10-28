@@ -18,7 +18,7 @@ import { Reap } from "./Reap.ts";
 import { Settings } from "./Settings.ts";
 import { INSTALL, INSTALL_PS1 } from "./Update.ts";
 import { move_over, write_whole } from "./Write.ts";
-import { Limit } from "./Limit.ts";
+import { LIMIT, Limit } from "./Limit.ts";
 import { Run, type Heard } from "./Run.ts";
 import * as Service from "./Service.ts";
 import * as Timer from "./Timer.ts";
@@ -80,6 +80,8 @@ type Turn = {
   check : Check | null;
   back  : number;
   sums  : { from: number; total: number } | null;
+  resume: ReturnType<typeof setTimeout> | null;
+  limits: number;
 };
 
 type Chat = Parts & Doing & Turn;
@@ -95,6 +97,7 @@ const HEAD       = "Turn: the user's new message:\n\n";
 const GOAL       = "You check a goal. Below is a chat between a user and Unii, an AI agent: its older messages as summary lines (id+n|text), then its latest messages whole, then the goal the user set with /goal. Answer yes if the chat shows the goal fully satisfied now, else no. Write that one word, nothing else.";
 const GOAL_ASK   = "\nThe goal:\n\n";
 const GOAL_NO    = "The goal isn't satisfied yet: keep working.";
+const GO_ON      = "The AI service's usage limit ended your last turn early. It should have reset by now: go on.";
 const TALK_FULL  = "Conversation mode switched itself off: it was full.";
 const TALK_SMALL = "Conversation mode switched itself off: too long for {model}.";
 const TALK_LONG  = "Conversation mode switched itself off: {model} refused the turn as too long.";
@@ -196,7 +199,6 @@ export namespace Chat {
   export function open(): Chat {
     const mem = Memory.load(CHAT, () => ({ system: Tools.prompt("compact"), searches: 0, server: "" }), Owner.act_put);
     const cut = mem.work;
-    Limit.answering(() => ({ queued: chat.main.queue.length > 0, busy: chat.main.busy }));
     const main = Run.make<Pending, Msg>(TURN, {
       pick   : () => chat.pick,
       begin  : () => Chat.begin(chat),
@@ -223,7 +225,7 @@ export namespace Chat {
     const pick = Pick.load(mem.pick, config.OFFER, config.PICK);
     const chat: Chat = {
       mem, tools, pick, socks: new Set(), acts: new Map(), main, model: "", check: null, asked: false, open: 0,
-      eye: { parts: [], from: 0 }, after: Promise.resolve(), batch: null, writes: Promise.resolve(), held: null, back: -1, sums: null,
+      eye: { parts: [], from: 0 }, after: Promise.resolve(), batch: null, writes: Promise.resolve(), held: null, back: -1, sums: null, resume: null, limits: 0,
     };
     const saved = mem.pick === null ? null : Chat.pick_name(mem.pick as Pick);
     if (saved !== null && saved !== Chat.pick_name(pick)) {
@@ -394,6 +396,9 @@ export namespace Chat {
   export async function call(chat: Chat, take: () => Msg[]): Promise<Ask | null> {
     const mem = chat.mem;
     const halt = chat.main.halt;
+    const limits = chat.limits;
+    chat.limits = 0;
+    Chat.unpark(chat);
     if (halt.signal.aborted) {
       return null;
     }
@@ -436,7 +441,7 @@ export namespace Chat {
     chat.eye = Chat.eye(mem, from);
     chat.socks.forEach((sock) => Chat.show(chat, sock));
     const blocks = [...view, Tools.devices(chat.tools), Tools.skills(chat.tools), Tools.at_work(chat.tools), { text: HEAD + text, mark: true }];
-    const ask = { ...Chat.share(chat, Tools.prompt("prompt")), searches: SEARCHES, server, blocks, imgs, talk: mem.talk !== null, who: "main", used: (tokens: number) => Chat.used(chat, tokens) };
+    const ask = { ...Chat.share(chat, Tools.prompt("prompt")), searches: SEARCHES, server, blocks, imgs, talk: mem.talk !== null, no_wait: true, limits, who: "main", used: (tokens: number) => Chat.used(chat, tokens) };
     chat.model = chat.pick.model;
     chat.asked = true;
     chat.open = 0;
@@ -447,7 +452,11 @@ export namespace Chat {
     const main = chat.main;
     const halt = main.halt;
     if (!end.ok && !halt.signal.aborted) {
-      Chat.failed(chat, end.text);
+      if (end.limits === undefined) {
+        Chat.failed(chat, end.text);
+      } else {
+        Chat.park(chat, end);
+      }
     }
     if (end.long && chat.mem.talk !== null) {
       Chat.talk_off(chat, TALK_LONG);
@@ -470,13 +479,7 @@ export namespace Chat {
       return Memory.line({ l: 0, i }, msg.kind + ": " + msg.text) + "\n";
     });
     const blocks = [...Memory.view(mem, at, Memory.fitted(mem)), { text: tail.join("") + GOAL_ASK + goal, mark: true }];
-    return { call: AskAI.ask({ ...Chat.share(chat, GOAL), blocks, who: "goal" }, (ev) => Chat.checking(chat, ev)), goal };
-  }
-
-  export function checking(chat: Chat, ev: Event): void {
-    if (ev.$ === "Limit") {
-      Chat.limit(chat, chat.main, ev.limit);
-    }
+    return { call: AskAI.ask({ ...Chat.share(chat, GOAL), blocks, no_wait: true, who: "goal" }, () => {}), goal };
   }
 
   export async function checked(chat: Chat, check: Check, halt: AbortController): Promise<boolean> {
@@ -486,8 +489,9 @@ export namespace Chat {
     const mem = chat.mem;
     const on = !halt.signal.aborted && mem.goal === goal && chat.main.queue.length === 0;
     chat.check = null;
-    chat.main.limit = null;
-    if (on && !end.ok) {
+    if (on && !end.ok && end.limits !== undefined) {
+      Chat.park(chat, end);
+    } else if (on && !end.ok) {
       Chat.note(chat, "No goal check: " + end.text.replace(/\.$/, "") + ". The goal stays; /halt drops it.");
     } else if (on && /^\W*yes\b/i.test(end.text)) {
       mem.goal = null;
@@ -501,6 +505,34 @@ export namespace Chat {
 
   export function failed(chat: Chat, why: string): void {
     Chat.note(chat, "No reply: " + why.replace(/\.$/, "") + ". Send a message to try again.");
+  }
+
+  export function park(chat: Chat, end: End): void {
+    const limits = end.limits ?? 0;
+    const known = end.until !== undefined;
+    const until = end.until ?? Date.now() + Limit.wait_for(null, limits, LIMIT).ms;
+    Chat.unpark(chat);
+    chat.main.limit = { until, known, vendor: chat.pick.vendor };
+    const go_on = () => {
+      Chat.unpark(chat);
+      chat.limits = limits;
+      void Run.take(chat.main, { kind: "note", text: GO_ON, images: [] });
+    };
+    chat.resume = setTimeout(go_on, Math.max(0, until - Date.now()));
+    const said = end.text.replace(/\.$/, "");
+    const when = !known ? "Trying again at " + Limit.utc(until) : said.includes(Limit.utc(until)) ? "Going on then" : "Going on at " + Limit.utc(until);
+    Chat.note(chat, said[0].toUpperCase() + said.slice(1) + ". " + when + "; a message goes on sooner, Stop cancels.");
+    Chat.change(chat);
+  }
+
+  export function unpark(chat: Chat): boolean {
+    if (chat.resume === null) {
+      return false;
+    }
+    clearTimeout(chat.resume);
+    chat.resume = null;
+    chat.main.limit = null;
+    return true;
   }
 
   export function note(chat: Chat, text: string): void {
@@ -971,11 +1003,19 @@ export namespace Chat {
   }
 
   export function running(chat: Chat): string[] {
-    return [...(chat.main.busy ? [TURN] : []), ...Tools.working(chat.tools).map((a) => a.name)];
+    return [...(chat.main.busy || chat.resume !== null ? [TURN] : []), ...Tools.working(chat.tools).map((a) => a.name)];
   }
 
   export function interrupt(chat: Chat, why: string | null): void {
-    Run.stop(chat.main, why);
+    const parked = Chat.unpark(chat);
+    if (chat.main.busy) {
+      Run.stop(chat.main, why);
+    } else if (parked) {
+      if (why !== null) {
+        Chat.note(chat, why);
+      }
+      Chat.change(chat);
+    }
   }
 
   export function stop(chat: Chat, why: string | null): void {
@@ -1052,7 +1092,7 @@ export namespace Chat {
 
   export function change(chat: Chat): void {
     const work = Chat.running(chat);
-    if ((!chat.main.busy || chat.main.limit !== null) && Tools.holding(chat.tools).length === 0) {
+    if (!chat.main.busy && Tools.holding(chat.tools).length === 0) {
       Tools.apply(chat.tools);
     }
     if (String(work) !== String(chat.mem.work)) {
