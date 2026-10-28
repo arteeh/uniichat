@@ -1,4 +1,4 @@
-export const VERSION = "33";
+export const VERSION = "34";
 
 const REPO        = "https://github.com/arteeh/uniichat";
 export const INSTALL     = REPO + "/releases/latest/download/install.sh";
