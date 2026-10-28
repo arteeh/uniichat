@@ -824,16 +824,8 @@ export function entry_settled(kind: Kind, text: string, ended: boolean): number 
 }
 
 function entry_body(kind: Kind, text: string, label: string, tool: string): Md.Block[] {
-  switch (kind) {
-    case "user":
-    case "work": {
-      return Md.md_plain(text);
-    }
-    case "echo": {
-      return Call.tool_name(tool) === "show" ? Md.md_shown(text, label) : Md.md_output(text, label);
-    }
-    default: {
-      return Md.md_parse(text);
-    }
+  if (kind !== "echo") {
+    return Md.md_parse(text);
   }
+  return Call.tool_name(tool) === "show" ? Md.md_shown(text, label) : Md.md_output(text, label);
 }

@@ -27,7 +27,6 @@ export type Block =
   | { $: "Diff"; k: string; x: Line[][] }
   | { $: "File"; k: string; n: number; x: string[] }
 
-const NAME  = new RegExp("\\[(" + Names.NAME + ")\\]", "g");
 const ONLY  = new RegExp("^(?:" + Names.NAME + ")$");
 export const MEDIA: ReadonlyMap<string, string> = new Map([
   ["png", "image/png"], ["jpeg", "image/jpeg"], ["gif", "image/gif"], ["webp", "image/webp"], ["svg", "image/svg+xml"],
@@ -37,6 +36,7 @@ export const MEDIA: ReadonlyMap<string, string> = new Map([
 ]);
 export const MEDIA_AS: ReadonlyMap<string, string> = new Map([["jpg", "jpeg"], ["m4v", "mp4"], ["oga", "ogg"], ["htm", "html"]]);
 const MEDIA_URL = /\/media\/[0-9a-f]{16}\.[a-z0-9]{1,10}(?=\))/y;
+const STORED = /^\/media\/[0-9a-f]{16}\.[a-z0-9]{1,10}$/;
 const LIST  = /^ {0,3}([-*+]|\d{1,9}[.)])(?=[ \t]|$)/;
 const FENCE = /^ {0,3}(`{3,}|~{3,})/;
 const TASK  = /^\[([ xX])\](?=[ \t]|$)[ \t]?/;
@@ -76,23 +76,6 @@ function Text(x: string): Span {
 
 function Name(x: string): Span {
   return { $: "Name", x };
-}
-
-function spans_by(s: string, re: RegExp, mark: (m: RegExpMatchArray) => Span): Span[] {
-  const out: Span[] = [];
-  let at = 0;
-  for (const m of s.matchAll(re)) {
-    const i = m.index ?? 0;
-    if (i > at) {
-      out.push(Text(s.slice(at, i)));
-    }
-    out.push(mark(m));
-    at = i + m[0].length;
-  }
-  if (at < s.length) {
-    out.push(Text(s.slice(at)));
-  }
-  return out;
 }
 
 type Node = { x: Span; m: Mark | null; prev: Node | null; next: Node | null };
@@ -187,7 +170,7 @@ function span_parse(s: string): Span[] {
       const got = on ? link_tail(s, i + 1, unshut) ?? link_ref(s, i + 1, o.at + o.c.length) : null;
       if (got !== null && link_safe(got.k)) {
         emphasis(o);
-        const x = nodes_spans(o.node.next);
+        const x = STORED.test(got.k) ? [Text(s.slice(o.at + o.c.length, i))] : nodes_spans(o.node.next);
         tail = o.node;
         o.node.next = null;
         o.node.x = o.c === "![" ? { $: "Pict", x: spans_text(x), k: got.k, t: got.t } : { $: "Link", x, k: got.k, t: got.t };
@@ -546,22 +529,6 @@ function entity_back(s: string, i: number, semi: number): number {
 
 export function md_flat(s: string): string {
   return spans_text(span_parse(s));
-}
-
-export function md_plain(s: string): Block[] {
-  const paras = s.replace(/\r/g, "").split(/\n(?:[ \t]*\n)+/);
-  const kept = paras.filter((p) => p.trim() !== "");
-  return kept.map((p) => ({ $: "Para", x: p.split("\n").flatMap((l, k) => [...(k === 0 ? [] : [{ $: "Brk" } as Span]), ...plain_line(l)]) }));
-}
-
-function plain_line(s: string): Span[] {
-  const out: Span[] = [];
-  let at = 0;
-  for (const [from, to, x, k] of md_pasted(s)) {
-    out.push(...spans_by(s.slice(at, from), NAME, (m) => Name(m[1])), { $: "Pict", x, k, t: "" });
-    at = to;
-  }
-  return [...out, ...spans_by(s.slice(at), NAME, (m) => Name(m[1]))];
 }
 
 export function md_pasted(s: string): Array<[number, number, string, string]> {

@@ -927,7 +927,6 @@ function name_word(word) {
 }
 
 // Md.ts
-var NAME2 = new RegExp("\\[(" + NAME + ")\\]", "g");
 var ONLY = new RegExp("^(?:" + NAME + ")$");
 var MEDIA = new Map([
   ["png", "image/png"],
@@ -949,6 +948,7 @@ var MEDIA = new Map([
 ]);
 var MEDIA_AS = new Map([["jpg", "jpeg"], ["m4v", "mp4"], ["oga", "ogg"], ["htm", "html"]]);
 var MEDIA_URL = /\/media\/[0-9a-f]{16}\.[a-z0-9]{1,10}(?=\))/y;
+var STORED = /^\/media\/[0-9a-f]{16}\.[a-z0-9]{1,10}$/;
 var LIST2 = /^ {0,3}([-*+]|\d{1,9}[.)])(?=[ \t]|$)/;
 var FENCE = /^ {0,3}(`{3,}|~{3,})/;
 var TASK = /^\[([ xX])\](?=[ \t]|$)[ \t]?/;
@@ -981,22 +981,6 @@ function Text(x) {
 }
 function Name(x) {
   return { $: "Name", x };
-}
-function spans_by(s, re, mark) {
-  const out = [];
-  let at = 0;
-  for (const m of s.matchAll(re)) {
-    const i = m.index ?? 0;
-    if (i > at) {
-      out.push(Text(s.slice(at, i)));
-    }
-    out.push(mark(m));
-    at = i + m[0].length;
-  }
-  if (at < s.length) {
-    out.push(Text(s.slice(at)));
-  }
-  return out;
 }
 function span_parse(s) {
   if (COLLECT) {
@@ -1090,7 +1074,7 @@ function span_parse(s) {
       const got = on ? link_tail(s, i + 1, unshut) ?? link_ref(s, i + 1, o.at + o.c.length) : null;
       if (got !== null && link_safe(got.k)) {
         emphasis(o);
-        const x = nodes_spans(o.node.next);
+        const x = STORED.test(got.k) ? [Text(s.slice(o.at + o.c.length, i))] : nodes_spans(o.node.next);
         tail = o.node;
         o.node.next = null;
         o.node.x = o.c === "![" ? { $: "Pict", x: spans_text(x), k: got.k, t: got.t } : { $: "Link", x, k: got.k, t: got.t };
@@ -1424,21 +1408,6 @@ function entity_back(s, i, semi) {
 }
 function md_flat(s) {
   return spans_text(span_parse(s));
-}
-function md_plain(s) {
-  const paras = s.replace(/\r/g, "").split(/\n(?:[ \t]*\n)+/);
-  const kept = paras.filter((p) => p.trim() !== "");
-  return kept.map((p) => ({ $: "Para", x: p.split(`
-`).flatMap((l, k) => [...k === 0 ? [] : [{ $: "Brk" }], ...plain_line(l)]) }));
-}
-function plain_line(s) {
-  const out = [];
-  let at = 0;
-  for (const [from, to, x, k] of md_pasted(s)) {
-    out.push(...spans_by(s.slice(at, from), NAME2, (m) => Name(m[1])), { $: "Pict", x, k, t: "" });
-    at = to;
-  }
-  return [...out, ...spans_by(s.slice(at), NAME2, (m) => Name(m[1]))];
 }
 function md_pasted(s) {
   const out = [];
@@ -2044,7 +2013,7 @@ var SUMS = "compressing earlier messages…";
 var UNSENT = "Sends once connected.";
 var MEDIA2 = MEDIA;
 var MEDIA_AS2 = MEDIA_AS;
-var STORED = /^[0-9a-f]{16}\.([a-z0-9]{1,10})$/;
+var STORED2 = /^[0-9a-f]{16}\.([a-z0-9]{1,10})$/;
 function media_kind(url) {
   const m = /^\/(?:media|image)\/[0-9a-f]{16}\.([a-z0-9]{1,10})$/.exec(url);
   return m === null ? null : ext_kind(m[1]);
@@ -2054,7 +2023,7 @@ function ext_kind(ext) {
   return type === undefined ? null : type === "text/html" ? "html" : type.split("/")[0];
 }
 function store_file(url) {
-  return url.startsWith("/media/") && STORED.test(url.slice("/media/".length)) && media_kind(url) === null;
+  return url.startsWith("/media/") && STORED2.test(url.slice("/media/".length)) && media_kind(url) === null;
 }
 function media_ext(file) {
   const dot = file.lastIndexOf(".");
@@ -2581,18 +2550,10 @@ function entry_rows(id, kind, text, images = [], of = { tool: "", apart: false }
   return call === null && body.length === 0 && pics.length === 0 ? [] : [{ $: "Msg", id, kind, who, text, body, call, images: pics }];
 }
 function entry_body(kind, text, label, tool) {
-  switch (kind) {
-    case "user":
-    case "work": {
-      return md_plain(text);
-    }
-    case "echo": {
-      return tool_name(tool) === "show" ? md_shown(text, label) : md_output(text, label);
-    }
-    default: {
-      return md_parse(text);
-    }
+  if (kind !== "echo") {
+    return md_parse(text);
   }
+  return tool_name(tool) === "show" ? md_shown(text, label) : md_output(text, label);
 }
 
 // web/src/Dom.ts
