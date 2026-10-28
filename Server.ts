@@ -1020,7 +1020,7 @@ export namespace Chat {
 
   export function stop(chat: Chat, why: string | null): void {
     const turn = chat.main.busy && !chat.main.halt.signal.aborted;
-    Chat.interrupt(chat, turn ? why : null);
+    Run.stop(chat.main, turn ? why : null);
     Tools.stop(chat.tools, null);
     if (!turn && why !== null) {
       Chat.note(chat, why);
