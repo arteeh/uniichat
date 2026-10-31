@@ -1,7 +1,7 @@
 import * as child from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import type { Options, Query, SDKMessage, SDKRateLimitInfo, SDKUserMessage, SpawnOptions } from "@anthropic-ai/claude-agent-sdk";
+import type { Options, Query, SDKMessage, SDKRateLimitInfo, SDKUserMessage, SpawnOptions, SyncHookJSONOutput } from "@anthropic-ai/claude-agent-sdk";
 import { AskAI, type Ask, type End, type Event, type Img, type Try } from "./AskAI.ts";
 import { Agent, BUSY, TOO_LONG, type Emit } from "./Agent.ts";
 import { Anthropic } from "./Anthropic.ts";
@@ -53,6 +53,8 @@ const NO_BIN = "claude-sub needs Claude Code: `bun install` in uniichat's folder
 
 const DIED = "Claude Code ended early";
 
+const OVERAGE = "usage limit: extra usage";
+
 
 type Sdk = typeof import("@anthropic-ai/claude-agent-sdk");
 
@@ -62,6 +64,8 @@ type Code = {
   proc : child.ChildProcess | null;
   exit : Promise<void>;
   gone : () => void;
+  over : boolean;
+  cut  : boolean;
 };
 
 type Out = Partial<End> & { limit?: { until: number | null; text: string } };
@@ -291,7 +295,7 @@ export namespace ClaudeSub {
     if (held) {
       void exit.then(ClaudeSub.free);
     }
-    const code = { box, proc: null, exit, gone } as Omit<Code, "q"> as Code;
+    const code = { box, proc: null, exit, gone, over: false, cut: false } as Omit<Code, "q"> as Code;
     const spawn = (o: SpawnOptions) => {
       const proc = child.spawn(o.command, o.args, { cwd: o.cwd, env: o.env, signal: o.signal, stdio: ["pipe", "pipe", "ignore"], windowsHide: true });
       code.proc = proc;
@@ -299,7 +303,8 @@ export namespace ClaudeSub {
       proc.once("error", () => proc.pid === undefined && gone());
       return proc;
     };
-    const options = { ...ClaudeSub.options(ask, new AbortController(), sdk.BUILTIN_TOOL_NAMES, sdk.SYSTEM_PROMPT_DYNAMIC_BOUNDARY), pathToClaudeCodeExecutable: bin, spawnClaudeCodeProcess: spawn };
+    const hooks = { PostToolBatch: [{ hooks: [() => Promise.resolve(ClaudeSub.after_tools(code))] }] };
+    const options = { ...ClaudeSub.options(ask, new AbortController(), sdk.BUILTIN_TOOL_NAMES, sdk.SYSTEM_PROMPT_DYNAMIC_BOUNDARY), pathToClaudeCodeExecutable: bin, spawnClaudeCodeProcess: spawn, hooks };
     try {
       code.q = sdk.query({ prompt: box.read(), options });
     } catch (err) {
@@ -458,12 +463,11 @@ export namespace ClaudeSub {
     return err instanceof Died && !said && !signal.aborted;
   }
 
-  export function interrupt_overage(code: Code, info: SDKRateLimitInfo, interrupted: boolean): boolean {
-    if (info.isUsingOverage === true && !interrupted) {
-      code.q.interrupt().catch(() => {});
-      return true;
-    }
-    return interrupted;
+  // after a batch of tool calls, before the next request: under extra usage
+  // the turn stops here, with the tools' results in
+  export function after_tools(code: Code): SyncHookJSONOutput {
+    code.cut = code.over;
+    return code.over ? { continue: false, stopReason: OVERAGE } : {};
   }
 
   export function limit_ended(whole: boolean, hit: boolean, over: boolean, info: SDKRateLimitInfo | null): boolean {
@@ -474,8 +478,8 @@ export namespace ClaudeSub {
     const stopped = new Promise<"stop">((ok) => (signal.aborted ? ok("stop") : signal.addEventListener("abort", () => ok("stop"), { once: true })));
     let info: SDKRateLimitInfo | null = null;
     let hit = false;
-    let over = false;
     let err: string | undefined;
+    [code.over, code.cut] = [false, false];
     for (;;) {
       const r = await Promise.race([ClaudeSub.read(code), stopped]);
       if (r === "stop") {
@@ -495,7 +499,7 @@ export namespace ClaudeSub {
       if (msg.type === "rate_limit_event") {
         info = msg.rate_limit_info;
         ClaudeSub.note(info);
-        over = ClaudeSub.interrupt_overage(code, info, over);
+        code.over ||= info.isUsingOverage === true;
       }
       if (msg.type === "assistant" && msg.error === undefined) {
         Anthropic.entries(msg.message.content).forEach((e) => log({ $: "Entry", ...e }));
@@ -516,7 +520,7 @@ export namespace ClaudeSub {
       }
       const ok = msg.subtype === "success" && !msg.is_error;
       const why = msg.subtype === "success" ? msg.result : msg.errors.join("; ");
-      if (ClaudeSub.limit_ended(ok, hit, over, info)) {
+      if (ClaudeSub.limit_ended(ok && !code.cut, hit, code.over, info)) {
         return { limit: { until: info && ClaudeSub.reset(info), text: why } };
       }
       if (!ok) {
