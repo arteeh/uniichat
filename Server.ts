@@ -16,7 +16,7 @@ import { Pick } from "./Pick.ts";
 import { ACTIVE_MS, Push } from "./Push.ts";
 import { Reap } from "./Reap.ts";
 import { Settings } from "./Settings.ts";
-import { INSTALL, INSTALL_PS1 } from "./Update.ts";
+import { update_cmd } from "./Update.ts";
 import { move_over, write_whole } from "./Write.ts";
 import { LIMIT, Limit } from "./Limit.ts";
 import { Run, type Heard } from "./Run.ts";
@@ -1742,7 +1742,7 @@ export namespace Main {
     Reap.start();
     await Main.lock();
     if ((fs.existsSync(config.DIR + "/users") && !fs.existsSync(CHAT)) || fs.existsSync(config.DIR + "/.migrating")) {
-      const installer = WIN ? "irm " + INSTALL_PS1 + " | iex" : "curl -fsSL " + INSTALL + " | sh";
+      const installer = update_cmd(WIN);
       throw new Error(config.DIR + " holds an older unii's data, not yet (or not all) moved to this version's layout: run the installer (" + installer + ") with no unii server running, then start again");
     }
     fs.writeFileSync(PID, String(process.pid));
