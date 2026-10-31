@@ -534,11 +534,6 @@ export namespace Chat {
     chat.limits = { vendor, n };
     chat.main.limit = { until, known, vendor };
     void Limit.wait(vendor, ms, wake.signal).then(() => Chat.go_on(chat, wake, goal));
-    const said = end.text.replace(/\.$/, "");
-    const at = Limit.utc(until);
-    Chat.note(chat, goal === null
-      ? said[0].toUpperCase() + said.slice(1) + ". " + (known ? "Going on" : "Trying again") + " at " + at + "; a message goes on sooner, Stop cancels."
-      : "No goal check: " + said + ". Checking again at " + at + "; Stop or /halt cancels.");
     Chat.change(chat);
   }
 

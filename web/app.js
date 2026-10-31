@@ -2289,16 +2289,16 @@ function sums_show(sums, again, now = Date.now()) {
   if (again === null) {
     return head;
   }
-  const at = new Date(again.until);
-  const day = at.toDateString() === new Date(now).toDateString() ? {} : { weekday: "short" };
-  const when = again.limit ? "at " + at.toLocaleString(undefined, { ...day, hour: "2-digit", minute: "2-digit" }) : "in " + Math.max(1, Math.ceil((again.until - now) / 60000)) + " min";
+  const when = again.limit ? "at " + clock(again.until, now) : "in " + Math.max(1, Math.ceil((again.until - now) / 60000)) + " min";
   const why = again.why.length > 120 ? again.why.slice(0, 120) + "…" : again.why.replace(/\.$/, "");
   return head + " · compactor: " + why + ", asking again " + when;
 }
 function limit_show(limit, now = Date.now()) {
-  const at = new Date(limit.until);
-  const day = at.toDateString() === new Date(now).toDateString() ? {} : { weekday: "short" };
-  return "waiting for the usage limit, " + (limit.known ? "resumes" : "tries again") + " at " + at.toLocaleString(undefined, { ...day, hour: "2-digit", minute: "2-digit" });
+  return "Usage limit on " + limit.vendor + ", " + (limit.known ? "resumes" : "tries again") + " at " + clock(limit.until, now);
+}
+function clock(at, now = Date.now()) {
+  const day = new Date(at).toDateString() === new Date(now).toDateString() ? {} : { weekday: "short", day: "numeric", month: "short" };
+  return new Date(at).toLocaleString(undefined, { ...day, hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
 }
 function view_stream(v) {
   return v.page === null ? v.live : v.page.live;
@@ -3027,7 +3027,7 @@ function html_media(el) {
 var AHEAD = 8 * 366;
 var DAYS = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
 var CLOCKS = new Map;
-function clock(zone) {
+function clock2(zone) {
   const had = CLOCKS.get(zone);
   if (had !== undefined) {
     return had;
@@ -3042,7 +3042,7 @@ function clock(zone) {
   }
 }
 function wall(ms, zone) {
-  const c = clock(zone);
+  const c = clock2(zone);
   if (c === null) {
     throw new Error("no time zone " + zone);
   }

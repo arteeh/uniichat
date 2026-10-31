@@ -13,7 +13,7 @@ import { EFFORTS, Pick } from "./Pick.ts";
 import { Run, type CallHooks, type Heard, type InboxHooks, type LoopHooks } from "./Run.ts";
 import type { Msg } from "./Server.ts";
 import * as Timer from "./Timer.ts";
-import { PING, type Pending } from "./View.ts";
+import { PING, limit_show, type Pending } from "./View.ts";
 import { err_why } from "./Err.ts";
 import { get, list as items, rec, text_of } from "./Json.ts";
 
@@ -249,7 +249,7 @@ export namespace Tools {
   }
 
   export function at_work(tools: Tools): Block {
-    const names = Tools.working(tools).map(({ name, run }) => (run.limit === null ? name : name + " (waiting for the usage limit on " + run.limit.vendor + ", " + (run.limit.known ? "resumes " : "tries again ") + Limit.utc(run.limit.until) + ")"));
+    const names = Tools.working(tools).map(({ name, run }) => (run.limit === null ? name : name + " (" + limit_show(run.limit) + ")"));
     return { text: "Agents at work now: " + (names.length === 0 ? "none." : names.join(", ") + ".") + "\n\n", mark: false };
   }
 

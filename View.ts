@@ -501,17 +501,18 @@ function sums_show(sums: Sums | null, again: Again | null, now = Date.now()): st
   if (again === null) {
     return head;
   }
-  const at   = new Date(again.until);
-  const day  = at.toDateString() === new Date(now).toDateString() ? {} : { weekday: "short" as const };
-  const when = again.limit ? "at " + at.toLocaleString(undefined, { ...day, hour: "2-digit", minute: "2-digit" }) : "in " + Math.max(1, Math.ceil((again.until - now) / 60e3)) + " min";
+  const when = again.limit ? "at " + clock(again.until, now) : "in " + Math.max(1, Math.ceil((again.until - now) / 60e3)) + " min";
   const why  = again.why.length > 120 ? again.why.slice(0, 120) + "…" : again.why.replace(/\.$/, "");
   return head + " · compactor: " + why + ", asking again " + when;
 }
 
-function limit_show(limit: Parked, now = Date.now()): string {
-  const at  = new Date(limit.until);
-  const day = at.toDateString() === new Date(now).toDateString() ? {} : { weekday: "short" as const };
-  return "waiting for the usage limit, " + (limit.known ? "resumes" : "tries again") + " at " + at.toLocaleString(undefined, { ...day, hour: "2-digit", minute: "2-digit" });
+export function limit_show(limit: Parked, now = Date.now()): string {
+  return "Usage limit on " + limit.vendor + ", " + (limit.known ? "resumes" : "tries again") + " at " + clock(limit.until, now);
+}
+
+function clock(at: number, now = Date.now()): string {
+  const day = new Date(at).toDateString() === new Date(now).toDateString() ? {} : { weekday: "short", day: "numeric", month: "short" } as const;
+  return new Date(at).toLocaleString(undefined, { ...day, hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
 }
 
 export function view_stream(v: View): Live[] {
