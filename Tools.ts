@@ -40,13 +40,13 @@ type Agent = {
   why     : string | null;
   view    : Block[];
   replies : string[];
-  run     : Run<Say, Say>;
+  run     : Run<Say, Msg>;
 };
 
 type Log = {
-  push   : (run: Run<Say, Say>, kind: Kind, text: string) => void;
+  push   : (run: Run<Say, Msg>, kind: Kind, text: string) => Msg;
   note   : (text: string) => void;
-  on     : (run: Run<Say, Say>, ev: Heard) => void;
+  on     : (run: Run<Say, Msg>, ev: Heard) => void;
   report : (text: string, take: boolean) => void;
   change : () => void;
   timed  : () => void;
@@ -717,7 +717,7 @@ export namespace Tools {
   }
 
   export function made(tools: Tools, name: string, role: Agent["role"], view: Block[]): Agent {
-    const agent: Agent = { name, role, why: null, view, replies: [], run: Run.make<Say, Say>(name, Tools.kind(tools, () => agent)) };
+    const agent: Agent = { name, role, why: null, view, replies: [], run: Run.make<Say, Msg>(name, Tools.kind(tools, () => agent)) };
     return agent;
   }
 
@@ -736,17 +736,14 @@ export namespace Tools {
     return sub === null ? null : Tools.made(tools, name, { effort: sub[2] ?? null, model: sub[1] ?? null }, []);
   }
 
-  export function kind(tools: Tools, agent: () => Agent): Run<Say, Say>["kind"] {
+  export function kind(tools: Tools, agent: () => Agent): Run<Say, Msg>["kind"] {
     return { ...Tools.agent_inbox(tools), ...Tools.agent_calls(tools, agent), ...Tools.agent_loop(tools, agent), change: () => tools.log.change() };
   }
 
-  export function agent_inbox(tools: Tools): InboxHooks<Say, Say> {
+  export function agent_inbox(tools: Tools): InboxHooks<Say, Msg> {
     const log = tools.log;
     return {
-      log    : (run, say) => {
-        log.push(run, "user", say.text);
-        return say;
-      },
+      log    : (run, say) => log.push(run, "user", say.text),
       queued : (run) => {
         Tools.queued(tools, run);
         log.change();
@@ -755,7 +752,7 @@ export namespace Tools {
     };
   }
 
-  export function agent_calls(tools: Tools, agent: () => Agent): CallHooks<Say, Say> {
+  export function agent_calls(tools: Tools, agent: () => Agent): CallHooks<Say, Msg> {
     return {
       pick   : () => Tools.pick(tools, agent()),
       ask    : (_, take) => {
@@ -771,7 +768,7 @@ export namespace Tools {
     };
   }
 
-  export function agent_loop(tools: Tools, agent: () => Agent): LoopHooks<Say, Say> {
+  export function agent_loop(tools: Tools, agent: () => Agent): LoopHooks<Say, Msg> {
     return {
       begin  : () => {},
       failed : (_, why) => {
@@ -786,7 +783,7 @@ export namespace Tools {
     };
   }
 
-  export function queued(tools: Tools, run: Run<Say, Say>): void {
+  export function queued(tools: Tools, run: Run<Say, Msg>): void {
     const texts = run.queue.map((x) => x.q.text);
     if (texts.length === 0 && !(run.name in tools.mem.tells)) {
       return;

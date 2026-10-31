@@ -47,6 +47,7 @@ type ByRun = {
   runs      : Record<string, Pick>;
   limits    : Record<string, Parked>;
   queue     : Record<string, Queued[]>;
+  sent      : Record<string, number[]>;
 };
 
 type Offered = {
@@ -265,6 +266,7 @@ export function view_new(): View {
     importing : null,
     limits    : {},
     queue     : {},
+    sent      : {},
     sums      : null,
     again     : null,
     timers    : [],
@@ -472,7 +474,7 @@ export function view_rows(v: View, parts: Part[]): Row[][] {
 }
 
 export function rows_wait(v: View, rows: Row[]): boolean {
-  return rows.some((row) => (row.$ === "Sum" && !v.nodes.has(row.id + "+" + row.n)) || (row.$ === "Box" && rows_wait(v, row.rows)));
+  return rows.some((row) => (row.$ === "Sum" && !v.nodes.has(row.id + "+" + row.n)) || (row.$ === "Msg" && row.queued === true) || (row.$ === "Box" && rows_wait(v, row.rows)));
 }
 
 export function view_tail(v: View, live = view_stream(v)): Row[] {
@@ -722,7 +724,7 @@ function part_rows(v: View, id: number, n: number, t: number, talk: boolean): Ro
   if (n === 1 && id >= t && entry !== undefined) {
     const minds = v.minds.get(id) ?? [];
     const after = minds.flatMap((x) => entry_rows(null, "mind", x));
-    return [...whole_rows(id, entry, v.whole.get(id - 1)), ...after];
+    return [...sent_rows(v, TURN, id, whole_rows(id, entry, v.whole.get(id - 1))), ...after];
   }
   const open  = talk && n === 1 && ["user", "unii"].includes(entry?.kind ?? "");
   if (!(v.open.get(key) ?? open)) {
@@ -757,7 +759,11 @@ function sum_rows(id: number, n: number, node: Node = { text: WAIT, to: "" }): R
 export function page_rows(v: View, page: Page, from = 0): Row[] {
   const head = Cap(page.name + (v.agents.includes(page.name) ? " · at work" : " · done"));
   const log = page.log ?? [];
-  return [head, ...log.slice(from).flatMap((e, k) => whole_rows(null, e, log[from + k - 1]))];
+  return [head, ...log.slice(from).flatMap((e, k) => sent_rows(v, page.name, from + k, whole_rows(null, e, log[from + k - 1])))];
+}
+
+function sent_rows(v: View, name: string, id: number, rows: Row[]): Row[] {
+  return (v.sent[name] ?? []).includes(id) ? rows.map((row) => (row.$ === "Msg" ? { ...row, queued: true } : row)) : rows;
 }
 
 export function live_push(live: Live[], kind: Kind, text: string, fresh = false): void {

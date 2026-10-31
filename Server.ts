@@ -47,7 +47,7 @@ type Body = { fh: fs.promises.FileHandle; size: number };
 
 export type Msg = { id: number; end: number };
 
-type Talk = Run<Pending, Msg> | Run<Say, Say>;
+type Talk = Run<Pending, Msg> | Run<Say, Msg>;
 
 type Eye = { parts: Part[]; from: number };
 
@@ -199,7 +199,7 @@ export namespace Chat {
   export function open(): Chat {
     const mem = Memory.load(CHAT, () => ({ system: Tools.prompt("compact"), searches: 0, server: "" }), Owner.act_put);
     const cut = mem.work;
-    Limit.answering(() => ({ queued: chat.main.queue.length > 0, busy: chat.main.busy }));
+    Limit.answering(() => ({ queued: chat.main.queue.length + chat.main.sent.length > 0, busy: chat.main.busy }));
     const main = Run.make<Pending, Msg>(TURN, {
       pick   : () => chat.pick,
       begin  : () => Chat.begin(chat),
@@ -1084,6 +1084,7 @@ export namespace Chat {
     const talk = Chat.meter(chat);
     const limits: Record<string, Parked> = {};
     const queue: Record<string, Queued[]> = {};
+    const sent: Record<string, number[]> = {};
     const shown = (text: string): string => (text.length > QUEUED_TEXT ? text.slice(0, QUEUED_TEXT) + "…" : text);
     for (const run of [chat.main, ...[...chat.tools.agents.values()].map((a) => a.run)]) {
       if (run.limit !== null) {
@@ -1092,8 +1093,11 @@ export namespace Chat {
       if (run.queue.length > 0) {
         queue[run.name] = run.queue.map(({ q }) => ({ kind: "kind" in q ? q.kind : "user", text: shown(q.text) }));
       }
+      if (run.sent.length > 0) {
+        sent[run.name] = run.sent.flatMap((m) => Array.from({ length: m.end - m.id }, (_, k) => m.id + k));
+      }
     }
-    return { $: "state", busy: chat.main.busy, wait: Chat.waits(chat), agents, runs, pick: chat.pick, ...config.OFFER, importing, limits, queue, sums: Chat.sums(chat), again: chat.mem.again, timers, mcp, talk, build: BUILD, site: config.SITE };
+    return { $: "state", busy: chat.main.busy, wait: Chat.waits(chat), agents, runs, pick: chat.pick, ...config.OFFER, importing, limits, queue, sent, sums: Chat.sums(chat), again: chat.mem.again, timers, mcp, talk, build: BUILD, site: config.SITE };
   }
 
   export function sums(chat: Chat): Sums | null {

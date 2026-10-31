@@ -2063,6 +2063,7 @@ function view_new() {
     importing: null,
     limits: {},
     queue: {},
+    sent: {},
     sums: null,
     again: null,
     timers: [],
@@ -2475,7 +2476,7 @@ function part_rows(v, id, n, t, talk) {
   if (n === 1 && id >= t && entry !== undefined) {
     const minds = v.minds.get(id) ?? [];
     const after = minds.flatMap((x) => entry_rows(null, "mind", x));
-    return [...whole_rows(id, entry, v.whole.get(id - 1)), ...after];
+    return [...sent_rows(v, TURN, id, whole_rows(id, entry, v.whole.get(id - 1))), ...after];
   }
   const open = talk && n === 1 && ["user", "unii"].includes(entry?.kind ?? "");
   if (!(v.open.get(key) ?? open)) {
@@ -2506,7 +2507,10 @@ function sum_rows(id, n, node = { text: WAIT, to: "" }) {
 function page_rows(v, page, from = 0) {
   const head = Cap(page.name + (v.agents.includes(page.name) ? " · at work" : " · done"));
   const log = page.log ?? [];
-  return [head, ...log.slice(from).flatMap((e, k) => whole_rows(null, e, log[from + k - 1]))];
+  return [head, ...log.slice(from).flatMap((e, k) => sent_rows(v, page.name, from + k, whole_rows(null, e, log[from + k - 1])))];
+}
+function sent_rows(v, name, id, rows) {
+  return (v.sent[name] ?? []).includes(id) ? rows.map((row) => row.$ === "Msg" ? { ...row, queued: true } : row) : rows;
 }
 function live_push(live, kind, text, fresh = false) {
   const top = live[live.length - 1];
@@ -4808,6 +4812,7 @@ function hear(msg) {
   }
   const was = view_pick(v);
   const agents = v.agents.join();
+  const sent = JSON.stringify(v.sent);
   for (const out of view_hear(v, msg)) {
     link_send(v, out);
   }
@@ -4815,7 +4820,7 @@ function hear(msg) {
   if (now.length > 0) {
     toast("Now " + now.map((k) => k.hint).join("; ") + ".");
   }
-  P.rows ||= msg.$ === "state" ? v.agents.join() !== agents : msg.$ !== "delta" && msg.$ !== "live";
+  P.rows ||= msg.$ === "state" ? v.agents.join() !== agents || JSON.stringify(v.sent) !== sent : msg.$ !== "delta" && msg.$ !== "live";
   if (msg.$ === "state") {
     renew_due(msg.build);
   }

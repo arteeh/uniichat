@@ -18,6 +18,7 @@ type Loop = {
 type Inbox<Q, M> = {
   queue : Queued<Q>[];
   wait  : M[];
+  sent  : M[];
 };
 
 type Calling = {
@@ -55,7 +56,7 @@ type Kind<Q, M> = LoopHooks<Q, M> & InboxHooks<Q, M> & CallHooks<Q, M> & { chang
 export namespace Run {
 
   export function make<Q, M>(name: string, kind: Kind<Q, M>): Run<Q, M> {
-    return { name, kind, busy: false, going: Promise.resolve(), call: null, queue: [], wait: [], halt: new AbortController(), live: [], calls: new Map(), limit: null, fell: null };
+    return { name, kind, busy: false, going: Promise.resolve(), call: null, queue: [], wait: [], sent: [], halt: new AbortController(), live: [], calls: new Map(), limit: null, fell: null };
   }
 
   export function take<Q, M>(run: Run<Q, M>, q: Q): Promise<string | null> {
@@ -92,7 +93,7 @@ export namespace Run {
         if (ask === null || run.halt.signal.aborted) {
           break;
         }
-        const call = (run.call = AskAI.ask(ask, (ev) => kind.on(run, ev)));
+        const call = (run.call = AskAI.ask(ask, (ev) => Run.heard(run, ev)));
         kind.change();
         const end = await call.done;
         run.call = null;
@@ -127,6 +128,7 @@ export namespace Run {
         const got = run.kind.log(run, q);
         const msg = got instanceof Promise ? await got : got;
         run.wait.push(msg);
+        run.sent.push(msg);
         logged.push(q);
         done(null);
       } catch (err) {
@@ -142,6 +144,18 @@ export namespace Run {
       Run.safe(run, () => run.kind.queued(run));
     }
     return logged;
+  }
+
+  export function heard<Q, M>(run: Run<Q, M>, ev: Event): void {
+    if (run.sent.length > 0 && Run.answers(ev)) {
+      run.sent = [];
+      Run.safe(run, run.kind.change);
+    }
+    run.kind.on(run, ev);
+  }
+
+  export function answers(ev: Event): boolean {
+    return ev.$ === "Delta" || ev.$ === "Start" || (ev.$ === "Entry" && ev.kind !== "mind");
   }
 
   export function safe<Q, M>(run: Run<Q, M>, step: () => void): void {

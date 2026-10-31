@@ -601,6 +601,7 @@ function hear(msg: View.Server): void {
   }
   const was = View.view_pick(v);
   const agents = v.agents.join();
+  const sent = JSON.stringify(v.sent);
   for (const out of View.view_hear(v, msg)) {
     View.link_send(v, out);
   }
@@ -608,7 +609,7 @@ function hear(msg: View.Server): void {
   if (now.length > 0) {
     toast("Now " + now.map((k) => k.hint).join("; ") + ".");
   }
-  P.rows ||= msg.$ === "state" ? v.agents.join() !== agents : msg.$ !== "delta" && msg.$ !== "live";
+  P.rows ||= msg.$ === "state" ? v.agents.join() !== agents || JSON.stringify(v.sent) !== sent : msg.$ !== "delta" && msg.$ !== "live";
   if (msg.$ === "state") {
     renew_due(msg.build);
   }

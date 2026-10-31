@@ -541,7 +541,8 @@ function term_print(t: Term, msg: View.Server): void {
       }
       return;
     }
-    case "know": {
+    case "know":
+    case "state": {
       if (main) {
         term_settle(t);
       }
