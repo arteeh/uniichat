@@ -87,6 +87,9 @@ const SPENT = /insufficient_quota|billing_hard_limit_reached|credit balance is t
 
 export const BUSY  = "the AI service is busy or unavailable right now";
 
+// as Claude Code words a message sent mid-turn (claude-sub's steers)
+const STEERED = ["The user sent a new message while you were working:\n", "\n\nAddress the message above as you continue this turn."];
+
 export const TOO_LONG = /prompt is too long|context.length|context (limit|window)|model_context_window_exceeded|too many (input )?tokens/i;
 
 const ROOMS = new Map<string, Room>();
@@ -174,6 +177,10 @@ export namespace Agent {
         return;
       }
       items.push({ $: "Back", backs });
+      const says = (await ask.steers?.()) ?? [];
+      if (says.length > 0) {
+        items.push({ $: "User", parts: says.map((say) => ({ text: STEERED[0] + say.text + STEERED[1], mark: false })), imgs: says.flatMap((say) => say.imgs) });
+      }
     }
   }
 

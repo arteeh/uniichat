@@ -204,6 +204,7 @@ export namespace Chat {
       pick   : () => chat.pick,
       begin  : () => Chat.begin(chat),
       log    : (_, post) => Chat.writing(chat, () => Promise.try(() => Chat.posted(chat, post))),
+      say    : (_, m) => Memory.say(chat.mem, m.id, m.end),
       ask    : (_, take) => Chat.call(chat, take),
       queued : (run) => Chat.queued(chat, run),
       again  : (post) => post.kind === "user",
@@ -263,7 +264,7 @@ export namespace Chat {
     return { ...Pick.ask(chat.pick), system, searches: 0, server: "" };
   }
 
-  export async function say(chat: Chat, id: string, sizes: number[], body: Body): Promise<Answer> {
+  export async function say(chat: Chat, id: string, sizes: number[], body: Body, steer: boolean): Promise<Answer> {
     if (chat.main.queue.some((x) => x.q.act === id)) {
       return {};
     }
@@ -279,7 +280,7 @@ export namespace Chat {
     }
     const text = (await Chat.read(body, at, body.size - at)).toString("utf8");
     const pics = [...images, ...await Chat.pictured(chat, text, images)];
-    const why = await Run.take(chat.main, { kind: "user", text, images: pics, act: id });
+    const why = await Run.take(chat.main, { kind: "user", text, images: pics, act: id }, steer);
     return why === null ? {} : { error: why };
   }
 
@@ -992,7 +993,7 @@ export namespace Chat {
     const queued = chat.mem.queue.filter((post) => post.act === undefined || Owner.act_get(post.act) === null);
     const posts: Pending[] = [...(work.includes(TURN) ? [{ kind: "note" as const, text, images: [] }] : []), ...queued];
     posts.forEach((post) => void Run.take(chat.main, post));
-    await Promise.all(agents.map((w) => Tools.tell(chat.tools, w, text, tells[w] ?? [])));
+    await Promise.all(agents.map((w) => Tools.tell(chat.tools, w, text, "queue", tells[w] ?? [])));
   }
 
   export function timed(chat: Chat, retry = false): void {
@@ -1368,7 +1369,7 @@ export namespace Chat {
           if (typeof msg.sizes !== "string") {
             throw new Error("A say has no sizes.");
           }
-          return await Chat.say(chat, id, msg.sizes.split(",").filter(Boolean).map(Number), body);
+          return await Chat.say(chat, id, msg.sizes.split(",").filter(Boolean).map(Number), body, msg.steer === "true");
         }
         case "import": {
           return await Chat.writing(chat, () => Chat.ingest(chat, id, body));

@@ -161,9 +161,9 @@ function chat(): void {
   // never the Enter that ends a composition (Japanese, Chinese: Safari
   // ends it first, so only its keyCode, 229, says so)
   BOX.onkeydown = (ev) => {
-    if (ev.key === "Enter" && !ev.shiftKey && !ev.isComposing && ev.keyCode !== 229 && DESK.matches) {
+    if (ev.key === "Enter" && !ev.shiftKey && !ev.isComposing && ev.keyCode !== 229 && (DESK.matches || ev.altKey || ev.ctrlKey)) {
       ev.preventDefault();
-      submit();
+      submit(ev.altKey || ev.ctrlKey);
     }
   };
   $("form").onsubmit = (ev) => {
@@ -171,6 +171,7 @@ function chat(): void {
     submit();
   };
   $(".attach").onclick = () => file.click();
+  steer_button($(".steer", HTMLButtonElement));
   $("#pick").onkeydown = roam;
   $("#pick").addEventListener("focusout", left);
   $("#menu .out").onclick = signout;
@@ -246,7 +247,28 @@ function typed(): void {
   draw(true);
 }
 
-function submit(): void {
+// a click steers; a long press (a touch screen has no hover) shows what that is
+function steer_button(steer: HTMLButtonElement): void {
+  let held: ReturnType<typeof setTimeout> | undefined;
+  let told = false;
+  steer.onpointerdown = () => {
+    told = false;
+    held = setTimeout(() => {
+      told = true;
+      toast(steer.title);
+    }, 500);
+  };
+  steer.onpointerup = steer.onpointerleave = () => clearTimeout(held);
+  steer.oncontextmenu = (ev) => ev.preventDefault();
+  steer.onclick = () => {
+    if (!told) {
+      submit(true);
+    }
+    told = false;
+  };
+}
+
+function submit(steer = false): void {
   if (Box.box_items().some((item) => item.dataset.state === "bad")) {
     P.after = false;
     toast(FAILED);
@@ -259,7 +281,7 @@ function submit(): void {
   }
   P.after = false;
   const text = Box.box_text().trim();
-  act({ $: "Send", text });
+  act({ $: "Send", text, steer });
   Box.box_set("");
 }
 
@@ -937,6 +959,7 @@ function bars(): void {
     $("#timers").hidePopover();
   }
   send.classList.toggle("stop", stop);
+  $(".steer").hidden = !on || !View.view_stoppable(v) || Box.box_blank();
   $(".composer").hidden = !on;
   $(".mic", HTMLButtonElement).disabled = v.out.some((p) => p.msg.$ === "voice");
   $(".mic").classList.toggle("rec", P.rec !== null);

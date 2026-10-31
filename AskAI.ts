@@ -34,6 +34,7 @@ export type Ask = Pick & {
   talk?     : boolean;
   repick?   : () => Pick;
   used?     : (tokens: number) => void;
+  steers?   : () => Promise<Say[]>;
   limits?   : number;
   who?      : string;
 };

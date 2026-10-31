@@ -110,6 +110,9 @@ body:is(.account, .tree) footer > :not(#toast) { display: none; }
 .field .item[data-state=up] > :is(img, video) { opacity: .6; }
 .field .item[data-state=bad] { border-color: var(--red); }
 .field .item[data-state=bad] .state { background: var(--red); }
+.sends { flex: none; display: flex; flex-direction: column; align-items: center; gap: 6px; }
+.steer { width: 28px; height: 28px; border-radius: 50%; background: var(--block); color: var(--ink); font: 700 15px/1 var(--sans); }
+.steer:hover { background: var(--hover); }
 .send, .attach, .mic { flex: none; width: 38px; height: 38px; display: grid; place-items: center; border-radius: 50%; }
 .send svg, .attach svg, .mic svg { width: 20px; height: 20px; stroke-width: 2; }
 .send { background: var(--ink); color: var(--paper); }

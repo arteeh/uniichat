@@ -59,6 +59,7 @@ function term_groups(): [group: string, cmds: Cmd[]][] {
   return [
     ["Chat", [
       ["",                  "Enter",                   "send; on an empty input, interrupt UniiChat",    term_enter],
+      ["",                  "Alt+Enter",               "send as a steer: UniiChat reads it at its next step, without waiting for its turn to end", term_enter],
       ["",                  "Esc",                     "interrupt UniiChat's turn; agents go on",        (t) => term_act(t, { $: "Send", text: "" })],
       ["",                  "Ctrl+C, Ctrl+D",          "clear; on an empty input, interrupt, quit",      term_clear],
       ["/goal <message>",   "",                        "send a message as the goal: at each turn's end, UniiChat asks itself if it is met, and goes on till it is", (t, a) => term_act(t, { $: "Send", text: "/goal " + a })],
@@ -120,7 +121,7 @@ function term_new(url: string, token: string): Term {
   };
   process.stdin.on("end", () => {
     if (t.scr.ed.text.trim() !== "") {
-      term_enter(t);
+      term_enter(t, "Enter");
     }
     t.ended = true;
     term_idle(t);
@@ -234,14 +235,14 @@ function term_press(t: Term, key: string): void {
   term_draw(t);
 }
 
-function term_enter(t: Term): void {
+function term_enter(t: Term, key: string): void {
   const text = Screen.ed_take(t.scr.ed);
   if (term_command(t, text)) {
     return;
   }
   if (!View.view_typing(t.v)) {
     term_note(t, "Messages go to UniiChat: Tab or /tab goes back.");
-  } else if (term_act(t, { $: "Send", text, images: t.imgs }).length > 0) {
+  } else if (term_act(t, { $: "Send", text, images: t.imgs, steer: key === "Alt+Enter" }).length > 0) {
     t.imgs = [];
     return;
   }

@@ -2190,7 +2190,7 @@ function view_act(v, act) {
         return [];
       }
       const blob = new Blob([...images, text]);
-      const say = { $: "say", sizes: images.map((b) => b.size), body: () => blob };
+      const say = { $: "say", sizes: images.map((b) => b.size), body: () => blob, ...act.steer === true ? { steer: true } : {} };
       v.fold = null;
       return goal === null ? [say] : [{ $: "goal", text: goal }, say];
     }
@@ -4403,9 +4403,9 @@ function chat() {
   box_new(BOX2, { input: typed, files: attach });
   BOX2.addEventListener("blur", () => draw2(false));
   BOX2.onkeydown = (ev) => {
-    if (ev.key === "Enter" && !ev.shiftKey && !ev.isComposing && ev.keyCode !== 229 && DESK.matches) {
+    if (ev.key === "Enter" && !ev.shiftKey && !ev.isComposing && ev.keyCode !== 229 && (DESK.matches || ev.altKey || ev.ctrlKey)) {
       ev.preventDefault();
-      submit();
+      submit(ev.altKey || ev.ctrlKey);
     }
   };
   $2("form").onsubmit = (ev) => {
@@ -4413,6 +4413,7 @@ function chat() {
     submit();
   };
   $2(".attach").onclick = () => file.click();
+  steer_button($2(".steer", HTMLButtonElement));
   $2("#pick").onkeydown = roam;
   $2("#pick").addEventListener("focusout", left);
   $2("#menu .out").onclick = signout;
@@ -4485,7 +4486,26 @@ function typed() {
   }
   draw2(true);
 }
-function submit() {
+function steer_button(steer) {
+  let held;
+  let told = false;
+  steer.onpointerdown = () => {
+    told = false;
+    held = setTimeout(() => {
+      told = true;
+      toast(steer.title);
+    }, 500);
+  };
+  steer.onpointerup = steer.onpointerleave = () => clearTimeout(held);
+  steer.oncontextmenu = (ev) => ev.preventDefault();
+  steer.onclick = () => {
+    if (!told) {
+      submit(true);
+    }
+    told = false;
+  };
+}
+function submit(steer = false) {
   if (box_items().some((item) => item.dataset.state === "bad")) {
     P.after = false;
     toast(FAILED2);
@@ -4498,7 +4518,7 @@ function submit() {
   }
   P.after = false;
   const text = box_text().trim();
-  act({ $: "Send", text });
+  act({ $: "Send", text, steer });
   box_set("");
 }
 function back(sent, out) {
@@ -5129,6 +5149,7 @@ function bars() {
     $2("#timers").hidePopover();
   }
   send.classList.toggle("stop", stop);
+  $2(".steer").hidden = !on || !view_stoppable(v) || box_blank();
   $2(".composer").hidden = !on;
   $2(".mic", HTMLButtonElement).disabled = v.out.some((p) => p.msg.$ === "voice");
   $2(".mic").classList.toggle("rec", P.rec !== null);
