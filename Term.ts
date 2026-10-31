@@ -62,6 +62,7 @@ function term_groups(): [group: string, cmds: Cmd[]][] {
       ["",                  "Alt+Enter",               "send as a steer: UniiChat reads it at its next step, without waiting for its turn to end", term_enter],
       ["",                  "Esc",                     "interrupt UniiChat's turn; agents go on",        (t) => term_act(t, { $: "Send", text: "" })],
       ["",                  "Ctrl+C, Ctrl+D",          "clear; on an empty input, interrupt, quit",      term_clear],
+      ["/steer <message>",  "",                        "send as a steer, as Alt+Enter does (where the terminal takes Alt+Enter, as Windows Terminal does)", (t, a) => term_steer(t, a)],
       ["/goal <message>",   "",                        "send a message as the goal: at each turn's end, UniiChat asks itself if it is met, and goes on till it is", (t, a) => term_act(t, { $: "Send", text: "/goal " + a })],
       ["/halt",             "",                        "drop the goal; the turn running ends as it would", (t) => term_act(t, { $: "Send", text: "/halt" })],
       ["/image <path>",     "",                        "attach an image to the next message",            term_image],
@@ -240,13 +241,29 @@ function term_enter(t: Term, key: string): void {
   if (term_command(t, text)) {
     return;
   }
+  if (!term_say(t, text, key === "Alt+Enter")) {
+    Screen.ed_type(t.scr.ed, text);
+  }
+}
+
+function term_steer(t: Term, text: string): void {
+  if (text === "") {
+    term_note(t, "/steer needs one: /steer <message>.");
+  } else if (!term_say(t, text, true)) {
+    Screen.ed_type(t.scr.ed, "/steer " + text);
+  }
+}
+
+function term_say(t: Term, text: string, steer: boolean): boolean {
   if (!View.view_typing(t.v)) {
     term_note(t, "Messages go to UniiChat: Tab or /tab goes back.");
-  } else if (term_act(t, { $: "Send", text, images: t.imgs, steer: key === "Alt+Enter" }).length > 0) {
-    t.imgs = [];
-    return;
+    return false;
   }
-  Screen.ed_type(t.scr.ed, text);
+  if (term_act(t, { $: "Send", text, images: t.imgs, steer }).length > 0) {
+    t.imgs = [];
+    return true;
+  }
+  return false;
 }
 
 function term_clear(t: Term, key: string): void {

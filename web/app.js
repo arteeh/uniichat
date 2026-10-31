@@ -4305,7 +4305,7 @@ var P = {
   toast: 0,
   push: null,
   used: { ws: null, on: false, at: 0 },
-  after: false,
+  after: null,
   at: ""
 };
 var SCROLL = {
@@ -4510,16 +4510,16 @@ function steer_button(steer) {
 }
 function submit(steer = false) {
   if (box_items().some((item) => item.dataset.state === "bad")) {
-    P.after = false;
+    P.after = null;
     toast(FAILED2);
     return;
   }
   if (UPS.size > 0) {
-    P.after = true;
+    P.after = { steer };
     toast("Sends once uploaded.");
     return;
   }
-  P.after = false;
+  P.after = null;
   const text = box_text().trim();
   act({ $: "Send", text, steer });
   box_set("");
@@ -4568,8 +4568,8 @@ function upload(item, file) {
       toast(out.error);
     }
     typed();
-    if (P.after && UPS.size === 0) {
-      submit();
+    if (P.after !== null && UPS.size === 0) {
+      submit(P.after.steer);
     }
   };
   xhr.send(file);
