@@ -2009,8 +2009,6 @@ var IDLE = "idle";
 var USE_PING = 20000;
 var FRAME = 2 ** 22;
 var HINT = "Message UniiChat";
-var AI = "Unii is an AI, not a person, and can make mistakes.";
-var NOTICE = 3 * 60 * 60 * 1000;
 var WAIT = "compressing…";
 var SUMS = "compressing earlier messages…";
 var UNSENT = "Sends once connected.";
@@ -2261,13 +2259,10 @@ function view_body(v) {
     const tops = v.fold.flatMap(([id, n]) => part_rows(v, id, n, Infinity, false));
     return [Cap(FOLD), ...tops];
   }
-  return [Cap(AI), ...view_rows(v, v.parts).flat()];
+  return view_rows(v, v.parts).flat();
 }
 function view_rows(v, parts) {
-  return parts.map(([id, n], k) => {
-    const rows = part_rows(v, id, n, v.turn, true);
-    return part_due(v, [id, n], parts[k - 1]) ? [Cap(AI), ...rows] : rows;
-  });
+  return parts.map(([id, n]) => part_rows(v, id, n, v.turn, true));
 }
 function view_tail(v, live = view_stream(v)) {
   if (v.page === null && v.fold !== null) {
@@ -2472,14 +2467,6 @@ async function post(url, body, auth = {}) {
   const res = await fetch(url, { method: "POST", headers, body: JSON.stringify(body) }).catch(() => null);
   const out = res === null ? { error: "Can't reach the server." } : await res.json().catch(() => res.ok ? {} : { error: "HTTP " + res.status });
   return { ...rec(out) ? out : {}, ok: res?.ok === true, status: res?.status ?? 0 };
-}
-function part_due(v, part, before) {
-  const last = before === undefined ? NaN : part_window(v, before);
-  return part[1] === 1 && part[0] >= v.turn && !Number.isNaN(last) && part_window(v, part) !== last;
-}
-function part_window(v, [id, n]) {
-  const date = n === 1 ? v.whole.get(id)?.date : v.nodes.get(id + "+" + n)?.to;
-  return Math.floor(Date.parse(date ?? "") / NOTICE);
 }
 function part_rows(v, id, n, t, talk) {
   const key = id + "+" + n;

@@ -559,10 +559,8 @@ function term_print(t: Term, msg: View.Server): void {
       }
       t.logs.set(page, n);
       t.last = main && msg.id !== undefined ? msg.id : t.last;
-      const due  = main && msg.id !== undefined && View.part_due(v, [msg.id, 1], v.parts[v.parts.length - 2]);
-      const head = due ? [View.Cap(View.AI)] : [];
       const before = main ? v.whole.get((msg.id ?? 0) - 1) : v.page?.log?.[n - 2];
-      term_rows(t, [...head, ...View.entry_rows(msg.id ?? null, msg.kind, text, msg.images, View.entry_of(msg, before))], false);
+      term_rows(t, View.entry_rows(msg.id ?? null, msg.kind, text, msg.images, View.entry_of(msg, before)), false);
       return;
     }
     case "root": {
@@ -602,10 +600,8 @@ function term_show(t: Term): void {
 }
 
 function term_after(t: Term): void {
-  const head = t.last < 0 ? [View.Cap(View.AI)] : [];
   t.wait = t.wait.concat(t.v.parts.filter(([id, n]) => id + n - 1 > t.last));
   t.last = Math.max(t.last, View.view_count(t.v) - 1);
-  term_rows(t, head, false);
   term_settle(t);
 }
 

@@ -185,12 +185,6 @@ export const FRAME = 2 ** 22;
 
 export const HINT = "Message UniiChat";
 
-// the disclosure both views show (EU AI Act art. 50, California SB 243,
-// New York GBL art. 47, Anthropic's usage policy)
-export const AI = "Unii is an AI, not a person, and can make mistakes.";
-
-const NOTICE = 3 * 60 * 60 * 1000;
-
 const WAIT = "compressing…";
 const SUMS = "compressing earlier messages…";
 
@@ -470,14 +464,11 @@ export function view_body(v: View): Row[] {
     const tops = v.fold.flatMap(([id, n]) => part_rows(v, id, n, Infinity, false));
     return [Cap(FOLD), ...tops];
   }
-  return [Cap(AI), ...view_rows(v, v.parts).flat()];
+  return view_rows(v, v.parts).flat();
 }
 
 export function view_rows(v: View, parts: Part[]): Row[][] {
-  return parts.map(([id, n], k) => {
-    const rows = part_rows(v, id, n, v.turn, true);
-    return part_due(v, [id, n], parts[k - 1]) ? [Cap(AI), ...rows] : rows;
-  });
+  return parts.map(([id, n]) => part_rows(v, id, n, v.turn, true));
 }
 
 export function rows_wait(v: View, rows: Row[]): boolean {
@@ -721,16 +712,6 @@ export async function post(url: string, body: object, auth: Record<string, strin
 
 export function block_name(id: number, n: number): string {
   return "#" + id + (n === 1 ? "" : "+" + n);
-}
-
-export function part_due(v: View, part: Part, before: Part | undefined): boolean {
-  const last = before === undefined ? NaN : part_window(v, before);
-  return part[1] === 1 && part[0] >= v.turn && !Number.isNaN(last) && part_window(v, part) !== last;
-}
-
-function part_window(v: View, [id, n]: Part): number {
-  const date = n === 1 ? v.whole.get(id)?.date : v.nodes.get(id + "+" + n)?.to;
-  return Math.floor(Date.parse(date ?? "") / NOTICE);
 }
 
 function part_rows(v: View, id: number, n: number, t: number, talk: boolean): Row[] {
