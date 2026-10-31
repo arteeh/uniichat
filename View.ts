@@ -21,7 +21,11 @@ type Node = { text: string; to: string };
 
 export type Live = { kind: Kind; text: string };
 
-export type Page = { name: string; log: Entry[] | null; live: Live[]; pick: Pick | null };
+// an agent page's log: its messages carry their id in the agent's log, the
+// thoughts shown live none
+type Logged = Entry & { id?: number };
+
+export type Page = { name: string; log: Logged[] | null; live: Live[]; pick: Pick | null };
 
 export type Progress = { done: number; total: number; why: string | null; msgs: number; open: number[] };
 
@@ -619,7 +623,7 @@ function view_entry(v: View, msg: Server & { $: "entry" }): void {
   if (agent !== undefined) {
     const log = v.pages.get(agent)?.log;
     if (Array.isArray(log)) {
-      log.push(entry);
+      log.push(id === undefined ? entry : { ...entry, id });
     }
   } else if (id !== undefined) {
     v.whole.set(id, entry);
@@ -734,7 +738,7 @@ function part_rows(v: View, id: number, n: number, t: number, talk: boolean): Ro
   if (n === 1 && id >= t && entry !== undefined) {
     const minds = v.minds.get(id) ?? [];
     const after = minds.flatMap((x) => entry_rows(null, "mind", x));
-    return [...sent_rows(v, TURN, id, whole_rows(id, entry, v.whole.get(id - 1))), ...after];
+    return [...sent_rows(entry_sent(v, TURN, id), whole_rows(id, entry, v.whole.get(id - 1))), ...after];
   }
   const open  = talk && n === 1 && ["user", "unii"].includes(entry?.kind ?? "");
   if (!(v.open.get(key) ?? open)) {
@@ -766,14 +770,27 @@ function sum_rows(id: number, n: number, node: Node = { text: WAIT, to: "" }): R
   return rows;
 }
 
-export function page_rows(v: View, page: Page, from = 0): Row[] {
-  const head = Cap(page.name + (v.agents.includes(page.name) ? " · at work" : " · done"));
-  const log = page.log ?? [];
-  return [head, ...log.slice(from).flatMap((e, k) => sent_rows(v, page.name, from + k, whole_rows(null, e, log[from + k - 1])))];
+function page_rows(v: View, page: Page): Row[] {
+  return [page_head(v, page), ...page_entries(v, page, 0).flat()];
 }
 
-function sent_rows(v: View, name: string, id: number, rows: Row[]): Row[] {
-  return (v.sent[name] ?? []).includes(id) ? rows.map((row) => (row.$ === "Msg" ? { ...row, queued: true } : row)) : rows;
+export function page_head(v: View, page: Page): Row {
+  return Cap(page.name + (v.agents.includes(page.name) ? " · at work" : " · done"));
+}
+
+// the page's log from from on, a row list per entry, a message taken but not
+// answered yet drawn queued
+export function page_entries(v: View, page: Page, from: number): Row[][] {
+  const log = page.log ?? [];
+  return log.slice(from).map((e, k) => sent_rows(entry_sent(v, page.name, e.id), whole_rows(null, e, log[from + k - 1])));
+}
+
+export function entry_sent(v: View, name: string, id: number | undefined): boolean {
+  return id !== undefined && (v.sent[name] ?? []).includes(id);
+}
+
+function sent_rows(sent: boolean, rows: Row[]): Row[] {
+  return sent ? rows.map((row) => (row.$ === "Msg" ? { ...row, queued: true } : row)) : rows;
 }
 
 export function live_push(live: Live[], kind: Kind, text: string, fresh = false): void {

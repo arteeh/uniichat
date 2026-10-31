@@ -1215,7 +1215,7 @@ export namespace Chat {
         const agent = log === null ? null : chat.tools.agents.get(name) ?? Tools.logged(chat.tools, name);
         const pick = agent === null ? null : Tools.shown(chat.tools, agent);
         Chat.send(sock, { $: "agent", name, found: log !== null, pick });
-        log?.forEach(({ kind, text, date, of, tool }) => Chat.send(sock, { $: "entry", agent: name, kind, text, date, of, tool }));
+        log?.forEach(({ i, kind, text, date, of, tool }) => Chat.send(sock, { $: "entry", agent: name, id: i, kind, text, date, of, tool }));
         Chat.send(sock, { $: "live", agent: name, live: chat.tools.agents.get(name)?.run.live ?? [] });
         return {};
       }

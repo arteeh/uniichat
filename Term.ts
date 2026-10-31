@@ -559,11 +559,14 @@ function term_print(t: Term, msg: View.Server): void {
       }
       return;
     }
-    case "know":
-    case "state": {
+    case "know": {
       if (main) {
         term_settle(t);
       }
+      return;
+    }
+    case "state": {
+      term_settle(t);
       return;
     }
     case "entry": {
@@ -573,15 +576,19 @@ function term_print(t: Term, msg: View.Server): void {
       const text = term_logged(t, msg.kind, msg.text);
       const page = msg.agent ?? "";
       const n    = v.page?.log?.length ?? 0;
-      if (main ? msg.id !== undefined && msg.id <= t.last : n <= (t.logs.get(page) ?? 0)) {
+      const from = t.logs.get(page) ?? 0;
+      if (main ? msg.id !== undefined && msg.id <= t.last : n <= from) {
         return;
       }
-      t.logs.set(page, n);
       t.last = main && msg.id !== undefined ? msg.id : t.last;
-      if (main && msg.id !== undefined && (v.sent[View.TURN] ?? []).includes(msg.id)) {
-        t.wait.push([msg.id, 1]);
+      // held: taken but not answered yet (Run.sent), or after a row held
+      if ((!main && from < n - 1) || View.entry_sent(v, page || View.TURN, msg.id)) {
+        if (main && msg.id !== undefined) {
+          t.wait.push([msg.id, 1]);
+        }
         return term_settle(t);
       }
+      t.logs.set(page, n);
       const before = main ? v.whole.get((msg.id ?? 0) - 1) : v.page?.log?.[n - 2];
       term_rows(t, View.entry_rows(msg.id ?? null, msg.kind, text, msg.images, View.entry_of(msg, before)), false);
       return;
@@ -611,9 +618,8 @@ function term_show(t: Term): void {
   const page = t.v.page;
   t.flow = new Map([...t.flow].filter(([, done]) => done === Infinity));
   if (page !== null) {
-    const from = t.logs.get(page.name) ?? 0;
-    t.logs.set(page.name, Math.max(from, page.log?.length ?? 0));
-    return term_rows(t, View.page_rows(t.v, page, from), false);
+    term_rows(t, [View.page_head(t.v, page)], false);
+    return term_settle(t);
   }
   if (t.v.fold === null) {
     return term_after(t);
@@ -628,11 +634,23 @@ function term_after(t: Term): void {
   term_settle(t);
 }
 
+// the rows held back from the scrollback, the tab's: they print in order once
+// none before them waits (a summary not here yet, a message not answered yet)
+function term_held(t: Term): View.Row[][] {
+  const page = t.v.page;
+  return page === null ? View.view_rows(t.v, t.wait) : View.page_entries(t.v, page, t.logs.get(page.name) ?? 0);
+}
+
 function term_settle(t: Term): void {
-  const rows = View.view_rows(t.v, t.wait);
+  const rows = term_held(t);
   const wait = rows.findIndex((r) => View.rows_wait(t.v, r));
   const done = wait < 0 ? rows.length : wait;
-  t.wait = t.wait.slice(done);
+  const page = t.v.page;
+  if (page === null) {
+    t.wait = t.wait.slice(done);
+  } else {
+    t.logs.set(page.name, (t.logs.get(page.name) ?? 0) + done);
+  }
   term_rows(t, rows.slice(0, done).flat(), false);
 }
 
@@ -718,7 +736,7 @@ function term_paint(t: Term): void {
   const under = off && t.v.up ? [] : [Paint.rule_text(t.v.up ? "" : "offline", iw)];
   const own   = term_inset([Paint.rule_line(t.v, iw), ...(input?.lines ?? []), ...under, Paint.tabs_line(t.v, iw)]);
   const rest  = View.view_stream(t.v).map((l) => ({ kind: l.kind, text: l.text.slice(t.flow.get(l) ?? 0) }));
-  const held  = t.v.page === null ? View.view_rows(t.v, t.wait).flat() : [];
+  const held  = term_held(t).flat();
   const tail  = term_lines([...held, ...View.view_tail(t.v, rest)]).flatMap((l) => Paint.runs_wrap(l, w, true));
   const above = tail.slice(Math.max(0, tail.length - room + own.length));
   const at    = input === null ? null : { row: above.length + 1 + input.at.row, col: input.at.col + MARGIN };

@@ -2381,7 +2381,7 @@ function view_entry(v, msg) {
   if (agent !== undefined) {
     const log = v.pages.get(agent)?.log;
     if (Array.isArray(log)) {
-      log.push(entry);
+      log.push(id === undefined ? entry : { ...entry, id });
     }
   } else if (id !== undefined) {
     v.whole.set(id, entry);
@@ -2483,7 +2483,7 @@ function part_rows(v, id, n, t, talk) {
   if (n === 1 && id >= t && entry !== undefined) {
     const minds = v.minds.get(id) ?? [];
     const after = minds.flatMap((x) => entry_rows(null, "mind", x));
-    return [...sent_rows(v, TURN, id, whole_rows(id, entry, v.whole.get(id - 1))), ...after];
+    return [...sent_rows(entry_sent(v, TURN, id), whole_rows(id, entry, v.whole.get(id - 1))), ...after];
   }
   const open = talk && n === 1 && ["user", "unii"].includes(entry?.kind ?? "");
   if (!(v.open.get(key) ?? open)) {
@@ -2511,13 +2511,21 @@ function sum_rows(id, n, node = { text: WAIT, to: "" }) {
   ROWS.set(node, rows);
   return rows;
 }
-function page_rows(v, page, from = 0) {
-  const head = Cap(page.name + (v.agents.includes(page.name) ? " · at work" : " · done"));
-  const log = page.log ?? [];
-  return [head, ...log.slice(from).flatMap((e, k) => sent_rows(v, page.name, from + k, whole_rows(null, e, log[from + k - 1])))];
+function page_rows(v, page) {
+  return [page_head(v, page), ...page_entries(v, page, 0).flat()];
 }
-function sent_rows(v, name, id, rows) {
-  return (v.sent[name] ?? []).includes(id) ? rows.map((row) => row.$ === "Msg" ? { ...row, queued: true } : row) : rows;
+function page_head(v, page) {
+  return Cap(page.name + (v.agents.includes(page.name) ? " · at work" : " · done"));
+}
+function page_entries(v, page, from) {
+  const log = page.log ?? [];
+  return log.slice(from).map((e, k) => sent_rows(entry_sent(v, page.name, e.id), whole_rows(null, e, log[from + k - 1])));
+}
+function entry_sent(v, name, id) {
+  return id !== undefined && (v.sent[name] ?? []).includes(id);
+}
+function sent_rows(sent, rows) {
+  return sent ? rows.map((row) => row.$ === "Msg" ? { ...row, queued: true } : row) : rows;
 }
 function live_push(live, kind, text, fresh = false) {
   const top = live[live.length - 1];
