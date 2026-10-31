@@ -168,10 +168,7 @@ export function box_place(a: number, b: number): void {
   const [start, end] = [point(a), point(b)];
   range.setStart(start[0], start[1]);
   range.setEnd(end[0], end[1]);
-  const sel = getSelection();
-  sel?.removeAllRanges();
-  sel?.addRange(range);
-  LAST = range.cloneRange();
+  select(range);
 }
 
 export function box_insert(text: string): void {
@@ -279,9 +276,7 @@ function put(node: Node): void {
   range.insertNode(node);
   range.setStartAfter(node);
   range.collapse(true);
-  sel?.removeAllRanges();
-  sel?.addRange(range);
-  LAST = range.cloneRange();
+  select(range);
   changed();
 }
 
@@ -424,10 +419,13 @@ function caret_at(x: number, y: number): void {
   }
   if (range !== null && BOX.contains(range.startContainer)) {
     range.collapse(true);
-    getSelection()?.removeAllRanges();
-    getSelection()?.addRange(range);
-    LAST = range.cloneRange();
+    select(range);
   }
+}
+
+function select(range: Range): void {
+  getSelection()?.setBaseAndExtent(range.startContainer, range.startOffset, range.endContainer, range.endOffset);
+  LAST = range.cloneRange();
 }
 
 function html_pieces(html: string): Piece[] | null {

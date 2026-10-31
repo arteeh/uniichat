@@ -2713,10 +2713,7 @@ function box_place(a, b) {
   const [start, end] = [point(a), point(b)];
   range.setStart(start[0], start[1]);
   range.setEnd(end[0], end[1]);
-  const sel = getSelection();
-  sel?.removeAllRanges();
-  sel?.addRange(range);
-  LAST = range.cloneRange();
+  select(range);
 }
 function box_insert(text) {
   if (text !== "") {
@@ -2814,9 +2811,7 @@ function put(node) {
   range.insertNode(node);
   range.setStartAfter(node);
   range.collapse(true);
-  sel?.removeAllRanges();
-  sel?.addRange(range);
-  LAST = range.cloneRange();
+  select(range);
   changed();
 }
 function end_range() {
@@ -2960,10 +2955,12 @@ function caret_at(x, y) {
   }
   if (range !== null && BOX.contains(range.startContainer)) {
     range.collapse(true);
-    getSelection()?.removeAllRanges();
-    getSelection()?.addRange(range);
-    LAST = range.cloneRange();
+    select(range);
   }
+}
+function select(range) {
+  getSelection()?.setBaseAndExtent(range.startContainer, range.startOffset, range.endContainer, range.endOffset);
+  LAST = range.cloneRange();
 }
 function html_pieces(html) {
   const doc = new DOMParser().parseFromString(html, "text/html");
