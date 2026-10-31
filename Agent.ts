@@ -231,7 +231,7 @@ export namespace Agent {
         }
         const after = Number(res?.headers.get("retry-after") ?? "");
         const ms = (after > 0 ? after : 2 ** k) * 1e3;
-        run.on({ $: "Entry", kind: "mind", text: "The AI service is busy: asking again in " + Math.ceil(ms / 1e3) + " s." });
+        Limit.busy(run.on, ms);
         await Machine.nap(ms, signal);
       }
       return Agent.fail("stopped", []);

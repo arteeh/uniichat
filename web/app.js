@@ -2295,7 +2295,10 @@ function sums_show(sums, again, now = Date.now()) {
   return head + " · compactor: " + why + ", asking again " + when;
 }
 function limit_show(limit, now = Date.now()) {
-  return "Usage limit on " + limit.vendor + ", " + (limit.known ? "resumes" : "tries again") + " at " + clock(limit.until, now);
+  return limit_note(limit.vendor, limit.known ? "resumes" : "tries again", limit.until, now);
+}
+function limit_note(vendor, does, until, now = Date.now()) {
+  return "Usage limit on " + vendor + ", " + (until === null ? "reset time unknown" : does + " at " + clock(until, now));
 }
 function clock(at, now = Date.now()) {
   const day = new Date(at).toDateString() === new Date(now).toDateString() ? {} : { weekday: "short", day: "numeric", month: "short" };

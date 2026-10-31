@@ -509,7 +509,13 @@ function sums_show(sums: Sums | null, again: Again | null, now = Date.now()): st
 }
 
 export function limit_show(limit: Parked, now = Date.now()): string {
-  return "Usage limit on " + limit.vendor + ", " + (limit.known ? "resumes" : "tries again") + " at " + clock(limit.until, now);
+  return limit_note(limit.vendor, limit.known ? "resumes" : "tries again", limit.until, now);
+}
+
+// the one usage-limit note: the parked wait's row, a subagent's line in
+// Agents at work, a call ended by one (Limit.off)
+export function limit_note(vendor: Vendor, does: string, until: number | null, now = Date.now()): string {
+  return "Usage limit on " + vendor + ", " + (until === null ? "reset time unknown" : does + " at " + clock(until, now));
 }
 
 function clock(at: number, now = Date.now()): string {

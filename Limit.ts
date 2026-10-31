@@ -2,6 +2,7 @@ import { AGAIN, type Ask, type Event, type Vendor } from "./AskAI.ts";
 import { TRIES } from "./Agent.ts";
 import { ChatGPT } from "./ChatGPT.ts";
 import { Machine } from "./Machine.ts";
+import { limit_note } from "./View.ts";
 
 export type Limit = {
   ask    : Ask;
@@ -71,13 +72,9 @@ export namespace Limit {
     ANSWERING = turn;
   }
 
-  export function utc(at: number): string {
-    return new Date(at).toISOString().slice(0, 16).replace("T", " ") + " UTC";
-  }
-
-  export function off(why: string, until: number | null, ask: { vendor: Vendor; model: string }, n: number): Off {
-    const when = until === null ? "reset time unknown" : "resets " + Limit.utc(until);
-    return { why: why + "; " + when, say: "usage limit on " + ask.vendor + " (" + ask.model + "), " + when, until: until ?? undefined, limits: n };
+  export function off(why: string, until: number | null, ask: { vendor: Vendor }, n: number): Off {
+    const say = limit_note(ask.vendor, "resets", until);
+    return { why: why + "; " + say, say, until: until ?? undefined, limits: n };
   }
 
   export async function park(l: Limit, ms: number, known: boolean): Promise<void> {
@@ -89,7 +86,7 @@ export namespace Limit {
       l.on({ $: "Limit", limit: { until: Date.now() + ms, known, vendor } });
     }
     if (!parked) {
-      l.on({ $: "Entry", kind: "mind", text: "The AI service is busy: asking again in " + Math.ceil(ms / 1e3) + " s." });
+      Limit.busy(l.on, ms);
     }
     const until = AbortSignal.any([l.signal, wake.signal]);
     try {
@@ -103,6 +100,10 @@ export namespace Limit {
         l.on({ $: "Limit", limit: null });
       }
     }
+  }
+
+  export function busy(on: (ev: Event) => void, ms: number): void {
+    on({ $: "Entry", kind: "mind", text: "The AI service is busy: asking again in " + Math.ceil(ms / 1e3) + " s." });
   }
 
   export async function let_unii_answer_first(l: Limit, until: AbortSignal): Promise<void> {
