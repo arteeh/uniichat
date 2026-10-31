@@ -44,7 +44,7 @@ type Agent = {
 };
 
 type Log = {
-  push   : (run: Run<Say, Msg>, kind: Kind, text: string) => Msg;
+  push   : (run: Run<Say, Msg>, kind: Kind, text: string, sent?: boolean) => Msg;
   note   : (text: string) => void;
   on     : (run: Run<Say, Msg>, ev: Heard) => void;
   report : (text: string, take: boolean) => void;
@@ -749,7 +749,7 @@ export namespace Tools {
   export function agent_inbox(tools: Tools): InboxHooks<Say, Msg> {
     const log = tools.log;
     return {
-      log    : (run, say) => log.push(run, "user", say.text),
+      log    : (run, say) => log.push(run, "user", say.text, true),
       say    : (say) => say,
       queued : (run) => {
         Tools.queued(tools, run);

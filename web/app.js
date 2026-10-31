@@ -2372,7 +2372,11 @@ function view_learn(v, pack) {
   }
 }
 function view_entry(v, msg) {
-  const { $, agent, id, ...entry } = msg;
+  const { $, agent, id, sent, ...entry } = msg;
+  const name = agent ?? TURN;
+  if (sent === true && id !== undefined) {
+    v.sent[name] = [...v.sent[name] ?? [], id];
+  }
   const last = v.parts[v.parts.length - 1];
   if (agent !== undefined) {
     const log = v.pages.get(agent)?.log;

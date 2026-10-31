@@ -578,6 +578,10 @@ function term_print(t: Term, msg: View.Server): void {
       }
       t.logs.set(page, n);
       t.last = main && msg.id !== undefined ? msg.id : t.last;
+      if (main && msg.id !== undefined && (v.sent[View.TURN] ?? []).includes(msg.id)) {
+        t.wait.push([msg.id, 1]);
+        return term_settle(t);
+      }
       const before = main ? v.whole.get((msg.id ?? 0) - 1) : v.page?.log?.[n - 2];
       term_rows(t, View.entry_rows(msg.id ?? null, msg.kind, text, msg.images, View.entry_of(msg, before)), false);
       return;

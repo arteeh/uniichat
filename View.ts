@@ -100,7 +100,7 @@ export type Server =
   | { $: "view"; parts: Part[]; turn: number }
   | { $: "zoom"; id: number; n: number; parts: Part[] }
   | { $: "root"; parts: Part[] }
-  | ({ $: "entry"; agent?: string; id?: number } & Entry)
+  | ({ $: "entry"; agent?: string; id?: number; sent?: boolean } & Entry)
   | { $: "delta"; agent?: string; kind: Kind; text: string; fresh?: boolean }
   | { $: "live"; agent?: string; live: Live[] }
   | ({ $: "state" } & State)
@@ -610,7 +610,11 @@ function view_learn(v: View, pack: Pack): void {
 }
 
 function view_entry(v: View, msg: Server & { $: "entry" }): void {
-  const { $, agent, id, ...entry } = msg;
+  const { $, agent, id, sent, ...entry } = msg;
+  const name = agent ?? TURN;
+  if (sent === true && id !== undefined) {
+    v.sent[name] = [...(v.sent[name] ?? []), id];
+  }
   const last = v.parts[v.parts.length - 1];
   if (agent !== undefined) {
     const log = v.pages.get(agent)?.log;

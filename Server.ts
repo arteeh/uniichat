@@ -216,7 +216,7 @@ export namespace Chat {
       change : () => Chat.change(chat),
     });
     const tools = Tools.serve(mem, main, {
-      push   : (run, kind, text) => Chat.push(chat, run, kind, text),
+      push   : (run, kind, text, sent) => Chat.push(chat, run, kind, text, [], false, undefined, {}, sent),
       note   : (text) => Chat.note(chat, text),
       on     : (run, ev) => Chat.on(chat, run, ev),
       report : (text, take) => Chat.report(chat, text, take),
@@ -295,7 +295,7 @@ export namespace Chat {
     let id = -1;
     pages.forEach((page, k) => {
       const last = k === pages.length - 1;
-      const msg = Chat.push(chat, chat.main, post.kind, page, last ? post.images : [], !last, last ? post.act : undefined);
+      const msg = Chat.push(chat, chat.main, post.kind, page, last ? post.images : [], !last, last ? post.act : undefined, {}, true);
       id = id < 0 ? msg.id : id;
     });
     return { id, end: chat.mem.count };
@@ -574,21 +574,23 @@ export namespace Chat {
     Chat.hold(chat, () => Chat.push(chat, chat.main, "note", text));
   }
 
-  export function push(chat: Chat, run: Talk, kind: Kind, text: string, images: string[] = [], more = false, act?: string, pair: Pair = {}): Msg {
+  // sent: a message the run takes from its queue, shown queued till answered (Run.sent)
+  export function push(chat: Chat, run: Talk, kind: Kind, text: string, images: string[] = [], more = false, act?: string, pair: Pair = {}, sent = false): Msg {
     Chat.flush(chat, run, kind === "echo" ? pair.of : undefined);
-    return Chat.put(chat, run, { kind, text, images, more, act, ...pair });
+    return Chat.put(chat, run, { kind, text, images, more, act, ...pair }, sent);
   }
 
-  export function put(chat: Chat, run: Talk, msg: Log): Msg {
+  export function put(chat: Chat, run: Talk, msg: Log, sent = false): Msg {
+    const queued = sent ? { sent } : {};
     if (run !== chat.main) {
       const { kind, text, of, tool } = msg;
       const id = Memory.agent_push(chat.mem, run.name, kind, text, { of, tool });
-      Chat.all(chat, { $: "entry", agent: run.name, id, kind, text, of, tool });
+      Chat.all(chat, { $: "entry", agent: run.name, id, kind, text, of, tool, ...queued });
       return { id, end: id + 1 };
     }
     const roots = Memory.push(chat.mem, [msg]);
     for (const { i, kind, text, date, images, of, tool } of roots) {
-      Chat.all(chat, { $: "entry", id: i, kind, text, date, images, of, tool });
+      Chat.all(chat, { $: "entry", id: i, kind, text, date, images, of, tool, ...queued });
     }
     Chat.talked(chat);
     return { id: roots[0].i, end: chat.mem.count };
