@@ -63,10 +63,10 @@ function update(): void {
   if (BUN) {
     fail("this unii runs from source (bun): update it with git.");
   }
-  const cmd = Update.update_cmd(process.execPath, WIN);
+  const cmd = Update.update_cmd(WIN);
   console.error(cmd);
   const run = WIN ? powershell_exiting_as_installer(cmd) : ["sh", "-c", cmd];
-  process.exitCode = child.spawnSync(run[0], run.slice(1), { stdio: "inherit", env: env_naming_updater() }).status ?? 1;
+  process.exitCode = child.spawnSync(run[0], run.slice(1), { stdio: "inherit", env: updater_env() }).status ?? 1;
 }
 
 const FAILED_TILL_INSTALLER_EXITS = "$global:LASTEXITCODE = 1; ";
@@ -75,8 +75,8 @@ function powershell_exiting_as_installer(cmd: string): string[] {
   return [Bun.which("pwsh") ?? "powershell.exe", "-NoProfile", "-Command", "$ErrorActionPreference = 'Stop'; " + FAILED_TILL_INSTALLER_EXITS + cmd + "; exit $LASTEXITCODE"];
 }
 
-function env_naming_updater(): Record<string, string | undefined> {
-  return { ...process.env, UNII_UPDATER: String(process.pid) };
+function updater_env(): Record<string, string | undefined> {
+  return { ...process.env, UNII_UPDATER: String(process.pid), UNII_BIN: process.execPath };
 }
 
 function unmark_from_parent_shell(): void {
