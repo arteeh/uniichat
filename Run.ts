@@ -1,4 +1,4 @@
-import { AskAI, type Ask, type Call, type End, type Event, type Parked, type Say } from "./AskAI.ts";
+import { AskAI, type Ask, type Call, type End, type Event, type Parked, type Say, type Steer } from "./AskAI.ts";
 import type { Pick } from "./Pick.ts";
 import type { Live } from "./View.ts";
 import { err_stack, err_why } from "./Err.ts";
@@ -9,6 +9,9 @@ export type Heard = Event | { $: "Ended" };
 
 type Queued<Q> = { q: Q; done: (why: string | null) => void; steer: boolean };
 
+// a message logged, not yet answered (steered: taken into a call's request)
+type Sent<Q, M> = { q: Q; m: M; steer: boolean };
+
 type Loop = {
   busy  : boolean;
   going : Promise<void>;
@@ -18,7 +21,7 @@ type Loop = {
 type Inbox<Q, M> = {
   queue : Queued<Q>[];
   wait  : M[];
-  sent  : M[];
+  sent  : Sent<Q, M>[];
 };
 
 type Calling = {
@@ -36,6 +39,7 @@ export type LoopHooks<Q, M> = {
   failed : (run: Run<Q, M>, why: string) => void;
   ending : (run: Run<Q, M>) => void;
   finish : (run: Run<Q, M>) => void;
+  parked : (run: Run<Q, M>) => boolean;
 };
 
 export type InboxHooks<Q, M> = {
@@ -94,9 +98,12 @@ export namespace Run {
         if (ask === null || run.halt.signal.aborted) {
           break;
         }
-        const call = (run.call = AskAI.ask({ ...ask, steers: () => Run.steers(run) }, (ev) => Run.heard(run, ev)));
+        let live = true;
+        const steer: Steer = { pending: () => live && run.queue.some((x) => x.steer), take: () => (live ? Run.steers(run) : Promise.resolve([])), taken: [] };
+        const call = (run.call = AskAI.ask({ ...ask, steer }, (ev) => Run.heard(run, ev)));
         kind.change();
         const end = await call.done;
+        live = false;
         run.call = null;
         kind.on(run, { $: "Ended" });
         go = await kind.ended(run, end);
@@ -109,10 +116,20 @@ export namespace Run {
     } finally {
       Run.safe(run, () => kind.ending(run));
       run.call = null;
+      // unanswered, so the next call carries them whole: steered messages
+      // (a new turn for them, as for messages still queued), and every
+      // message of a run parked at a usage limit (its go-on carries them)
+      const parked = kind.parked(run);
+      const steered = run.sent.filter((s) => s.steer);
+      const missed = run.sent.filter((s) => parked || s.steer);
+      steered.forEach((s) => (s.steer = false));
       const left = await Run.logs(run);
-      again = left.some(kind.again);
-      run.wait = again ? run.wait : [];
+      again = [...(parked ? [] : steered.map((s) => s.q)), ...left].some(kind.again);
+      run.wait = again || parked ? [...missed.map((s) => s.m), ...run.wait] : [];
       run.busy = false;
+      if (!again && run.queue.length === 0 && !parked) {
+        run.sent = [];
+      }
       Run.safe(run, () => kind.finish(run));
     }
     if ((again || run.queue.length > 0) && !run.busy) {
@@ -123,14 +140,12 @@ export namespace Run {
   export async function logs<Q, M>(run: Run<Q, M>): Promise<Q[]> {
     const logged: Q[] = [];
     let changed = false;
-    while (run.queue.length > 0) {
-      const x = run.queue[0];
-      const msg = await Run.log(run, x);
+    for (let x = run.queue.shift(); x !== undefined; x = run.queue.shift()) {
+      const msg = await Run.log(run, x, false);
       if (msg !== null) {
         run.wait.push(msg);
         logged.push(x.q);
       }
-      run.queue.shift();
       changed = true;
     }
     if (changed) {
@@ -139,25 +154,30 @@ export namespace Run {
     return logged;
   }
 
-  // the steered messages, logged as they are taken, for the call to insert at its next step
+  // the steered messages, each taken off the queue before it is logged, for
+  // the call to put in its next request
   export async function steers<Q, M>(run: Run<Q, M>): Promise<Say[]> {
     const says: Say[] = [];
+    let changed = false;
     for (let k = run.queue.findIndex((x) => x.steer); k >= 0; k = run.queue.findIndex((x) => x.steer)) {
       const [x] = run.queue.splice(k, 1);
-      const msg = await Run.log(run, x);
+      const msg = await Run.log(run, x, true);
       if (msg !== null) {
         says.push(run.kind.say(x.q, msg));
       }
+      changed = true;
+    }
+    if (changed) {
       Run.safe(run, () => run.kind.queued(run));
     }
     return says;
   }
 
-  export async function log<Q, M>(run: Run<Q, M>, { q, done }: Queued<Q>): Promise<M | null> {
+  export async function log<Q, M>(run: Run<Q, M>, { q, done }: Queued<Q>, steer: boolean): Promise<M | null> {
     try {
       const got = run.kind.log(run, q);
       const msg = got instanceof Promise ? await got : got;
-      run.sent.push(msg);
+      run.sent.push({ q, m: msg, steer });
       done(null);
       return msg;
     } catch (err) {
@@ -169,15 +189,17 @@ export namespace Run {
   }
 
   export function heard<Q, M>(run: Run<Q, M>, ev: Event): void {
-    if (run.sent.length > 0 && Run.answers(ev)) {
+    if (run.sent.length > 0 && AskAI.answers(ev)) {
       run.sent = [];
       Run.safe(run, run.kind.change);
     }
     run.kind.on(run, ev);
   }
 
-  export function answers(ev: Event): boolean {
-    return ev.$ === "Delta" || ev.$ === "Start" || (ev.$ === "Entry" && ev.kind !== "mind");
+  // anything it hasn't answered yet: queued, or logged and sent to a model
+  // that hasn't started answering
+  export function waiting<Q, M>(run: Run<Q, M>): boolean {
+    return run.queue.length + run.sent.length > 0;
   }
 
   export function safe<Q, M>(run: Run<Q, M>, step: () => void): void {
@@ -186,6 +208,12 @@ export namespace Run {
     } catch (err) {
       console.error("unii: " + run.name + ": " + err_stack(err));
     }
+  }
+
+  // an idle run's messages that nothing will answer now (Stop while parked)
+  export function drop<Q, M>(run: Run<Q, M>): void {
+    run.wait = [];
+    run.sent = [];
   }
 
   export function stop<Q, M>(run: Run<Q, M>, why: string | null): void {

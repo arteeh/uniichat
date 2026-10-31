@@ -1,4 +1,4 @@
-import { AskAI, type Ask, type Block, type Flight, type Try, type End, type Event, type Img, type Kind } from "./AskAI.ts";
+import { AskAI, NOT_RUN, type Ask, type Block, type Flight, type Try, type End, type Event, type Img, type Kind } from "./AskAI.ts";
 import { Anthropic } from "./Anthropic.ts";
 import { OpenAI } from "./OpenAI.ts";
 import { ChatGPT } from "./ChatGPT.ts";
@@ -87,9 +87,6 @@ const SPENT = /insufficient_quota|billing_hard_limit_reached|credit balance is t
 
 export const BUSY  = "the AI service is busy or unavailable right now";
 
-// as Claude Code words a message sent mid-turn (claude-sub's steers)
-const STEERED = ["The user sent a new message while you were working:\n", "\n\nAddress the message above as you continue this turn."];
-
 export const TOO_LONG = /prompt is too long|context.length|context (limit|window)|model_context_window_exceeded|too many (input )?tokens/i;
 
 const ROOMS = new Map<string, Room>();
@@ -137,8 +134,9 @@ export namespace Agent {
     }
     const { tools, notes } = await Agent.server(run);
     const noted = notes.length === 0 ? [] : [{ text: notes.map((note) => "Note: " + note + "\n").join("") + "\n", mark: false }];
-    const parts = [...ask.blocks.slice(0, -1), ...noted, ...ask.blocks.slice(-1)].filter((b) => b.text !== "");
-    const items: Item[] = [{ $: "User", parts, imgs: ask.imgs ?? [] }];
+    const taken = AskAI.taken(ask);
+    const parts = [...ask.blocks.slice(0, -1), ...noted, ...ask.blocks.slice(-1), ...taken.map((say) => ({ text: say.text, mark: false }))].filter((b) => b.text !== "");
+    const items: Item[] = [{ $: "User", parts, imgs: [...(ask.imgs ?? []), ...taken.flatMap((say) => say.imgs)] }];
     while (!signal.aborted) {
       const step = await Agent.step(wire, run, key, (max) => wire.body(ask, items, tools, max), items);
       Agent.entries_queued_till_started(step).forEach(on);
@@ -162,9 +160,10 @@ export namespace Agent {
         if (signal.aborted) {
           return;
         }
-        end.acted = true;
+        const skip = ask.steer?.pending() === true;
+        end.acted ||= !skip;
         on({ $: "Start", of: use.id });
-        const out = await Agent.use(run, tools, use);
+        const out = skip ? { text: NOT_RUN, fail: true } : await Agent.use(run, tools, use);
         on({ $: "Entry", kind: "echo", text: (out.fail ? "error: " : "") + out.text, of: use.id });
         backs.push({ id: use.id, out });
       }
@@ -177,10 +176,6 @@ export namespace Agent {
         return;
       }
       items.push({ $: "Back", backs });
-      const says = (await ask.steers?.()) ?? [];
-      if (says.length > 0) {
-        items.push({ $: "User", parts: says.map((say) => ({ text: STEERED[0] + say.text + STEERED[1], mark: false })), imgs: says.flatMap((say) => say.imgs) });
-      }
     }
   }
 
@@ -199,6 +194,7 @@ export namespace Agent {
         if (token === null) {
           return Agent.fail("stopped", seen);
         }
+        await Agent.steered(run.ask, items);
         const sent = typeof token === "string" ? Agent.request(wire, run, token, make(MAX), seen) : Promise.resolve({ res: null, step: token });
         const got = await Agent.unless_stopped(sent, signal);
         if (got === null) {
@@ -237,6 +233,15 @@ export namespace Agent {
       return Agent.fail("stopped", []);
     } finally {
       Agent.leave_seat(seat);
+    }
+  }
+
+  // steered messages go in before each request: the first, one after tool
+  // results, one asked again after a wait
+  export async function steered(ask: Ask, items: Item[]): Promise<void> {
+    const say = await AskAI.steered(ask);
+    if (say !== null) {
+      items.push({ $: "User", parts: [{ text: say.text, mark: false }], imgs: say.imgs });
     }
   }
 

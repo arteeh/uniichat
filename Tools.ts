@@ -168,7 +168,7 @@ const OWN: Spec[] = [
 ];
 const BOSS: Spec[] = [
   spec("spawn", "Start one subagent per task, in parallel, and return their names at once. Each one's report reaches you as a message \"[Name] report\" when it finishes. One that hits an AI service's usage limit waits for the reset and goes on by itself, as you do (Agents at work shows it waiting); stop ends it. A subagent sees the view and the user's instructions, but knows what you want only from its task. Each task names its own model and effort, if any.", { tasks: { type: "array", items: TASK } }, ["tasks"]),
-  spec("tell", "Send a message to a subagent, by name. Pick its mode each time. steer, to change course now (stop doing X, a rule changed): one at work gets it at its next step, right after its current tool call returns, in the middle of its reply. queue, to tell it without interrupting (FYI, main moved): one at work gets it once its current reply is done, as the user's messages do for you. Either way its report answers it; an idle one goes on from its chat at once, and its reply reaches you as a message \"[Name] reply\". stop ends one at once.", { name: STR, message: STR, mode: { type: "string", enum: MODES, description: "steer: at its next step; queue: after its current reply." } }, ["name", "message", "mode"]),
+  spec("tell", "Send a message to a subagent, by name. Pick its mode each time. steer, to change course now (stop doing X, a rule changed): one at work gets it at its next step, right after its current tool call returns (tool calls it asked for that haven't started are skipped), in the middle of its reply. queue, to tell it without interrupting (FYI, main moved): one at work gets it once its current reply is done, as the user's messages do for you. Either way its report answers it; an idle one goes on from its chat at once, and its reply reaches you as a message \"[Name] reply\". stop ends one at once.", { name: STR, message: STR, mode: { type: "string", enum: MODES, description: "steer: at its next step; queue: after its current reply." } }, ["name", "message", "mode"]),
   spec("schedule", "Schedule a message to yourself: at its time it reaches you as a message \"[Timer id]\" from the timer, not the user, starting a turn as a report does, whether or not the user is online. Give `at` to send it once, or `cron` to send it again and again, and the time zone both are read in (the user's). Write the message as the task to do then, whole: by then this turn is far back in the view.", {
     message : STR,
     at      : { type: "string", description: "Once: YYYY-MM-DD HH:MM, in zone." },
@@ -787,6 +787,7 @@ export namespace Tools {
         run.fell = null;
         tools.log.report(report_text(a.name, a.replies.join("\n\n")), !run.halt.signal.aborted);
       },
+      parked : () => false,
     };
   }
 

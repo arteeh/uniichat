@@ -758,7 +758,7 @@ export namespace Memory {
         console.error(line + "; asking again " + (failed.limit ? "at " + new Date(failed.until).toISOString().slice(0, 16).replace("T", " ") + " UTC" : "in " + Math.ceil((failed.until - now) / 60e3) + " min"));
       }
     }
-    const answered = ev.$ === "Delta" || (ev.$ === "Entry" && ev.kind !== "mind");
+    const answered = AskAI.answers(ev);
     const asks = ev.$ === "Again" && failed === null && mem.again === told.again;
     const again = failed ?? (asks || answered ? null : mem.again);
     if (ev.$ === "Again") {

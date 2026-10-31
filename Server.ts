@@ -3,7 +3,7 @@
 import * as fs from "node:fs";
 import * as net from "node:net";
 import type { ServerWebSocket } from "bun";
-import { AskAI, type Ask, type Call, type End, type Event, type Kind, type Parked, type Say, type Vendor } from "./AskAI.ts";
+import { AskAI, GO_ON, type Ask, type Call, type End, type Event, type Kind, type Parked, type Say, type Vendor } from "./AskAI.ts";
 import { clip_pages } from "./Clip.ts";
 import { Disk } from "./Disk.ts";
 import { Mcp } from "./Mcp.ts";
@@ -97,7 +97,6 @@ const HEAD       = "Turn: the user's new message:\n\n";
 const GOAL       = "You check a goal. Below is a chat between a user and Unii, an AI agent: its older messages as summary lines (id+n|text), then its latest messages whole, then the goal the user set with /goal. Answer yes if the chat shows the goal fully satisfied now, else no. Write that one word, nothing else.";
 const GOAL_ASK   = "\nThe goal:\n\n";
 const GOAL_NO    = "The goal isn't satisfied yet: keep working.";
-const GO_ON      = "The AI service's usage limit ended your last turn early. It should have reset by now: go on.";
 const TALK_FULL  = "Conversation mode switched itself off: it was full.";
 const TALK_SMALL = "Conversation mode switched itself off: too long for {model}.";
 const TALK_LONG  = "Conversation mode switched itself off: {model} refused the turn as too long.";
@@ -199,7 +198,7 @@ export namespace Chat {
   export function open(): Chat {
     const mem = Memory.load(CHAT, () => ({ system: Tools.prompt("compact"), searches: 0, server: "" }), Owner.act_put);
     const cut = mem.work;
-    Limit.answering(() => ({ queued: chat.main.queue.length + chat.main.sent.length > 0, busy: chat.main.busy }));
+    Limit.answering(() => ({ queued: Run.waiting(chat.main), busy: chat.main.busy }));
     const main = Run.make<Pending, Msg>(TURN, {
       pick   : () => chat.pick,
       begin  : () => Chat.begin(chat),
@@ -212,6 +211,7 @@ export namespace Chat {
       failed : (_, why) => Chat.failed(chat, why),
       ending : () => Chat.ending(chat),
       finish : () => Chat.finish(chat),
+      parked : () => chat.resume !== null,
       on     : (run, ev) => Chat.on(chat, run, ev),
       change : () => Chat.change(chat),
     });
@@ -475,7 +475,7 @@ export namespace Chat {
       Chat.all(chat, { $: "note", text: end.note });
     }
     const goal = chat.mem.goal;
-    if (end.ok && !halt.signal.aborted && main.queue.length === 0 && goal !== null) {
+    if (end.ok && !halt.signal.aborted && !Run.waiting(main) && goal !== null) {
       return Chat.checked(chat, Chat.check(chat, goal), halt);
     }
     return !halt.signal.aborted;
@@ -497,7 +497,7 @@ export namespace Chat {
     halt.signal.addEventListener("abort", () => call.stop(), { once: true });
     const end = await call.done;
     const mem = chat.mem;
-    const on = !halt.signal.aborted && mem.goal === goal && chat.main.queue.length === 0;
+    const on = !halt.signal.aborted && mem.goal === goal && !Run.waiting(chat.main);
     chat.check = null;
     if (end.ok) {
       chat.limits = null;
@@ -1048,6 +1048,7 @@ export namespace Chat {
     if (chat.main.busy) {
       Run.stop(chat.main, why);
     } else if (parked) {
+      Run.drop(chat.main);
       if (why !== null) {
         Chat.note(chat, why);
       }
@@ -1097,7 +1098,7 @@ export namespace Chat {
         queue[run.name] = run.queue.map(({ q }) => ({ kind: "kind" in q ? q.kind : "user", text: shown(q.text) }));
       }
       if (run.sent.length > 0) {
-        sent[run.name] = run.sent.flatMap((m) => Array.from({ length: m.end - m.id }, (_, k) => m.id + k));
+        sent[run.name] = run.sent.flatMap(({ m }) => Array.from({ length: m.end - m.id }, (_, k) => m.id + k));
       }
     }
     return { $: "state", busy: chat.main.busy, wait: Chat.waits(chat), agents, runs, pick: chat.pick, ...config.OFFER, importing, limits, queue, sent, sums: Chat.sums(chat), again: chat.mem.again, timers, mcp, talk, build: BUILD, site: config.SITE };

@@ -2,7 +2,7 @@ import * as child from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import type { Options, Query, SDKMessage, SDKRateLimitInfo, SDKUserMessage, SpawnOptions, SyncHookJSONOutput } from "@anthropic-ai/claude-agent-sdk";
-import { AskAI, type Ask, type End, type Event, type Img, type Try } from "./AskAI.ts";
+import { AskAI, GO_ON, NOT_RUN, type Ask, type End, type Event, type Img, type Try } from "./AskAI.ts";
 import { Agent, BUSY, TOO_LONG, type Emit } from "./Agent.ts";
 import { Anthropic } from "./Anthropic.ts";
 import { LIMIT, Limit, type Off } from "./Limit.ts";
@@ -18,7 +18,6 @@ export const SUMS = 4;
 
 const FRESH = 60e3;
 
-const GO_ON_AFTER_LIMIT = "(The AI service's usage limit cut your last step short. It has reset: go on.)";
 
 const WEB = ["WebSearch"];
 
@@ -55,6 +54,10 @@ const DIED = "Claude Code ended early";
 
 const OVERAGE = "usage limit: extra usage";
 
+const STEERING = "a new message came in";
+
+const CONTINUE = "Go on.";
+
 
 type Sdk = typeof import("@anthropic-ai/claude-agent-sdk");
 
@@ -65,10 +68,10 @@ type Code = {
   exit : Promise<void>;
   gone : () => void;
   over : boolean;
-  cut  : boolean;
+  cut  : "over" | "steer" | null;
 };
 
-type Out = Partial<End> & { limit?: { until: number | null; text: string } };
+type Out = Partial<End> & { limit?: { until: number | null; text: string }; steered?: boolean };
 
 type Wait = { imp: boolean; n: number; go: () => void };
 
@@ -295,7 +298,7 @@ export namespace ClaudeSub {
     if (held) {
       void exit.then(ClaudeSub.free);
     }
-    const code = { box, proc: null, exit, gone, over: false, cut: false } as Omit<Code, "q"> as Code;
+    const code = { box, proc: null, exit, gone, over: false, cut: null } as Omit<Code, "q"> as Code;
     const spawn = (o: SpawnOptions) => {
       const proc = child.spawn(o.command, o.args, { cwd: o.cwd, env: o.env, signal: o.signal, stdio: ["pipe", "pipe", "ignore"], windowsHide: true });
       code.proc = proc;
@@ -303,7 +306,10 @@ export namespace ClaudeSub {
       proc.once("error", () => proc.pid === undefined && gone());
       return proc;
     };
-    const hooks = { PostToolBatch: [{ hooks: [() => ClaudeSub.after_tools(code, ask)] }] };
+    const hooks = {
+      PreToolUse    : [{ hooks: [() => Promise.resolve(ClaudeSub.before_tool(ask))] }],
+      PostToolBatch : [{ hooks: [() => Promise.resolve(ClaudeSub.after_tools(code, ask))] }],
+    };
     const options = { ...ClaudeSub.options(ask, new AbortController(), sdk.BUILTIN_TOOL_NAMES, sdk.SYSTEM_PROMPT_DYNAMIC_BOUNDARY), pathToClaudeCodeExecutable: bin, spawnClaudeCodeProcess: spawn, hooks };
     try {
       code.q = sdk.query({ prompt: box.read(), options });
@@ -378,6 +384,7 @@ export namespace ClaudeSub {
     };
     const acted = { v: false };
     let code: Code | null = null;
+    let lead: string[] = [];
     try {
       for (let tries = 0; !signal.aborted; ) {
         const guarded = await Limit.guard(limit, "claude-sub", acted.v);
@@ -400,9 +407,9 @@ export namespace ClaudeSub {
           if (signal.aborted) {
             return {};
           }
-          ClaudeSub.first_message(code, ask);
-        } else if (limit.n > 0) {
-          ClaudeSub.go_on_after_limit(code);
+          await ClaudeSub.first_message(code, ask);
+        } else {
+          await ClaudeSub.go_on(code, ask, lead);
         }
         let got: Out | null;
         try {
@@ -416,9 +423,14 @@ export namespace ClaudeSub {
           code = null;
           continue;
         }
+        if (got?.steered === true) {
+          lead = [];
+          continue;
+        }
         if (got === null || got.limit === undefined) {
           return got === null ? {} : { ...got, acted: acted.v };
         }
+        lead = [GO_ON];
         limit.n += 1;
         const keep_code_across_limit = acted.v;
         if (!keep_code_across_limit) {
@@ -450,31 +462,38 @@ export namespace ClaudeSub {
     return ClaudeSub.bin();
   }
 
-  export function first_message(code: Code, ask: Ask): void {
+  // a new Claude Code's message: the call's blocks and every message steered
+  // into the call so far (AskAI.steered)
+  export async function first_message(code: Code, ask: Ask): Promise<void> {
+    await AskAI.steered(ask);
     const blocks = ask.blocks.filter((b) => b.text !== "");
-    void code.box.put(blocks.map((b) => b.text), ask.imgs ?? [], blocks.slice(0, -1).findLastIndex((b) => b.mark));
+    const taken = AskAI.taken(ask);
+    code.box.put([...blocks.map((b) => b.text), ...taken.map((say) => say.text)], [...(ask.imgs ?? []), ...taken.flatMap((say) => say.imgs)], blocks.slice(0, -1).findLastIndex((b) => b.mark));
   }
 
-  export function go_on_after_limit(code: Code): void {
-    void code.box.put([GO_ON_AFTER_LIMIT], []);
+  // a kept Claude Code's turn goes on (after a limit's reset: lead), with
+  // the messages steered in since, in one message: two would start two turns
+  export async function go_on(code: Code, ask: Ask, lead: string[]): Promise<void> {
+    const say = await AskAI.steered(ask);
+    const texts = [...lead, ...(say === null ? [] : [say.text])];
+    code.box.put(texts.length === 0 ? [CONTINUE] : texts, say?.imgs ?? []);
   }
 
   export function died_before_saying(err: unknown, said: boolean, signal: AbortSignal): boolean {
     return err instanceof Died && !said && !signal.aborted;
   }
 
-  // after a batch of tool calls, before the next request: under extra usage
-  // the turn stops here, with the tools' results in; else the steered
-  // messages go in, which Claude Code adds to that request as sent mid-turn
-  export async function after_tools(code: Code, ask: Ask): Promise<SyncHookJSONOutput> {
-    code.cut = code.over;
-    if (code.over) {
-      return { continue: false, stopReason: OVERAGE };
-    }
-    for (const say of (await ask.steers?.()) ?? []) {
-      await code.box.put([say.text], say.imgs);
-    }
-    return {};
+  // a tool not started yet when a message is steered in isn't run
+  export function before_tool(ask: Ask): SyncHookJSONOutput {
+    return ask.steer?.pending() === true ? { hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: NOT_RUN } } : {};
+  }
+
+  // after a batch of tool calls, before the next request, the turn stops,
+  // the tools' results in: under extra usage (a limit), or for steered
+  // messages, which go on it in our words (go_on), not Claude Code's
+  export function after_tools(code: Code, ask: Ask): SyncHookJSONOutput {
+    code.cut = code.over ? "over" : ask.steer?.pending() === true ? "steer" : null;
+    return code.cut === null ? {} : { continue: false, stopReason: code.cut === "over" ? OVERAGE : STEERING };
   }
 
   export function limit_ended(whole: boolean, hit: boolean, over: boolean, info: SDKRateLimitInfo | null): boolean {
@@ -486,7 +505,7 @@ export namespace ClaudeSub {
     let info: SDKRateLimitInfo | null = null;
     let hit = false;
     let err: string | undefined;
-    [code.over, code.cut] = [false, false];
+    [code.over, code.cut] = [false, null];
     for (;;) {
       const r = await Promise.race([ClaudeSub.read(code), stopped]);
       if (r === "stop") {
@@ -527,8 +546,11 @@ export namespace ClaudeSub {
       }
       const ok = msg.subtype === "success" && !msg.is_error;
       const why = msg.subtype === "success" ? msg.result : msg.errors.join("; ");
-      if (ClaudeSub.limit_ended(ok && !code.cut, hit, code.over, info)) {
+      if (ClaudeSub.limit_ended(ok && code.cut !== "over", hit, code.over, info)) {
         return { limit: { until: info && ClaudeSub.reset(info), text: why } };
+      }
+      if (ok && code.cut === "steer") {
+        return { steered: true };
       }
       if (!ok) {
         const said = (err ? err + ": " : "") + (why || msg.subtype);
@@ -562,27 +584,22 @@ export namespace ClaudeSub {
   // two of its own (our system prompt, its last message), three if its
   // system prompt isn't split at the boundary (ClaudeSub.options)
   export function inbox() {
-    const queue: Array<{ msg: SDKUserMessage; read: () => void }> = [];
+    const queue: SDKUserMessage[] = [];
     let wake = () => {};
     let shut = false;
     const push = (content: unknown[]) => {
-      const read = new Promise<undefined>((ok) => {
-        queue.push({ msg: { type: "user", message: { role: "user", content: content as Exclude<SDKUserMessage["message"]["content"], string> }, parent_tool_use_id: null }, read: () => ok(undefined) });
-      });
+      queue.push({ type: "user", message: { role: "user", content: content as Exclude<SDKUserMessage["message"]["content"], string> }, parent_tool_use_id: null });
       wake();
-      return read;
     };
     const put = (texts: string[], imgs: Img[], mark = -1) => push(Anthropic.content(texts, imgs).map((b, k) => (k === mark ? { ...b, cache_control: HOUR } : b)));
     const close = () => {
       shut = true;
-      queue.splice(0).forEach((x) => x.read());
       wake();
     };
     async function* read(): AsyncGenerator<SDKUserMessage> {
       for (;;) {
         for (let next = queue.shift(); next !== undefined; next = queue.shift()) {
-          yield next.msg;
-          next.read();
+          yield next;
         }
         if (shut) {
           return;
