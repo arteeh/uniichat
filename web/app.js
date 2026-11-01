@@ -28,18 +28,23 @@ async function* stream_lines(stream) {
   const reader = stream.getReader();
   const utf8 = new TextDecoder;
   let rest = "";
-  for (let got = await reader.read();!got.done; got = await reader.read()) {
-    const text = utf8.decode(got.value, { stream: true });
-    const nl = text.lastIndexOf(`
+  try {
+    for (let got = await reader.read();!got.done; got = await reader.read()) {
+      const text = utf8.decode(got.value, { stream: true });
+      const nl = text.lastIndexOf(`
 `);
-    if (nl >= 0) {
-      yield (rest + text.slice(0, nl)).split(`
+      if (nl >= 0) {
+        yield (rest + text.slice(0, nl)).split(`
 `);
-      rest = "";
+        rest = "";
+      }
+      rest += text.slice(nl + 1);
     }
-    rest += text.slice(nl + 1);
+    yield [rest + utf8.decode()];
+  } finally {
+    await reader.cancel().catch(() => {});
+    reader.releaseLock();
   }
-  yield [rest + utf8.decode()];
 }
 
 // Json.ts
@@ -48,6 +53,9 @@ function has(x, k) {
 }
 function get(x, k) {
   return has(x, k) ? x[k] : undefined;
+}
+function str(x) {
+  return typeof x === "string" ? x : undefined;
 }
 function text_of(x, or = "") {
   const shown = String(x);
@@ -58,6 +66,164 @@ function rec(x) {
 }
 function list(x) {
   return Array.isArray(x) ? x : [];
+}
+
+// PiImport.ts
+async function* records(file) {
+  let n = 0;
+  for await (const lines of stream_lines(file.stream()))
+    for (const line of lines) {
+      const at = n++;
+      if (line.trim() === "")
+        continue;
+      let value = null;
+      try {
+        value = JSON.parse(line);
+      } catch {}
+      yield { line: at, value: rec(value) ? value : null };
+    }
+}
+async function pi_scan(file) {
+  let header = null;
+  let version = 0;
+  let broken = 0;
+  let generated = 0;
+  let snapshots = false;
+  let leaf;
+  const index = new Map;
+  const ordinals = new Map;
+  let ordinal = 0;
+  for await (const row of records(file)) {
+    const j = row.value;
+    if (j === null) {
+      broken++;
+      continue;
+    }
+    if (header === null) {
+      if (j.type !== "session")
+        return null;
+      const v = j.version ?? 1;
+      if (typeof v !== "number" || ![1, 2, 3].includes(v))
+        throw new Error("Unsupported Pi session version: " + text_of(v));
+      const id = str(j.id);
+      const cwd = str(j.cwd);
+      const start = iso(j.timestamp);
+      if (id === undefined || id === "" || cwd === undefined || start === "")
+        throw new Error("Invalid Pi session header");
+      if (encodeURIComponent(id).length > 1900)
+        throw new Error("Pi session ID is too long to import safely");
+      version = v;
+      header = { id, cwd, start };
+      continue;
+    }
+    if (j.type === "session")
+      throw new Error("Multiple Pi session headers");
+    if (typeof j.type !== "string") {
+      broken++;
+      continue;
+    }
+    const id = version === 1 ? "v1-" + row.line : j.id;
+    const parent = version === 1 ? leaf?.id ?? null : j.parentId;
+    if (typeof id !== "string" || id === "" || parent !== null && typeof parent !== "string")
+      throw new Error("Invalid Pi entry ID or parent");
+    if (index.has(id))
+      throw new Error("Duplicate Pi entry ID");
+    const role = rec(j.message) ? str(j.message.role) : undefined;
+    const ordinary = j.type === "message" && role !== undefined && ["user", "assistant", "toolResult", "bashExecution"].includes(role);
+    if (j.type === "message")
+      ordinals.set(row.line, ordinal++);
+    leaf = { id, parent, line: row.line, message: ordinary };
+    index.set(id, leaf);
+    snapshots ||= j.type === "compaction" && Array.isArray(j.retainedTail);
+    generated += Number(j.type === "custom_message" || j.type === "message" && !ordinary);
+  }
+  if (header === null)
+    return null;
+  const active = new Set;
+  const visited = new Set;
+  let messages = 0;
+  for (let entry = leaf;entry !== undefined; ) {
+    if (visited.has(entry.id))
+      throw new Error("Cycle in Pi session branch");
+    visited.add(entry.id);
+    active.add(entry.line);
+    messages += Number(entry.message);
+    if (entry.parent === null)
+      break;
+    const next = index.get(entry.parent);
+    if (next === undefined)
+      throw new Error("Missing parent in Pi session branch");
+    if (next.line >= entry.line)
+      throw new Error("Invalid parent order in Pi session branch");
+    entry = next;
+  }
+  if (snapshots && messages === 0)
+    throw new Error("Pi snapshot-only history is unsupported; choose the original log");
+  const warnings = [
+    ...broken > 0 ? [broken + " malformed/non-object lines skipped"] : [],
+    ...generated > 0 ? [generated + " generated/custom records excluded"] : []
+  ];
+  return { ...header, active, ordinals, warnings };
+}
+async function* pi_read(file, session) {
+  let last = session.start;
+  for await (const { line, value: j } of records(file)) {
+    if (!session.active.has(line) || j?.type !== "message" || !rec(j.message))
+      continue;
+    const m = j.message;
+    const date = typeof m.timestamp === "number" ? iso(m.timestamp) || iso(j.timestamp) || last : iso(j.timestamp) || last;
+    last = date;
+    let part = 0;
+    const source = "pi:" + encodeURIComponent(session.id) + ":message-" + session.ordinals.get(line) + ":";
+    const emit = (kind, value) => pages(kind, value, date).map((msg) => ({ ...msg, source: source + part++ }));
+    switch (m.role) {
+      case "user":
+        yield* emit("user", text(m.content));
+        break;
+      case "assistant": {
+        const blocks = typeof m.content === "string" ? [{ type: "text", text: m.content }] : list(m.content);
+        let say = [];
+        for (const block of blocks) {
+          if (!rec(block))
+            continue;
+          if (block.type === "text" || block.type === "image")
+            say.push(block);
+          if (block.type === "toolCall") {
+            yield* emit("unii", text(say));
+            say = [];
+            yield* emit("tool", text_of(block.name, "tool") + call(block.id) + " " + JSON.stringify(block.arguments ?? {}));
+          }
+        }
+        yield* emit("unii", text(say));
+        break;
+      }
+      case "toolResult":
+        yield* emit("echo", text_of(m.toolName, "tool") + call(m.toolCallId) + (m.isError === true ? " [error]" : "") + ": " + text(m.content));
+        break;
+      case "bashExecution":
+        yield* emit("tool", "shell " + JSON.stringify({ command: m.command ?? "" }));
+        yield* emit("echo", text_of(m.output) + (typeof m.exitCode === "number" && m.exitCode !== 0 ? `
+[exit ` + m.exitCode + "]" : ""));
+        break;
+    }
+  }
+}
+function call(id) {
+  return typeof id === "string" ? " [call:" + id + "]" : "";
+}
+function text(content) {
+  if (typeof content === "string")
+    return content;
+  return list(content).flatMap((part) => !rec(part) ? [] : part.type === "image" ? ["[image]"] : part.type === "text" && typeof part.text === "string" ? [part.text] : []).join(`
+`);
+}
+function pages(kind, value, date) {
+  const parts = value.trim() === "" ? [] : clip_pages(value);
+  return parts.map((text, k) => ({ kind, text, date, more: k < parts.length - 1 }));
+}
+function iso(at) {
+  const n = typeof at === "number" ? at : typeof at === "string" ? Date.parse(at) : NaN;
+  return Number.isFinite(n) && !Number.isNaN(new Date(n).getTime()) ? new Date(n).toISOString() : "";
 }
 
 // Import.ts
@@ -78,12 +244,24 @@ function import_file(path) {
 async function import_session(file, form, app = "", where = "") {
   const s = { app, form, where, start: "", file, heads: [] };
   for await (const m of import_read(s)) {
-    s.heads.push({ kind: m.kind, date: m.date, size: import_size(m), n: s.heads.length });
+    s.heads.push({ kind: m.kind, date: m.date, size: import_size(m), n: s.heads.length, ...m.source === undefined ? {} : { source: m.source } });
   }
-  s.start = s.heads[0]?.date ?? "";
+  s.start ||= s.heads[0]?.date ?? "";
   return s.heads.length > 0 ? s : null;
 }
 async function* import_read(s) {
+  if (s.form === "log" && (s.app === "" || s.app === "Pi")) {
+    if (s.pi === undefined)
+      s.pi = await pi_scan(s.file);
+    if (s.pi !== null) {
+      s.app = "Pi";
+      s.where = "session in " + s.pi.cwd;
+      s.start = s.pi.start;
+      s.warnings = s.pi.warnings;
+      yield* pi_read(s.file, s.pi);
+      return;
+    }
+  }
   let date = "";
   for await (const lines of stream_lines(s.file.stream())) {
     for (const line of lines) {
@@ -107,8 +285,15 @@ function line_msgs(s, line, last) {
 }
 function import_pick(sessions, want, done) {
   const old = [...sessions].sort((a, b) => a.start.localeCompare(b.start));
-  const keep = (m, last) => (want.tools || m.kind === "user" || m.kind === "unii") && m.date >= want.since && import_new(m, last);
-  const kept = (s, last) => s.heads.filter((m) => keep(m, last));
+  const seen = new Set;
+  const keep = (m, last) => (want.tools || m.kind === "user" || m.kind === "unii") && m.date >= want.since && import_new(m, last, done);
+  const kept = (s, last) => s.heads.filter((m) => {
+    if (!keep(m, last) || m.source !== undefined && seen.has(m.source))
+      return false;
+    if (m.source !== undefined)
+      seen.add(m.source);
+    return true;
+  });
   return old.map((s) => ({ ...s, heads: kept(s, done[import_id(s)]) })).filter((s) => s.heads.length > 0);
 }
 function import_plan(sessions, want, done) {
@@ -119,11 +304,12 @@ function import_plan(sessions, want, done) {
   const sizes = picked.flatMap((s) => [import_size(import_note(s)), ...s.heads.map((m) => m.size)]);
   return { sessions: shown, picked, msgs: sizes.length - picked.length, first: first.slice(0, 10), sizes };
 }
-function import_new(m, last) {
-  return last === undefined || (m.date ?? "") > last;
+function import_new(m, last, done = {}) {
+  return m.source === undefined ? last === undefined || (m.date ?? "") > last : done["source " + m.source] === undefined;
 }
 function import_name(s) {
-  return s.app + " " + s.where + ", from " + new Date(s.start).toLocaleString("sv-SE").slice(0, 16);
+  const source = s.pi === undefined || s.pi === null ? "" : " [session " + encodeURIComponent(s.pi.id) + "]";
+  return s.app + source + " " + s.where + ", from " + new Date(s.start).toLocaleString("sv-SE").slice(0, 16);
 }
 function import_cells(s) {
   const day = DAY.format(new Date(s.start));
@@ -145,6 +331,9 @@ function import_id(s) {
   return import_key(import_note(s));
 }
 function import_key(note) {
+  const pi = /^Pi \[session ([^\]]+)\] /.exec(note.text);
+  if (pi !== null)
+    return "pi " + pi[1];
   return note.date + " " + without_local_time(without_app(note.text));
 }
 function without_app(name) {
@@ -4301,7 +4490,7 @@ function file_name(pic) {
 // web/src/main.ts
 var APP = window.webkit?.messageHandlers?.unii ?? null;
 var DESK = matchMedia("(hover: hover)");
-var NONE = "No Claude or ChatGPT chats in that folder. Choose ~/.claude or ~/.codex.";
+var NONE = "No supported Claude, ChatGPT or Pi chats in that folder. Choose ~/.claude, ~/.codex or ~/.pi.";
 var SCENES = `
   <div class="scene"><p>Your entire life.</p><p>One single chat.</p></div>
   <div class="scene"><i class="mark"></i><h1>UniiChat</h1></div>`;
@@ -4869,7 +5058,9 @@ function importer() {
   const zip = $2("#import [name=zip]", HTMLInputElement);
   $2(".pickdir").onclick = () => dir.click();
   for (const src of import_srcs()) {
-    const pick = find(src, ".pickzip", HTMLButtonElement);
+    const pick = src.querySelector(".pickzip");
+    if (pick === null)
+      continue;
     pick.onclick = () => zip.click();
     pick.title = "From the website: " + EXPORTS[src.dataset.app ?? ""] + ", which emails you a zip.";
   }
@@ -4898,18 +5089,26 @@ function importer() {
     const files = all.filter((f) => import_file(f.webkitRelativePath));
     const found = [];
     let moved = 0;
+    let skipped = 0;
     const reading = (k) => "Reading " + k + " of " + files.length + " files…";
     import_draw(reading(1));
     for (const [k, f] of files.entries()) {
       $2("#import .guess").textContent = reading(k + 1);
-      const s = await import_copy(f).then((b) => import_session(b, "log"), () => {
+      const s = await import_copy(f).then(async (b) => {
+        try {
+          return await import_session(b, "log");
+        } catch {
+          skipped++;
+          return null;
+        }
+      }, () => {
         return;
       });
       moved += s === undefined ? 1 : 0;
       found.push(...s ? [s] : []);
     }
     dir.value = "";
-    import_took(all[0]?.webkitRelativePath.split("/")[0] ?? "", { sessions: found, moved }, found.length > 0 ? "" : NONE);
+    import_took(all[0]?.webkitRelativePath.split("/")[0] ?? "", { sessions: found, moved, skipped }, found.length > 0 ? "" : NONE);
   };
   zip.onchange = async () => {
     for (const f of zip.files ?? []) {
@@ -5009,6 +5208,7 @@ function import_draw(status) {
   const plan = import_plan2();
   const msgs = plan.msgs;
   const left = reads.reduce((n, read) => n + read.moved, 0);
+  const skipped = reads.reduce((n, read) => n + (read.skipped ?? 0), 0);
   const moved = left === 0 ? "" : " (" + left + (left === 1 ? " file" : " files") + " changed while read: choose the folder again to add them)";
   const found = sessions.length === 0 ? "" : plan.first === "" ? OLD : import_count(msgs, "new ");
   const day = (at) => new Date(at).getUTCDate() + " " + new Date(at).toLocaleDateString("en-US", { month: "short", year: "numeric", timeZone: "UTC" });
@@ -5019,11 +5219,11 @@ function import_draw(status) {
   BACK.style.setProperty("--at", 100 * (BACK.valueAsNumber - Number(BACK.min)) / Math.max(1, Number(BACK.max) - Number(BACK.min)) + "%");
   $2("#import .want").hidden = plan.first === "";
   $2("#import .tools").hidden = !sessions.some((s) => s.heads.some((m) => m.kind === "tool" || m.kind === "echo"));
-  $2("#import .found").textContent = found + moved;
+  $2("#import .found").textContent = found + moved + (skipped > 0 ? " · " + skipped + " invalid/unsupported session files skipped" : "");
   for (const src of import_srcs()) {
     const list = must(src.querySelector(".sessions"), "#import .sessions");
     const shown = plan.sessions.filter((s) => s.app === src.dataset.app);
-    markup(list, shown.map((s) => `<label title="${esc(s.where + ", " + import_count(s.heads.length, ""))}"><input type="checkbox" name="session" value="${esc(import_id(s))}">${import_cells(s).map((c) => `<span>${esc(c)}</span>`).join("")}</label>`));
+    markup(list, shown.map((s) => `<label title="${esc(s.where + ", " + import_count(s.heads.length, "") + (s.warnings === undefined ? "" : "; " + s.warnings.join("; ")))}"><input type="checkbox" name="session" value="${esc(import_id(s))}">${import_cells(s).map((c) => `<span>${esc(c)}</span>`).join("")}</label>`));
     list.querySelectorAll("input").forEach((box) => box.checked = !IMPORT.off.has(box.value));
     const on = shown.filter((s) => !IMPORT.off.has(import_id(s))).length;
     find(src, ".pick", HTMLElement).hidden = shown.length === 0;
@@ -5036,7 +5236,11 @@ function import_draw(status) {
   dir.textContent = msgs > 0 ? "Add a folder" : "Choose folder";
   dir.classList.toggle("alt", msgs > 0);
   dir.disabled = go.disabled;
-  import_srcs().forEach((src) => find(src, ".pickzip", HTMLButtonElement).disabled = dir.disabled);
+  import_srcs().forEach((src) => {
+    const pick = src.querySelector(".pickzip");
+    if (pick !== null)
+      pick.disabled = dir.disabled;
+  });
 }
 function import_srcs() {
   return [...document.querySelectorAll("#import .src")];

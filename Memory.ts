@@ -12,7 +12,7 @@ import { move_over } from "./Write.ts";
 
 type Root = Msg & { i: number; size: number; date: string };
 
-export type Msg = { kind: Kind; text: string; date?: string; images?: string[]; imported?: boolean; line?: string; more?: boolean; act?: string } & Pair;
+export type Msg = { kind: Kind; text: string; date?: string; images?: string[]; imported?: boolean; line?: string; more?: boolean; act?: string; source?: string } & Pair;
 
 export type Pair = { of?: string; tool?: string };
 

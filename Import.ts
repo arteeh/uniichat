@@ -1,14 +1,15 @@
 import type { Kind } from "./AskAI.ts";
 import { clip_pages, stream_lines } from "./Clip.ts";
 import { get, list, text_of } from "./Json.ts";
+import { pi_scan, pi_read, type PiSession } from "./PiImport.ts";
 
-type Msg = { kind: Kind; text: string; date: string; more?: boolean };
+export type Msg = { kind: Kind; text: string; date: string; more?: boolean; source?: string };
 
-type Head = { kind: Kind; date: string; size: number; n: number };
+type Head = { kind: Kind; date: string; size: number; n: number; source?: string };
 
 export type Form = "log" | "msgs";
 
-export type Session = { app: string; form: Form; where: string; start: string; file: Blob; heads: Head[] };
+export type Session = { app: string; form: Form; where: string; start: string; file: Blob; heads: Head[]; pi?: PiSession | null; warnings?: string[] };
 
 export type Done = Record<string, string>;
 
@@ -26,7 +27,7 @@ const COMPACTION_MICRO_USD_FIT = { base: 187, per_source_doubling: 735, per_summ
 
 const PIECE_KEPT_AS_BLOB = 2 ** 20;
 
-export const APPS = ["Claude", "ChatGPT"];
+export const APPS = ["Claude", "ChatGPT", "Pi"];
 
 export const OLD = "Nothing new: these chats are in Unii's memory already.";
 
@@ -81,13 +82,24 @@ export function import_file(path: string): boolean {
 export async function import_session(file: Blob, form: Form, app = "", where = ""): Promise<Session | null> {
   const s: Session = { app, form, where, start: "", file, heads: [] };
   for await (const m of import_read(s)) {
-    s.heads.push({ kind: m.kind, date: m.date, size: import_size(m), n: s.heads.length });
+    s.heads.push({ kind: m.kind, date: m.date, size: import_size(m), n: s.heads.length, ...(m.source === undefined ? {} : { source: m.source }) });
   }
-  s.start = s.heads[0]?.date ?? "";
+  s.start ||= s.heads[0]?.date ?? "";
   return s.heads.length > 0 ? s : null;
 }
 
 async function* import_read(s: Session): AsyncGenerator<Msg> {
+  if (s.form === "log" && (s.app === "" || s.app === "Pi")) {
+    if (s.pi === undefined) s.pi = await pi_scan(s.file);
+    if (s.pi !== null) {
+      s.app = "Pi";
+      s.where = "session in " + s.pi.cwd;
+      s.start = s.pi.start;
+      s.warnings = s.pi.warnings;
+      yield* pi_read(s.file, s.pi);
+      return;
+    }
+  }
   let date = "";
   for await (const lines of stream_lines(s.file.stream())) {
     for (const line of lines) {
@@ -114,8 +126,13 @@ function line_msgs(s: Session, line: string, last: string): Msg[] {
 
 function import_pick(sessions: Session[], want: Want, done: Done): Session[] {
   const old  = [...sessions].sort((a, b) => a.start.localeCompare(b.start));
-  const keep = (m: Head, last?: string) => (want.tools || m.kind === "user" || m.kind === "unii") && m.date >= want.since && import_new(m, last);
-  const kept = (s: Session, last?: string) => s.heads.filter((m) => keep(m, last));
+  const seen = new Set<string>();
+  const keep = (m: Head, last?: string) => (want.tools || m.kind === "user" || m.kind === "unii") && m.date >= want.since && import_new(m, last, done);
+  const kept = (s: Session, last?: string) => s.heads.filter((m) => {
+    if (!keep(m, last) || (m.source !== undefined && seen.has(m.source))) return false;
+    if (m.source !== undefined) seen.add(m.source);
+    return true;
+  });
   return old.map((s) => ({ ...s, heads: kept(s, done[import_id(s)]) })).filter((s) => s.heads.length > 0);
 }
 
@@ -128,12 +145,13 @@ export function import_plan(sessions: Session[], want: Want, done: Done): Plan {
   return { sessions: shown, picked, msgs: sizes.length - picked.length, first: first.slice(0, 10), sizes };
 }
 
-export function import_new(m: { date?: string }, last: string | undefined): boolean {
-  return last === undefined || (m.date ?? "") > last;
+export function import_new(m: { date?: string; source?: string }, last: string | undefined, done: Done = {}): boolean {
+  return m.source === undefined ? last === undefined || (m.date ?? "") > last : done["source " + m.source] === undefined;
 }
 
 function import_name(s: Session): string {
-  return s.app + " " + s.where + ", from " + new Date(s.start).toLocaleString("sv-SE").slice(0, 16);
+  const source = s.pi === undefined || s.pi === null ? "" : " [session " + encodeURIComponent(s.pi.id) + "]";
+  return s.app + source + " " + s.where + ", from " + new Date(s.start).toLocaleString("sv-SE").slice(0, 16);
 }
 
 export function import_cells(s: Session): string[] {
@@ -165,6 +183,8 @@ export function import_id(s: Session): string {
 }
 
 export function import_key(note: { text: string; date?: string }): string {
+  const pi = /^Pi \[session ([^\]]+)\] /.exec(note.text);
+  if (pi !== null) return "pi " + pi[1];
   return note.date + " " + without_local_time(without_app(note.text));
 }
 

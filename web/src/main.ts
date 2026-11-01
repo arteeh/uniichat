@@ -10,7 +10,7 @@ import * as Html from "./Html.ts";
 import * as Tree from "./Tree.ts";
 import * as Viewer from "./Viewer.ts";
 
-type Read = { sessions: Import.Session[]; moved: number };
+type Read = { sessions: Import.Session[]; moved: number; skipped?: number };
 
 type Back = { at: { a: number; top: number } | null; y: number | null; away: { y: number; end: boolean } | null; caret: [number, number]; focus: boolean; open: string[] };
 
@@ -22,7 +22,7 @@ const APP = window.webkit?.messageHandlers?.unii ?? null;
 
 const DESK = matchMedia("(hover: hover)");
 
-const NONE   = "No Claude or ChatGPT chats in that folder. Choose ~/.claude or ~/.codex.";
+const NONE   = "No supported Claude, ChatGPT or Pi chats in that folder. Choose ~/.claude, ~/.codex or ~/.pi.";
 
 const SCENES = `
   <div class="scene"><p>Your entire life.</p><p>One single chat.</p></div>
@@ -646,7 +646,8 @@ function importer(): void {
   const zip  = $("#import [name=zip]", HTMLInputElement);
   $(".pickdir").onclick = () => dir.click();
   for (const src of import_srcs()) {
-    const pick = find(src, ".pickzip", HTMLButtonElement);
+    const pick = src.querySelector<HTMLButtonElement>(".pickzip");
+    if (pick === null) continue;
     pick.onclick = () => zip.click();
     pick.title = "From the website: " + Import.EXPORTS[src.dataset.app ?? ""] + ", which emails you a zip.";
   }
@@ -675,16 +676,20 @@ function importer(): void {
     const files = all.filter((f) => Import.import_file(f.webkitRelativePath));
     const found: Import.Session[] = [];
     let moved = 0;
+    let skipped = 0;
     const reading = (k: number) => "Reading " + k + " of " + files.length + " files…";
     import_draw(reading(1));
     for (const [k, f] of files.entries()) {
       $("#import .guess").textContent = reading(k + 1);
-      const s = await import_copy(f).then((b) => Import.import_session(b, "log"), () => undefined);
+      const s = await import_copy(f).then(async (b) => {
+        try { return await Import.import_session(b, "log"); }
+        catch { skipped++; return null; }
+      }, () => undefined);
       moved += s === undefined ? 1 : 0;
       found.push(...(s ? [s] : []));
     }
     dir.value = "";
-    import_took(all[0]?.webkitRelativePath.split("/")[0] ?? "", { sessions: found, moved }, found.length > 0 ? "" : NONE);
+    import_took(all[0]?.webkitRelativePath.split("/")[0] ?? "", { sessions: found, moved, skipped }, found.length > 0 ? "" : NONE);
   };
   zip.onchange = async () => {
     for (const f of zip.files ?? []) {
@@ -794,6 +799,7 @@ function import_draw(status: string): void {
   const plan     = import_plan();
   const msgs     = plan.msgs;
   const left     = reads.reduce((n, read) => n + read.moved, 0);
+  const skipped = reads.reduce((n, read) => n + (read.skipped ?? 0), 0);
   const moved    = left === 0 ? "" : " (" + left + (left === 1 ? " file" : " files") + " changed while read: choose the folder again to add them)";
   const found    = sessions.length === 0 ? "" : plan.first === "" ? Import.OLD : Import.import_count(msgs, "new ");
   const day = (at: string | number) => new Date(at).getUTCDate() + " " + new Date(at).toLocaleDateString("en-US", { month: "short", year: "numeric", timeZone: "UTC" });
@@ -804,11 +810,11 @@ function import_draw(status: string): void {
   BACK.style.setProperty("--at", (100 * (BACK.valueAsNumber - Number(BACK.min))) / Math.max(1, Number(BACK.max) - Number(BACK.min)) + "%");
   $("#import .want").hidden = plan.first === "";
   $("#import .tools").hidden = !sessions.some((s) => s.heads.some((m) => m.kind === "tool" || m.kind === "echo"));
-  $("#import .found").textContent = found + moved;
+  $("#import .found").textContent = found + moved + (skipped > 0 ? " · " + skipped + " invalid/unsupported session files skipped" : "");
   for (const src of import_srcs()) {
     const list  = must(src.querySelector(".sessions"), "#import .sessions");
     const shown = plan.sessions.filter((s) => s.app === src.dataset.app);
-    markup(list, shown.map((s) => `<label title="${Html.esc(s.where + ", " + Import.import_count(s.heads.length, ""))}"><input type="checkbox" name="session" value="${Html.esc(Import.import_id(s))}">${Import.import_cells(s).map((c) => `<span>${Html.esc(c)}</span>`).join("")}</label>`));
+    markup(list, shown.map((s) => `<label title="${Html.esc(s.where + ", " + Import.import_count(s.heads.length, "") + (s.warnings === undefined ? "" : "; " + s.warnings.join("; ")))}"><input type="checkbox" name="session" value="${Html.esc(Import.import_id(s))}">${Import.import_cells(s).map((c) => `<span>${Html.esc(c)}</span>`).join("")}</label>`));
     list.querySelectorAll("input").forEach((box) => (box.checked = !IMPORT.off.has(box.value)));
     const on = shown.filter((s) => !IMPORT.off.has(Import.import_id(s))).length;
     find(src, ".pick", HTMLElement).hidden = shown.length === 0;
@@ -821,7 +827,10 @@ function import_draw(status: string): void {
   dir.textContent = msgs > 0 ? "Add a folder" : "Choose folder";
   dir.classList.toggle("alt", msgs > 0);
   dir.disabled = go.disabled;
-  import_srcs().forEach((src) => (find(src, ".pickzip", HTMLButtonElement).disabled = dir.disabled));
+  import_srcs().forEach((src) => {
+    const pick = src.querySelector<HTMLButtonElement>(".pickzip");
+    if (pick !== null) pick.disabled = dir.disabled;
+  });
 }
 
 function import_srcs(): HTMLElement[] {

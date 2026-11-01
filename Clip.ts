@@ -59,14 +59,19 @@ export async function* stream_lines(stream: ReadableStream<Uint8Array>): AsyncGe
   const reader = stream.getReader();
   const utf8 = new TextDecoder();
   let rest = "";
-  for (let got = await reader.read(); !got.done; got = await reader.read()) {
-    const text = utf8.decode(got.value, { stream: true });
-    const nl = text.lastIndexOf("\n");
-    if (nl >= 0) {
-      yield (rest + text.slice(0, nl)).split("\n");
-      rest = "";
+  try {
+    for (let got = await reader.read(); !got.done; got = await reader.read()) {
+      const text = utf8.decode(got.value, { stream: true });
+      const nl = text.lastIndexOf("\n");
+      if (nl >= 0) {
+        yield (rest + text.slice(0, nl)).split("\n");
+        rest = "";
+      }
+      rest += text.slice(nl + 1);
     }
-    rest += text.slice(nl + 1);
+    yield [rest + utf8.decode()];
+  } finally {
+    await reader.cancel().catch(() => {});
+    reader.releaseLock();
   }
-  yield [rest + utf8.decode()];
 }

@@ -66,7 +66,7 @@
   </section>
   <form>
     <p class="title">Import your past AI chats</p>
-    <p class="desk sub">Choose your <code>~/.claude</code> or <code>~/.codex</code> folder (hidden: <kbd>⌘</kbd><kbd>⇧</kbd><kbd>G</kbd> in the dialog).</p>
+    <p class="desk sub">Choose your <code>~/.claude</code>, <code>~/.codex</code> or <code>~/.pi</code> folder (hidden: <kbd>⌘</kbd><kbd>⇧</kbd><kbd>G</kbd> in the dialog).</p>
     <p class="phone sub">Import on your computer: open this site there, or type <code>/import</code> in unii.</p>
     <input type="file" name="dir" webkitdirectory hidden>
     <input type="file" name="zip" accept=".zip,.json" multiple hidden>
@@ -79,6 +79,11 @@
       <legend>ChatGPT</legend>
       <details class="pick" hidden><summary></summary><div class="sessions"></div></details>
       <button type="button" class="pickzip">Add a website export</button>
+    </fieldset>
+    <fieldset class="src desk" data-app="Pi">
+      <legend>Pi</legend>
+      <details class="pick" hidden><summary></summary><div class="sessions"></div></details>
+      <p class="sub">Original messages on the saved active branch in ~/.pi/agent/sessions.</p>
     </fieldset>
     <fieldset class="want" hidden>
       <label class="tools"><input type="checkbox" name="tools"> Tool calls</label>

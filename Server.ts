@@ -889,14 +889,22 @@ export namespace Chat {
   export async function* fresh(body: Body, done: Import.Done): AsyncGenerator<Log[]> {
     let note: Log | null = null;
     let last: string | undefined;
+    let session = "";
+    const seen = new Set<string>();
     for await (const msgs of Chat.reads(body)) {
       const out: Log[] = [];
       for (const m of msgs) {
         if (m.kind === "note") {
-          [note, last] = [m, done[Import.import_key(m)]];
-        } else if (Import.import_new(m, last)) {
-          out.push(...(note === null ? [] : [note]), m);
-          note = null;
+          const key = Import.import_key(m);
+          [note, last] = [m, done[key]];
+          session = key.startsWith("pi ") ? key.slice(3) : "";
+        } else {
+          if (m.source !== undefined && m.source.split(":")[1] !== session) throw new Error("A Pi source ID does not match its session note.");
+          if (Import.import_new(m, last, done) && (m.source === undefined || !seen.has(m.source))) {
+            if (m.source !== undefined) seen.add(m.source);
+            out.push(...(note === null ? [] : [note]), m);
+            note = null;
+          }
         }
       }
       yield out;
@@ -908,6 +916,7 @@ export namespace Chat {
     let key = "";
     for (let i = 0; i < chat.mem.count; i++) {
       const m = Memory.at(chat.mem, i);
+      if (m.imported === true && m.source !== undefined) done["source " + m.source] = m.date;
       if (m.imported && m.kind === "note") {
         key = Import.import_key(m);
       } else if (m.imported && m.date > (done[key] ?? "")) {
@@ -928,8 +937,16 @@ export namespace Chat {
       throw new Error("An import has a " + kind + " message with no text.");
     }
     const date = Number.isNaN(Date.parse(when)) ? undefined : new Date(when).toISOString();
+    const source = get(x, "source");
+    if (source !== undefined) {
+      if (kind === "note" || typeof source !== "string" || source.length > 2048 || source.trim() !== source) throw new Error("An import has an invalid Pi source ID.");
+      const match = /^pi:([^:]+):message-(0|[1-9]\d*):(0|[1-9]\d*)$/.exec(source);
+      let valid = false;
+      try { valid = match !== null && encodeURIComponent(decodeURIComponent(match[1])) === match[1]; } catch { /* invalid URI encoding */ }
+      if (!valid) throw new Error("An import has an invalid Pi source ID.");
+    }
     const pair = (y: unknown) => (typeof y === "string" && y.length <= PAIR ? y : undefined);
-    return { kind, text, date, more: get(x, "more") === true, of: pair(of), tool: pair(tool) };
+    return { kind, text, date, more: get(x, "more") === true, of: pair(of), tool: pair(tool), ...(source === undefined ? {} : { source }) };
   }
 
   export function made(chat: Chat, l: number, i: number): void {

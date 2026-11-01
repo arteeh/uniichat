@@ -13,7 +13,7 @@ Features
 - **All your computers.** Run `unii device` on a machine and the agent can run commands and edit files there.
 - **Subagents** do the grunt work in the background and report back.
 - **Goals.** `/goal` keeps UniiChat working until something is done.
-- **Don't start from scratch.** Import past conversations from either Claude Code, Codex or another UniiChat instance into your memory tree.
+- **Don't start from scratch.** Import past conversations from Claude Code, Codex, Pi or another UniiChat instance into your memory tree.
 
 What this fork adds:
 
@@ -79,11 +79,17 @@ Use
 ---
 
 - **Web:** open the server's address. Install it as an app from your browser to get notifications when Unii replies.
-- **Terminal:** `unii [url]`. `/help` lists its commands; `/import` brings in this computer's Claude Code and Codex sessions. Without a url it uses `$UNII_URL`, else the last one, else http://127.0.0.1:8788. The terminal and devices keep their server and sign-in in `~/.config/unii`.
+- **Terminal:** `unii [url]`. `/help` lists its commands; `/import` brings in this computer's Claude Code, Codex and Pi sessions. Without a url it uses `$UNII_URL`, else the last one, else http://127.0.0.1:8788. The terminal and devices keep their server and sign-in in `~/.config/unii`.
 - **Conversation mode:** the switch next to "fold all" (`/mode` in the terminal). From then on, your and Unii's messages stay word for word in Unii's memory, for a real discussion. It costs more per turn and turns itself off when the model's context window fills up.
 - `unii help` lists every command.
 
 From source (Bun): `bun install`, `bun run web`, `bun Cli.ts <command>`, `bun run build` for a single `unii` program.
+
+**Pi history:** choose `~/.pi`, `~/.pi/agent` or `~/.pi/agent/sessions` in Import History. Pi gets its own section. In the terminal, `/import pi sessions` previews the selection; add `go` only when you want to import it. `PI_CODING_AGENT_DIR` and `PI_CODING_AGENT_SESSION_DIR` are honored.
+
+The reader supports Pi JSONL versions 1–3 without changing source files. It follows the last persisted entry back to the root, importing original messages rather than abandoned siblings, generated compaction/branch summaries, retained-tail copies, thinking or injected custom context. An in-memory branch selection with no subsequent append is not saved in the log. Images become `[image]`; tool calls, results and shell records require the Tool calls option. Files rejected for invalid/unsupported Pi headers or tree structure are counted as skipped; empty histories and unrecognized formats are ignored. Re-imports use session ID, persisted message position and page index to avoid duplicates, including same-timestamp entries and native legacy migration. Distinct forked session IDs remain separate histories. User-role records are transcript content, not proof of human authorship.
+
+For import changes, run `bun run check` and `bun test --isolate`, then rebuild the browser with `bun run web` before building the executable.
 
 Uninstall
 ---------
