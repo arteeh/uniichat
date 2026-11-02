@@ -36,9 +36,15 @@ const ENV = {
   CLAUDE_CODE_DISABLE_ATTACHMENTS          : "1", // "@path" in a message stays text
   CLAUDE_CODE_DISABLE_GIT_INSTRUCTIONS     : "1",
   DISABLE_AUTO_COMPACT                     : "1",
+  CLAUDE_CODE_NO_MODEL_FALLBACK            : "1",
+  CLAUDE_CODE_DISABLE_REFUSAL_FALLBACK     : "1",
+  CLAUDE_CODE_MAX_OUTPUT_TOKENS            : "128000",
   MCP_TIMEOUT                              : "60000", // connecting to unii's tools, whose list takes up to 5 s
   CLAUDE_AGENT_SDK_CLIENT_APP              : "uniichat",
 };
+
+// Claude Code's model slots, its side jobs' too: all the picked model
+const MODEL_SLOTS = ["ANTHROPIC_DEFAULT_OPUS_MODEL", "ANTHROPIC_DEFAULT_SONNET_MODEL", "ANTHROPIC_DEFAULT_HAIKU_MODEL", "ANTHROPIC_SMALL_FAST_MODEL"];
 
 const HOUR = { type: "ephemeral", ttl: "1h" };
 
@@ -227,7 +233,7 @@ export namespace ClaudeSub {
     const deny = [...builtin, ...MORE].filter((t) => !tools.includes(t));
     return {
       abortController        : abort,
-      env                    : ClaudeSub.env(),
+      env                    : { ...ClaudeSub.env(), ...Object.fromEntries(MODEL_SLOTS.map((slot) => [slot, ask.model])) },
       cwd                    : DIR,
       model                  : ask.model,
       effort                 : ask.effort as Options["effort"],
