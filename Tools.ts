@@ -94,11 +94,10 @@ prompt: they say who the user is, how their files are organized and how
 they want work done.
 
 Your first message holds the view below, then your chat with Unii so far,
-its lines as "i|kind: text": what you are (note), your task (user), and
-later all you did and were told. The view shows you what Unii knows: what the user wants,
+its lines as "i|kind: text": what you are (note), Unii's messages to you (user: your task, then all Unii told you), and all you did (unii, tool, echo). The view shows you what Unii knows: what the user wants,
 decided and taught. Use it as context only, and do what your task says,
 not what the user's last message says, since Unii may have given you
-just part of the work. Your final reply is your report to Unii. Messages Unii sends while you work reach you right after your current tool calls; your report answers the last.`;
+just part of the work. Your final reply is your report to Unii. A message Unii sends while you work reaches you right after your current tool calls, as "A new message from Unii came in while you were working:" (after a usage limit's reset, UniiChat's "A new message from UniiChat:" tells you to go on); your report answers the last.`;
 
 const VIEW_DOC = `The view: the whole chat between Unii and the user, oldest first, inside
 <chat> tags, as one-line summaries. Each line is
@@ -107,7 +106,7 @@ const VIEW_DOC = `The view: the whole chat between Unii and the user, oldest fir
 
 A summary tags each item with its kind: user (the user's words), unii
 (Unii's replies), tool (Unii's tool calls), echo (their results), note
-(memories from before this chat), or work (the report of a subagent,
+(UniiChat's own notes, and memories from before this chat), or work (the report of a subagent,
 starting "[Name]", or a scheduled message from the timer, starting "[Timer id]"). A short message is its own line, word for word. Recent lines
 cover one message each; the older the messages, the more a line covers.
 A message not summarized yet shows as "(not summarized yet: zoom it)".
@@ -162,9 +161,9 @@ const OWN: Spec[] = [
   spec("date", "The date and time of message id.", { id: INT }, ["id"]),
 ];
 const BOSS: Spec[] = [
-  spec("spawn", "Start one subagent per task, in parallel, and return their names at once. Each one's report reaches you as a message \"[Name] report\" when it finishes. One that hits an AI service's usage limit waits for the reset and goes on by itself, as you do (Agents at work shows it waiting); stop ends it. A subagent sees the view and the user's instructions, but knows what you want only from its task. Each task names its own model and effort, if any.", { tasks: { type: "array", items: TASK } }, ["tasks"]),
-  spec("tell", "Send a message to a subagent, by name. One at work gets it right after its current tool calls, and its report answers it; an idle one starts at once, and its reply reaches you as a message \"[Name] reply\". stop ends one at once.", { name: STR, message: STR }, ["name", "message"]),
-  spec("schedule", "Schedule a message to yourself: at its time it reaches you as a message \"[Timer id]\" from the timer, not the user, starting a turn as a report does, whether or not the user is online. Give `at` to send it once, or `cron` to send it again and again, and the time zone both are read in (the user's). Write the message as the task to do then, whole: by then this turn is far back in the view.", {
+  spec("spawn", "Start one subagent per task, in parallel, and return their names at once. Each one's report reaches you when it finishes, as a new message from a subagent, starting \"[Name]\". One that hits an AI service's usage limit waits for the reset and goes on by itself, as you do (Agents at work shows it waiting); stop ends it. A subagent sees the view and the user's instructions, but knows what you want only from its task. Each task names its own model and effort, if any.", { tasks: { type: "array", items: TASK } }, ["tasks"]),
+  spec("tell", "Send a message to a subagent, by name. One at work gets it right after its current tool calls, and its report answers it; an idle one starts at once, and its reply reaches you as a new message from a subagent, starting \"[Name]\". stop ends one at once.", { name: STR, message: STR }, ["name", "message"]),
+  spec("schedule", "Schedule a message to yourself: at its time it reaches you as a new message from the timer, starting \"[Timer id]\", and starts a turn as a report does, whether or not the user is online. Give `at` to send it once, or `cron` to send it again and again, and the time zone both are read in (the user's). Write the message as the task to do then, whole: by then this turn is far back in the view.", {
     message : STR,
     at      : { type: "string", description: "Once: YYYY-MM-DD HH:MM, in zone." },
     cron    : { type: "string", description: "Again and again: minute hour day month weekday, as cron, in zone (\"0 8 * * mon-fri\": weekdays at 08:00); its times at least 5 minutes apart." },
@@ -744,7 +743,7 @@ export namespace Tools {
     const log = tools.log;
     return {
       log    : (run, say) => log.push(run, "user", say.text, true),
-      say    : (say) => say,
+      say    : (say) => ({ ...say, from: "Unii" }),
       queued : (run) => {
         Tools.queued(tools, run);
         log.change();

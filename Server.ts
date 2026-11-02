@@ -3,7 +3,7 @@
 import * as fs from "node:fs";
 import * as net from "node:net";
 import type { ServerWebSocket } from "bun";
-import { AskAI, GO_ON, type Ask, type Call, type End, type Event, type Kind, type Parked, type Say, type Vendor } from "./AskAI.ts";
+import { AskAI, GO_ON, type Ask, type Call, type End, type Event, type Kind, type Parked, type Said, type Say, type Vendor } from "./AskAI.ts";
 import { clip_pages } from "./Clip.ts";
 import { Disk } from "./Disk.ts";
 import { Mcp } from "./Mcp.ts";
@@ -93,7 +93,7 @@ const LOCK_DEAD  = 30000;
 const WIN        = process.platform === "win32";
 const PID        = config.DIR + "/server.pid";
 const CHAT       = config.DIR + "/chat";
-const HEAD       = "Turn: the user's new message:\n\n";
+const HEAD       = "Turn:\n\n";
 const GOAL       = "You check a goal. Below is a chat between a user and Unii, an AI agent: its older messages as summary lines (id+n|text), then its latest messages whole, then the goal the user set with /goal. Answer yes if the chat shows the goal fully satisfied now, else no. Write that one word, nothing else.";
 const GOAL_ASK   = "\nThe goal:\n\n";
 const GOAL_NO    = "The goal isn't satisfied yet: keep working.";
@@ -203,7 +203,7 @@ export namespace Chat {
       pick   : () => chat.pick,
       begin  : () => Chat.begin(chat),
       log    : (_, post) => Chat.writing(chat, () => Promise.try(() => Chat.posted(chat, post))),
-      say    : (_, m) => Memory.say(chat.mem, m.id, m.end),
+      say    : (_, m) => Chat.said(chat.mem, m.id, m.end),
       ask    : (_, take) => Chat.call(chat, take),
       queued : (run) => Chat.queued(chat, run),
       again  : (post) => post.kind === "user",
@@ -432,11 +432,11 @@ export namespace Chat {
     }
     chat.sums = null;
     const msgs = take();
-    const says = msgs.filter((m) => m.end > from).map((m) => Memory.say(mem, Math.max(m.id, from), m.end));
+    const says = msgs.filter((m) => m.end > from).map((m) => Chat.said(mem, Math.max(m.id, from), m.end));
     const view = Memory.view(mem, from, mem.view.parts, mem.talk, mem.talk === null ? -1 : chat.back);
     chat.back = mem.talk === null ? -1 : view.length - 3;
     Mcp.heard(chat.tools.mcp, Tools.off(chat.tools), "main", true);
-    const text = says.map((say) => say.text).join("\n\n");
+    const text = says.map((say) => AskAI.labeled(say)).join("\n\n");
     const imgs = says.flatMap((say) => say.imgs);
     const server = Tools.at(chat.tools, "main");
     chat.eye = Chat.eye(mem, from);
@@ -511,9 +511,17 @@ export namespace Chat {
       Memory.save(mem);
       Chat.note(chat, "Goal met.");
     } else if (on) {
-      void Run.take(chat.main, { kind: "user", text: GOAL_NO, images: [] });
+      void Run.take(chat.main, { kind: "note", text: GOAL_NO, images: [] });
     }
     return !halt.signal.aborted;
+  }
+
+  // messages a to b, sent by who their kind says: a report or a timer's
+  // message is work, UniiChat's own (a go-on, a restart, the goal) a note
+  export function said(mem: Memory, a: number, b: number): Said {
+    const { kind, text } = Memory.at(mem, a);
+    const from = kind === "user" ? "the user" : kind !== "work" ? "UniiChat" : text.startsWith("[Timer ") ? "the timer" : "a subagent";
+    return { ...Memory.say(mem, a, b), from };
   }
 
   export function failed(chat: Chat, why: string): void {

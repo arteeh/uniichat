@@ -1,4 +1,4 @@
-import { AskAI, type Ask, type Call, type End, type Event, type Parked, type Say, type Steer } from "./AskAI.ts";
+import { AskAI, type Ask, type Call, type End, type Event, type Parked, type Said, type Steer } from "./AskAI.ts";
 import type { Pick } from "./Pick.ts";
 import type { Live } from "./View.ts";
 import { err_stack, err_why } from "./Err.ts";
@@ -44,7 +44,7 @@ export type LoopHooks<Q, M> = {
 
 export type InboxHooks<Q, M> = {
   log    : (run: Run<Q, M>, q: Q) => M | Promise<M>;
-  say    : (q: Q, m: M) => Say;
+  say    : (q: Q, m: M) => Said;
   queued : (run: Run<Q, M>) => void;
   again  : (q: Q) => boolean;
 };
@@ -163,8 +163,8 @@ export namespace Run {
 
   // the messages queued, each taken off the queue before it is logged, for
   // the running call to put in its next request
-  export async function steers<Q, M>(run: Run<Q, M>): Promise<Say[]> {
-    const says: Say[] = [];
+  export async function steers<Q, M>(run: Run<Q, M>): Promise<Said[]> {
+    const says: Said[] = [];
     let changed = false;
     for (let x = run.queue.shift(); x !== undefined; x = run.queue.shift()) {
       const msg = await Run.log(run, x, true);

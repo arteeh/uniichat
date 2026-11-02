@@ -17,6 +17,9 @@ export type Img = { type: string; data: string };
 
 export type Say = { text: string; imgs: Img[] };
 
+// a message with who sent it, as the prompts name them (prompt.txt, Tools.ts)
+export type Said = Say & { from: string };
+
 export type Block = { text: string; mark: boolean; back?: boolean };
 
 export type Ask = Pick & {
@@ -46,7 +49,7 @@ export type Flight = { begun: () => void; end: () => void };
 // the messages that come in while a call works, which it puts in its next
 // request: pending says one waits, take logs and hands them over, taken keeps
 // them for a fresh start of the call (a fallback, a new Claude Code)
-export type Steer = { pending: () => boolean; take: () => Promise<Say[]>; taken: Say[] };
+export type Steer = { pending: () => boolean; take: () => Promise<Said[]>; taken: Say[] };
 
 export type Parked = { until: number; known: boolean; vendor: Vendor };
 
@@ -197,15 +200,16 @@ export namespace AskAI {
     return out;
   }
 
-  // the messages that came in, worded as sent while the agent worked: to
-  // Unii by the user, a subagent or the timer; to a subagent by Unii
+  export function labeled(said: Said, working = false): string {
+    return "A new message from " + said.from + (working ? " came in while you were working:\n" : ":\n\n") + said.text;
+  }
+
   export async function steered(ask: Ask): Promise<Say | null> {
     const says = (await ask.steer?.take()) ?? [];
     if (says.length === 0) {
       return null;
     }
-    const came = ask.agent === true ? "Unii sent a new message" : "A new message came in";
-    const say = { text: says.map((s) => came + " while you were working:\n" + s.text + "\n\nAddress the message above as you continue this turn.").join("\n\n"), imgs: says.flatMap((s) => s.imgs) };
+    const say = { text: says.map((s) => AskAI.labeled(s, true) + "\n\nAddress the message above as you continue this turn.").join("\n\n"), imgs: says.flatMap((s) => s.imgs) };
     ask.steer?.taken.push(say);
     return say;
   }

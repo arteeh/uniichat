@@ -62,7 +62,7 @@ const DIED = "Claude Code ended early";
 
 const OVERAGE = "usage limit: extra usage";
 
-const STEERING = "a new message came in";
+const STEERING = "new messages came in; they follow, each saying who sent it";
 
 const CONTINUE = "Go on.";
 
@@ -482,8 +482,8 @@ export namespace ClaudeSub {
   // the messages steered in since, in one message: two would start two turns
   export async function go_on(code: Code, ask: Ask, lead: string[]): Promise<void> {
     const say = await AskAI.steered(ask);
-    const texts = [...lead, ...(say === null ? [] : [say.text])];
-    code.box.put(texts.length === 0 ? [CONTINUE] : texts, say?.imgs ?? []);
+    const texts = [...lead.map((text) => AskAI.labeled({ text, imgs: [], from: "UniiChat" })), ...(say === null ? [] : [say.text])];
+    code.box.put(texts.length === 0 ? [AskAI.labeled({ text: CONTINUE, imgs: [], from: "UniiChat" })] : texts, say?.imgs ?? []);
   }
 
   export function died_before_saying(err: unknown, said: boolean, signal: AbortSignal): boolean {
