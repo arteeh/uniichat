@@ -3,6 +3,8 @@ import type { Ask } from "./AskAI.ts";
 import type { SubscriptionApi } from "./SubscriptionModels.ts";
 import { object, text, type Obj } from "./SubscriptionRequest.ts";
 
+const CONTEXT = "Subscription context window exceeded";
+
 export type State = {
   api: SubscriptionApi; allowed: Set<string>; done: boolean; error: string;
   finish: string; blocks: Map<number, Obj>; output: unknown[] | null;
@@ -14,7 +16,7 @@ export function start(api: SubscriptionApi, allowed: Set<string>): State {
 function fail(why: string): Step {
   // Native memory treats `fail` as a compressible context failure and clips it.
   // Protocol/auth/service failures must instead wait/stop, never create a summary.
-  return { out: [], uses: [], entries: [], stop: "down", off: true, why, note: "" };
+  return { out: [], uses: [], entries: [], stop: why === CONTEXT ? "fail" : "down", off: why !== CONTEXT, why, note: "" };
 }
 function index(x: unknown): number {
   if (typeof x !== "number" || !Number.isSafeInteger(x) || x < 0 || x > 1024) throw new Error("invalid subscription stream index");
@@ -54,8 +56,16 @@ function responses(st: State, ev: Obj, on: Emit): void {
       st.done = true;
       break;
     }
-    case "response.incomplete": case "response.failed": case "error":
+    case "response.incomplete": case "response.failed": case "error": {
+      const body = ev.type === "error" ? ev : object(ev.response);
+      const error = body.error === undefined ? body : object(body.error);
+      if (["context_length_exceeded", "model_context_window_exceeded"].includes(String(error.code))) {
+        st.error = CONTEXT;
+        st.done = true;
+        break;
+      }
       throw new Error("subscription response incomplete or failed");
+    }
   }
 }
 export function read(st: State, event: unknown, on: Emit): boolean {
