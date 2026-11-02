@@ -135,11 +135,12 @@ async function boot(): Promise<void> {
 async function boot_me(): Promise<unknown> {
   for (let k = 0; ; k++) {
     const res = await me();
-    if (res?.status === 200 || res?.status === 401) {
+    const got: unknown = res?.status === 200 ? await res.json().catch(() => undefined) : res?.status === 401 ? null : undefined;
+    if (got !== undefined) {
       if (k > 0) {
         $("#toast").hidden = true;
       }
-      return res.ok ? res.json() : null;
+      return got;
     }
     if (k === 0) {
       toast("Can't reach UniiChat. Reconnecting…", true);

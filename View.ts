@@ -683,10 +683,10 @@ export function link_open(v: View, link: Link): void {
       void drop();
     }
   }
-  // back in view: a link not up, or not heard from since the server's last
-  // tick, is dead
+  // back in view: a link not heard from since the server's last tick (or
+  // since it opened) is dead
   function wake(): void {
-    if (v.ws === ws && (!v.up || Date.now() - heard > PING / 2 + RETRY)) {
+    if (v.ws === ws && Date.now() - heard > PING / 2 + RETRY) {
       void drop();
     }
   }

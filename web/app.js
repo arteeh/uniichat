@@ -2439,7 +2439,7 @@ function link_open(v, link) {
     }
   }
   function wake() {
-    if (v.ws === ws && (!v.up || Date.now() - heard > PING / 2 + RETRY)) {
+    if (v.ws === ws && Date.now() - heard > PING / 2 + RETRY) {
       drop();
     }
   }
@@ -4404,11 +4404,14 @@ async function boot() {
 async function boot_me() {
   for (let k = 0;; k++) {
     const res = await me();
-    if (res?.status === 200 || res?.status === 401) {
+    const got = res?.status === 200 ? await res.json().catch(() => {
+      return;
+    }) : res?.status === 401 ? null : undefined;
+    if (got !== undefined) {
       if (k > 0) {
         $2("#toast").hidden = true;
       }
-      return res.ok ? res.json() : null;
+      return got;
     }
     if (k === 0) {
       toast("Can't reach UniiChat. Reconnecting…", true);
