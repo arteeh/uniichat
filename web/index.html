@@ -83,12 +83,14 @@
     <fieldset class="src desk" data-app="Pi">
       <legend>Pi</legend>
       <details class="pick" hidden><summary></summary><div class="sessions"></div></details>
-      <p class="sub">Original messages on the saved active branch in ~/.pi/agent/sessions.</p>
     </fieldset>
     <fieldset class="want" hidden>
       <label class="tools"><input type="checkbox" name="tools"> Tool calls</label>
       <label class="since"><span class="from"></span><span class="to"></span><input type="range" name="back" min="0"></label>
     </fieldset>
+    <label class="replay" hidden><input type="checkbox" name="replay"> Replay selected Pi history, including previously imported messages</label>
+    <div class="warnings" role="status" hidden></div>
+    <button type="button" class="pickunii desk">Add imported sessions from a UniiChat export</button>
     <p class="found"></p>
     <p class="guess"></p>
     <div class="acts"><button type="button" class="skip">Skip</button><button type="button" class="pickdir desk">Choose folder</button><button class="go" hidden>Import</button></div>

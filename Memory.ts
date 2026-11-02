@@ -12,7 +12,7 @@ import { move_over } from "./Write.ts";
 
 type Root = Msg & { i: number; size: number; date: string };
 
-export type Msg = { kind: Kind; text: string; date?: string; images?: string[]; imported?: boolean; line?: string; more?: boolean; act?: string; source?: string } & Pair;
+export type Msg = { kind: Kind; text: string; date?: string; images?: string[]; imported?: boolean; line?: string; more?: boolean; act?: string } & Pair;
 
 export type Pair = { of?: string; tool?: string };
 
@@ -1110,8 +1110,8 @@ ${Memory.cut(line)}| ← LIMIT`;
     let sep = "\n";
     yield '{"messages": [';
     for (let i = 0; i < mem.count; i++) {
-      const { kind, text, date, images, more, of, tool } = Memory.at(mem, i);
-      yield (i === 0 ? "\n" : ",\n") + JSON.stringify({ id: i, kind, text, date, images, more, of, tool });
+      const { kind, text, date, images, more, of, tool, imported } = Memory.at(mem, i);
+      yield (i === 0 ? "\n" : ",\n") + JSON.stringify({ id: i, kind, text, date, images, more, of, tool, imported });
     }
     yield '],\n"summaries": [';
     for (const l of Memory.levels(mem)) {

@@ -1,6 +1,3 @@
-// Pi's persisted active-branch transcript, not its compacted LLM context.
-// Originals stay in native logs: ignore generated summaries/retainedTail
-// copies, thinking and custom injected context. Source files are read only.
 import type { Kind } from "./AskAI.ts";
 import type { Msg } from "./Import.ts";
 import { clip_pages, stream_lines } from "./Clip.ts";
@@ -8,11 +5,11 @@ import { list, rec, str, text_of } from "./Json.ts";
 
 type Header = { id: string; cwd: string; start: string };
 type Entry = { id: string; parent: string | null; line: number; message: boolean };
-export type PiSession = Header & { active: Set<number>; ordinals: Map<number, number>; warnings: string[] };
+export type PiSession = Header & { active: Set<number>; warnings: string[] };
 
 async function* records(file: Blob) {
   let n = 0;
-  for await (const lines of stream_lines(file.stream())) for (const line of lines) {
+  for await (const lines of stream_lines(file.stream(), 8 * 2 ** 20)) for (const line of lines) {
     const at = n++;
     if (line.trim() === "") continue;
     let value: unknown = null;
@@ -29,20 +26,17 @@ export async function pi_scan(file: Blob): Promise<PiSession | null> {
   let snapshots = false;
   let leaf: Entry | undefined;
   const index = new Map<string, Entry>();
-  const ordinals = new Map<number, number>();
-  let ordinal = 0;
   for await (const row of records(file)) {
     const j = row.value;
     if (j === null) { broken++; continue; }
     if (header === null) {
       if (j.type !== "session") return null;
-      const v = j.version ?? 1;
-      if (typeof v !== "number" || ![1, 2, 3].includes(v)) throw new Error("Unsupported Pi session version: " + text_of(v));
+      const v = j.version === undefined ? 1 : j.version;
+      if (typeof v !== "number" || !Number.isSafeInteger(v) || v < 1) throw new Error("Unsupported Pi session version (expected a positive integer): " + JSON.stringify(v));
       const id = str(j.id);
       const cwd = str(j.cwd);
       const start = iso(j.timestamp);
       if (id === undefined || id === "" || cwd === undefined || start === "") throw new Error("Invalid Pi session header");
-      if (encodeURIComponent(id).length > 1900) throw new Error("Pi session ID is too long to import safely");
       version = v;
       header = { id, cwd, start };
       continue;
@@ -55,7 +49,6 @@ export async function pi_scan(file: Blob): Promise<PiSession | null> {
     if (index.has(id)) throw new Error("Duplicate Pi entry ID");
     const role = rec(j.message) ? str(j.message.role) : undefined;
     const ordinary = j.type === "message" && role !== undefined && ["user", "assistant", "toolResult", "bashExecution"].includes(role);
-    if (j.type === "message") ordinals.set(row.line, ordinal++);
     leaf = { id, parent, line: row.line, message: ordinary };
     index.set(id, leaf);
     snapshots ||= j.type === "compaction" && Array.isArray(j.retainedTail);
@@ -76,10 +69,11 @@ export async function pi_scan(file: Blob): Promise<PiSession | null> {
   }
   if (snapshots && messages === 0) throw new Error("Pi snapshot-only history is unsupported; choose the original log");
   const warnings = [
+    ...(version > 3 ? ["Pi version " + version + " read as version 3; newer record types may be excluded"] : []),
     ...(broken > 0 ? [broken + " malformed/non-object lines skipped"] : []),
     ...(generated > 0 ? [generated + " generated/custom records excluded"] : []),
   ];
-  return { ...header, active, ordinals, warnings };
+  return { ...header, active, warnings };
 }
 
 export async function* pi_read(file: Blob, session: PiSession): AsyncGenerator<Msg> {
@@ -89,11 +83,7 @@ export async function* pi_read(file: Blob, session: PiSession): AsyncGenerator<M
     const m = j.message;
     const date = typeof m.timestamp === "number" ? iso(m.timestamp) || iso(j.timestamp) || last : iso(j.timestamp) || last;
     last = date;
-    let part = 0;
-    // Native v1 migration regenerates tree IDs, but preserves the order of
-    // all message records, including those outside the active branch.
-    const source = "pi:" + encodeURIComponent(session.id) + ":message-" + session.ordinals.get(line) + ":";
-    const emit = (kind: Kind, value: string) => pages(kind, value, date).map((msg) => ({ ...msg, source: source + part++ }));
+    const emit = (kind: Kind, value: string) => pages(kind, value, date);
     switch (m.role) {
       case "user":
         yield* emit("user", text(m.content));

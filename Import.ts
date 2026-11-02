@@ -1,19 +1,19 @@
 import type { Kind } from "./AskAI.ts";
 import { clip_pages, stream_lines } from "./Clip.ts";
-import { get, list, text_of } from "./Json.ts";
+import { get, list, rec, text_of } from "./Json.ts";
 import { pi_scan, pi_read, type PiSession } from "./PiImport.ts";
 
-export type Msg = { kind: Kind; text: string; date: string; more?: boolean; source?: string };
+export type Msg = { kind: Kind; text: string; date: string; more?: boolean; replay?: boolean };
 
-type Head = { kind: Kind; date: string; size: number; n: number; source?: string };
+type Head = { kind: Kind; date: string; size: number; n: number };
 
 export type Form = "log" | "msgs";
 
-export type Session = { app: string; form: Form; where: string; start: string; file: Blob; heads: Head[]; pi?: PiSession | null; warnings?: string[] };
+export type Session = { app: string; form: Form; where: string; start: string; file: Blob; heads: Head[]; pi?: PiSession | null; warnings?: string[]; replay?: boolean };
 
 export type Done = Record<string, string>;
 
-export type Want = { off: string[]; since: string; tools: boolean };
+export type Want = { off: string[]; since: string; tools: boolean; replay?: boolean };
 
 export type Plan = { sessions: Session[]; picked: Session[]; msgs: number; first: string; sizes: number[] };
 
@@ -79,10 +79,15 @@ export function import_file(path: string): boolean {
   return session && path.endsWith(".jsonl") && !path.includes("subagents/");
 }
 
+export function import_limit(file: { size: number }): void {
+  if (file.size > 64 * 2 ** 20) throw new Error("Import file exceeds 64 MiB.");
+}
+
 export async function import_session(file: Blob, form: Form, app = "", where = ""): Promise<Session | null> {
+  import_limit(file);
   const s: Session = { app, form, where, start: "", file, heads: [] };
   for await (const m of import_read(s)) {
-    s.heads.push({ kind: m.kind, date: m.date, size: import_size(m), n: s.heads.length, ...(m.source === undefined ? {} : { source: m.source }) });
+    s.heads.push({ kind: m.kind, date: m.date, size: import_size(m), n: s.heads.length });
   }
   s.start ||= s.heads[0]?.date ?? "";
   return s.heads.length > 0 ? s : null;
@@ -126,14 +131,16 @@ function line_msgs(s: Session, line: string, last: string): Msg[] {
 
 function import_pick(sessions: Session[], want: Want, done: Done): Session[] {
   const old  = [...sessions].sort((a, b) => a.start.localeCompare(b.start));
-  const seen = new Set<string>();
-  const keep = (m: Head, last?: string) => (want.tools || m.kind === "user" || m.kind === "unii") && m.date >= want.since && import_new(m, last, done);
-  const kept = (s: Session, last?: string) => s.heads.filter((m) => {
-    if (!keep(m, last) || (m.source !== undefined && seen.has(m.source))) return false;
-    if (m.source !== undefined) seen.add(m.source);
-    return true;
-  });
-  return old.map((s) => ({ ...s, heads: kept(s, done[import_id(s)]) })).filter((s) => s.heads.length > 0);
+  const seen = { ...done };
+  const keep = (m: Head, last?: string) => (want.tools || m.kind === "user" || m.kind === "unii") && m.date >= want.since && import_new(m, last);
+  return old.map((s) => {
+    const key = import_id(s);
+    const replay = s.replay === true || (s.app === "Pi" && want.replay === true);
+    const last = replay ? undefined : seen[key];
+    const heads = s.heads.filter((m) => keep(m, last));
+    for (const m of heads) if (m.date > (seen[key] ?? "")) seen[key] = m.date;
+    return { ...s, replay, heads };
+  }).filter((s) => s.heads.length > 0);
 }
 
 export function import_plan(sessions: Session[], want: Want, done: Done): Plan {
@@ -145,13 +152,35 @@ export function import_plan(sessions: Session[], want: Want, done: Done): Plan {
   return { sessions: shown, picked, msgs: sizes.length - picked.length, first: first.slice(0, 10), sizes };
 }
 
-export function import_new(m: { date?: string; source?: string }, last: string | undefined, done: Done = {}): boolean {
-  return m.source === undefined ? last === undefined || (m.date ?? "") > last : done["source " + m.source] === undefined;
+export function import_new(m: { date?: string }, last: string | undefined): boolean {
+  return last === undefined || (m.date ?? "") > last;
+}
+
+export function import_repeat(sessions: Session[], done: Done): boolean {
+  const seen = new Set(Object.keys(done));
+  return sessions.some((s) => {
+    const key = import_id(s);
+    const repeat = s.app === "Pi" && s.form === "log" && seen.has(key);
+    seen.add(key);
+    return repeat;
+  });
+}
+
+export function import_warnings(sessions: Session[], done: Done): string[] {
+  const seen = new Set<string[]>();
+  const warnings = sessions.flatMap((s) => {
+    if (s.warnings === undefined || seen.has(s.warnings)) return [];
+    seen.add(s.warnings);
+    return s.warnings.map((w) => s.app + " " + s.where + ": " + w);
+  });
+  if (import_repeat(sessions, done)) {
+    warnings.push("Pi re-import only adds messages after the last imported date. Same-timestamp appends, older branches and tools enabled later may be left out. Replay selected Pi history (terminal: /import pi replay sessions) to recover them; replay duplicates existing messages and may put older history after newer messages.");
+  }
+  return warnings;
 }
 
 function import_name(s: Session): string {
-  const source = s.pi === undefined || s.pi === null ? "" : " [session " + encodeURIComponent(s.pi.id) + "]";
-  return s.app + source + " " + s.where + ", from " + new Date(s.start).toLocaleString("sv-SE").slice(0, 16);
+  return s.app + " " + s.where + ", from " + new Date(s.start).toLocaleString("sv-SE").slice(0, 16);
 }
 
 export function import_cells(s: Session): string[] {
@@ -175,7 +204,7 @@ function path_short(path: string): string {
 }
 
 function import_note(s: Session): Msg {
-  return { kind: "note", text: import_name(s) + " (imported)", date: s.start };
+  return { kind: "note", text: import_name(s) + " (imported)", date: s.start, ...(s.replay ? { replay: true } : {}) };
 }
 
 export function import_id(s: Session): string {
@@ -183,8 +212,6 @@ export function import_id(s: Session): string {
 }
 
 export function import_key(note: { text: string; date?: string }): string {
-  const pi = /^Pi \[session ([^\]]+)\] /.exec(note.text);
-  if (pi !== null) return "pi " + pi[1];
   return note.date + " " + without_local_time(without_app(note.text));
 }
 
@@ -250,17 +277,50 @@ function node_merge(a: Node, b: Node): Node {
 }
 
 export async function import_export(file: Blob): Promise<Session[]> {
+  import_limit(file);
   const zip  = (await file.slice(0, 2).text()) === "PK";
   const json = zip ? await zip_file(file, "conversations.json") : file;
   if (json === null) {
     throw new Error("No conversations.json in the zip.");
   }
+  import_limit(json);
   const chats: unknown = await json.text().then((text) => JSON.parse(text) as unknown).catch(() => null);
+  if (rec(chats) && Array.isArray(chats.messages)) return imported_sessions(chats);
   if (!Array.isArray(chats) || !chats.every((chat: unknown) => get(chat, "mapping") !== undefined || Array.isArray(get(chat, "chat_messages")))) {
     throw new Error(NOT_EXPORT);
   }
   const sessions = await Promise.all(list(chats).map((chat) => chat_session(chat as Chat)));
   return sessions.filter((s) => s !== null);
+}
+
+async function imported_sessions(dump: Record<string, unknown>): Promise<Session[]> {
+  const groups: { app: string; where: string; start: string; msgs: unknown[] }[] = [];
+  let group: (typeof groups)[number] | undefined;
+  let kept = 0;
+  for (const m of list(dump.messages)) {
+    if (!rec(m) || m.imported !== true) { group = undefined; continue; }
+    if (m.kind === "note") {
+      const name = /^(Claude|ChatGPT|Pi)(?: \[session [^\]]+\])? (.*), from .* \(imported\)$/.exec(text_of(m.text));
+      if (name === null || typeof m.date !== "string" || Number.isNaN(Date.parse(m.date))) throw new Error("Invalid imported session note in UniiChat export.");
+      group = { app: name[1], where: name[2], start: new Date(m.date).toISOString(), msgs: [] };
+      groups.push(group);
+    } else {
+      if (group === undefined || !["user", "unii", "tool", "echo"].includes(text_of(m.kind)) || typeof m.text !== "string" || typeof m.date !== "string" || Number.isNaN(Date.parse(m.date))) throw new Error("Invalid imported message in UniiChat export.");
+      group.msgs.push({ kind: m.kind, text: m.text, date: new Date(m.date).toISOString(), more: m.more === true });
+    }
+    kept++;
+  }
+  if (groups.length === 0) throw new Error("No marked imported sessions. Export again with a current UniiChat; older unmarked exports cannot restore session watermarks.");
+  const sessions: Session[] = [];
+  for (const g of groups) {
+    const s = await import_session(new Blob(g.msgs.map((m) => JSON.stringify(m) + "\n")), "msgs", g.app, g.where);
+    if (s !== null) { s.start = g.start; s.replay = true; sessions.push(s); }
+  }
+  const count = (v: unknown) => rec(v) ? Object.keys(v).length : list(v).length;
+  const warning = "Imported-session transcripts only, NOT a full backup restore. Omitted: " + (list(dump.messages).length - kept) + " live/unmarked messages, " + count(dump.summaries) + " summaries, " + count(dump.images) + " images and " + count(dump.agents) + " agent histories; settings are not restored. Recovery replays selected transcript groups, including prior duplicates: use an empty chat to avoid additional duplication. Tool calls still require the Tool calls option.";
+  const warnings = [warning];
+  sessions.forEach((s) => s.warnings = warnings);
+  return sessions;
 }
 
 function chat_session(chat: Chat): Promise<Session | null> {
@@ -322,11 +382,20 @@ async function zip_file(zip: Blob, name: string): Promise<Blob | null> {
   const dir   = await view(from, size);
   for (let p = 0, k = 0; k < count; k++) {
     const entry = new TextDecoder().decode(new Uint8Array(dir.buffer, p + 46, dir.getUint16(p + 28, true)));
-    const [, packed, at] = zip_sizes(dir, p);
+    const [size, packed, at] = zip_sizes(dir, p);
     if (entry === name || entry.endsWith("/" + name)) {
+      import_limit({ size });
       const head = await view(at, 30);
       const data = zip.slice(at + 30 + head.getUint16(26, true) + head.getUint16(28, true)).slice(0, packed);
-      return dir.getUint16(p + 10, true) === 8 ? new Response(data.stream().pipeThrough(new DecompressionStream("deflate-raw"))).blob() : data;
+      if (dir.getUint16(p + 10, true) !== 8) return data;
+      let bytes = 0;
+      const bounded = new TransformStream<Uint8Array, Uint8Array>({ transform(chunk, out) {
+        import_limit({ size: bytes += chunk.byteLength });
+        out.enqueue(chunk);
+      } });
+      try {
+        return await new Response(data.stream().pipeThrough(new DecompressionStream("deflate-raw")).pipeThrough(bounded)).blob();
+      } catch (e) { import_limit({ size: bytes }); throw e; }
     }
     p += 46 + dir.getUint16(p + 28, true) + dir.getUint16(p + 30, true) + dir.getUint16(p + 32, true);
   }

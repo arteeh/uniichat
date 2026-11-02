@@ -85,12 +85,6 @@ Use
 
 From source (Bun): `bun install`, `bun run web`, `bun Cli.ts <command>`, `bun run build` for a single `unii` program.
 
-**Pi history:** choose `~/.pi`, `~/.pi/agent` or `~/.pi/agent/sessions` in Import History. Pi gets its own section. In the terminal, `/import pi sessions` previews the selection; add `go` only when you want to import it. `PI_CODING_AGENT_DIR` and `PI_CODING_AGENT_SESSION_DIR` are honored.
-
-The reader supports Pi JSONL versions 1–3 without changing source files. It follows the last persisted entry back to the root, importing original messages rather than abandoned siblings, generated compaction/branch summaries, retained-tail copies, thinking or injected custom context. An in-memory branch selection with no subsequent append is not saved in the log. Images become `[image]`; tool calls, results and shell records require the Tool calls option. Files rejected for invalid/unsupported Pi headers or tree structure are counted as skipped; empty histories and unrecognized formats are ignored. Re-imports use session ID, persisted message position and page index to avoid duplicates, including same-timestamp entries and native legacy migration. Distinct forked session IDs remain separate histories. User-role records are transcript content, not proof of human authorship.
-
-For import changes, run `bun run check` and `bun test --isolate`, then rebuild the browser with `bun run web` before building the executable.
-
 Uninstall
 ---------
 
