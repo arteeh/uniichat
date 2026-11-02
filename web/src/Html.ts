@@ -1,7 +1,7 @@
 import type { Vendor } from "../../AskAI.ts";
 import * as Call from "../../Call.ts";
 import * as Md from "../../Md.ts";
-import { EFFORTS, LABELS, Pick, VENDORS } from "../../Pick.ts";
+import { LABELS, Pick, VENDORS } from "../../Pick.ts";
 import type { Key, Page, Row } from "../../Settings.ts";
 import * as Theme from "../../Theme.ts";
 import * as Timer from "../../Timer.ts";
@@ -313,7 +313,7 @@ export function picks_html(key: string, vendors: string[], models: string[], val
     return `<select id="set-${key}-${part}" name="${key}.${part}" aria-label="${name}">${items}</select>`;
   };
   const head = select("vendor", "Vendor", [...offered, ...profiles], vendor, none);
-  return vendor === "" || profiles.includes(vendor) ? head : head + select("model", "Model", labels, model, null) + select("effort", "Effort", EFFORTS, effort, null) + select("speed", "Speed", speeds, speed, null);
+  return vendor === "" || profiles.includes(vendor) ? head : head + select("model", "Model", labels, model, null) + select("effort", "Effort", Pick.efforts(known ? Pick.model(vendor as Vendor, model) : undefined), effort, null) + select("speed", "Speed", speeds, speed, null);
 }
 
 export function pick_mend(parts: string[], models: string[], profiles: string[] = []): string {
@@ -324,11 +324,12 @@ export function pick_mend(parts: string[], models: string[], profiles: string[] 
   if (!(VENDORS as string[]).includes(vendor)) {
     return vendor === "" ? "" : parts.join(":");
   }
-  const m = Pick.model(vendor as Vendor, model) ?? Pick.models([vendor as Vendor], models)[0]?.[1];
+  const offered = Pick.models([vendor as Vendor], models).map(([, m]) => m);
+  const m = offered.find((m) => m.label === model) ?? offered[0];
   if (m === undefined) {
     return parts.join(":");
   }
-  return [vendor, m.label, effort || "medium", m.speeds.includes(speed) ? speed : m.speeds[0]].join(":");
+  return [vendor, m.label, Pick.efforts(m).includes(effort) ? effort : Pick.efforts(m)[0], m.speeds.includes(speed) ? speed : m.speeds[0]].join(":");
 }
 
 function section_html(title: string, body: string): string {

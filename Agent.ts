@@ -2,6 +2,8 @@ import { AskAI, type Ask, type Block, type Flight, type Try, type End, type Even
 import { Anthropic } from "./Anthropic.ts";
 import { OpenAI } from "./OpenAI.ts";
 import { ChatGPT } from "./ChatGPT.ts";
+import { Subscriptions } from "./Subscriptions.ts";
+import { SubscriptionModels } from "./SubscriptionModels.ts";
 import { Limit } from "./Limit.ts";
 import { live_push } from "./View.ts";
 import { Machine, type Spec } from "./Machine.ts";
@@ -66,7 +68,8 @@ type Rpc = { "tools/list": Listed; "tools/call": Called };
 
 export type Wire<S, E> = {
   key     : string;
-  auth?   : (refused: string | undefined) => Promise<string>;
+  auth?   : (refused: string | undefined, signal?: AbortSignal) => Promise<string>;
+  reject? : (res: Response, body: string) => Step;
   refusal?: (res: Response, body: string) => Refusal | null;
   reset?  : (res: Response, body: string) => number | null;
   idle    : number;
@@ -114,6 +117,8 @@ export namespace Agent {
       try {
         if (ask.vendor === "claude-api") {
           await Agent.loop(Anthropic.wire, run);
+        } else if (SubscriptionModels.isVendor(ask.vendor)) {
+          await Agent.loop(Subscriptions.wire(ask), run);
         } else if (ask.vendor === "openai-sub") {
           await Agent.loop(ChatGPT.wire, run);
         } else {
@@ -192,7 +197,7 @@ export namespace Agent {
       for (let k = 0; !signal.aborted; ) {
         await Agent.give_way(seat, signal);
         const seen: Entry[] = [];
-        const token = await Agent.unless_stopped(Agent.token(wire, key, refused), signal);
+        const token = await Agent.unless_stopped(Agent.token(wire, key, refused, signal), signal);
         if (token === null) {
           return Agent.fail("stopped", seen);
         }
@@ -285,12 +290,12 @@ export namespace Agent {
     return after?.[1] ?? (told.length > 0 ? Math.max(...told.map(([, t]) => t)) : null);
   }
 
-  export async function token<S, E>(wire: Wire<S, E>, key: string, refused: string | undefined): Promise<string | Step> {
+  export async function token<S, E>(wire: Wire<S, E>, key: string, refused: string | undefined, signal?: AbortSignal): Promise<string | Step> {
     if (wire.auth === undefined) {
       return key;
     }
     try {
-      return await wire.auth(refused);
+      return await wire.auth(refused, signal);
     } catch (err) {
       if (!(err instanceof Error && "busy" in err && err.busy === true)) {
         throw err;
@@ -379,6 +384,7 @@ export namespace Agent {
         body    : json,
         signal  : AbortSignal.any([run.abort.signal, idle.signal]),
         timeout : false,
+        redirect: SubscriptionModels.isVendor(run.ask.vendor) ? "error" : undefined,
       } as RequestInit);
       const text = res.ok && res.body ? null : await res.text();
       const refusal = text === null ? null : wire.refusal?.(res, text) ?? null;
@@ -387,9 +393,11 @@ export namespace Agent {
       const off = spent || OFF.includes(res.status) || refusal !== null;
       const stop = refusal !== null ? "down" : text !== null && Agent.limited(res, text) && !spent ? "limit" : text !== null && Agent.passing(res) && !spent ? "busy" : "down";
       const until = text !== null && stop === "limit" ? wire.reset?.(res, text) ?? undefined : undefined;
-      step = text !== null || res.body === null ? { ...Agent.fail(why, [], stop), off, refusal: refusal ?? undefined, until } : await Agent.stream(wire, run, res.body, timer, seen, st, flight.begun);
+      step = text !== null || res.body === null
+        ? wire.reject?.(res, text ?? "") ?? { ...Agent.fail(why, [], stop), off, refusal: refusal ?? undefined, until }
+        : await Agent.stream(wire, run, res.body, timer, seen, st, flight.begun);
     } catch (err) {
-      step = Agent.fail(err_why(err), [], "busy");
+      step = Agent.fail(SubscriptionModels.isVendor(run.ask.vendor) ? "Subscription transport failed" : err_why(err), [], "busy");
     }
     clearTimeout(timer);
     flight.end();
@@ -443,7 +451,7 @@ export namespace Agent {
       }
       return Agent.fail("the stream ended early", seen, "busy");
     } catch (err) {
-      return Agent.fail(err_why(err), seen, "busy");
+      return Agent.fail(SubscriptionModels.isVendor(ask.vendor) ? "Subscription stream decoding failed" : err_why(err), seen, "busy");
     }
   }
 

@@ -1846,9 +1846,124 @@ function row_cells(line, n) {
 function cells_split(line) {
   return line.trim().replace(/^\||(?<!\\)\|$/g, "").split(/(?<!\\)\|/);
 }
+// SubscriptionCatalog.json
+var SubscriptionCatalog_default = {
+  provenance: {
+    pi: "b556cfe5b0300a91f39c7bc5369a65a25fb7fcd5",
+    cells: "f5dcf452bcd08b4d877dbc59e60d0bfc43731d08",
+    note: "Public xAI catalog declarations only; no pricing or entitlement claim. Effort rosters follow pinned Pi getSupportedThinkingLevels restricted to low/medium/high/xhigh/max."
+  },
+  models: {
+    "xai-sub": [
+      {
+        label: "grok-4.3",
+        id: "grok-4.3",
+        speeds: [
+          "slow"
+        ],
+        window: 1e6,
+        output: 30000,
+        api: "openai-responses",
+        baseUrl: "https://api.x.ai/v1",
+        reasoning: true,
+        input: [
+          "text",
+          "image"
+        ],
+        efforts: [
+          "low",
+          "medium",
+          "high"
+        ]
+      },
+      {
+        label: "grok-4.5",
+        id: "grok-4.5",
+        speeds: [
+          "slow"
+        ],
+        window: 500000,
+        output: 500000,
+        api: "openai-responses",
+        baseUrl: "https://api.x.ai/v1",
+        reasoning: true,
+        input: [
+          "text",
+          "image"
+        ],
+        efforts: [
+          "low",
+          "medium",
+          "high"
+        ]
+      },
+      {
+        label: "grok-4.6",
+        id: "grok-4.6",
+        speeds: [
+          "slow"
+        ],
+        window: 500000,
+        output: 500000,
+        api: "openai-responses",
+        baseUrl: "https://api.x.ai/v1",
+        reasoning: true,
+        input: [
+          "text",
+          "image"
+        ],
+        efforts: [
+          "low",
+          "medium",
+          "high",
+          "xhigh"
+        ]
+      },
+      {
+        label: "grok-build-0.1",
+        id: "grok-build-0.1",
+        speeds: [
+          "slow"
+        ],
+        window: 256000,
+        output: 256000,
+        api: "openai-responses",
+        baseUrl: "https://api.x.ai/v1",
+        reasoning: true,
+        input: [
+          "text",
+          "image"
+        ],
+        efforts: [
+          "low",
+          "medium",
+          "high"
+        ]
+      }
+    ]
+  }
+};
+
+// SubscriptionModels.ts
+var SUBSCRIPTION_VENDORS = ["xai-sub"];
+var SubscriptionModels;
+((SubscriptionModels) => {
+  function isVendor(vendor) {
+    return SUBSCRIPTION_VENDORS.includes(vendor);
+  }
+  SubscriptionModels.isVendor = isVendor;
+  function models(vendor) {
+    return SubscriptionCatalog_default.models[vendor];
+  }
+  SubscriptionModels.models = models;
+  function model(vendor, label) {
+    return models(vendor).find((m) => m.label === label);
+  }
+  SubscriptionModels.model = model;
+})(SubscriptionModels ||= {});
 
 // Pick.ts
-var VENDORS = ["claude-api", "openai-api", "openai-sub", "claude-sub"];
+var VENDORS = ["claude-api", "openai-api", "openai-sub", "claude-sub", ...SUBSCRIPTION_VENDORS];
 var OPUS = { label: "opus-5.5", id: "claude-opus-5-5", speeds: ["slow", "fast"], window: 1e6 };
 var SONNET = { label: "sonnet-5.5", id: "claude-sonnet-5-5", speeds: ["slow"], window: 1e6 };
 var HAIKU = { label: "haiku-5.5", id: "claude-haiku-5-5", speeds: ["slow"], window: 1e6 };
@@ -1862,7 +1977,8 @@ var MODELS = {
   "claude-api": [OPUS, SONNET, HAIKU],
   "openai-api": OPENAI,
   "openai-sub": PLAN,
-  "claude-sub": [{ ...OPUS, speeds: ["slow"] }, SONNET, HAIKU]
+  "claude-sub": [{ ...OPUS, speeds: ["slow"] }, SONNET, HAIKU],
+  "xai-sub": SubscriptionModels.models("xai-sub")
 };
 var EFFORTS = ["low", "medium", "high", "xhigh", "max"];
 var SPEEDS = ["slow", "fast", "ultrafast"];
@@ -1876,9 +1992,14 @@ var Pick;
   function on(pick, vendor, model) {
     const below = SPEEDS.slice(0, SPEEDS.indexOf(pick.speed) + 1);
     const speed = below.filter((s) => model.speeds.includes(s)).pop() ?? "slow";
-    return { ...pick, vendor, model: model.label, speed };
+    const effort = efforts(model).includes(pick.effort) ? pick.effort : efforts(model)[0];
+    return { ...pick, vendor, model: model.label, speed, effort };
   }
   Pick2.on = on;
+  function efforts(model) {
+    return model?.efforts ?? EFFORTS;
+  }
+  Pick2.efforts = efforts;
   function models(vendors, labels) {
     return vendors.flatMap((v) => MODELS[v].filter((m) => labels.includes(m.label)).map((m) => [v, m]));
   }
@@ -1900,7 +2021,7 @@ var Pick;
       case "up":
       case "down":
       case "effort": {
-        return EFFORTS.map((effort) => [effort, { ...pick, effort }]);
+        return efforts(Pick.model(pick.vendor, pick.model)).map((effort) => [effort, { ...pick, effort }]);
       }
       case "speed": {
         return speeds.map((speed) => [speed, { ...pick, speed }]);
@@ -1953,7 +2074,11 @@ var Pick;
       const on = Pick.on(own, f.vendor, f.model);
       return Pick.ask({ ...on, effort: f.effort ?? on.effort, speed: f.speed ?? on.speed });
     });
-    return [own, ...list].filter((p, k, all) => all.findIndex((q) => q.vendor === p.vendor && q.model === p.model) === k);
+    const all = [own, ...list];
+    if (all.some((p) => SubscriptionModels.isVendor(p.vendor)) && all.some((p) => p.vendor.endsWith("-api"))) {
+      throw new Error("Subscription profiles cannot fall back to metered API providers");
+    }
+    return all.filter((p, k) => all.findIndex((q) => q.vendor === p.vendor && q.model === p.model) === k);
   }
   Pick2.falls = falls;
   function profile(name, offer, effort, speed) {
@@ -1963,7 +2088,7 @@ var Pick;
       return null;
     }
     const on = Pick.on({ vendor: first.vendor, model: first.model.label, effort, speed }, first.vendor, first.model);
-    return { ...on, effort: first.effort ?? effort, speed: first.speed ?? on.speed, profile: name };
+    return { ...on, effort: first.effort ?? on.effort, speed: first.speed ?? on.speed, profile: name };
   }
   Pick2.profile = profile;
   function read(x, offer) {
@@ -1976,7 +2101,7 @@ var Pick;
       return null;
     }
     const model = Pick.model(vendor, label);
-    if (model === undefined || typeof effort !== "string" || !EFFORTS.includes(effort) || typeof speed !== "string" || !model.speeds.includes(speed)) {
+    if (model === undefined || typeof effort !== "string" || !efforts(model).includes(effort) || typeof speed !== "string" || !model.speeds.includes(speed)) {
       return null;
     }
     return { vendor, model: label, effort, speed };
@@ -3346,7 +3471,7 @@ function picks_html(key, vendors, models, value, none, profiles = []) {
     return `<select id="set-${key}-${part}" name="${key}.${part}" aria-label="${name}">${items}</select>`;
   };
   const head = select("vendor", "Vendor", [...offered, ...profiles], vendor, none);
-  return vendor === "" || profiles.includes(vendor) ? head : head + select("model", "Model", labels, model, null) + select("effort", "Effort", EFFORTS, effort, null) + select("speed", "Speed", speeds, speed, null);
+  return vendor === "" || profiles.includes(vendor) ? head : head + select("model", "Model", labels, model, null) + select("effort", "Effort", Pick.efforts(known ? Pick.model(vendor, model) : undefined), effort, null) + select("speed", "Speed", speeds, speed, null);
 }
 function pick_mend(parts, models, profiles = []) {
   const [vendor = "", model = "", effort = "", speed = ""] = parts;
@@ -3356,11 +3481,12 @@ function pick_mend(parts, models, profiles = []) {
   if (!VENDORS.includes(vendor)) {
     return vendor === "" ? "" : parts.join(":");
   }
-  const m = Pick.model(vendor, model) ?? Pick.models([vendor], models)[0]?.[1];
+  const offered = Pick.models([vendor], models).map(([, m]) => m);
+  const m = offered.find((m) => m.label === model) ?? offered[0];
   if (m === undefined) {
     return parts.join(":");
   }
-  return [vendor, m.label, effort || "medium", m.speeds.includes(speed) ? speed : m.speeds[0]].join(":");
+  return [vendor, m.label, Pick.efforts(m).includes(effort) ? effort : Pick.efforts(m)[0], m.speeds.includes(speed) ? speed : m.speeds[0]].join(":");
 }
 function section_html(title, body) {
   return `<section><h2>${esc(title)}</h2>${body}</section>`;

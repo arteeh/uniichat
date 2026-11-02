@@ -5,7 +5,9 @@ import * as path from "node:path";
 import type { Vendor } from "./AskAI.ts";
 import { err_code, err_why } from "./Err.ts";
 import { get, list as items, rec, text_of } from "./Json.ts";
-import { EFFORTS, LABELS, VENDORS, Pick, type Fall, type Offer } from "./Pick.ts";
+import { LABELS, VENDORS, Pick, type Fall, type Offer } from "./Pick.ts";
+import { SubscriptionAuth } from "./SubscriptionAuth.ts";
+import { SubscriptionModels } from "./SubscriptionModels.ts";
 
 type ServerOnly = "runs a command";
 
@@ -57,12 +59,14 @@ const USABLE: Record<Vendor, string> = {
   "openai-sub" : "signed in to ChatGPT",
   "claude-api" : "Anthropic key set",
   "openai-api" : "OpenAI key set",
+  "xai-sub": "signed in to xAI subscription",
 };
 const DEFAULT_MODEL: Record<Vendor, string> = {
   "claude-sub" : "sonnet-5.5",
   "openai-sub" : "gpt-6.1-sol",
   "claude-api" : "sonnet-5.5",
   "openai-api" : "gpt-6.1-sol",
+  "xai-sub": "grok-4.3",
 };
 
 const NONE     = "Not signed in and no API key: sign in with `unii serve claude login` (or `unii serve chatgpt login`) on the server, or set a key in Settings";
@@ -144,14 +148,19 @@ function config_default_vendors(file: Record<string, unknown>, def: string, usab
 function config_default_pick(file: Record<string, unknown>, def: string, usable: Vendor[]): { value: string; why: string } {
   const offered = config_value(file, "vendors").split(",").map((v) => v.trim());
   const models = config_value(file, "models").split(",").map((m) => m.trim());
-  const model = (v: Vendor) => (models.includes(DEFAULT_MODEL[v]) ? DEFAULT_MODEL[v] : Pick.models([v], models)[0]?.[1].label);
+  const model = (v: Vendor) => {
+    const all = Pick.models([v], models).map(([, m]) => m);
+    return all.find((m) => m.label === DEFAULT_MODEL[v]) ?? all[0];
+  };
   const order = [...usable, ...VENDORS.filter((v) => !usable.includes(v))].filter((v) => offered.includes(v));
   const vendor = order.find((v) => model(v) !== undefined);
   if (vendor === undefined) {
     return { value: def, why: "" };
   }
   const why = usable.includes(vendor) ? USABLE[vendor] : usable.length === 0 ? NONE_WHY : vendor + " has no sign-in or key here";
-  return { value: vendor + ":" + model(vendor) + ":medium:slow", why };
+  const chosen = model(vendor);
+  const effort = Pick.efforts(chosen).includes("medium") ? "medium" : Pick.efforts(chosen)[0];
+  return { value: vendor + ":" + chosen.label + ":" + effort + ":slow", why };
 }
 
 function config_named(file: Record<string, unknown>): Vendor[] {
@@ -200,7 +209,9 @@ function config_usable(): Vendor[] {
   };
   const claude = field(CLAUDE_SUB + "/.credentials.json", "claudeAiOauth") != null || field(CLAUDE_SUB + "/.claude.json", "oauthAccount") != null;
   const chatgpt = typeof field(CHATGPT, "tokens", "refresh_token") === "string";
-  const has: Record<Vendor, boolean> = { "claude-sub": claude, "openai-sub": chatgpt, "claude-api": KEYS.anthropic !== "", "openai-api": KEYS.openai !== "" };
+  const has: Record<Vendor, boolean> = { "claude-sub": claude, "openai-sub": chatgpt, "claude-api": KEYS.anthropic !== "", "openai-api": KEYS.openai !== "",
+    "xai-sub": SubscriptionAuth.status(DIR, "xai-sub").connected,
+  };
   return (Object.keys(USABLE) as Vendor[]).filter((v) => has[v]);
 }
 
@@ -213,11 +224,12 @@ export function config_follow(): boolean {
   if (now === FOLLOWED) {
     return false;
   }
-  FOLLOWED = now;
   try {
     config_reload();
+    FOLLOWED = now;
     return true;
   } catch (err) {
+    FOLLOWED = "";
     console.error("unii: the sign-ins changed, but " + err_why(err));
     return false;
   }
@@ -324,7 +336,11 @@ function config_profiles(file: Record<string, unknown>, offer: Offer): Record<st
     if (name.trim() === "" || name.includes(":") || LABELS.includes(name) || !Array.isArray(list) || list.length === 0) {
       throw new Error("config: profile " + JSON.stringify(name) + " is no name (none of a model, no \":\") with a list of models");
     }
-    return [name, items(list).map((f) => config_fall(name, String(f).trim(), offer))];
+    const falls = items(list).map((f) => config_fall(name, String(f).trim(), offer));
+    if (falls.some((f) => SubscriptionModels.isVendor(f.vendor)) && falls.some((f) => f.vendor.endsWith("-api"))) {
+      throw new Error("config: subscription profiles cannot fall back to metered API providers");
+    }
+    return [name, falls];
   }));
 }
 
@@ -332,7 +348,7 @@ function config_fall(name: string, f: string, offer: Offer): Fall {
   const parts = f.split(":");
   const [vendor, label, effort, speed] = parts as [Vendor, string, string?, string?];
   const model = offer.vendors.includes(vendor) && offer.models.includes(label) ? Pick.model(vendor, label) : undefined;
-  const bad = parts.length > 4 || (effort !== undefined && !EFFORTS.includes(effort)) || (speed !== undefined && !model?.speeds.includes(speed));
+  const bad = parts.length > 4 || (effort !== undefined && !Pick.efforts(model).includes(effort)) || (speed !== undefined && !model?.speeds.includes(speed));
   if (model === undefined || bad) {
     throw new Error("config: profile " + JSON.stringify(name) + " has no vendor:model[:effort[:speed]] offered here: " + f);
   }
