@@ -158,8 +158,13 @@ export namespace ChatGPT {
     if (!res.ok) {
       const error = get(body, "error");
       const code = (typeof error === "string" ? error : text_of(get(error, "code") ?? get(body, "code"))).toLowerCase();
-      if (res.status !== 401 && !GONE.includes(code)) {
+      if (res.status === 429 || res.status >= 500) {
         throw ChatGPT.busy("HTTP " + res.status);
+      }
+      if (res.status !== 401 && !GONE.includes(code)) {
+        const told = get(body, "error_description") ?? get(error, "message");
+        const why = typeof told === "string" ? ": " + told.slice(0, 200) : "";
+        throw new Error("openai-sub couldn't renew its sign-in (HTTP " + res.status + (code ? ", " + code.slice(0, 60) : "") + ")" + why);
       }
       const now = await ChatGPT.refreshed_elsewhere_soon(old);
       if (now !== null) {
@@ -168,7 +173,7 @@ export namespace ChatGPT {
       throw new Error("openai-sub's sign-in has expired or was revoked (" + (code || "HTTP " + res.status) + "): " + SIGN_IN);
     }
     if (typeof get(body, "access_token") !== "string") {
-      throw ChatGPT.busy("no access token");
+      throw new Error("openai-sub couldn't renew its sign-in: the answer held no access token");
     }
     return ChatGPT.save_unless_refreshed_elsewhere(old, ChatGPT.auth(ChatGPT.got(body), old.tokens));
   }
