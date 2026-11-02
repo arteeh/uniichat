@@ -107,6 +107,13 @@ export namespace Run {
         run.call = null;
         kind.on(run, { $: "Ended" });
         go = await kind.ended(run, end);
+        // messages a failed call took and didn't answer, of any kind, go into
+        // the next call whole
+        if (go && !kind.parked(run)) {
+          const taken = run.sent.filter((s) => s.taken);
+          taken.forEach((s) => (s.taken = false));
+          run.wait.unshift(...taken.map((s) => s.m));
+        }
         if (go) {
           await Run.logs(run);
         }
