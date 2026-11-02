@@ -59,7 +59,7 @@ function responses(st: State, ev: Obj, on: Emit): void {
     case "response.incomplete": case "response.failed": case "error": {
       const body = ev.type === "error" ? ev : object(ev.response);
       const error = body.error === undefined ? body : object(body.error);
-      if (["context_length_exceeded", "model_context_window_exceeded"].includes(String(error.code))) {
+      if (typeof error.code === "string" && ["context_length_exceeded", "model_context_window_exceeded"].includes(error.code)) {
         st.error = CONTEXT;
         st.done = true;
         break;

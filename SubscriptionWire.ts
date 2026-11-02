@@ -47,7 +47,17 @@ export namespace SubscriptionWire {
       step: Stream.step,
       reject: (res, body) => {
         const spent = /insufficient_quota|billing_hard_limit_reached|credit balance is too low/i.test(body);
-        const context = !spent && [400, 413, 422].includes(res.status) && /context_length_exceeded|model_context_window_exceeded|prompt is too long|maximum context length|too many input tokens/i.test(body);
+        let code: unknown, message: unknown, json: unknown;
+        try { json = JSON.parse(body) as unknown; } catch { message = body; }
+        try {
+          const parsed = object(json);
+          const error = parsed.error === undefined ? parsed : object(parsed.error);
+          code = error.code;
+          message = error.message;
+        } catch {}
+        const context = !spent && [400, 413, 422].includes(res.status) && (code === undefined
+          ? typeof message === "string" && /context_length_exceeded|model_context_window_exceeded|prompt is too long|maximum context length|too many input tokens/i.test(message)
+          : typeof code === "string" && ["context_length_exceeded", "model_context_window_exceeded"].includes(code));
         return {
           out: [], uses: [], entries: [], note: "",
           stop: context ? "fail" : spent ? "down" : res.status === 429 ? "limit" : [408, 409].includes(res.status) || res.status >= 500 ? "busy" : "down",
