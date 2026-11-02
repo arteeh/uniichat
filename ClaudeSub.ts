@@ -2,7 +2,7 @@ import * as child from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import type { Options, Query, SDKMessage, SDKRateLimitInfo, SDKUserMessage, SpawnOptions, SyncHookJSONOutput } from "@anthropic-ai/claude-agent-sdk";
-import { AskAI, GO_ON, NOT_RUN, type Ask, type End, type Event, type Img, type Try } from "./AskAI.ts";
+import { AskAI, GO_ON, type Ask, type End, type Event, type Img, type Try } from "./AskAI.ts";
 import { Agent, BUSY, TOO_LONG, type Emit } from "./Agent.ts";
 import { Anthropic } from "./Anthropic.ts";
 import { LIMIT, Limit, type Off } from "./Limit.ts";
@@ -315,7 +315,6 @@ export namespace ClaudeSub {
       return proc;
     };
     const hooks = {
-      PreToolUse    : [{ hooks: [() => Promise.resolve(ClaudeSub.before_tool(ask))] }],
       PostToolBatch : [{ hooks: [() => Promise.resolve(ClaudeSub.after_tools(code, ask))] }],
     };
     const options = { ...ClaudeSub.options(ask, new AbortController(), sdk.BUILTIN_TOOL_NAMES, sdk.SYSTEM_PROMPT_DYNAMIC_BOUNDARY), pathToClaudeCodeExecutable: bin, spawnClaudeCodeProcess: spawn, hooks };
@@ -489,11 +488,6 @@ export namespace ClaudeSub {
 
   export function died_before_saying(err: unknown, said: boolean, signal: AbortSignal): boolean {
     return err instanceof Died && !said && !signal.aborted;
-  }
-
-  // a tool not started yet when a message is steered in isn't run
-  export function before_tool(ask: Ask): SyncHookJSONOutput {
-    return ask.steer?.pending() === true ? { hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: NOT_RUN } } : {};
   }
 
   // after a batch of tool calls, before the next request, the turn stops,

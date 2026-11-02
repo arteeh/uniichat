@@ -2191,7 +2191,7 @@ function view_act(v, act) {
         return [];
       }
       const blob = new Blob([...images, text]);
-      const say = { $: "say", sizes: images.map((b) => b.size), body: () => blob, ...act.steer === true ? { steer: true } : {} };
+      const say = { $: "say", sizes: images.map((b) => b.size), body: () => blob };
       v.fold = null;
       return goal === null ? [say] : [{ $: "goal", text: goal }, say];
     }
@@ -4324,7 +4324,7 @@ var P = {
   toast: 0,
   push: null,
   used: { ws: null, on: false, at: 0 },
-  after: null,
+  after: false,
   at: ""
 };
 var SCROLL = {
@@ -4430,9 +4430,9 @@ function chat() {
   box_new(BOX2, { input: typed, files: attach });
   BOX2.addEventListener("blur", () => draw2(false));
   BOX2.onkeydown = (ev) => {
-    if (ev.key === "Enter" && !ev.shiftKey && !ev.isComposing && ev.keyCode !== 229 && (DESK.matches || ev.altKey || ev.ctrlKey)) {
+    if (ev.key === "Enter" && !ev.shiftKey && !ev.isComposing && ev.keyCode !== 229 && DESK.matches) {
       ev.preventDefault();
-      submit(ev.altKey || ev.ctrlKey);
+      submit();
     }
   };
   $2("form").onsubmit = (ev) => {
@@ -4440,7 +4440,6 @@ function chat() {
     submit();
   };
   $2(".attach").onclick = () => file.click();
-  steer_button($2(".steer", HTMLButtonElement));
   $2("#pick").onkeydown = roam;
   $2("#pick").addEventListener("focusout", left);
   $2("#menu .out").onclick = signout;
@@ -4513,39 +4512,20 @@ function typed() {
   }
   draw2(true);
 }
-function steer_button(steer) {
-  let held;
-  let told = false;
-  steer.onpointerdown = () => {
-    told = false;
-    held = setTimeout(() => {
-      told = true;
-      toast(steer.title);
-    }, 500);
-  };
-  steer.onpointerup = steer.onpointerleave = () => clearTimeout(held);
-  steer.oncontextmenu = (ev) => ev.preventDefault();
-  steer.onclick = () => {
-    if (!told) {
-      submit(true);
-    }
-    told = false;
-  };
-}
-function submit(steer = false) {
+function submit() {
   if (box_items().some((item) => item.dataset.state === "bad")) {
-    P.after = null;
+    P.after = false;
     toast(FAILED2);
     return;
   }
   if (UPS.size > 0) {
-    P.after = { steer };
+    P.after = true;
     toast("Sends once uploaded.");
     return;
   }
-  P.after = null;
+  P.after = false;
   const text = box_text().trim();
-  act({ $: "Send", text, steer });
+  act({ $: "Send", text });
   box_set("");
 }
 function back(sent, out) {
@@ -4592,8 +4572,8 @@ function upload(item, file) {
       toast(out.error);
     }
     typed();
-    if (P.after !== null && UPS.size === 0) {
-      submit(P.after.steer);
+    if (P.after && UPS.size === 0) {
+      submit();
     }
   };
   xhr.send(file);
@@ -5179,7 +5159,6 @@ function bars() {
     $2("#timers").hidePopover();
   }
   send.classList.toggle("stop", stop);
-  $2(".steer").hidden = !on || !view_stoppable(v) || box_blank();
   $2(".composer").hidden = !on;
   $2(".mic", HTMLButtonElement).disabled = v.out.some((p) => p.msg.$ === "voice");
   $2(".mic").classList.toggle("rec", P.rec !== null);

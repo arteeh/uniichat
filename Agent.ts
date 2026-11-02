@@ -1,4 +1,4 @@
-import { AskAI, NOT_RUN, type Ask, type Block, type Flight, type Try, type End, type Event, type Img, type Kind } from "./AskAI.ts";
+import { AskAI, type Ask, type Block, type Flight, type Try, type End, type Event, type Img, type Kind } from "./AskAI.ts";
 import { Anthropic } from "./Anthropic.ts";
 import { OpenAI } from "./OpenAI.ts";
 import { ChatGPT } from "./ChatGPT.ts";
@@ -29,13 +29,15 @@ type Seat = { model: string; room: string; yields: boolean; held: boolean };
 
 export type Item =
   | { $: "User"; parts: Block[]; imgs: Img[] }
-  | { $: "Turn"; out: unknown[] }
+  | { $: "Turn"; out: unknown[]; open?: boolean }
   | { $: "Back"; backs: Back[] };
 
 export type Use = { id: string; name: string; input: unknown };
 
 export type Entry = { kind: Kind; text: string; of?: string };
 
+// open: a server tool call it made runs only with the next request (a client
+// call beside it came first), so only tool results may follow it
 export type Step = {
   out      : unknown[];
   uses     : Use[];
@@ -47,6 +49,7 @@ export type Step = {
   refusal? : Refusal;
   until?   : number;
   limits?  : number;
+  open?    : boolean;
 };
 
 export type Refusal = { why: string; say: string; until?: number };
@@ -150,7 +153,7 @@ export namespace Agent {
         end.limits = step.limits;
         return;
       }
-      items.push({ $: "Turn", out: step.out });
+      items.push({ $: "Turn", out: step.out, open: step.open });
       end.note = step.note || end.note;
       if (step.stop === "again") {
         continue;
@@ -160,10 +163,9 @@ export namespace Agent {
         if (signal.aborted) {
           return;
         }
-        const skip = ask.steer?.pending() === true;
-        end.acted ||= !skip;
+        end.acted = true;
         on({ $: "Start", of: use.id });
-        const out = skip ? { text: NOT_RUN, fail: true } : await Agent.use(run, tools, use);
+        const out = await Agent.use(run, tools, use);
         on({ $: "Entry", kind: "echo", text: (out.fail ? "error: " : "") + out.text, of: use.id });
         backs.push({ id: use.id, out });
       }
@@ -236,9 +238,14 @@ export namespace Agent {
     }
   }
 
-  // steered messages go in before each request: the first, one after tool
-  // results, one asked again after a wait
+  // messages that came in go in before each request: the first, one after
+  // tool results, one asked again after a wait; not while a server tool call
+  // is open
   export async function steered(ask: Ask, items: Item[]): Promise<void> {
+    const turn = items.findLast((item) => item.$ === "Turn");
+    if (turn?.$ === "Turn" && turn.open === true) {
+      return;
+    }
     const say = await AskAI.steered(ask);
     if (say !== null) {
       items.push({ $: "User", parts: [{ text: say.text, mark: false }], imgs: say.imgs });

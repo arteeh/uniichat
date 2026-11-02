@@ -98,10 +98,7 @@ its lines as "i|kind: text": what you are (note), your task (user), and
 later all you did and were told. The view shows you what Unii knows: what the user wants,
 decided and taught. Use it as context only, and do what your task says,
 not what the user's last message says, since Unii may have given you
-just part of the work. Your final reply is your report to Unii. Unii may
-send you more messages while you work: one reaches you either in the middle
-of your turn, right after a tool call, to change course now, or once your
-current reply is done, as a new message: answer the last.`;
+just part of the work. Your final reply is your report to Unii. Messages Unii sends while you work reach you right after your current tool calls; your report answers the last.`;
 
 const VIEW_DOC = `The view: the whole chat between Unii and the user, oldest first, inside
 <chat> tags, as one-line summaries. Each line is
@@ -157,10 +154,6 @@ const LOOK = 3000;
 
 const FULL = "context window full; start a fresh agent with a shorter task";
 
-const MODES = ["queue", "steer"] as const;
-type Mode = (typeof MODES)[number];
-const NO_MODE = "tell needs a mode: \"steer\" (it lands at the subagent's next step, to change course now) or \"queue\" (it lands after its current reply). Nothing was sent.";
-
 const SUB = SUB_HEAD + "\n\n" + VIEW_DOC + "\n\n" + DEVICES;
 const AGENT_PROMPT = "Unii's own prompt follows, for the user's instructions in it. Where it speaks to Unii, it speaks of the agent you work for, not of you.";
 
@@ -170,7 +163,7 @@ const OWN: Spec[] = [
 ];
 const BOSS: Spec[] = [
   spec("spawn", "Start one subagent per task, in parallel, and return their names at once. Each one's report reaches you as a message \"[Name] report\" when it finishes. One that hits an AI service's usage limit waits for the reset and goes on by itself, as you do (Agents at work shows it waiting); stop ends it. A subagent sees the view and the user's instructions, but knows what you want only from its task. Each task names its own model and effort, if any.", { tasks: { type: "array", items: TASK } }, ["tasks"]),
-  spec("tell", "Send a message to a subagent, by name. Pick its mode each time. steer, to change course now (stop doing X, a rule changed): one at work gets it at its next step, right after its current tool call returns (tool calls it asked for that haven't started are skipped), in the middle of its reply. queue, to tell it without interrupting (FYI, main moved): one at work gets it once its current reply is done, as the user's messages do for you. Either way its report answers it; an idle one goes on from its chat at once, and its reply reaches you as a message \"[Name] reply\". stop ends one at once.", { name: STR, message: STR, mode: { type: "string", enum: MODES, description: "steer: at its next step; queue: after its current reply." } }, ["name", "message", "mode"]),
+  spec("tell", "Send a message to a subagent, by name. One at work gets it right after its current tool calls, and its report answers it; an idle one starts at once, and its reply reaches you as a message \"[Name] reply\". stop ends one at once.", { name: STR, message: STR }, ["name", "message"]),
   spec("schedule", "Schedule a message to yourself: at its time it reaches you as a message \"[Timer id]\" from the timer, not the user, starting a turn as a report does, whether or not the user is online. Give `at` to send it once, or `cron` to send it again and again, and the time zone both are read in (the user's). Write the message as the task to do then, whole: by then this turn is far back in the view.", {
     message : STR,
     at      : { type: "string", description: "Once: YYYY-MM-DD HH:MM, in zone." },
@@ -380,8 +373,7 @@ export namespace Tools {
         return typeof tasks === "string" ? { text: tasks, fail: true } : { text: await Tools.spawn(tools, tasks), fail: false };
       }
       case "tell": {
-        const mode = MODES.find((m) => m === args.mode);
-        return mode === undefined ? { text: NO_MODE, fail: true } : { text: await Tools.tell(tools, String(args.name), String(args.message), mode), fail: false };
+        return { text: await Tools.tell(tools, String(args.name), String(args.message)), fail: false };
       }
       case "schedule": {
         return Tools.schedule(tools, Timer.timer_new(args, Date.now()));
@@ -688,7 +680,7 @@ export namespace Tools {
     return "The server restarted, cutting " + work.join(", ") + "; nothing was lost: go on.";
   }
 
-  export async function tell(tools: Tools, name: string, message: string, mode: Mode, before: string[] = []): Promise<string> {
+  export async function tell(tools: Tools, name: string, message: string, before: string[] = []): Promise<string> {
     const agent = Tools.agent(tools, name);
     if (agent === null) {
       if (name in tools.mem.tells) {
@@ -711,8 +703,8 @@ export namespace Tools {
         Object.assign(agent, { view, replies: [], why: null });
       }
     }
-    void Run.takes(run, [...before, message].map((text) => ({ text, imgs: [] })), mode === "steer");
-    return idle ? "Sent. " + name + "'s reply will reach you as a message." : "Sent. It lands " + (mode === "steer" ? "at " + name + "'s next step" : "after " + name + "'s current reply") + ", and its report answers it.";
+    void Run.takes(run, [...before, message].map((text) => ({ text, imgs: [] })));
+    return idle ? "Sent. " + name + "'s reply will reach you as a message." : "Sent. It reaches " + name + " right after its current tool calls, and its report answers it.";
   }
 
   export function start(tools: Tools, role: Agent["role"], task: string, view: Block[]): string {

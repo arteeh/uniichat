@@ -43,9 +43,9 @@ type Prefix = { warm_until: number; writing: Promise<void> | null };
 
 export type Flight = { begun: () => void; end: () => void };
 
-// messages steered into a call: pending says one waits, take logs and hands
-// them over, taken keeps them for a fresh start of the call (a fallback, a
-// new Claude Code)
+// the messages that come in while a call works, which it puts in its next
+// request: pending says one waits, take logs and hands them over, taken keeps
+// them for a fresh start of the call (a fallback, a new Claude Code)
 export type Steer = { pending: () => boolean; take: () => Promise<Say[]>; taken: Say[] };
 
 export type Parked = { until: number; known: boolean; vendor: Vendor };
@@ -85,8 +85,6 @@ export type Call = Try;
 export const AGAIN = 60e3;
 
 export const GO_ON = "The AI service's usage limit cut your last turn short. It has reset: go on.";
-
-export const NOT_RUN = "Not run: a new message came in before it started.";
 
 // the longest a patient call waits for a refusal to lift (a ChatGPT
 // plan's limits last a week at most)
@@ -199,15 +197,15 @@ export namespace AskAI {
     return out;
   }
 
-  // the steered messages pending, worded as sent while the agent worked,
-  // named by who sent them: the user, or Unii to a subagent
+  // the messages that came in, worded as sent while the agent worked: to
+  // Unii by the user, a subagent or the timer; to a subagent by Unii
   export async function steered(ask: Ask): Promise<Say | null> {
     const says = (await ask.steer?.take()) ?? [];
     if (says.length === 0) {
       return null;
     }
-    const who = ask.agent === true ? "Unii" : "The user";
-    const say = { text: says.map((s) => who + " sent a new message while you were working:\n" + s.text + "\n\nAddress the message above as you continue this turn.").join("\n\n"), imgs: says.flatMap((s) => s.imgs) };
+    const came = ask.agent === true ? "Unii sent a new message" : "A new message came in";
+    const say = { text: says.map((s) => came + " while you were working:\n" + s.text + "\n\nAddress the message above as you continue this turn.").join("\n\n"), imgs: says.flatMap((s) => s.imgs) };
     ask.steer?.taken.push(say);
     return say;
   }

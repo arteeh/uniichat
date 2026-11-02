@@ -116,14 +116,14 @@ export type Server =
   | { $: "jobs"; ids: string[] }
   | { $: "job"; id: string; job: Job };
 
-export type Sent = { text: string; images?: Blob[]; steer?: boolean };
+export type Sent = { text: string; images?: Blob[] };
 
 export type Answer = { error?: string; status?: number; text?: string; going?: boolean };
 type Upload = BodyInit | AsyncIterable<string>;
 type Body   = () => Upload | Promise<Upload>;
 
 export type Client =
-  | { $: "say"; sizes: number[]; body: Body; steer?: boolean }
+  | { $: "say"; sizes: number[]; body: Body }
   | { $: "import"; body: Body }
   | { $: "voice"; type: string; body: Body }
   | { $: "stop"; name?: string }
@@ -401,7 +401,7 @@ export function view_act(v: View, act: Act): Client[] {
         return [];
       }
       const blob = new Blob([...images, text]);
-      const say: Client = { $: "say", sizes: images.map((b) => b.size), body: () => blob, ...(act.steer === true ? { steer: true } : {}) };
+      const say: Client = { $: "say", sizes: images.map((b) => b.size), body: () => blob };
       v.fold = null;
       return goal === null ? [say] : [{ $: "goal", text: goal }, say];
     }
