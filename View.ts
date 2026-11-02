@@ -95,6 +95,7 @@ export type View = State & {
   ws    : WebSocket | null;
   up    : boolean;
   flush : () => void;
+  wake  : () => void;
 };
 
 type Pack = { nodes?: Record<string, Node>; whole?: Record<string, Entry> };
@@ -292,6 +293,7 @@ export function view_new(): View {
     ws        : null,
     up        : false,
     flush     : () => {},
+    wake      : () => {},
   };
 }
 
@@ -681,7 +683,14 @@ export function link_open(v: View, link: Link): void {
       void drop();
     }
   }
-  [v.ws, v.flush] = [ws, flush];
+  // back in view: a link not up, or not heard from since the server's last
+  // tick, is dead
+  function wake(): void {
+    if (v.ws === ws && (!v.up || Date.now() - heard > PING / 2 + RETRY)) {
+      void drop();
+    }
+  }
+  [v.ws, v.flush, v.wake] = [ws, flush, wake];
   ws.onmessage = (ev) => {
     heard = Date.now();
     if (ev.data === TICK) {

@@ -2084,7 +2084,8 @@ function view_new() {
     out: [],
     ws: null,
     up: false,
-    flush: () => {}
+    flush: () => {},
+    wake: () => {}
   };
 }
 function view_hear(v, msg) {
@@ -2437,7 +2438,12 @@ function link_open(v, link) {
       drop();
     }
   }
-  [v.ws, v.flush] = [ws, flush];
+  function wake() {
+    if (v.ws === ws && (!v.up || Date.now() - heard > PING / 2 + RETRY)) {
+      drop();
+    }
+  }
+  [v.ws, v.flush, v.wake] = [ws, flush, wake];
   ws.onmessage = (ev) => {
     heard = Date.now();
     if (ev.data === TICK) {
@@ -4301,6 +4307,7 @@ function file_name(pic) {
 // web/src/main.ts
 var APP = window.webkit?.messageHandlers?.unii ?? null;
 var DESK = matchMedia("(hover: hover)");
+var ME_WAIT = 4000;
 var NONE = "No Claude or ChatGPT chats in that folder. Choose ~/.claude or ~/.codex.";
 var SCENES = `
   <div class="scene"><p>Your entire life.</p><p>One single chat.</p></div>
@@ -4379,6 +4386,9 @@ async function boot() {
     notes_close();
   });
   document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) {
+      v.wake();
+    }
     in_use();
     notes_close();
     if (document.hidden && RENEW.due && !RENEW.going && renew_free(true)) {
@@ -4386,12 +4396,14 @@ async function boot() {
       renew(true);
     }
   });
+  addEventListener("pageshow", () => v.wake());
+  addEventListener("online", () => v.wake());
   addEventListener("blur", () => in_use(true));
   addEventListener("pagehide", () => in_use(true));
 }
 async function boot_me() {
   for (let k = 0;; k++) {
-    const res = await fetch("/api/me").catch(() => null);
+    const res = await me();
     if (res?.status === 200 || res?.status === 401) {
       if (k > 0) {
         $2("#toast").hidden = true;
@@ -4832,10 +4844,13 @@ function in_use(off = false) {
   ws.send(on ? ACTIVE : IDLE);
   P.used = { ws, on, at: Date.now() };
 }
+function me() {
+  return fetch("/api/me", { signal: AbortSignal.timeout(ME_WAIT) }).catch(() => null);
+}
 async function lost(up) {
   draw2(true);
-  const me = up ? null : await fetch("/api/me").catch(() => null);
-  if (me !== null && me.status === 401) {
+  const res = up ? null : await me();
+  if (res !== null && res.status === 401) {
     location.href = "/";
     return false;
   }

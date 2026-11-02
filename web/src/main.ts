@@ -22,6 +22,8 @@ const APP = window.webkit?.messageHandlers?.unii ?? null;
 
 const DESK = matchMedia("(hover: hover)");
 
+const ME_WAIT = 4000;
+
 const NONE   = "No Claude or ChatGPT chats in that folder. Choose ~/.claude or ~/.codex.";
 
 const SCENES = `
@@ -114,6 +116,9 @@ async function boot(): Promise<void> {
     notes_close();
   });
   document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) {
+      v.wake();
+    }
     in_use();
     notes_close();
     if (document.hidden && RENEW.due && !RENEW.going && renew_free(true)) {
@@ -121,13 +126,15 @@ async function boot(): Promise<void> {
       void renew(true);
     }
   });
+  addEventListener("pageshow", () => v.wake());
+  addEventListener("online", () => v.wake());
   addEventListener("blur", () => in_use(true));
   addEventListener("pagehide", () => in_use(true));
 }
 
 async function boot_me(): Promise<unknown> {
   for (let k = 0; ; k++) {
-    const res = await fetch("/api/me").catch(() => null);
+    const res = await me();
     if (res?.status === 200 || res?.status === 401) {
       if (k > 0) {
         $("#toast").hidden = true;
@@ -607,10 +614,16 @@ function in_use(off = false): void {
   P.used = { ws, on, at: Date.now() };
 }
 
+// after a sleep a request can hang on a dead connection: one that takes
+// longer counts as unanswered
+function me(): Promise<Response | null> {
+  return fetch("/api/me", { signal: AbortSignal.timeout(ME_WAIT) }).catch(() => null);
+}
+
 async function lost(up: boolean): Promise<boolean> {
   draw(true);
-  const me = up ? null : await fetch("/api/me").catch(() => null);
-  if (me !== null && me.status === 401) {
+  const res = up ? null : await me();
+  if (res !== null && res.status === 401) {
     location.href = "/";
     return false;
   }
