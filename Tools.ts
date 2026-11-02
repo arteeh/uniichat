@@ -155,6 +155,8 @@ const SKILLS = "Skills on the devices open now, by device: when a task matches o
 
 const LOOK = 3000;
 
+const FULL = "context window full; start a fresh agent with a shorter task";
+
 const MODES = ["queue", "steer"] as const;
 type Mode = (typeof MODES)[number];
 const NO_MODE = "tell needs a mode: \"steer\" (it lands at the subagent's next step, to change course now) or \"queue\" (it lands after its current reply). Nothing was sent.";
@@ -768,7 +770,7 @@ export namespace Tools {
       },
       ended  : (_, end) => {
         const a = agent();
-        a.replies.push(end.ok ? end.text : a.why ?? "failed: " + end.text);
+        a.replies.push(end.ok ? end.text : a.why ?? "failed: " + (end.long === true ? FULL : end.text));
         return end.ok;
       },
       on     : (run, ev) => tools.log.on(run, ev),

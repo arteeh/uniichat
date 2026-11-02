@@ -141,7 +141,7 @@ export namespace Agent {
       const step = await Agent.step(wire, run, key, (max) => wire.body(ask, items, tools, max), items);
       Agent.entries_queued_till_started(step).forEach(on);
       if (step.stop === "down" || step.stop === "lost" || step.stop === "fail") {
-        end.text ||= step.stop === "down" ? step.refusal?.say ?? BUSY : step.why;
+        end.text ||= step.refusal?.say ?? Agent.said(step.why);
         end.why = step.why;
         end.long = step.stop !== "lost" && TOO_LONG.test(step.why);
         end.stop = step.stop;
@@ -212,7 +212,7 @@ export namespace Agent {
           console.error(model + ": " + step.why.slice(0, 300));
         }
         if (!limit && (step.stop !== "busy" || k >= tries)) {
-          return step.stop === "busy" ? { ...step, stop: "down", off: true } : step;
+          return step.stop === "busy" ? { ...step, stop: "down", off: true, refusal: { why: step.why, say: BUSY } } : step;
         }
         if (Agent.import_seated_elsewhere(seat)) {
           continue;
@@ -438,6 +438,12 @@ export namespace Agent {
     } catch (err) {
       return Agent.fail(err_why(err), seen, "busy");
     }
+  }
+
+  // a failure's reason as the chat shows it: its first line, cut short
+  export function said(why: string): string {
+    const line = why.trim().split("\n")[0];
+    return line.length > 300 ? line.slice(0, 300) + "…" : line;
   }
 
   export function fail(why: string, seen: Entry[], stop: Step["stop"] = "lost"): Step {

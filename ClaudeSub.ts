@@ -48,6 +48,8 @@ const SIGN_IN = "claude-sub is not signed in, or its sign-in expired: run `unii 
 
 const OFF = ["server_error", "overloaded", "billing_error", "account_on_hold", "oauth_org_not_allowed", "verification_required", "model_not_found"];
 
+const BUSY_ERRORS = ["server_error", "overloaded"];
+
 const NO_BIN = "claude-sub needs Claude Code: `bun install` in uniichat's folder, or set `claude` to a Claude Code executable";
 
 const DIED = "Claude Code ended early";
@@ -557,7 +559,7 @@ export namespace ClaudeSub {
         if (ask.patient !== true) {
           console.error("claude-sub: " + said.slice(0, 300));
         }
-        return { text: BUSY, why: said, stop: "down", off: err !== undefined && OFF.includes(err), long: TOO_LONG.test(why) };
+        return { text: BUSY_ERRORS.includes(err ?? "") ? BUSY : Agent.said(said), why: said, stop: "down", off: err !== undefined && OFF.includes(err), long: TOO_LONG.test(why) };
       }
       return { ok: true, text: msg.result.trim() };
     }

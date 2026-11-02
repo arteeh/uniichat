@@ -226,7 +226,8 @@ export namespace Anthropic {
     const note = slow ? "ran at " + st.speed + " speed" : "";
     const step: Step = { out, uses, entries: Anthropic.entries(out), stop: "done", why: "", note };
     if (st.error !== null) {
-      return { ...step, stop: st.error.type === "rate_limit_error" ? "limit" : "busy", why: st.error.type + ": " + st.error.message };
+      const stop = st.error.type === "rate_limit_error" ? "limit" : ["overloaded_error", "api_error"].includes(st.error.type) ? "busy" : "fail";
+      return { ...step, stop, why: st.error.type + ": " + st.error.message };
     }
     switch (st.stop) {
       case "end_turn":
