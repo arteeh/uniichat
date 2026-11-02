@@ -47,11 +47,12 @@ export namespace SubscriptionWire {
       step: Stream.step,
       reject: (res, body) => {
         const spent = /insufficient_quota|billing_hard_limit_reached|credit balance is too low/i.test(body);
+        const context = [400, 413, 422].includes(res.status) && /context_length_exceeded|model_context_window_exceeded|prompt is too long|maximum context length|too many input tokens/i.test(body);
         return {
           out: [], uses: [], entries: [], note: "",
-          stop: spent ? "down" : res.status === 429 ? "limit" : [408, 409].includes(res.status) || res.status >= 500 ? "busy" : "down",
+          stop: context ? "fail" : spent ? "down" : res.status === 429 ? "limit" : [408, 409].includes(res.status) || res.status >= 500 ? "busy" : "down",
           off: spent || [401, 402, 403, 404].includes(res.status),
-          why: "subscription inference HTTP " + res.status + (spent ? " (quota unavailable)" : ""),
+          why: context ? "Subscription context window exceeded" : "subscription inference HTTP " + res.status + (spent ? " (quota unavailable)" : ""),
         };
       },
     };

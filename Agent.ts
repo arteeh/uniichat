@@ -4,6 +4,7 @@ import { OpenAI } from "./OpenAI.ts";
 import { ChatGPT } from "./ChatGPT.ts";
 import { Subscriptions } from "./Subscriptions.ts";
 import { SubscriptionModels } from "./SubscriptionModels.ts";
+import { SubscriptionContextLimit } from "./SubscriptionRequest.ts";
 import { Limit } from "./Limit.ts";
 import { live_push } from "./View.ts";
 import { Machine, type Spec } from "./Machine.ts";
@@ -126,6 +127,10 @@ export namespace Agent {
         }
       } catch (err) {
         end.text ||= err_why(err);
+        if (err instanceof SubscriptionContextLimit) {
+          end.stop = "fail";
+          end.long = true;
+        }
       }
       end.ok = end.ok && !run.abort.signal.aborted;
       return end;
@@ -386,7 +391,7 @@ export namespace Agent {
         timeout : false,
         redirect: SubscriptionModels.isVendor(run.ask.vendor) ? "error" : undefined,
       } as RequestInit);
-      const text = res.ok && res.body ? null : await res.text();
+      const text = res.ok && res.body ? null : await (wire.reject ? Agent.error_text(res) : res.text());
       const refusal = text === null ? null : wire.refusal?.(res, text) ?? null;
       const spent = text !== null && SPENT.test(text);
       const why = refusal?.why ?? "HTTP " + res.status + ": " + Agent.reason(text ?? "");
@@ -402,6 +407,24 @@ export namespace Agent {
     clearTimeout(timer);
     flight.end();
     return { res, step };
+  }
+
+  export async function error_text(res: Response): Promise<string> {
+    const reader = res.body?.getReader();
+    if (!reader) return "";
+    const chunks: Uint8Array[] = [];
+    let size = 0;
+    try {
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        const room = 64 * 1024 - size;
+        chunks.push(value.subarray(0, room));
+        size += value.length;
+        if (size >= 64 * 1024) { await reader.cancel(); break; }
+      }
+      return Buffer.concat(chunks).toString("utf8");
+    } finally { reader.releaseLock(); }
   }
 
   // a failed request's why: the API's message (Anthropic's and OpenAI's

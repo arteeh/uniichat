@@ -2,9 +2,8 @@
 
 These native UniiChat adapters use the authentication/protocol implementations and public model catalogs in Pi and NodeCode Cells as references. Neither their agent runtimes nor their credential stores are consumed. `SubscriptionCatalog.json` records the exact source commits used for its public data; those declarations are not live entitlement or billing evidence.
 
-- Pi: https://github.com/earendil-works/pi — `packages/ai/src/auth/oauth/{xai,meta,github-copilot}.ts`, `packages/ai/src/api/`, and provider catalog data for xAI, OpenCode Go and Copilot.
-- Cells: the inspected `cells` checkout's `providers/nodecode-{xai-oauth,muse-code,github-copilot}/` implementations; Muse's `models.json` supplies the catalog because the inspected Pi checkout lacked generated Meta model data.
-- Anthropic Messages route composition follows the SDK resource's `/v1/messages` path relative to the documented provider base, not a guessed `/messages` path.
+- Pi: https://github.com/earendil-works/pi — xAI OAuth, Responses protocol and public xAI model catalog references.
+- NodeCode Cells: `providers/nodecode-xai-oauth/` authentication reference; its upstream attribution lineage is retained below.
 
 The adapted references/catalog material is MIT licensed under the notices below. This does not change UniiChat's own license. OAuth client IDs in the source are public client identifiers, not credentials. No operator identities, authorization tokens or sessions are part of this catalog or these notices.
 

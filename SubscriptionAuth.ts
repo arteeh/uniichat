@@ -67,7 +67,8 @@ export namespace SubscriptionAuth {
       console.log(vendor + ": local credentials removed (provider session not revoked)");
     } else if (args[0] === "status" || args[0] === "models") {
       // Local snapshot only; never a live entitlement or quota check.
-      console.log(JSON.stringify(status(dir, vendor)));
+      const connection = status(dir, vendor);
+      console.log(JSON.stringify(args[0] === "models" ? { ...connection, catalog: SubscriptionModels.models(vendor).map((m) => m.id), catalog_scope: "public capabilities, not account entitlement" } : connection));
     } else {
       const controller = new AbortController();
       const abort = () => controller.abort();

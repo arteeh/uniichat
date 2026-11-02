@@ -3,6 +3,9 @@ import type { Item, Tool } from "./Agent.ts";
 import { SubscriptionModels, SUBSCRIPTION_VENDORS, type SubscriptionModel, type SubscriptionVendor } from "./SubscriptionModels.ts";
 
 export type Obj = Record<string, unknown>;
+export class SubscriptionContextLimit extends Error {
+  constructor() { super("Subscription context window has no output room"); }
+}
 export function object(x: unknown): Obj {
   if (x === null || typeof x !== "object" || Array.isArray(x)) throw new Error("invalid subscription protocol object");
   return x as Obj;
@@ -55,6 +58,7 @@ function grokSchema(schema: object): object {
   const key = Array.isArray(s.anyOf) ? "anyOf" : "oneOf";
   const branches = s[key];
   if ((s.type === "object" || s.properties || (Array.isArray(s.type) && s.type.includes("object"))) && Array.isArray(branches) && branches.length > 0 && branches.every((b: unknown) => {
+    if (b === null || typeof b !== "object" || Array.isArray(b)) return false;
     const o = object(b);
     return Array.isArray(o.required) && o.required.length > 0 && o.required.every((k) => typeof k === "string" && k.length > 0) && Object.keys(o).every((k) => ["required", "title", "description"].includes(k));
   })) {
@@ -81,7 +85,7 @@ export function request(model: SubscriptionModel, _vendor: SubscriptionVendor, a
     : i.$ === "Back" ? { ...i, backs: i.backs.map((b) => ({ ...b, out: { ...b.out, imgs: b.out.imgs?.map(estimateImage) } })) } : i));
   const inputEstimate = new TextEncoder().encode(ask.system + history + JSON.stringify(tools)).length + images * Math.ceil(4800 / 3.5);
   const cap = Math.min(max, model.output, model.window - inputEstimate);
-  if (cap < 16) throw new Error("subscription context has no output room");
+  if (cap < 16) throw new SubscriptionContextLimit();
   const body: Obj = { model: model.id, stream: true };
   const grok = model.id.startsWith("grok-");
   Object.assign(body, { store: false, max_output_tokens: cap, input: [{ role: "developer", content: [{ type: "input_text", text: ask.system }] }, ...responsesInput(items)] });
