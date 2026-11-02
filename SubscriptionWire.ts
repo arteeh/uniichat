@@ -11,7 +11,7 @@ type Connection = {
 };
 // Parent must invoke this on HTTP failures before generic Agent.reason/logging.
 // Raw HTTP bodies are deliberately never incorporated in the Step.
-type NativeWire = Wire<State, unknown> & { auth: Connection["auth"]; reject: (res: Response, body: string) => Step };
+type NativeWire = Wire<State, unknown> & { auth: Connection["auth"]; reject: (res: Response, body: string, truncated?: boolean) => Step };
 
 export namespace SubscriptionWire {
   export function wire(model: SubscriptionModel, connection: Connection): NativeWire {
@@ -45,7 +45,7 @@ export namespace SubscriptionWire {
         } catch { return false; }
       },
       step: Stream.step,
-      reject: (res, body) => {
+      reject: (res, body, truncated = false) => {
         const spent = /insufficient_quota|billing_hard_limit_reached|credit balance is too low/i.test(body);
         let code: unknown, message: unknown, json: unknown;
         try { json = JSON.parse(body) as unknown; } catch { message = body; }
@@ -55,14 +55,14 @@ export namespace SubscriptionWire {
           code = error.code;
           message = error.message;
         } catch {}
-        const context = !spent && [400, 413, 422].includes(res.status) && (code === undefined
+        const context = !truncated && !spent && [400, 413, 422].includes(res.status) && (code === undefined
           ? typeof message === "string" && /context_length_exceeded|model_context_window_exceeded|prompt is too long|maximum context length|too many input tokens/i.test(message)
           : typeof code === "string" && ["context_length_exceeded", "model_context_window_exceeded"].includes(code));
         return {
           out: [], uses: [], entries: [], note: "",
-          stop: context ? "fail" : spent ? "down" : res.status === 429 ? "limit" : [408, 409].includes(res.status) || res.status >= 500 ? "busy" : "down",
-          off: spent || [401, 402, 403, 404].includes(res.status),
-          why: context ? "Subscription context window exceeded" : "subscription inference HTTP " + res.status + (spent ? " (quota unavailable)" : ""),
+          stop: truncated ? "down" : context ? "fail" : spent ? "down" : res.status === 429 ? "limit" : [408, 409].includes(res.status) || res.status >= 500 ? "busy" : "down",
+          off: truncated || spent || [401, 402, 403, 404].includes(res.status),
+          why: truncated ? "Subscription inference error exceeded the local response limit" : context ? "Subscription context window exceeded" : "subscription inference HTTP " + res.status + (spent ? " (quota unavailable)" : ""),
         };
       },
     };

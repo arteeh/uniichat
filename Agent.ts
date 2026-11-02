@@ -70,7 +70,7 @@ type Rpc = { "tools/list": Listed; "tools/call": Called };
 export type Wire<S, E> = {
   key     : string;
   auth?   : (refused: string | undefined, signal?: AbortSignal) => Promise<string>;
-  reject? : (res: Response, body: string) => Step;
+  reject? : (res: Response, body: string, truncated?: boolean) => Step;
   refusal?: (res: Response, body: string) => Refusal | null;
   reset?  : (res: Response, body: string) => number | null;
   idle    : number;
@@ -391,7 +391,9 @@ export namespace Agent {
         timeout : false,
         redirect: SubscriptionModels.isVendor(run.ask.vendor) ? "error" : undefined,
       } as RequestInit);
-      const text = res.ok && res.body ? null : await (wire.reject ? Agent.error_text(res) : res.text());
+      const failed = !res.ok || res.body === null;
+      const bounded = failed && wire.reject ? await Agent.error_text(res) : null;
+      const text = failed ? bounded?.text ?? await res.text() : null;
       const refusal = text === null ? null : wire.refusal?.(res, text) ?? null;
       const spent = text !== null && SPENT.test(text);
       const why = refusal?.why ?? "HTTP " + res.status + ": " + Agent.reason(text ?? "");
@@ -399,7 +401,7 @@ export namespace Agent {
       const stop = refusal !== null ? "down" : text !== null && Agent.limited(res, text) && !spent ? "limit" : text !== null && Agent.passing(res) && !spent ? "busy" : "down";
       const until = text !== null && stop === "limit" ? wire.reset?.(res, text) ?? undefined : undefined;
       step = text !== null || res.body === null
-        ? wire.reject?.(res, text ?? "") ?? { ...Agent.fail(why, [], stop), off, refusal: refusal ?? undefined, until }
+        ? wire.reject?.(res, text ?? "", bounded?.truncated) ?? { ...Agent.fail(why, [], stop), off, refusal: refusal ?? undefined, until }
         : await Agent.stream(wire, run, res.body, timer, seen, st, flight.begun);
     } catch (err) {
       step = Agent.fail(SubscriptionModels.isVendor(run.ask.vendor) ? "Subscription transport failed" : err_why(err), [], "busy");
@@ -409,11 +411,12 @@ export namespace Agent {
     return { res, step };
   }
 
-  export async function error_text(res: Response): Promise<string> {
+  export async function error_text(res: Response): Promise<{ text: string; truncated: boolean }> {
     const reader = res.body?.getReader();
-    if (!reader) return "";
+    if (!reader) return { text: "", truncated: false };
     const chunks: Uint8Array[] = [];
     let size = 0;
+    let truncated = false;
     try {
       for (;;) {
         const { value, done } = await reader.read();
@@ -421,9 +424,9 @@ export namespace Agent {
         const room = 64 * 1024 - size;
         chunks.push(value.subarray(0, room));
         size += value.length;
-        if (size >= 64 * 1024) { await reader.cancel(); break; }
+        if (size >= 64 * 1024) { truncated = true; await reader.cancel(); break; }
       }
-      return Buffer.concat(chunks).toString("utf8");
+      return { text: Buffer.concat(chunks).toString("utf8"), truncated };
     } finally { reader.releaseLock(); }
   }
 
