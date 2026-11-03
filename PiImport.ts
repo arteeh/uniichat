@@ -31,6 +31,7 @@ export async function pi_scan(file: Blob): Promise<PiSession | null> {
     if (j === null) { broken++; continue; }
     if (header === null) {
       if (j.type !== "session") return null;
+      if (file.size > 64 * 2 ** 20) throw new Error("Pi session file exceeds 64 MiB.");
       const v = j.version === undefined ? 1 : j.version;
       if (typeof v !== "number" || !Number.isSafeInteger(v) || v < 1) throw new Error("Unsupported Pi session version (expected a positive integer): " + JSON.stringify(v));
       const id = str(j.id);

@@ -692,7 +692,6 @@ function importer(): void {
     for (const f of zip.files ?? []) {
       import_draw("Reading " + f.name + "…");
       try {
-        Import.import_limit(f);
         const found = await Import.import_export(await import_copy(f));
         import_took(f.name, { sessions: found, moved: 0 }, found.length > 0 ? "" : "No chats in " + f.name + ".");
       } catch (e) {

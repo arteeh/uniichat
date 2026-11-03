@@ -111,6 +111,8 @@ async function pi_scan(file) {
     if (header === null) {
       if (j.type !== "session")
         return null;
+      if (file.size > 64 * 2 ** 20)
+        throw new Error("Pi session file exceeds 64 MiB.");
       const v = j.version === undefined ? 1 : j.version;
       if (typeof v !== "number" || !Number.isSafeInteger(v) || v < 1)
         throw new Error("Unsupported Pi session version (expected a positive integer): " + JSON.stringify(v));
@@ -245,12 +247,7 @@ function import_file(path) {
   const session = /(^|\/)(projects|sessions|archived_sessions)\//.test(path);
   return session && path.endsWith(".jsonl") && !path.includes("subagents/");
 }
-function import_limit(file) {
-  if (file.size > 64 * 2 ** 20)
-    throw new Error("Import file exceeds 64 MiB.");
-}
 async function import_session(file, form, app = "", where = "") {
-  import_limit(file);
   const s = { app, form, where, start: "", file, heads: [] };
   for await (const m of import_read(s)) {
     s.heads.push({ kind: m.kind, date: m.date, size: import_size(m), n: s.heads.length });
@@ -396,13 +393,11 @@ function import_count(n, what) {
   return n.toLocaleString("en-US") + " " + what + (n === 1 ? "message" : "messages");
 }
 async function import_export(file) {
-  import_limit(file);
   const zip = await file.slice(0, 2).text() === "PK";
   const json = zip ? await zip_file(file, "conversations.json") : file;
   if (json === null) {
     throw new Error("No conversations.json in the zip.");
   }
-  import_limit(json);
   const chats = await json.text().then((text) => JSON.parse(text)).catch(() => null);
   if (rec(chats) && Array.isArray(chats.messages))
     return imported_sessions(chats);
@@ -505,24 +500,11 @@ async function zip_file(zip, name) {
   const dir = await view(from, size);
   for (let p = 0, k = 0;k < count; k++) {
     const entry = new TextDecoder().decode(new Uint8Array(dir.buffer, p + 46, dir.getUint16(p + 28, true)));
-    const [size, packed, at] = zip_sizes(dir, p);
+    const [, packed, at] = zip_sizes(dir, p);
     if (entry === name || entry.endsWith("/" + name)) {
-      import_limit({ size });
       const head = await view(at, 30);
       const data = zip.slice(at + 30 + head.getUint16(26, true) + head.getUint16(28, true)).slice(0, packed);
-      if (dir.getUint16(p + 10, true) !== 8)
-        return data;
-      let bytes = 0;
-      const bounded = new TransformStream({ transform(chunk, out) {
-        import_limit({ size: bytes += chunk.byteLength });
-        out.enqueue(chunk);
-      } });
-      try {
-        return await new Response(data.stream().pipeThrough(new DecompressionStream("deflate-raw")).pipeThrough(bounded)).blob();
-      } catch (e) {
-        import_limit({ size: bytes });
-        throw e;
-      }
+      return dir.getUint16(p + 10, true) === 8 ? new Response(data.stream().pipeThrough(new DecompressionStream("deflate-raw"))).blob() : data;
     }
     p += 46 + dir.getUint16(p + 28, true) + dir.getUint16(p + 30, true) + dir.getUint16(p + 32, true);
   }
@@ -5206,7 +5188,6 @@ function importer() {
     for (const f of zip.files ?? []) {
       import_draw("Reading " + f.name + "…");
       try {
-        import_limit(f);
         const found = await import_export(await import_copy(f));
         import_took(f.name, { sessions: found, moved: 0 }, found.length > 0 ? "" : "No chats in " + f.name + ".");
       } catch (e) {

@@ -79,12 +79,7 @@ export function import_file(path: string): boolean {
   return session && path.endsWith(".jsonl") && !path.includes("subagents/");
 }
 
-export function import_limit(file: { size: number }): void {
-  if (file.size > 64 * 2 ** 20) throw new Error("Import file exceeds 64 MiB.");
-}
-
 export async function import_session(file: Blob, form: Form, app = "", where = ""): Promise<Session | null> {
-  import_limit(file);
   const s: Session = { app, form, where, start: "", file, heads: [] };
   for await (const m of import_read(s)) {
     s.heads.push({ kind: m.kind, date: m.date, size: import_size(m), n: s.heads.length });
@@ -277,13 +272,11 @@ function node_merge(a: Node, b: Node): Node {
 }
 
 export async function import_export(file: Blob): Promise<Session[]> {
-  import_limit(file);
   const zip  = (await file.slice(0, 2).text()) === "PK";
   const json = zip ? await zip_file(file, "conversations.json") : file;
   if (json === null) {
     throw new Error("No conversations.json in the zip.");
   }
-  import_limit(json);
   const chats: unknown = await json.text().then((text) => JSON.parse(text) as unknown).catch(() => null);
   if (rec(chats) && Array.isArray(chats.messages)) return imported_sessions(chats);
   if (!Array.isArray(chats) || !chats.every((chat: unknown) => get(chat, "mapping") !== undefined || Array.isArray(get(chat, "chat_messages")))) {
@@ -382,20 +375,11 @@ async function zip_file(zip: Blob, name: string): Promise<Blob | null> {
   const dir   = await view(from, size);
   for (let p = 0, k = 0; k < count; k++) {
     const entry = new TextDecoder().decode(new Uint8Array(dir.buffer, p + 46, dir.getUint16(p + 28, true)));
-    const [size, packed, at] = zip_sizes(dir, p);
+    const [, packed, at] = zip_sizes(dir, p);
     if (entry === name || entry.endsWith("/" + name)) {
-      import_limit({ size });
       const head = await view(at, 30);
       const data = zip.slice(at + 30 + head.getUint16(26, true) + head.getUint16(28, true)).slice(0, packed);
-      if (dir.getUint16(p + 10, true) !== 8) return data;
-      let bytes = 0;
-      const bounded = new TransformStream<Uint8Array, Uint8Array>({ transform(chunk, out) {
-        import_limit({ size: bytes += chunk.byteLength });
-        out.enqueue(chunk);
-      } });
-      try {
-        return await new Response(data.stream().pipeThrough(new DecompressionStream("deflate-raw")).pipeThrough(bounded)).blob();
-      } catch (e) { import_limit({ size: bytes }); throw e; }
+      return dir.getUint16(p + 10, true) === 8 ? new Response(data.stream().pipeThrough(new DecompressionStream("deflate-raw"))).blob() : data;
     }
     p += 46 + dir.getUint16(p + 28, true) + dir.getUint16(p + 30, true) + dir.getUint16(p + 32, true);
   }
