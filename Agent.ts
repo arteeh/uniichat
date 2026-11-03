@@ -404,7 +404,7 @@ export namespace Agent {
         ? wire.reject?.(res, text ?? "", bounded?.truncated) ?? { ...Agent.fail(why, [], stop), off, refusal: refusal ?? undefined, until }
         : await Agent.stream(wire, run, res.body, timer, seen, st, flight.begun);
     } catch (err) {
-      step = Agent.fail(SubscriptionModels.isVendor(run.ask.vendor) ? "Subscription transport failed" : err_why(err), [], "busy");
+      step = Agent.fail(err_why(err), [], "busy");
     }
     clearTimeout(timer);
     flight.end();
@@ -477,7 +477,7 @@ export namespace Agent {
       }
       return Agent.fail("the stream ended early", seen, "busy");
     } catch (err) {
-      return Agent.fail(SubscriptionModels.isVendor(ask.vendor) ? "Subscription stream decoding failed" : err_why(err), seen, "busy");
+      return Agent.fail(err_why(err), seen, "busy");
     }
   }
 
