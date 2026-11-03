@@ -222,11 +222,14 @@ export namespace Anthropic {
       }
     });
     const out = st.blocks.filter((b) => b.type !== "text" || b.text);
+    const ran = new Set(out.map((b) => b.tool_use_id));
+    const open = out.some((b) => b.type === "server_tool_use" && !ran.has(b.id));
     const slow = ask.speed === "fast" && st.speed !== "fast";
     const note = slow ? "ran at " + st.speed + " speed" : "";
-    const step: Step = { out, uses, entries: Anthropic.entries(out), stop: "done", why: "", note };
+    const step: Step = { out, uses, entries: Anthropic.entries(out), stop: "done", why: "", note, open };
     if (st.error !== null) {
-      return { ...step, stop: st.error.type === "rate_limit_error" ? "limit" : "busy", why: st.error.type + ": " + st.error.message };
+      const stop = st.error.type === "rate_limit_error" ? "limit" : ["overloaded_error", "api_error"].includes(st.error.type) ? "busy" : "fail";
+      return { ...step, stop, why: st.error.type + ": " + st.error.message };
     }
     switch (st.stop) {
       case "end_turn":

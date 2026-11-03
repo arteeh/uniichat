@@ -17,6 +17,9 @@ export type Img = { type: string; data: string };
 
 export type Say = { text: string; imgs: Img[] };
 
+// a message with who sent it, as the prompts name them (prompt.txt, Tools.ts)
+export type Said = Say & { from: string };
+
 export type Block = { text: string; mark: boolean; back?: boolean };
 
 export type Ask = Pick & {
@@ -43,10 +46,10 @@ type Prefix = { warm_until: number; writing: Promise<void> | null };
 
 export type Flight = { begun: () => void; end: () => void };
 
-// messages steered into a call: pending says one waits, take logs and hands
-// them over, taken keeps them for a fresh start of the call (a fallback, a
-// new Claude Code)
-export type Steer = { pending: () => boolean; take: () => Promise<Say[]>; taken: Say[] };
+// the messages that come in while a call works, which it puts in its next
+// request: pending says one waits, take logs and hands them over, taken keeps
+// them for a fresh start of the call (a fallback, a new Claude Code)
+export type Steer = { pending: () => boolean; take: () => Promise<Said[]>; taken: Say[] };
 
 export type Parked = { until: number; known: boolean; vendor: Vendor };
 
@@ -85,8 +88,6 @@ export type Call = Try;
 export const AGAIN = 60e3;
 
 export const GO_ON = "The AI service's usage limit cut your last turn short. It has reset: go on.";
-
-export const NOT_RUN = "Not run: a new message came in before it started.";
 
 // the longest a patient call waits for a refusal to lift (a ChatGPT
 // plan's limits last a week at most)
@@ -199,15 +200,16 @@ export namespace AskAI {
     return out;
   }
 
-  // the steered messages pending, worded as sent while the agent worked,
-  // named by who sent them: the user, or Unii to a subagent
+  export function labeled(said: Said, working = false): string {
+    return "A new message from " + said.from + (working ? " came in while you were working:\n" : ":\n\n") + said.text;
+  }
+
   export async function steered(ask: Ask): Promise<Say | null> {
     const says = (await ask.steer?.take()) ?? [];
     if (says.length === 0) {
       return null;
     }
-    const who = ask.agent === true ? "Unii" : "The user";
-    const say = { text: says.map((s) => who + " sent a new message while you were working:\n" + s.text + "\n\nAddress the message above as you continue this turn.").join("\n\n"), imgs: says.flatMap((s) => s.imgs) };
+    const say = { text: says.map((s) => AskAI.labeled(s, true) + "\n\nAddress the message above as you continue this turn.").join("\n\n"), imgs: says.flatMap((s) => s.imgs) };
     ask.steer?.taken.push(say);
     return say;
   }

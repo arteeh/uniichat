@@ -1,4 +1,4 @@
-import { AskAI, NOT_RUN, type Ask, type Block, type Flight, type Try, type End, type Event, type Img, type Kind } from "./AskAI.ts";
+import { AskAI, type Ask, type Block, type Flight, type Try, type End, type Event, type Img, type Kind } from "./AskAI.ts";
 import { Anthropic } from "./Anthropic.ts";
 import { OpenAI } from "./OpenAI.ts";
 import { ChatGPT } from "./ChatGPT.ts";
@@ -29,13 +29,15 @@ type Seat = { model: string; room: string; yields: boolean; held: boolean };
 
 export type Item =
   | { $: "User"; parts: Block[]; imgs: Img[] }
-  | { $: "Turn"; out: unknown[] }
+  | { $: "Turn"; out: unknown[]; open?: boolean }
   | { $: "Back"; backs: Back[] };
 
 export type Use = { id: string; name: string; input: unknown };
 
 export type Entry = { kind: Kind; text: string; of?: string };
 
+// open: a server tool call it made runs only with the next request (a client
+// call beside it came first), so only tool results may follow it
 export type Step = {
   out      : unknown[];
   uses     : Use[];
@@ -47,6 +49,7 @@ export type Step = {
   refusal? : Refusal;
   until?   : number;
   limits?  : number;
+  open?    : boolean;
 };
 
 export type Refusal = { why: string; say: string; until?: number };
@@ -141,7 +144,7 @@ export namespace Agent {
       const step = await Agent.step(wire, run, key, (max) => wire.body(ask, items, tools, max), items);
       Agent.entries_queued_till_started(step).forEach(on);
       if (step.stop === "down" || step.stop === "lost" || step.stop === "fail") {
-        end.text ||= step.stop === "down" ? step.refusal?.say ?? BUSY : step.why;
+        end.text ||= step.refusal?.say ?? Agent.said(step.why);
         end.why = step.why;
         end.long = step.stop !== "lost" && TOO_LONG.test(step.why);
         end.stop = step.stop;
@@ -150,7 +153,7 @@ export namespace Agent {
         end.limits = step.limits;
         return;
       }
-      items.push({ $: "Turn", out: step.out });
+      items.push({ $: "Turn", out: step.out, open: step.open });
       end.note = step.note || end.note;
       if (step.stop === "again") {
         continue;
@@ -160,10 +163,9 @@ export namespace Agent {
         if (signal.aborted) {
           return;
         }
-        const skip = ask.steer?.pending() === true;
-        end.acted ||= !skip;
+        end.acted = true;
         on({ $: "Start", of: use.id });
-        const out = skip ? { text: NOT_RUN, fail: true } : await Agent.use(run, tools, use);
+        const out = await Agent.use(run, tools, use);
         on({ $: "Entry", kind: "echo", text: (out.fail ? "error: " : "") + out.text, of: use.id });
         backs.push({ id: use.id, out });
       }
@@ -212,7 +214,7 @@ export namespace Agent {
           console.error(model + ": " + step.why.slice(0, 300));
         }
         if (!limit && (step.stop !== "busy" || k >= tries)) {
-          return step.stop === "busy" ? { ...step, stop: "down", off: true } : step;
+          return step.stop === "busy" ? { ...step, stop: "down", off: true, refusal: { why: step.why, say: BUSY } } : step;
         }
         if (Agent.import_seated_elsewhere(seat)) {
           continue;
@@ -236,9 +238,14 @@ export namespace Agent {
     }
   }
 
-  // steered messages go in before each request: the first, one after tool
-  // results, one asked again after a wait
+  // messages that came in go in before each request: the first, one after
+  // tool results, one asked again after a wait; not while a server tool call
+  // is open
   export async function steered(ask: Ask, items: Item[]): Promise<void> {
+    const turn = items.findLast((item) => item.$ === "Turn");
+    if (turn?.$ === "Turn" && turn.open === true) {
+      return;
+    }
     const say = await AskAI.steered(ask);
     if (say !== null) {
       items.push({ $: "User", parts: [{ text: say.text, mark: false }], imgs: say.imgs });
@@ -438,6 +445,12 @@ export namespace Agent {
     } catch (err) {
       return Agent.fail(err_why(err), seen, "busy");
     }
+  }
+
+  // a failure's reason as the chat shows it: its first line, cut short
+  export function said(why: string): string {
+    const line = why.trim().split("\n")[0];
+    return line.length > 300 ? line.slice(0, 300) + "…" : line;
   }
 
   export function fail(why: string, seen: Entry[], stop: Step["stop"] = "lost"): Step {

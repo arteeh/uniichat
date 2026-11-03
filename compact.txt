@@ -18,7 +18,7 @@ Each message has a kind:
 - work: an agent's report, starting "[Name]", or a scheduled message from the
   timer (Unii's schedule tool), starting "[Timer id]"
 - ai: another AI's replies and tool calls, from an imported chat; not Unii's
-- note: memories from before this chat
+- note: UniiChat's own notes, and memories from before this chat
 
 The summaries form a binary tree: each message is compressed into a line (a
 short message is its own line), then adjacent lines are merged in pairs, again

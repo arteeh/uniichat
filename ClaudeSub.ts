@@ -2,7 +2,7 @@ import * as child from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import type { Options, Query, SDKMessage, SDKRateLimitInfo, SDKUserMessage, SpawnOptions, SyncHookJSONOutput } from "@anthropic-ai/claude-agent-sdk";
-import { AskAI, GO_ON, NOT_RUN, type Ask, type End, type Event, type Img, type Try } from "./AskAI.ts";
+import { AskAI, GO_ON, type Ask, type End, type Event, type Img, type Try } from "./AskAI.ts";
 import { Agent, BUSY, TOO_LONG, type Emit } from "./Agent.ts";
 import { Anthropic } from "./Anthropic.ts";
 import { LIMIT, Limit, type Off } from "./Limit.ts";
@@ -36,9 +36,15 @@ const ENV = {
   CLAUDE_CODE_DISABLE_ATTACHMENTS          : "1", // "@path" in a message stays text
   CLAUDE_CODE_DISABLE_GIT_INSTRUCTIONS     : "1",
   DISABLE_AUTO_COMPACT                     : "1",
+  CLAUDE_CODE_NO_MODEL_FALLBACK            : "1",
+  CLAUDE_CODE_DISABLE_REFUSAL_FALLBACK     : "1",
+  CLAUDE_CODE_MAX_OUTPUT_TOKENS            : "128000",
   MCP_TIMEOUT                              : "60000", // connecting to unii's tools, whose list takes up to 5 s
   CLAUDE_AGENT_SDK_CLIENT_APP              : "uniichat",
 };
+
+// Claude Code's model slots, its side jobs' too: all the picked model
+const MODEL_SLOTS = ["ANTHROPIC_DEFAULT_OPUS_MODEL", "ANTHROPIC_DEFAULT_SONNET_MODEL", "ANTHROPIC_DEFAULT_HAIKU_MODEL", "ANTHROPIC_SMALL_FAST_MODEL"];
 
 const HOUR = { type: "ephemeral", ttl: "1h" };
 
@@ -48,13 +54,15 @@ const SIGN_IN = "claude-sub is not signed in, or its sign-in expired: run `unii 
 
 const OFF = ["server_error", "overloaded", "billing_error", "account_on_hold", "oauth_org_not_allowed", "verification_required", "model_not_found"];
 
+const BUSY_ERRORS = ["server_error", "overloaded"];
+
 const NO_BIN = "claude-sub needs Claude Code: `bun install` in uniichat's folder, or set `claude` to a Claude Code executable";
 
 const DIED = "Claude Code ended early";
 
 const OVERAGE = "usage limit: extra usage";
 
-const STEERING = "a new message came in";
+const STEERING = "new messages came in; they follow, each saying who sent it";
 
 const CONTINUE = "Go on.";
 
@@ -225,7 +233,7 @@ export namespace ClaudeSub {
     const deny = [...builtin, ...MORE].filter((t) => !tools.includes(t));
     return {
       abortController        : abort,
-      env                    : ClaudeSub.env(),
+      env                    : { ...ClaudeSub.env(), ...Object.fromEntries(MODEL_SLOTS.map((slot) => [slot, ask.model])) },
       cwd                    : DIR,
       model                  : ask.model,
       effort                 : ask.effort as Options["effort"],
@@ -307,7 +315,6 @@ export namespace ClaudeSub {
       return proc;
     };
     const hooks = {
-      PreToolUse    : [{ hooks: [() => Promise.resolve(ClaudeSub.before_tool(ask))] }],
       PostToolBatch : [{ hooks: [() => Promise.resolve(ClaudeSub.after_tools(code, ask))] }],
     };
     const options = { ...ClaudeSub.options(ask, new AbortController(), sdk.BUILTIN_TOOL_NAMES, sdk.SYSTEM_PROMPT_DYNAMIC_BOUNDARY), pathToClaudeCodeExecutable: bin, spawnClaudeCodeProcess: spawn, hooks };
@@ -475,17 +482,12 @@ export namespace ClaudeSub {
   // the messages steered in since, in one message: two would start two turns
   export async function go_on(code: Code, ask: Ask, lead: string[]): Promise<void> {
     const say = await AskAI.steered(ask);
-    const texts = [...lead, ...(say === null ? [] : [say.text])];
-    code.box.put(texts.length === 0 ? [CONTINUE] : texts, say?.imgs ?? []);
+    const texts = [...lead.map((text) => AskAI.labeled({ text, imgs: [], from: "UniiChat" })), ...(say === null ? [] : [say.text])];
+    code.box.put(texts.length === 0 ? [AskAI.labeled({ text: CONTINUE, imgs: [], from: "UniiChat" })] : texts, say?.imgs ?? []);
   }
 
   export function died_before_saying(err: unknown, said: boolean, signal: AbortSignal): boolean {
     return err instanceof Died && !said && !signal.aborted;
-  }
-
-  // a tool not started yet when a message is steered in isn't run
-  export function before_tool(ask: Ask): SyncHookJSONOutput {
-    return ask.steer?.pending() === true ? { hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: NOT_RUN } } : {};
   }
 
   // after a batch of tool calls, before the next request, the turn stops,
@@ -557,7 +559,7 @@ export namespace ClaudeSub {
         if (ask.patient !== true) {
           console.error("claude-sub: " + said.slice(0, 300));
         }
-        return { text: BUSY, why: said, stop: "down", off: err !== undefined && OFF.includes(err), long: TOO_LONG.test(why) };
+        return { text: BUSY_ERRORS.includes(err ?? "") ? BUSY : Agent.said(said), why: said, stop: "down", off: err !== undefined && OFF.includes(err), long: TOO_LONG.test(why) };
       }
       return { ok: true, text: msg.result.trim() };
     }

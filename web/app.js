@@ -2359,7 +2359,8 @@ function view_new() {
     out: [],
     ws: null,
     up: false,
-    flush: () => {}
+    flush: () => {},
+    wake: () => {}
   };
 }
 function view_hear(v, msg) {
@@ -2465,7 +2466,7 @@ function view_act(v, act) {
         return [];
       }
       const blob = new Blob([...images, text]);
-      const say = { $: "say", sizes: images.map((b) => b.size), body: () => blob, ...act.steer === true ? { steer: true } : {} };
+      const say = { $: "say", sizes: images.map((b) => b.size), body: () => blob };
       v.fold = null;
       return goal === null ? [say] : [{ $: "goal", text: goal }, say];
     }
@@ -2712,7 +2713,12 @@ function link_open(v, link) {
       drop();
     }
   }
-  [v.ws, v.flush] = [ws, flush];
+  function wake() {
+    if (v.ws === ws && Date.now() - heard > PING / 2 + RETRY) {
+      drop();
+    }
+  }
+  [v.ws, v.flush, v.wake] = [ws, flush, wake];
   ws.onmessage = (ev) => {
     heard = Date.now();
     if (ev.data === TICK) {
@@ -4576,6 +4582,7 @@ function file_name(pic) {
 // web/src/main.ts
 var APP = window.webkit?.messageHandlers?.unii ?? null;
 var DESK = matchMedia("(hover: hover)");
+var ME_WAIT = 4000;
 var NONE = "No supported Claude, ChatGPT or Pi chats in that folder. Choose ~/.claude, ~/.codex or ~/.pi.";
 var SCENES = `
   <div class="scene"><p>Your entire life.</p><p>One single chat.</p></div>
@@ -4592,7 +4599,7 @@ var P = {
   toast: 0,
   push: null,
   used: { ws: null, on: false, at: 0 },
-  after: null,
+  after: false,
   at: ""
 };
 var SCROLL = {
@@ -4655,6 +4662,9 @@ async function boot() {
     notes_close();
   });
   document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) {
+      v.wake();
+    }
     in_use();
     notes_close();
     if (document.hidden && RENEW.due && !RENEW.going && renew_free(true)) {
@@ -4662,17 +4672,22 @@ async function boot() {
       renew(true);
     }
   });
+  addEventListener("pageshow", () => v.wake());
+  addEventListener("online", () => v.wake());
   addEventListener("blur", () => in_use(true));
   addEventListener("pagehide", () => in_use(true));
 }
 async function boot_me() {
   for (let k = 0;; k++) {
-    const res = await fetch("/api/me").catch(() => null);
-    if (res?.status === 200 || res?.status === 401) {
+    const res = await me();
+    const got = res?.status === 200 ? await res.json().catch(() => {
+      return;
+    }) : res?.status === 401 ? null : undefined;
+    if (got !== undefined) {
       if (k > 0) {
         $2("#toast").hidden = true;
       }
-      return res.ok ? res.json() : null;
+      return got;
     }
     if (k === 0) {
       toast("Can't reach UniiChat. Reconnecting…", true);
@@ -4694,9 +4709,9 @@ function chat() {
   box_new(BOX2, { input: typed, files: attach });
   BOX2.addEventListener("blur", () => draw2(false));
   BOX2.onkeydown = (ev) => {
-    if (ev.key === "Enter" && !ev.shiftKey && !ev.isComposing && ev.keyCode !== 229 && (DESK.matches || ev.altKey || ev.ctrlKey)) {
+    if (ev.key === "Enter" && !ev.shiftKey && !ev.isComposing && ev.keyCode !== 229 && DESK.matches) {
       ev.preventDefault();
-      submit(ev.altKey || ev.ctrlKey);
+      submit();
     }
   };
   $2("form").onsubmit = (ev) => {
@@ -4704,7 +4719,6 @@ function chat() {
     submit();
   };
   $2(".attach").onclick = () => file.click();
-  steer_button($2(".steer", HTMLButtonElement));
   $2("#pick").onkeydown = roam;
   $2("#pick").addEventListener("focusout", left);
   $2("#menu .out").onclick = signout;
@@ -4777,39 +4791,20 @@ function typed() {
   }
   draw2(true);
 }
-function steer_button(steer) {
-  let held;
-  let told = false;
-  steer.onpointerdown = () => {
-    told = false;
-    held = setTimeout(() => {
-      told = true;
-      toast(steer.title);
-    }, 500);
-  };
-  steer.onpointerup = steer.onpointerleave = () => clearTimeout(held);
-  steer.oncontextmenu = (ev) => ev.preventDefault();
-  steer.onclick = () => {
-    if (!told) {
-      submit(true);
-    }
-    told = false;
-  };
-}
-function submit(steer = false) {
+function submit() {
   if (box_items().some((item) => item.dataset.state === "bad")) {
-    P.after = null;
+    P.after = false;
     toast(FAILED2);
     return;
   }
   if (UPS.size > 0) {
-    P.after = { steer };
+    P.after = true;
     toast("Sends once uploaded.");
     return;
   }
-  P.after = null;
+  P.after = false;
   const text = box_text().trim();
-  act({ $: "Send", text, steer });
+  act({ $: "Send", text });
   box_set("");
 }
 function back(sent, out) {
@@ -4856,8 +4851,8 @@ function upload(item, file) {
       toast(out.error);
     }
     typed();
-    if (P.after !== null && UPS.size === 0) {
-      submit(P.after.steer);
+    if (P.after && UPS.size === 0) {
+      submit();
     }
   };
   xhr.send(file);
@@ -5108,10 +5103,13 @@ function in_use(off = false) {
   ws.send(on ? ACTIVE : IDLE);
   P.used = { ws, on, at: Date.now() };
 }
+function me() {
+  return fetch("/api/me", { signal: AbortSignal.timeout(ME_WAIT) }).catch(() => null);
+}
 async function lost(up) {
   draw2(true);
-  const me = up ? null : await fetch("/api/me").catch(() => null);
-  if (me !== null && me.status === 401) {
+  const res = up ? null : await me();
+  if (res !== null && res.status === 401) {
     location.href = "/";
     return false;
   }
@@ -5475,7 +5473,6 @@ function bars() {
     $2("#timers").hidePopover();
   }
   send.classList.toggle("stop", stop);
-  $2(".steer").hidden = !on || !view_stoppable(v) || box_blank();
   $2(".composer").hidden = !on;
   $2(".mic", HTMLButtonElement).disabled = v.out.some((p) => p.msg.$ === "voice");
   $2(".mic").classList.toggle("rec", P.rec !== null);
