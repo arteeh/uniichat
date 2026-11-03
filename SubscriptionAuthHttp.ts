@@ -6,6 +6,7 @@ export type Body = Record<string, unknown>;
 export class Denied extends Error {
   constructor() { super("Subscription permission missing, removed, or expired; log in again"); }
 }
+export class Transient extends Error {}
 const AUTH_URLS = new Set([
   "https://auth.x.ai/oauth2/device/code", "https://auth.x.ai/oauth2/token",
 ]);
@@ -14,7 +15,9 @@ async function request(url: string, init: RequestInit, signal?: AbortSignal): Pr
   const timeout = AbortSignal.timeout(30_000);
   const bounded = signal ? AbortSignal.any([signal, timeout]) : timeout;
   try {
-    const res = await fetch(url, { ...init, redirect: "error", signal: bounded });
+    const res = await fetch(url, { ...init, redirect: "error", signal: bounded }).catch((error: unknown) => {
+      throw bounded.aborted ? error : new Transient("Subscription sign-in service unreachable; try again later");
+    });
     const reader = res.body?.getReader();
     const chunks: Uint8Array[] = [];
     let size = 0;
@@ -30,12 +33,13 @@ async function request(url: string, init: RequestInit, signal?: AbortSignal): Pr
       } finally { reader.releaseLock(); }
     }
     if (res.status === 401 || res.status === 403) throw new Denied();
+    if (res.status === 429 || res.status >= 500) throw new Transient("Subscription sign-in service unavailable (HTTP " + res.status + "); try again later");
     let body: unknown;
     try { body = JSON.parse(Buffer.concat(chunks).toString("utf8")); } catch { throw new Error(); }
     if (!body || typeof body !== "object" || Array.isArray(body)) throw new Error();
     return { body: body as Body, ok: res.ok, status: res.status };
   } catch (error) {
-    if (error instanceof Denied) throw error;
+    if (error instanceof Denied || error instanceof Transient) throw error;
     // Never surface fetch errors, statusText, URLs from responses, or provider bodies.
     throw new Error("Subscription auth request failed (network, timeout, redirect, or malformed response)");
   }

@@ -1,7 +1,7 @@
 import type { SubscriptionVendor } from "./SubscriptionModels.ts";
 import { SubscriptionModels } from "./SubscriptionModels.ts";
 import { forget, load, locked, save, type Credential } from "./SubscriptionAuthStore.ts";
-import { Denied, type LoginOptions } from "./SubscriptionAuthHttp.ts";
+import { Denied, Transient, type LoginOptions } from "./SubscriptionAuthHttp.ts";
 import { initial, renew, usable } from "./SubscriptionAuthProtocols.ts";
 
 function check(vendor: SubscriptionVendor): void {
@@ -53,6 +53,7 @@ export namespace SubscriptionAuth {
         return next;
       } catch (error) {
         if (error instanceof Denied) forget(dir, vendor);
+        if (error instanceof Transient) save(dir, vendor, old);
         throw error;
       }
     }, signal);
