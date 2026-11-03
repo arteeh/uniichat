@@ -5,14 +5,8 @@
     "note": "Public xAI catalog declarations only; no pricing or entitlement claim. Effort rosters follow pinned Pi getSupportedThinkingLevels restricted to low/medium/high/xhigh/max."
   },
   "models": {
-    "xai-sub": [
-      {
-        "label": "grok-4.3",
-        "id": "grok-4.3",
-        "speeds": [
-          "slow"
-        ],
-        "window": 1000000,
+    "xai-sub": {
+      "grok-4.3": {
         "output": 30000,
         "api": "openai-responses",
         "baseUrl": "https://api.x.ai/v1",
@@ -20,20 +14,9 @@
         "input": [
           "text",
           "image"
-        ],
-        "efforts": [
-          "low",
-          "medium",
-          "high"
         ]
       },
-      {
-        "label": "grok-4.5",
-        "id": "grok-4.5",
-        "speeds": [
-          "slow"
-        ],
-        "window": 500000,
+      "grok-4.5": {
         "output": 500000,
         "api": "openai-responses",
         "baseUrl": "https://api.x.ai/v1",
@@ -41,20 +24,9 @@
         "input": [
           "text",
           "image"
-        ],
-        "efforts": [
-          "low",
-          "medium",
-          "high"
         ]
       },
-      {
-        "label": "grok-4.6",
-        "id": "grok-4.6",
-        "speeds": [
-          "slow"
-        ],
-        "window": 500000,
+      "grok-4.6": {
         "output": 500000,
         "api": "openai-responses",
         "baseUrl": "https://api.x.ai/v1",
@@ -62,21 +34,9 @@
         "input": [
           "text",
           "image"
-        ],
-        "efforts": [
-          "low",
-          "medium",
-          "high",
-          "xhigh"
         ]
       },
-      {
-        "label": "grok-build-0.1",
-        "id": "grok-build-0.1",
-        "speeds": [
-          "slow"
-        ],
-        "window": 256000,
+      "grok-build-0.1": {
         "output": 256000,
         "api": "openai-responses",
         "baseUrl": "https://api.x.ai/v1",
@@ -84,13 +44,8 @@
         "input": [
           "text",
           "image"
-        ],
-        "efforts": [
-          "low",
-          "medium",
-          "high"
         ]
       }
-    ]
+    }
   }
 }

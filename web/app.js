@@ -1846,121 +1846,79 @@ function row_cells(line, n) {
 function cells_split(line) {
   return line.trim().replace(/^\||(?<!\\)\|$/g, "").split(/(?<!\\)\|/);
 }
-// SubscriptionCatalog.json
-var SubscriptionCatalog_default = {
-  provenance: {
-    pi: "b556cfe5b0300a91f39c7bc5369a65a25fb7fcd5",
-    cells: "f5dcf452bcd08b4d877dbc59e60d0bfc43731d08",
-    note: "Public xAI catalog declarations only; no pricing or entitlement claim. Effort rosters follow pinned Pi getSupportedThinkingLevels restricted to low/medium/high/xhigh/max."
-  },
-  models: {
-    "xai-sub": [
-      {
-        label: "grok-4.3",
-        id: "grok-4.3",
-        speeds: [
-          "slow"
-        ],
-        window: 1e6,
-        output: 30000,
-        api: "openai-responses",
-        baseUrl: "https://api.x.ai/v1",
-        reasoning: true,
-        input: [
-          "text",
-          "image"
-        ],
-        efforts: [
-          "low",
-          "medium",
-          "high"
-        ]
-      },
-      {
-        label: "grok-4.5",
-        id: "grok-4.5",
-        speeds: [
-          "slow"
-        ],
-        window: 500000,
-        output: 500000,
-        api: "openai-responses",
-        baseUrl: "https://api.x.ai/v1",
-        reasoning: true,
-        input: [
-          "text",
-          "image"
-        ],
-        efforts: [
-          "low",
-          "medium",
-          "high"
-        ]
-      },
-      {
-        label: "grok-4.6",
-        id: "grok-4.6",
-        speeds: [
-          "slow"
-        ],
-        window: 500000,
-        output: 500000,
-        api: "openai-responses",
-        baseUrl: "https://api.x.ai/v1",
-        reasoning: true,
-        input: [
-          "text",
-          "image"
-        ],
-        efforts: [
-          "low",
-          "medium",
-          "high",
-          "xhigh"
-        ]
-      },
-      {
-        label: "grok-build-0.1",
-        id: "grok-build-0.1",
-        speeds: [
-          "slow"
-        ],
-        window: 256000,
-        output: 256000,
-        api: "openai-responses",
-        baseUrl: "https://api.x.ai/v1",
-        reasoning: true,
-        input: [
-          "text",
-          "image"
-        ],
-        efforts: [
-          "low",
-          "medium",
-          "high"
-        ]
-      }
-    ]
-  }
+
+// SubscriptionPicks.json
+var SubscriptionPicks_default = {
+  "xai-sub": [
+    {
+      label: "grok-4.3",
+      id: "grok-4.3",
+      speeds: [
+        "slow"
+      ],
+      window: 1e6,
+      efforts: [
+        "low",
+        "medium",
+        "high"
+      ]
+    },
+    {
+      label: "grok-4.5",
+      id: "grok-4.5",
+      speeds: [
+        "slow"
+      ],
+      window: 500000,
+      efforts: [
+        "low",
+        "medium",
+        "high"
+      ]
+    },
+    {
+      label: "grok-4.6",
+      id: "grok-4.6",
+      speeds: [
+        "slow"
+      ],
+      window: 500000,
+      efforts: [
+        "low",
+        "medium",
+        "high",
+        "xhigh"
+      ]
+    },
+    {
+      label: "grok-build-0.1",
+      id: "grok-build-0.1",
+      speeds: [
+        "slow"
+      ],
+      window: 256000,
+      efforts: [
+        "low",
+        "medium",
+        "high"
+      ]
+    }
+  ]
 };
 
-// SubscriptionModels.ts
+// SubscriptionPicks.ts
 var SUBSCRIPTION_VENDORS = ["xai-sub"];
-var SubscriptionModels;
-((SubscriptionModels) => {
+var SubscriptionPicks;
+((SubscriptionPicks) => {
   function isVendor(vendor) {
     return SUBSCRIPTION_VENDORS.includes(vendor);
   }
-  SubscriptionModels.isVendor = isVendor;
+  SubscriptionPicks.isVendor = isVendor;
   function models(vendor) {
-    return SubscriptionCatalog_default.models[vendor];
+    return SubscriptionPicks_default[vendor];
   }
-  SubscriptionModels.models = models;
-  function model(vendor, label) {
-    return models(vendor).find((m) => m.label === label);
-  }
-  SubscriptionModels.model = model;
-})(SubscriptionModels ||= {});
+  SubscriptionPicks.models = models;
+})(SubscriptionPicks ||= {});
 
 // Pick.ts
 var VENDORS = ["claude-api", "openai-api", "openai-sub", "claude-sub", ...SUBSCRIPTION_VENDORS];
@@ -1978,7 +1936,7 @@ var MODELS = {
   "openai-api": OPENAI,
   "openai-sub": PLAN,
   "claude-sub": [{ ...OPUS, speeds: ["slow"] }, SONNET, HAIKU],
-  "xai-sub": SubscriptionModels.models("xai-sub")
+  "xai-sub": SubscriptionPicks.models("xai-sub")
 };
 var EFFORTS = ["low", "medium", "high", "xhigh", "max"];
 var SPEEDS = ["slow", "fast", "ultrafast"];
@@ -2074,10 +2032,9 @@ var Pick;
       const on = Pick.on(own, f.vendor, f.model);
       return Pick.ask({ ...on, effort: f.effort ?? on.effort, speed: f.speed ?? on.speed });
     });
-    const all = [own, ...list];
-    if (all.some((p) => SubscriptionModels.isVendor(p.vendor)) && all.some((p) => p.vendor.endsWith("-api"))) {
-      throw new Error("Subscription profiles cannot fall back to metered API providers");
-    }
+    const metered = (p) => p.vendor.endsWith("-api");
+    const apart = (p) => SubscriptionPicks.isVendor(own.vendor) && metered(p) || metered(own) && SubscriptionPicks.isVendor(p.vendor);
+    const all = [own, ...list.filter((p) => !apart(p))];
     return all.filter((p, k) => all.findIndex((q) => q.vendor === p.vendor && q.model === p.model) === k);
   }
   Pick2.falls = falls;

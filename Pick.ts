@@ -1,6 +1,6 @@
 import type { Vendor } from "./AskAI.ts";
 import { get } from "./Json.ts";
-import { SUBSCRIPTION_VENDORS, SubscriptionModels } from "./SubscriptionModels.ts";
+import { SUBSCRIPTION_VENDORS, SubscriptionPicks } from "./SubscriptionPicks.ts";
 
 export type Pick = {
   vendor   : Vendor;
@@ -42,7 +42,7 @@ const MODELS: Record<Vendor, Model[]> = {
   "openai-api": OPENAI,
   "openai-sub": PLAN,
   "claude-sub": [{ ...OPUS, speeds: ["slow"] }, SONNET, HAIKU],
-  "xai-sub": SubscriptionModels.models("xai-sub"),
+  "xai-sub": SubscriptionPicks.models("xai-sub"),
 };
 
 export const EFFORTS = ["low", "medium", "high", "xhigh", "max"];
@@ -140,10 +140,10 @@ export namespace Pick {
       const on = Pick.on(own, f.vendor, f.model);
       return Pick.ask({ ...on, effort: f.effort ?? on.effort, speed: f.speed ?? on.speed });
     });
-    const all = [own, ...list];
-    if (all.some((p) => SubscriptionModels.isVendor(p.vendor)) && all.some((p) => p.vendor.endsWith("-api"))) {
-      throw new Error("Subscription profiles cannot fall back to metered API providers");
-    }
+    // a subscription never falls back to a metered API, nor the other way round
+    const metered = (p: Pick) => p.vendor.endsWith("-api");
+    const apart = (p: Pick) => (SubscriptionPicks.isVendor(own.vendor) && metered(p)) || (metered(own) && SubscriptionPicks.isVendor(p.vendor));
+    const all = [own, ...list.filter((p) => !apart(p))];
     return all.filter((p, k) => all.findIndex((q) => q.vendor === p.vendor && q.model === p.model) === k);
   }
 
