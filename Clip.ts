@@ -55,6 +55,8 @@ export function clip_page(str: string, at: number): string {
   return str.slice(at, end) + (end < str.length ? on : "");
 }
 
+export class LineLimit extends Error {}
+
 export async function* stream_lines(stream: ReadableStream<Uint8Array>, max = Infinity): AsyncGenerator<string[]> {
   const reader = stream.getReader();
   const utf8 = new TextDecoder();
@@ -66,7 +68,7 @@ export async function* stream_lines(stream: ReadableStream<Uint8Array>, max = In
         const nl = got.value.indexOf(10, at);
         const end = nl < 0 ? got.value.length : nl;
         bytes += end - at;
-        if (bytes > max) throw new Error("Session line exceeds " + max + " bytes.");
+        if (bytes > max) throw new LineLimit("Session line exceeds " + max + " bytes.");
         if (nl >= 0) bytes = 0;
         at = end + 1;
       }

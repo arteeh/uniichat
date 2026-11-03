@@ -24,6 +24,8 @@ function clip_pages(str) {
   } while (at < str.length);
   return pages;
 }
+class LineLimit extends Error {
+}
 async function* stream_lines(stream, max = Infinity) {
   const reader = stream.getReader();
   const utf8 = new TextDecoder;
@@ -36,7 +38,7 @@ async function* stream_lines(stream, max = Infinity) {
         const end = nl < 0 ? got.value.length : nl;
         bytes += end - at;
         if (bytes > max)
-          throw new Error("Session line exceeds " + max + " bytes.");
+          throw new LineLimit("Session line exceeds " + max + " bytes.");
         if (nl >= 0)
           bytes = 0;
         at = end + 1;
@@ -102,47 +104,53 @@ async function pi_scan(file) {
   let snapshots = false;
   let leaf;
   const index = new Map;
-  for await (const row of records(file)) {
-    const j = row.value;
-    if (j === null) {
-      broken++;
-      continue;
+  try {
+    for await (const row of records(file)) {
+      const j = row.value;
+      if (j === null) {
+        broken++;
+        continue;
+      }
+      if (header === null) {
+        if (j.type !== "session")
+          return null;
+        if (file.size > 64 * 2 ** 20)
+          throw new Error("Pi session file exceeds 64 MiB.");
+        const v = j.version === undefined ? 1 : j.version;
+        if (typeof v !== "number" || !Number.isSafeInteger(v) || v < 1)
+          throw new Error("Unsupported Pi session version (expected a positive integer): " + JSON.stringify(v));
+        const id = str(j.id);
+        const cwd = str(j.cwd);
+        const start = iso(j.timestamp);
+        if (id === undefined || id === "" || cwd === undefined || start === "")
+          throw new Error("Invalid Pi session header");
+        version = v;
+        header = { id, cwd, start };
+        continue;
+      }
+      if (j.type === "session")
+        throw new Error("Multiple Pi session headers");
+      if (typeof j.type !== "string") {
+        broken++;
+        continue;
+      }
+      const id = version === 1 ? "v1-" + row.line : j.id;
+      const parent = version === 1 ? leaf?.id ?? null : j.parentId;
+      if (typeof id !== "string" || id === "" || parent !== null && typeof parent !== "string")
+        throw new Error("Invalid Pi entry ID or parent");
+      if (index.has(id))
+        throw new Error("Duplicate Pi entry ID");
+      const role = rec(j.message) ? str(j.message.role) : undefined;
+      const ordinary = j.type === "message" && role !== undefined && ["user", "assistant", "toolResult", "bashExecution"].includes(role);
+      leaf = { id, parent, line: row.line, message: ordinary };
+      index.set(id, leaf);
+      snapshots ||= j.type === "compaction" && Array.isArray(j.retainedTail);
+      generated += Number(j.type === "custom_message" || j.type === "message" && !ordinary);
     }
-    if (header === null) {
-      if (j.type !== "session")
-        return null;
-      if (file.size > 64 * 2 ** 20)
-        throw new Error("Pi session file exceeds 64 MiB.");
-      const v = j.version === undefined ? 1 : j.version;
-      if (typeof v !== "number" || !Number.isSafeInteger(v) || v < 1)
-        throw new Error("Unsupported Pi session version (expected a positive integer): " + JSON.stringify(v));
-      const id = str(j.id);
-      const cwd = str(j.cwd);
-      const start = iso(j.timestamp);
-      if (id === undefined || id === "" || cwd === undefined || start === "")
-        throw new Error("Invalid Pi session header");
-      version = v;
-      header = { id, cwd, start };
-      continue;
-    }
-    if (j.type === "session")
-      throw new Error("Multiple Pi session headers");
-    if (typeof j.type !== "string") {
-      broken++;
-      continue;
-    }
-    const id = version === 1 ? "v1-" + row.line : j.id;
-    const parent = version === 1 ? leaf?.id ?? null : j.parentId;
-    if (typeof id !== "string" || id === "" || parent !== null && typeof parent !== "string")
-      throw new Error("Invalid Pi entry ID or parent");
-    if (index.has(id))
-      throw new Error("Duplicate Pi entry ID");
-    const role = rec(j.message) ? str(j.message.role) : undefined;
-    const ordinary = j.type === "message" && role !== undefined && ["user", "assistant", "toolResult", "bashExecution"].includes(role);
-    leaf = { id, parent, line: row.line, message: ordinary };
-    index.set(id, leaf);
-    snapshots ||= j.type === "compaction" && Array.isArray(j.retainedTail);
-    generated += Number(j.type === "custom_message" || j.type === "message" && !ordinary);
+  } catch (err) {
+    if (header === null && err instanceof LineLimit)
+      return null;
+    throw err;
   }
   if (header === null)
     return null;

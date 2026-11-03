@@ -1,6 +1,6 @@
 import type { Kind } from "./AskAI.ts";
 import type { Msg } from "./Import.ts";
-import { clip_pages, stream_lines } from "./Clip.ts";
+import { LineLimit, clip_pages, stream_lines } from "./Clip.ts";
 import { list, rec, str, text_of } from "./Json.ts";
 
 type Header = { id: string; cwd: string; start: string };
@@ -26,34 +26,39 @@ export async function pi_scan(file: Blob): Promise<PiSession | null> {
   let snapshots = false;
   let leaf: Entry | undefined;
   const index = new Map<string, Entry>();
-  for await (const row of records(file)) {
-    const j = row.value;
-    if (j === null) { broken++; continue; }
-    if (header === null) {
-      if (j.type !== "session") return null;
-      if (file.size > 64 * 2 ** 20) throw new Error("Pi session file exceeds 64 MiB.");
-      const v = j.version === undefined ? 1 : j.version;
-      if (typeof v !== "number" || !Number.isSafeInteger(v) || v < 1) throw new Error("Unsupported Pi session version (expected a positive integer): " + JSON.stringify(v));
-      const id = str(j.id);
-      const cwd = str(j.cwd);
-      const start = iso(j.timestamp);
-      if (id === undefined || id === "" || cwd === undefined || start === "") throw new Error("Invalid Pi session header");
-      version = v;
-      header = { id, cwd, start };
-      continue;
+  try {
+    for await (const row of records(file)) {
+      const j = row.value;
+      if (j === null) { broken++; continue; }
+      if (header === null) {
+        if (j.type !== "session") return null;
+        if (file.size > 64 * 2 ** 20) throw new Error("Pi session file exceeds 64 MiB.");
+        const v = j.version === undefined ? 1 : j.version;
+        if (typeof v !== "number" || !Number.isSafeInteger(v) || v < 1) throw new Error("Unsupported Pi session version (expected a positive integer): " + JSON.stringify(v));
+        const id = str(j.id);
+        const cwd = str(j.cwd);
+        const start = iso(j.timestamp);
+        if (id === undefined || id === "" || cwd === undefined || start === "") throw new Error("Invalid Pi session header");
+        version = v;
+        header = { id, cwd, start };
+        continue;
+      }
+      if (j.type === "session") throw new Error("Multiple Pi session headers");
+      if (typeof j.type !== "string") { broken++; continue; }
+      const id = version === 1 ? "v1-" + row.line : j.id;
+      const parent = version === 1 ? leaf?.id ?? null : j.parentId;
+      if (typeof id !== "string" || id === "" || (parent !== null && typeof parent !== "string")) throw new Error("Invalid Pi entry ID or parent");
+      if (index.has(id)) throw new Error("Duplicate Pi entry ID");
+      const role = rec(j.message) ? str(j.message.role) : undefined;
+      const ordinary = j.type === "message" && role !== undefined && ["user", "assistant", "toolResult", "bashExecution"].includes(role);
+      leaf = { id, parent, line: row.line, message: ordinary };
+      index.set(id, leaf);
+      snapshots ||= j.type === "compaction" && Array.isArray(j.retainedTail);
+      generated += Number(j.type === "custom_message" || (j.type === "message" && !ordinary));
     }
-    if (j.type === "session") throw new Error("Multiple Pi session headers");
-    if (typeof j.type !== "string") { broken++; continue; }
-    const id = version === 1 ? "v1-" + row.line : j.id;
-    const parent = version === 1 ? leaf?.id ?? null : j.parentId;
-    if (typeof id !== "string" || id === "" || (parent !== null && typeof parent !== "string")) throw new Error("Invalid Pi entry ID or parent");
-    if (index.has(id)) throw new Error("Duplicate Pi entry ID");
-    const role = rec(j.message) ? str(j.message.role) : undefined;
-    const ordinary = j.type === "message" && role !== undefined && ["user", "assistant", "toolResult", "bashExecution"].includes(role);
-    leaf = { id, parent, line: row.line, message: ordinary };
-    index.set(id, leaf);
-    snapshots ||= j.type === "compaction" && Array.isArray(j.retainedTail);
-    generated += Number(j.type === "custom_message" || (j.type === "message" && !ordinary));
+  } catch (err) {
+    if (header === null && err instanceof LineLimit) return null;
+    throw err;
   }
   if (header === null) return null;
   const active = new Set<number>();
