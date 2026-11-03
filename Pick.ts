@@ -1,5 +1,6 @@
 import type { Vendor } from "./AskAI.ts";
 import { get } from "./Json.ts";
+import { SUBSCRIPTION_VENDORS, SubscriptionPicks } from "./SubscriptionPicks.ts";
 
 export type Pick = {
   vendor   : Vendor;
@@ -11,13 +12,13 @@ export type Pick = {
 
 export type Move = "next" | "prev" | "model" | "up" | "down" | "effort" | "speed";
 
-export type Model = { label: string; id: string; speeds: string[]; window: number };
+export type Model = { label: string; id: string; speeds: string[]; window: number; efforts?: string[] };
 
 export type Offer = { vendors: Vendor[]; models: string[]; profiles?: Record<string, Fall[]> };
 
 export type Fall = { vendor: Vendor; model: Model; effort?: string; speed?: string };
 
-export const VENDORS: Vendor[] = ["claude-api", "openai-api", "openai-sub", "claude-sub"];
+export const VENDORS: Vendor[] = ["claude-api", "openai-api", "openai-sub", "claude-sub", ...SUBSCRIPTION_VENDORS];
 
 // the windows: Claude's 1M, its models' default (Claude Code's docs:
 // Opus 4.7+, Sonnet 5+, Haiku 5.5 need no [1m]), at the API and on a
@@ -41,6 +42,7 @@ const MODELS: Record<Vendor, Model[]> = {
   "openai-api": OPENAI,
   "openai-sub": PLAN,
   "claude-sub": [{ ...OPUS, speeds: ["slow"] }, SONNET, HAIKU],
+  "xai-sub": SubscriptionPicks.models("xai-sub"),
 };
 
 export const EFFORTS = ["low", "medium", "high", "xhigh", "max"];
@@ -58,8 +60,11 @@ export namespace Pick {
   export function on(pick: Pick, vendor: Vendor, model: Model): Pick {
     const below = SPEEDS.slice(0, SPEEDS.indexOf(pick.speed) + 1);
     const speed = below.filter((s) => model.speeds.includes(s)).pop() ?? "slow";
-    return { ...pick, vendor, model: model.label, speed };
+    const effort = efforts(model).includes(pick.effort) ? pick.effort : efforts(model)[0];
+    return { ...pick, vendor, model: model.label, speed, effort };
   }
+
+  export function efforts(model?: Model): string[] { return model?.efforts ?? EFFORTS; }
 
   export function models(vendors: Vendor[], labels: string[]): Array<[Vendor, Model]> {
     return vendors.flatMap((v) => MODELS[v].filter((m) => labels.includes(m.label)).map((m): [Vendor, Model] => [v, m]));
@@ -82,7 +87,7 @@ export namespace Pick {
       case "up":
       case "down":
       case "effort": {
-        return EFFORTS.map((effort) => [effort, { ...pick, effort }]);
+        return efforts(Pick.model(pick.vendor, pick.model)).map((effort) => [effort, { ...pick, effort }]);
       }
       case "speed": {
         return speeds.map((speed) => [speed, { ...pick, speed }]);
@@ -135,7 +140,11 @@ export namespace Pick {
       const on = Pick.on(own, f.vendor, f.model);
       return Pick.ask({ ...on, effort: f.effort ?? on.effort, speed: f.speed ?? on.speed });
     });
-    return [own, ...list].filter((p, k, all) => all.findIndex((q) => q.vendor === p.vendor && q.model === p.model) === k);
+    // a subscription never falls back to a metered API, nor the other way round
+    const metered = (p: Pick) => p.vendor.endsWith("-api");
+    const apart = (p: Pick) => (SubscriptionPicks.isVendor(own.vendor) && metered(p)) || (metered(own) && SubscriptionPicks.isVendor(p.vendor));
+    const all = [own, ...list.filter((p) => !apart(p))];
+    return all.filter((p, k) => all.findIndex((q) => q.vendor === p.vendor && q.model === p.model) === k);
   }
 
   export function profile(name: string, offer: Offer, effort: string, speed: string): Pick | null {
@@ -145,7 +154,7 @@ export namespace Pick {
       return null;
     }
     const on = Pick.on({ vendor: first.vendor, model: first.model.label, effort, speed }, first.vendor, first.model);
-    return { ...on, effort: first.effort ?? effort, speed: first.speed ?? on.speed, profile: name };
+    return { ...on, effort: first.effort ?? on.effort, speed: first.speed ?? on.speed, profile: name };
   }
 
   export function read(x: unknown, offer: Offer): Pick | null {
@@ -158,7 +167,7 @@ export namespace Pick {
       return null;
     }
     const model = Pick.model(vendor, label);
-    if (model === undefined || typeof effort !== "string" || !EFFORTS.includes(effort) || typeof speed !== "string" || !model.speeds.includes(speed)) {
+    if (model === undefined || typeof effort !== "string" || !efforts(model).includes(effort) || typeof speed !== "string" || !model.speeds.includes(speed)) {
       return null;
     }
     return { vendor, model: label, effort, speed };

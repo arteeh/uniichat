@@ -1,0 +1,57 @@
+{
+  "xai-sub": [
+    {
+      "label": "grok-4.3",
+      "id": "grok-4.3",
+      "speeds": [
+        "slow"
+      ],
+      "window": 1000000,
+      "efforts": [
+        "low",
+        "medium",
+        "high"
+      ]
+    },
+    {
+      "label": "grok-4.5",
+      "id": "grok-4.5",
+      "speeds": [
+        "slow"
+      ],
+      "window": 500000,
+      "efforts": [
+        "low",
+        "medium",
+        "high"
+      ]
+    },
+    {
+      "label": "grok-4.6",
+      "id": "grok-4.6",
+      "speeds": [
+        "slow"
+      ],
+      "window": 500000,
+      "efforts": [
+        "low",
+        "medium",
+        "high",
+        "xhigh"
+      ]
+    },
+    {
+      "label": "grok-build-0.1",
+      "id": "grok-build-0.1",
+      "speeds": [
+        "slow"
+      ],
+      "window": 256000,
+      "efforts": [
+        "low",
+        "medium",
+        "high"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,51 @@
+{
+  "provenance": {
+    "pi": "b556cfe5b0300a91f39c7bc5369a65a25fb7fcd5",
+    "cells": "f5dcf452bcd08b4d877dbc59e60d0bfc43731d08",
+    "note": "Public xAI catalog declarations only; no pricing or entitlement claim. Effort rosters follow pinned Pi getSupportedThinkingLevels restricted to low/medium/high/xhigh/max."
+  },
+  "models": {
+    "xai-sub": {
+      "grok-4.3": {
+        "output": 30000,
+        "api": "openai-responses",
+        "baseUrl": "https://api.x.ai/v1",
+        "reasoning": true,
+        "input": [
+          "text",
+          "image"
+        ]
+      },
+      "grok-4.5": {
+        "output": 500000,
+        "api": "openai-responses",
+        "baseUrl": "https://api.x.ai/v1",
+        "reasoning": true,
+        "input": [
+          "text",
+          "image"
+        ]
+      },
+      "grok-4.6": {
+        "output": 500000,
+        "api": "openai-responses",
+        "baseUrl": "https://api.x.ai/v1",
+        "reasoning": true,
+        "input": [
+          "text",
+          "image"
+        ]
+      },
+      "grok-build-0.1": {
+        "output": 256000,
+        "api": "openai-responses",
+        "baseUrl": "https://api.x.ai/v1",
+        "reasoning": true,
+        "input": [
+          "text",
+          "image"
+        ]
+      }
+    }
+  }
+}

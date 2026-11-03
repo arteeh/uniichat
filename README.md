@@ -85,6 +85,8 @@ Use
 
 From source (Bun): `bun install`, `bun run web`, `bun Cli.ts <command>`, `bun run build` for a single `unii` program.
 
+**xAI subscription:** `unii serve xai-sub login` (also `status`, `models`, `logout`); choose `xai-sub` independently for chat, compactor and subagents in Settings. No metered-API fallback; check your provider's eligibility and billing settings. Native subscription auth is Linux-only verified; Windows unsupported, macOS unverified. [Required third-party notices](SUBSCRIPTION-NOTICE.md).
+
 Uninstall
 ---------
 

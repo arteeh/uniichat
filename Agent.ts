@@ -2,6 +2,9 @@ import { AskAI, type Ask, type Block, type Flight, type Try, type End, type Even
 import { Anthropic } from "./Anthropic.ts";
 import { OpenAI } from "./OpenAI.ts";
 import { ChatGPT } from "./ChatGPT.ts";
+import { Subscriptions } from "./Subscriptions.ts";
+import { SubscriptionModels } from "./SubscriptionModels.ts";
+import { SubscriptionContextLimit } from "./SubscriptionRequest.ts";
 import { Limit } from "./Limit.ts";
 import { live_push } from "./View.ts";
 import { Machine, type Spec } from "./Machine.ts";
@@ -66,7 +69,8 @@ type Rpc = { "tools/list": Listed; "tools/call": Called };
 
 export type Wire<S, E> = {
   key     : string;
-  auth?   : (refused: string | undefined) => Promise<string>;
+  auth?   : (refused: string | undefined, signal?: AbortSignal) => Promise<string>;
+  reject? : (res: Response, body: string, truncated?: boolean) => Step;
   refusal?: (res: Response, body: string) => Refusal | null;
   reset?  : (res: Response, body: string) => number | null;
   idle    : number;
@@ -114,6 +118,8 @@ export namespace Agent {
       try {
         if (ask.vendor === "claude-api") {
           await Agent.loop(Anthropic.wire, run);
+        } else if (SubscriptionModels.isVendor(ask.vendor)) {
+          await Agent.loop(Subscriptions.wire(ask), run);
         } else if (ask.vendor === "openai-sub") {
           await Agent.loop(ChatGPT.wire, run);
         } else {
@@ -121,6 +127,10 @@ export namespace Agent {
         }
       } catch (err) {
         end.text ||= err_why(err);
+        if (err instanceof SubscriptionContextLimit) {
+          end.stop = "fail";
+          end.long = true;
+        }
       }
       end.ok = end.ok && !run.abort.signal.aborted;
       return end;
@@ -192,7 +202,7 @@ export namespace Agent {
       for (let k = 0; !signal.aborted; ) {
         await Agent.give_way(seat, signal);
         const seen: Entry[] = [];
-        const token = await Agent.unless_stopped(Agent.token(wire, key, refused), signal);
+        const token = await Agent.unless_stopped(Agent.token(wire, key, refused, signal), signal);
         if (token === null) {
           return Agent.fail("stopped", seen);
         }
@@ -285,12 +295,12 @@ export namespace Agent {
     return after?.[1] ?? (told.length > 0 ? Math.max(...told.map(([, t]) => t)) : null);
   }
 
-  export async function token<S, E>(wire: Wire<S, E>, key: string, refused: string | undefined): Promise<string | Step> {
+  export async function token<S, E>(wire: Wire<S, E>, key: string, refused: string | undefined, signal?: AbortSignal): Promise<string | Step> {
     if (wire.auth === undefined) {
       return key;
     }
     try {
-      return await wire.auth(refused);
+      return await wire.auth(refused, signal);
     } catch (err) {
       if (!(err instanceof Error && "busy" in err && err.busy === true)) {
         throw err;
@@ -379,21 +389,45 @@ export namespace Agent {
         body    : json,
         signal  : AbortSignal.any([run.abort.signal, idle.signal]),
         timeout : false,
+        redirect: SubscriptionModels.isVendor(run.ask.vendor) ? "error" : undefined,
       } as RequestInit);
-      const text = res.ok && res.body ? null : await res.text();
+      const failed = !res.ok || res.body === null;
+      const bounded = failed && wire.reject ? await Agent.error_text(res) : null;
+      const text = failed ? bounded?.text ?? await res.text() : null;
       const refusal = text === null ? null : wire.refusal?.(res, text) ?? null;
       const spent = text !== null && SPENT.test(text);
       const why = refusal?.why ?? "HTTP " + res.status + ": " + Agent.reason(text ?? "");
       const off = spent || OFF.includes(res.status) || refusal !== null;
       const stop = refusal !== null ? "down" : text !== null && Agent.limited(res, text) && !spent ? "limit" : text !== null && Agent.passing(res) && !spent ? "busy" : "down";
       const until = text !== null && stop === "limit" ? wire.reset?.(res, text) ?? undefined : undefined;
-      step = text !== null || res.body === null ? { ...Agent.fail(why, [], stop), off, refusal: refusal ?? undefined, until } : await Agent.stream(wire, run, res.body, timer, seen, st, flight.begun);
+      step = text !== null || res.body === null
+        ? wire.reject?.(res, text ?? "", bounded?.truncated) ?? { ...Agent.fail(why, [], stop), off, refusal: refusal ?? undefined, until }
+        : await Agent.stream(wire, run, res.body, timer, seen, st, flight.begun);
     } catch (err) {
       step = Agent.fail(err_why(err), [], "busy");
     }
     clearTimeout(timer);
     flight.end();
     return { res, step };
+  }
+
+  export async function error_text(res: Response): Promise<{ text: string; truncated: boolean }> {
+    const reader = res.body?.getReader();
+    if (!reader) return { text: "", truncated: false };
+    const chunks: Uint8Array[] = [];
+    let size = 0;
+    let truncated = false;
+    try {
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        const room = 64 * 1024 - size;
+        chunks.push(value.subarray(0, room));
+        size += value.length;
+        if (size >= 64 * 1024) { truncated = true; await reader.cancel(); break; }
+      }
+      return { text: Buffer.concat(chunks).toString("utf8"), truncated };
+    } finally { reader.releaseLock(); }
   }
 
   // a failed request's why: the API's message (Anthropic's and OpenAI's

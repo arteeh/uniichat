@@ -6,6 +6,7 @@ import * as path from "node:path";
 import { err_why } from "./Err.ts";
 import type { Part } from "./Service.ts";
 import * as Update from "./Update.ts";
+import { SUBSCRIPTION_VENDORS, type SubscriptionVendor } from "./SubscriptionModels.ts";
 
 const SET = /^--env=(UNII_DIR|XDG_CONFIG_HOME)=(.+)$/;
 const ARGS = process.argv.slice(2).filter((a) => !SET.test(a));
@@ -143,7 +144,18 @@ function plan(name: "claude" | "chatgpt", about: string): Cmd {
   ] };
 }
 
-const TREE: Cmd = { use: "unii [url]", about: "the chat in this terminal", url: true, run: async () => (await import("./Term.ts")).main(URL_), kids: [
+function subscription(vendor: SubscriptionVendor): Cmd {
+  return { use: vendor, about: "native subscription provider (chat and compaction)", kids: ["login", "logout", "status", "models"].map((word): Cmd => ({
+    use: word, about: word === "login" ? "connect this provider" : word === "logout" ? "forget local credentials" : "local connection/catalog status",
+    run: async () => {
+      // Recovery must not import Config: a disconnected configured pick may be invalid.
+      const dir = (process.env.UNII_DIR ?? "~/.unii").replace(/^~(?=[\\/]|$)/, (await import("node:os")).homedir());
+      await (await import("./SubscriptionAuth.ts")).SubscriptionAuth.cli(dir, vendor, [word]).catch((err: unknown) => fail(err_why(err)));
+    },
+  })) };
+}
+
+const TREE: Cmd = { use: "unii [url]",  about: "the chat in this terminal", url: true, run: async () => (await import("./Term.ts")).main(URL_), kids: [
   { use: "device [url]", about: "this computer as a device of a server", url: true, run: async () => { await run_here("device"); await (await import("./Device.ts")).run(URL_); }, kids: service("device", async () => {
     unmark_from_parent_shell();
     const Service = await import("./Service.ts");
@@ -164,6 +176,7 @@ const TREE: Cmd = { use: "unii [url]", about: "the chat in this terminal", url: 
     ] },
     plan("claude", "your Claude plan (claude-sub)"),
     plan("chatgpt", "your ChatGPT plan (openai-sub)"),
+    ...SUBSCRIPTION_VENDORS.map(subscription),
   ] },
   { use: "update", about: "install the newest release", run: update },
   { use: "version", about: "this unii's version", run: () => console.log("unii " + Update.VERSION) },
