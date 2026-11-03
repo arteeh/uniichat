@@ -11,12 +11,6 @@ type Connection = {
 };
 type NativeWire = Wire<State, unknown> & { auth: Connection["auth"]; reject: (res: Response, body: string, truncated?: boolean) => Step };
 
-// the provider's own message, else the start of its body, without any bearer token it echoes
-function said(message: unknown, body: string): string {
-  const text = typeof message === "string" && message !== "" ? message : body;
-  return text.slice(0, 2000).replace(/Bearer\s+\S+/gi, "Bearer [redacted]");
-}
-
 export namespace SubscriptionWire {
   export function wire(model: SubscriptionModel, connection: Connection): NativeWire {
     const vendor = vendorOf(model);
@@ -66,7 +60,7 @@ export namespace SubscriptionWire {
           out: [], uses: [], entries: [], note: "",
           stop: truncated ? "down" : context ? "fail" : spent ? "down" : res.status === 429 ? "limit" : [408, 409].includes(res.status) || res.status >= 500 ? "busy" : "down",
           off: truncated || spent || [401, 402, 403, 404].includes(res.status),
-          why: truncated ? "HTTP " + res.status + ": error body exceeded the local response limit" : (context ? "Subscription context window exceeded: " : "HTTP " + res.status + ": ") + said(message, body),
+          why: truncated ? "HTTP " + res.status + ": error body exceeded the local response limit" : (context ? "Subscription context window exceeded: " : "HTTP " + res.status + ": ") + Stream.said(message, body),
         };
       },
     };
