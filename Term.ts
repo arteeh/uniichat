@@ -450,20 +450,19 @@ async function term_import(t: Term, arg: string): Promise<void> {
     return;
   }
   const old   = (await done.json()) as Import.Done;
-  const warnings = Import.import_warnings(sessions, old);
+  const shown = Import.import_plan(sessions, want, old).sessions;
+  want.off    = shown.filter((_, k) => words.includes("-#" + (k + 1))).map(Import.import_id);
+  const plan  = Import.import_plan(sessions, want, old);
+  const warnings = words.includes("go") && plan.msgs > 0 ? [] : Import.import_warnings(sessions, old, want.replay);
   if (warnings.length > 0) term_note(t, warnings.join("\n"));
   if (want.replay) term_note(t, "Replay selected Pi history: existing messages will be duplicated; older history may follow newer messages. Omit go to preview or cancel.");
-  const shown = Import.import_plan(sessions, want, old).sessions;
-  const ids = [...new Set([...sessions].sort((a, b) => a.start.localeCompare(b.start)).map(Import.import_id))];
-  want.off    = ids.filter((_, k) => words.includes("-#" + (k + 1)));
-  const plan  = Import.import_plan(sessions, want, old);
   const found = "Found " + Import.import_count(plan.msgs, "new ") + ". ";
   if (plan.msgs === 0) {
     term_note(t, plan.first === "" ? Import.OLD : found + HOW);
     return;
   }
   if (!words.includes("go")) {
-    const which = words.includes("sessions") ? shown.map((s) => "\n- #" + (ids.indexOf(Import.import_id(s)) + 1) + " " + s.app + ": " + Import.import_line(s) + (want.off.includes(Import.import_id(s)) ? " (left out)" : "")).join("") + "\n" : "";
+    const which = words.includes("sessions") ? shown.map((s, k) => "\n- #" + (k + 1) + " " + s.app + ": " + Import.import_line(s) + (want.off.includes(Import.import_id(s)) ? " (left out)" : "")).join("") + "\n" : "";
     const go    = "To import them, type:\n\n```\n/import " + (arg + " go").trim() + "\n```";
     term_rows(t, View.entry_rows(null, "note", found + which + "\n" + go + "\n\n" + HOW), false);
     return;

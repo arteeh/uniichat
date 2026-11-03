@@ -332,7 +332,7 @@ function import_repeat(sessions, done) {
     return repeat;
   });
 }
-function import_warnings(sessions, done) {
+function import_warnings(sessions, done, replay = false) {
   const seen = new Set;
   const warnings = sessions.flatMap((s) => {
     if (s.warnings === undefined || seen.has(s.warnings))
@@ -340,7 +340,7 @@ function import_warnings(sessions, done) {
     seen.add(s.warnings);
     return s.warnings.map((w) => s.app + " " + s.where + ": " + w);
   });
-  if (import_repeat(sessions, done)) {
+  if (!replay && import_repeat(sessions, done)) {
     warnings.push("Pi re-import only adds messages after the last imported date. Same-timestamp appends, older branches and tools enabled later may be left out. Replay selected Pi history (terminal: /import pi replay sessions) to recover them; replay duplicates existing messages and may put older history after newer messages.");
   }
   return warnings;
