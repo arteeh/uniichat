@@ -55,18 +55,34 @@ export function clip_page(str: string, at: number): string {
   return str.slice(at, end) + (end < str.length ? on : "");
 }
 
-export async function* stream_lines(stream: ReadableStream<Uint8Array>): AsyncGenerator<string[]> {
+export class LineLimit extends Error {}
+
+export async function* stream_lines(stream: ReadableStream<Uint8Array>, max = Infinity): AsyncGenerator<string[]> {
   const reader = stream.getReader();
   const utf8 = new TextDecoder();
   let rest = "";
-  for (let got = await reader.read(); !got.done; got = await reader.read()) {
-    const text = utf8.decode(got.value, { stream: true });
-    const nl = text.lastIndexOf("\n");
-    if (nl >= 0) {
-      yield (rest + text.slice(0, nl)).split("\n");
-      rest = "";
+  let bytes = 0;
+  try {
+    for (let got = await reader.read(); !got.done; got = await reader.read()) {
+      for (let at = 0; at < got.value.length;) {
+        const nl = got.value.indexOf(10, at);
+        const end = nl < 0 ? got.value.length : nl;
+        bytes += end - at;
+        if (bytes > max) throw new LineLimit("Session line exceeds " + max + " bytes.");
+        if (nl >= 0) bytes = 0;
+        at = end + 1;
+      }
+      const text = utf8.decode(got.value, { stream: true });
+      const nl = text.lastIndexOf("\n");
+      if (nl >= 0) {
+        yield (rest + text.slice(0, nl)).split("\n");
+        rest = "";
+      }
+      rest += text.slice(nl + 1);
     }
-    rest += text.slice(nl + 1);
+    yield [rest + utf8.decode()];
+  } finally {
+    await reader.cancel().catch(() => {});
+    reader.releaseLock();
   }
-  yield [rest + utf8.decode()];
 }

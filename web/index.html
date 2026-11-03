@@ -66,7 +66,7 @@
   </section>
   <form>
     <p class="title">Import your past AI chats</p>
-    <p class="desk sub">Choose your <code>~/.claude</code> or <code>~/.codex</code> folder (hidden: <kbd>⌘</kbd><kbd>⇧</kbd><kbd>G</kbd> in the dialog).</p>
+    <p class="desk sub">Choose your <code>~/.claude</code>, <code>~/.codex</code> or <code>~/.pi</code> folder (hidden: <kbd>⌘</kbd><kbd>⇧</kbd><kbd>G</kbd> in the dialog).</p>
     <p class="phone sub">Import on your computer: open this site there, or type <code>/import</code> in unii.</p>
     <input type="file" name="dir" webkitdirectory hidden>
     <input type="file" name="zip" accept=".zip,.json" multiple hidden>
@@ -80,10 +80,17 @@
       <details class="pick" hidden><summary></summary><div class="sessions"></div></details>
       <button type="button" class="pickzip">Add a website export</button>
     </fieldset>
+    <fieldset class="src desk" data-app="Pi">
+      <legend>Pi</legend>
+      <details class="pick" hidden><summary></summary><div class="sessions"></div></details>
+    </fieldset>
     <fieldset class="want" hidden>
       <label class="tools"><input type="checkbox" name="tools"> Tool calls</label>
       <label class="since"><span class="from"></span><span class="to"></span><input type="range" name="back" min="0"></label>
     </fieldset>
+    <label class="replay" hidden><input type="checkbox" name="replay"> Replay selected Pi history, including previously imported messages</label>
+    <div class="warnings" role="status" hidden></div>
+    <button type="button" class="pickunii desk">Add imported sessions from a UniiChat export</button>
     <p class="found"></p>
     <p class="guess"></p>
     <div class="acts"><button type="button" class="skip">Skip</button><button type="button" class="pickdir desk">Choose folder</button><button class="go" hidden>Import</button></div>

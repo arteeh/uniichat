@@ -10,7 +10,7 @@ import * as Html from "./Html.ts";
 import * as Tree from "./Tree.ts";
 import * as Viewer from "./Viewer.ts";
 
-type Read = { sessions: Import.Session[]; moved: number };
+type Read = { sessions: Import.Session[]; moved: number; skipped?: string[] };
 
 type Back = { at: { a: number; top: number } | null; y: number | null; away: { y: number; end: boolean } | null; caret: [number, number]; focus: boolean; open: string[] };
 
@@ -24,7 +24,7 @@ const DESK = matchMedia("(hover: hover)");
 
 const ME_WAIT = 4000;
 
-const NONE   = "No Claude or ChatGPT chats in that folder. Choose ~/.claude or ~/.codex.";
+const NONE   = "No supported Claude, ChatGPT or Pi chats in that folder. Choose ~/.claude, ~/.codex or ~/.pi.";
 
 const SCENES = `
   <div class="scene"><p>Your entire life.</p><p>One single chat.</p></div>
@@ -74,6 +74,7 @@ const IMPORT = {
   found : new Map<string, Read>(),
   done  : {} as Import.Done,
   off   : new Set<string>(),
+  since : "",
   step  : "" as "" | "start" | "send" | "run" | "seen" | "done",
 };
 
@@ -636,9 +637,11 @@ function importer(): void {
   const dir  = $("#import [name=dir]", HTMLInputElement);
   $(".imp").onclick = () => void import_open(false);
   const zip  = $("#import [name=zip]", HTMLInputElement);
+  $("#import .pickunii").onclick = () => zip.click();
   $(".pickdir").onclick = () => dir.click();
   for (const src of import_srcs()) {
-    const pick = find(src, ".pickzip", HTMLButtonElement);
+    const pick = src.querySelector<HTMLButtonElement>(".pickzip");
+    if (pick === null) continue;
     pick.onclick = () => zip.click();
     pick.title = "From the website: " + Import.EXPORTS[src.dataset.app ?? ""] + ", which emails you a zip.";
   }
@@ -657,6 +660,7 @@ function importer(): void {
   };
   form.oninput = (ev) => {
     const box = ev.target as HTMLInputElement;
+    if (box.name === "back") IMPORT.since = BACK.valueAsNumber > Number(BACK.min) ? new Date(BACK.valueAsNumber * 864e5).toISOString().slice(0, 10) : "";
     if (box.name === "session") {
       box.checked ? IMPORT.off.delete(box.value) : IMPORT.off.add(box.value);
     }
@@ -667,16 +671,22 @@ function importer(): void {
     const files = all.filter((f) => Import.import_file(f.webkitRelativePath));
     const found: Import.Session[] = [];
     let moved = 0;
+    const skipped: string[] = [];
     const reading = (k: number) => "Reading " + k + " of " + files.length + " files…";
     import_draw(reading(1));
     for (const [k, f] of files.entries()) {
       $("#import .guess").textContent = reading(k + 1);
-      const s = await import_copy(f).then((b) => Import.import_session(b, "log"), () => undefined);
-      moved += s === undefined ? 1 : 0;
-      found.push(...(s ? [s] : []));
+      try {
+        const s = await Import.import_session(f, "log");
+        if (s === null) continue;
+        const copy = await import_copy(f).catch(() => undefined);
+        if (copy === undefined) { moved++; continue; }
+        s.file = copy;
+        found.push(s);
+      } catch (e) { skipped.push(f.name + ": " + (e as Error).message); }
     }
     dir.value = "";
-    import_took(all[0]?.webkitRelativePath.split("/")[0] ?? "", { sessions: found, moved }, found.length > 0 ? "" : NONE);
+    import_took(all[0]?.webkitRelativePath.split("/")[0] ?? "", { sessions: found, moved, skipped }, found.length > 0 ? "" : NONE);
   };
   zip.onchange = async () => {
     for (const f of zip.files ?? []) {
@@ -703,6 +713,7 @@ function import_flow(): void {
 async function import_open(first: boolean): Promise<void> {
   $("#menu").hidePopover();
   IMPORT.done = (await fetch("/api/imported").then((res) => res.json()).catch(() => ({}))) as Import.Done;
+  $("#import [name=replay]", HTMLInputElement).checked = false;
   $("#import form .skip").textContent = first ? "Start fresh" : "Close";
   IMPORT.step = first ? "start" : IMPORT.step === "done" ? "" : IMPORT.step;
   import_draw("");
@@ -711,8 +722,8 @@ async function import_open(first: boolean): Promise<void> {
 
 function import_took(name: string, read: Read, status: string): void {
   IMPORT.found.set(name, read);
-  BACK.min = "0";
-  BACK.value = "0";
+  $("#import [name=replay]", HTMLInputElement).checked = false;
+  IMPORT.since = "";
   import_draw(status);
 }
 
@@ -744,13 +755,9 @@ function import_sent(out: View.Answer): void {
 
 function import_plan(): Import.Plan {
   const form = new FormData($("#import form", HTMLFormElement));
-  const want = { off: [...IMPORT.off], since: import_since(), tools: form.has("tools") };
+  const want = { off: [...IMPORT.off], since: IMPORT.since, tools: form.has("tools"), replay: form.has("replay") };
   const found = [...IMPORT.found.values()].flatMap((read) => read.sessions);
   return Import.import_plan(found, want, IMPORT.done);
-}
-
-function import_since(): string {
-  return BACK.valueAsNumber > Number(BACK.min) ? new Date(BACK.valueAsNumber * 864e5).toISOString().slice(0, 10) : "";
 }
 
 function import_bar(): boolean {
@@ -786,21 +793,29 @@ function import_draw(status: string): void {
   const plan     = import_plan();
   const msgs     = plan.msgs;
   const left     = reads.reduce((n, read) => n + read.moved, 0);
+  const skipped = reads.flatMap((read) => read.skipped ?? []);
+  const warnings = [...skipped, ...Import.import_warnings(sessions, IMPORT.done)];
+  const repeat = Import.import_repeat(sessions, IMPORT.done);
+  $("#import .replay").hidden = !repeat;
+  if (!repeat) $("#import [name=replay]", HTMLInputElement).checked = false;
+  markup($("#import .warnings"), warnings.map((w) => "<p>" + Html.esc(w) + "</p>"));
+  $("#import .warnings").hidden = warnings.length === 0;
   const moved    = left === 0 ? "" : " (" + left + (left === 1 ? " file" : " files") + " changed while read: choose the folder again to add them)";
   const found    = sessions.length === 0 ? "" : plan.first === "" ? Import.OLD : Import.import_count(msgs, "new ");
   const day = (at: string | number) => new Date(at).getUTCDate() + " " + new Date(at).toLocaleDateString("en-US", { month: "short", year: "numeric", timeZone: "UTC" });
   BACK.min = String(Math.floor(Date.parse(plan.first || new Date().toISOString()) / 864e5));
   BACK.max = String(Math.floor(Date.now() / 864e5));
-  $("#import .since .from").textContent = day(import_since() || plan.first || Date.now());
+  BACK.value = IMPORT.since === "" ? BACK.min : String(Math.floor(Date.parse(IMPORT.since) / 864e5));
+  $("#import .since .from").textContent = day(IMPORT.since || plan.first || Date.now());
   $("#import .since .to").textContent = day(Date.now());
   BACK.style.setProperty("--at", (100 * (BACK.valueAsNumber - Number(BACK.min))) / Math.max(1, Number(BACK.max) - Number(BACK.min)) + "%");
   $("#import .want").hidden = plan.first === "";
   $("#import .tools").hidden = !sessions.some((s) => s.heads.some((m) => m.kind === "tool" || m.kind === "echo"));
-  $("#import .found").textContent = found + moved;
+  $("#import .found").textContent = found + moved + (skipped.length > 0 ? " · " + skipped.length + (skipped.length === 1 ? " session file skipped" : " session files skipped") : "");
   for (const src of import_srcs()) {
     const list  = must(src.querySelector(".sessions"), "#import .sessions");
     const shown = plan.sessions.filter((s) => s.app === src.dataset.app);
-    markup(list, shown.map((s) => `<label title="${Html.esc(s.where + ", " + Import.import_count(s.heads.length, ""))}"><input type="checkbox" name="session" value="${Html.esc(Import.import_id(s))}">${Import.import_cells(s).map((c) => `<span>${Html.esc(c)}</span>`).join("")}</label>`));
+    markup(list, shown.map((s) => `<label title="${Html.esc(s.where + ", " + Import.import_count(s.heads.length, "") + (s.warnings?.length ? "; " + s.warnings.join("; ") : ""))}"><input type="checkbox" name="session" value="${Html.esc(Import.import_id(s))}">${Import.import_cells(s).map((c) => `<span>${Html.esc(c)}</span>`).join("")}</label>`));
     list.querySelectorAll("input").forEach((box) => (box.checked = !IMPORT.off.has(box.value)));
     const on = shown.filter((s) => !IMPORT.off.has(Import.import_id(s))).length;
     find(src, ".pick", HTMLElement).hidden = shown.length === 0;
@@ -813,7 +828,11 @@ function import_draw(status: string): void {
   dir.textContent = msgs > 0 ? "Add a folder" : "Choose folder";
   dir.classList.toggle("alt", msgs > 0);
   dir.disabled = go.disabled;
-  import_srcs().forEach((src) => (find(src, ".pickzip", HTMLButtonElement).disabled = dir.disabled));
+  $("#import .pickunii", HTMLButtonElement).disabled = go.disabled;
+  import_srcs().forEach((src) => {
+    const pick = src.querySelector<HTMLButtonElement>(".pickzip");
+    if (pick !== null) pick.disabled = dir.disabled;
+  });
 }
 
 function import_srcs(): HTMLElement[] {
@@ -823,10 +842,15 @@ function import_srcs(): HTMLElement[] {
 async function import_copy(file: File): Promise<Blob> {
   const reader = file.stream().getReader();
   const parts: Blob[] = [];
-  for (let got = await reader.read(); !got.done; got = await reader.read()) {
-    parts.push(new Blob([got.value]));
+  try {
+    for (let got = await reader.read(); !got.done; got = await reader.read()) {
+      parts.push(new Blob([got.value]));
+    }
+    return new Blob(parts);
+  } finally {
+    await reader.cancel().catch(() => {});
+    reader.releaseLock();
   }
-  return new Blob(parts);
 }
 
 const MARKUP = new WeakMap<Element, string>();

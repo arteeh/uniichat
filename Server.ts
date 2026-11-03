@@ -888,7 +888,7 @@ export namespace Chat {
     return Chat.batch(chat, saved);
   }
 
-  export async function* reads(body: Body): AsyncGenerator<Log[]> {
+  export async function* reads(body: Body): AsyncGenerator<(Log & { replay?: boolean })[]> {
     for await (const [lines] of Chat.pieces(body, 0, (text) => text.split("\n"))) {
       yield lines.filter((line) => line !== "").map((line) => Chat.imported(JSON.parse(line)));
     }
@@ -897,14 +897,19 @@ export namespace Chat {
   export async function* fresh(body: Body, done: Import.Done): AsyncGenerator<Log[]> {
     let note: Log | null = null;
     let last: string | undefined;
+    let key = "";
+    const seen = { ...done };
     for await (const msgs of Chat.reads(body)) {
       const out: Log[] = [];
       for (const m of msgs) {
         if (m.kind === "note") {
-          [note, last] = [m, done[Import.import_key(m)]];
+          const { replay, ...plain } = m;
+          key = Import.import_key(m);
+          [note, last] = [plain, replay === true ? undefined : seen[key]];
         } else if (Import.import_new(m, last)) {
           out.push(...(note === null ? [] : [note]), m);
           note = null;
+          if (m.date !== undefined && m.date > (seen[key] ?? "")) seen[key] = m.date;
         }
       }
       yield out;
@@ -925,7 +930,7 @@ export namespace Chat {
     return done;
   }
 
-  export function imported(x: unknown): Log {
+  export function imported(x: unknown): Log & { replay?: boolean } {
     const kinds: Kind[] = ["user", "unii", "tool", "echo", "note"];
     const kind = kinds.find((k) => k === get(x, "kind"));
     if (kind === undefined) {
@@ -937,7 +942,7 @@ export namespace Chat {
     }
     const date = Number.isNaN(Date.parse(when)) ? undefined : new Date(when).toISOString();
     const pair = (y: unknown) => (typeof y === "string" && y.length <= PAIR ? y : undefined);
-    return { kind, text, date, more: get(x, "more") === true, of: pair(of), tool: pair(tool) };
+    return { kind, text, date, more: get(x, "more") === true, of: pair(of), tool: pair(tool), ...(kind === "note" && get(x, "replay") === true ? { replay: true } : {}) };
   }
 
   export function made(chat: Chat, l: number, i: number): void {

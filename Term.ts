@@ -30,8 +30,6 @@ type Term = {
 
 type Cmd = [use: string, keys: string, text: string, run: (t: Term, arg: string) => void | Promise<void>];
 
-const WIN = process.platform === "win32";
-
 const TOP_ROW_KEPT_FREE = 1;
 
 const MARGIN = 2;
@@ -42,14 +40,15 @@ const SETTLE = 100;
 
 const CODEX   = process.env.CODEX_HOME ?? os.homedir() + "/.codex";
 const IMPORTS = [
-  (process.env.CLAUDE_CONFIG_DIR ?? os.homedir() + "/.claude") + "/projects",
-  CODEX + "/sessions",
-  CODEX + "/archived_sessions",
+  { app: "Claude", dir: (process.env.CLAUDE_CONFIG_DIR ?? os.homedir() + "/.claude") + "/projects" },
+  { app: "ChatGPT", dir: CODEX + "/sessions" },
+  { app: "ChatGPT", dir: CODEX + "/archived_sessions" },
+  { app: "Pi", dir: process.env.PI_CODING_AGENT_SESSION_DIR ?? (process.env.PI_CODING_AGENT_DIR ?? os.homedir() + "/.pi/agent") + "/sessions" },
 ];
 
 const SINCE  = /\bsince +(\d{4}-\d\d-\d\d)\b/;
 const EXPORT = /\.(zip|json)$/i;
-const HOW = "Pick with /import [claude] [chatgpt] [since 2026-06-01] [tools] [sessions] [-#n] [<export>.zip] [go] (-#n: not session n; go: import); /import pause or resume: the import running. Exports, on each website: " + Object.entries(Import.EXPORTS).map(([app, how]) => app + ": " + how).join("; ") + "; it emails you a zip.";
+const HOW = "Pick with /import [claude] [chatgpt] [pi] [since 2026-06-01] [tools] [replay] [sessions] [-#n] [<export>.zip] [go] (-#n: not session n; go: import); /import pause or resume: the import running. Exports, on each website: " + Object.entries(Import.EXPORTS).map(([app, how]) => app + ": " + how).join("; ") + "; it emails you a zip.";
 
 const PAGE_KEYS = ["Tab", "Ctrl+D", "Ctrl+Z", "Esc"];
 
@@ -431,18 +430,21 @@ async function term_import(t: Term, arg: string): Promise<void> {
   const files = given.filter((w) => EXPORT.test(w)).map((w) => w.replace(/^~(?=\/)/, os.homedir()));
   const words = given.filter((w) => !EXPORT.test(w)).map((w) => w.toLowerCase());
   const apps  = Import.APPS.filter((app) => words.includes(app.toLowerCase()));
-  const want  = { off: [] as string[], since: arg.match(SINCE)?.[1] ?? "", tools: words.includes("tools") };
-  if (words.some((w) => !/^(tools|sessions|go|-#\d+)$/.test(w) && !Import.APPS.some((app) => app.toLowerCase() === w))) {
+  const want  = { off: [] as string[], since: arg.match(SINCE)?.[1] ?? "", tools: words.includes("tools"), replay: words.includes("replay") };
+  if (words.some((w) => !/^(tools|replay|sessions|go|-#\d+)$/.test(w) && !Import.APPS.some((app) => app.toLowerCase() === w))) {
     term_note(t, "Not understood. " + HOW);
     return;
   }
-  term_note(t, "Looking for Claude and ChatGPT chats on this computer…");
-  const read = await Promise.all([...IMPORTS.map(term_sessions), ...files.map(export_sessions)]).catch((e: unknown) => err_why(e));
+  term_note(t, "Looking for Claude, ChatGPT and Pi chats on this computer…");
+  const skipped: string[] = [];
+  const roots = IMPORTS.filter((root) => apps.length === 0 || apps.includes(root.app));
+  const read = await Promise.all([...roots.map((root) => term_sessions(root.dir, skipped)), ...files.map(export_sessions)]).catch((e: unknown) => err_why(e));
   if (typeof read === "string") {
     term_note(t, "Not imported: " + read);
     return;
   }
   const sessions = read.flat().filter((s) => apps.length === 0 || apps.includes(s.app));
+  if (skipped.length > 0) term_note(t, skipped.length + " session files skipped:\n" + skipped.join("\n"));
   const done  = await term_get(t, "/api/imported", "read what Unii has");
   if (done === null) {
     return;
@@ -451,6 +453,9 @@ async function term_import(t: Term, arg: string): Promise<void> {
   const shown = Import.import_plan(sessions, want, old).sessions;
   want.off    = shown.filter((_, k) => words.includes("-#" + (k + 1))).map(Import.import_id);
   const plan  = Import.import_plan(sessions, want, old);
+  const warnings = words.includes("go") && plan.msgs > 0 ? [] : Import.import_warnings(sessions, old, want.replay);
+  if (warnings.length > 0) term_note(t, warnings.join("\n"));
+  if (want.replay) term_note(t, "Replay selected Pi history: existing messages will be duplicated; older history may follow newer messages. Omit go to preview or cancel.");
   const found = "Found " + Import.import_count(plan.msgs, "new ") + ". ";
   if (plan.msgs === 0) {
     term_note(t, plan.first === "" ? Import.OLD : found + HOW);
@@ -466,11 +471,14 @@ async function term_import(t: Term, arg: string): Promise<void> {
   term_send(t, { $: "import", body: () => Import.import_body(plan.picked) });
 }
 
-async function term_sessions(dir: string): Promise<Import.Session[]> {
-  const files = fs.existsSync(dir) ? fs.readdirSync(dir, { recursive: true, encoding: "utf8" }).map((f) => dir + "/" + (WIN ? f.replaceAll("\\", "/") : f)).filter(Import.import_file) : [];
+async function term_sessions(dir: string, skipped: string[]): Promise<Import.Session[]> {
+  const files = fs.existsSync(dir) ? fs.readdirSync(dir, { recursive: true, encoding: "utf8" }).filter((f) => f.endsWith(".jsonl") && !f.split(/[\\/]/).includes("subagents")) : [];
   const found: Import.Session[] = [];
-  for (const f of files) {
-    found.push(...[await Import.import_session(Bun.file(f), "log")].filter((s) => s !== null));
+  for (const name of files) {
+    try {
+      const session = await Import.import_session(Bun.file(dir + "/" + name), "log");
+      if (session !== null) found.push(session);
+    } catch (e) { skipped.push(name + ": " + err_why(e)); }
   }
   return found;
 }

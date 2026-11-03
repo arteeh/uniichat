@@ -13,7 +13,7 @@ Features
 - **All your computers.** Run `unii device` on a machine and the agent can run commands and edit files there.
 - **Subagents** do the grunt work in the background and report back.
 - **Goals.** `/goal` keeps UniiChat working until something is done.
-- **Don't start from scratch.** Import past conversations from either Claude Code, Codex or another UniiChat instance into your memory tree.
+- **Don't start from scratch.** Import past conversations from Claude Code, Codex, Pi or another UniiChat instance into your memory tree.
 
 What this fork adds:
 
@@ -79,7 +79,7 @@ Use
 ---
 
 - **Web:** open the server's address. Install it as an app from your browser to get notifications when Unii replies.
-- **Terminal:** `unii [url]`. `/help` lists its commands; `/import` brings in this computer's Claude Code and Codex sessions. Without a url it uses `$UNII_URL`, else the last one, else http://127.0.0.1:8788. The terminal and devices keep their server and sign-in in `~/.config/unii`.
+- **Terminal:** `unii [url]`. `/help` lists its commands; `/import` brings in this computer's Claude Code, Codex and Pi sessions. Without a url it uses `$UNII_URL`, else the last one, else http://127.0.0.1:8788. The terminal and devices keep their server and sign-in in `~/.config/unii`.
 - **Conversation mode:** the switch next to "fold all" (`/mode` in the terminal). From then on, your and Unii's messages stay word for word in Unii's memory, for a real discussion. It costs more per turn and turns itself off when the model's context window fills up.
 - `unii help` lists every command.
 

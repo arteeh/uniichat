@@ -1,18 +1,19 @@
 import type { Kind } from "./AskAI.ts";
 import { clip_pages, stream_lines } from "./Clip.ts";
-import { get, list, text_of } from "./Json.ts";
+import { get, list, rec, text_of } from "./Json.ts";
+import { pi_scan, pi_read, type PiSession } from "./PiImport.ts";
 
-type Msg = { kind: Kind; text: string; date: string; more?: boolean };
+export type Msg = { kind: Kind; text: string; date: string; more?: boolean; replay?: boolean };
 
 type Head = { kind: Kind; date: string; size: number; n: number };
 
 export type Form = "log" | "msgs";
 
-export type Session = { app: string; form: Form; where: string; start: string; file: Blob; heads: Head[] };
+export type Session = { app: string; form: Form; where: string; start: string; file: Blob; heads: Head[]; pi?: PiSession | null; warnings?: string[]; replay?: boolean };
 
 export type Done = Record<string, string>;
 
-export type Want = { off: string[]; since: string; tools: boolean };
+export type Want = { off: string[]; since: string; tools: boolean; replay?: boolean };
 
 export type Plan = { sessions: Session[]; picked: Session[]; msgs: number; first: string; sizes: number[] };
 
@@ -26,7 +27,7 @@ const COMPACTION_MICRO_USD_FIT = { base: 187, per_source_doubling: 735, per_summ
 
 const PIECE_KEPT_AS_BLOB = 2 ** 20;
 
-export const APPS = ["Claude", "ChatGPT"];
+export const APPS = ["Claude", "ChatGPT", "Pi"];
 
 export const OLD = "Nothing new: these chats are in Unii's memory already.";
 
@@ -83,11 +84,22 @@ export async function import_session(file: Blob, form: Form, app = "", where = "
   for await (const m of import_read(s)) {
     s.heads.push({ kind: m.kind, date: m.date, size: import_size(m), n: s.heads.length });
   }
-  s.start = s.heads[0]?.date ?? "";
+  s.start ||= s.heads[0]?.date ?? "";
   return s.heads.length > 0 ? s : null;
 }
 
 async function* import_read(s: Session): AsyncGenerator<Msg> {
+  if (s.form === "log" && (s.app === "" || s.app === "Pi")) {
+    if (s.pi === undefined) s.pi = await pi_scan(s.file);
+    if (s.pi !== null) {
+      s.app = "Pi";
+      s.where = "session in " + s.pi.cwd;
+      s.start = s.pi.start;
+      s.warnings = s.pi.warnings;
+      yield* pi_read(s.file, s.pi);
+      return;
+    }
+  }
   let date = "";
   for await (const lines of stream_lines(s.file.stream())) {
     for (const line of lines) {
@@ -114,9 +126,16 @@ function line_msgs(s: Session, line: string, last: string): Msg[] {
 
 function import_pick(sessions: Session[], want: Want, done: Done): Session[] {
   const old  = [...sessions].sort((a, b) => a.start.localeCompare(b.start));
+  const seen = { ...done };
   const keep = (m: Head, last?: string) => (want.tools || m.kind === "user" || m.kind === "unii") && m.date >= want.since && import_new(m, last);
-  const kept = (s: Session, last?: string) => s.heads.filter((m) => keep(m, last));
-  return old.map((s) => ({ ...s, heads: kept(s, done[import_id(s)]) })).filter((s) => s.heads.length > 0);
+  return old.map((s) => {
+    const key = import_id(s);
+    const replay = s.replay === true || (s.app === "Pi" && want.replay === true);
+    const last = replay ? undefined : seen[key];
+    const heads = s.heads.filter((m) => keep(m, last));
+    for (const m of heads) if (m.date > (seen[key] ?? "")) seen[key] = m.date;
+    return { ...s, replay, heads };
+  }).filter((s) => s.heads.length > 0);
 }
 
 export function import_plan(sessions: Session[], want: Want, done: Done): Plan {
@@ -130,6 +149,29 @@ export function import_plan(sessions: Session[], want: Want, done: Done): Plan {
 
 export function import_new(m: { date?: string }, last: string | undefined): boolean {
   return last === undefined || (m.date ?? "") > last;
+}
+
+export function import_repeat(sessions: Session[], done: Done): boolean {
+  const seen = new Set(Object.keys(done));
+  return sessions.some((s) => {
+    const key = import_id(s);
+    const repeat = s.app === "Pi" && s.form === "log" && seen.has(key);
+    seen.add(key);
+    return repeat;
+  });
+}
+
+export function import_warnings(sessions: Session[], done: Done, replay = false): string[] {
+  const seen = new Set<string[]>();
+  const warnings = sessions.flatMap((s) => {
+    if (s.warnings === undefined || seen.has(s.warnings)) return [];
+    seen.add(s.warnings);
+    return s.warnings.map((w) => s.app + " " + s.where + ": " + w);
+  });
+  if (!replay && import_repeat(sessions, done)) {
+    warnings.push("Pi re-import only adds messages after the last imported date. Same-timestamp appends, older branches and tools enabled later may be left out. Replay selected Pi history (terminal: /import pi replay sessions) to recover them; replay duplicates existing messages and may put older history after newer messages.");
+  }
+  return warnings;
 }
 
 function import_name(s: Session): string {
@@ -157,7 +199,7 @@ function path_short(path: string): string {
 }
 
 function import_note(s: Session): Msg {
-  return { kind: "note", text: import_name(s) + " (imported)", date: s.start };
+  return { kind: "note", text: import_name(s) + " (imported)", date: s.start, ...(s.replay ? { replay: true } : {}) };
 }
 
 export function import_id(s: Session): string {
@@ -236,11 +278,42 @@ export async function import_export(file: Blob): Promise<Session[]> {
     throw new Error("No conversations.json in the zip.");
   }
   const chats: unknown = await json.text().then((text) => JSON.parse(text) as unknown).catch(() => null);
+  if (rec(chats) && Array.isArray(chats.messages)) return imported_sessions(chats);
   if (!Array.isArray(chats) || !chats.every((chat: unknown) => get(chat, "mapping") !== undefined || Array.isArray(get(chat, "chat_messages")))) {
     throw new Error(NOT_EXPORT);
   }
   const sessions = await Promise.all(list(chats).map((chat) => chat_session(chat as Chat)));
   return sessions.filter((s) => s !== null);
+}
+
+async function imported_sessions(dump: Record<string, unknown>): Promise<Session[]> {
+  const groups: { app: string; where: string; start: string; msgs: unknown[] }[] = [];
+  let group: (typeof groups)[number] | undefined;
+  let kept = 0;
+  for (const m of list(dump.messages)) {
+    if (!rec(m) || m.imported !== true) { group = undefined; continue; }
+    if (m.kind === "note") {
+      const name = /^(Claude|ChatGPT|Pi)(?: \[session [^\]]+\])? (.*), from .* \(imported\)$/.exec(text_of(m.text));
+      if (name === null || typeof m.date !== "string" || Number.isNaN(Date.parse(m.date))) throw new Error("Invalid imported session note in UniiChat export.");
+      group = { app: name[1], where: name[2], start: new Date(m.date).toISOString(), msgs: [] };
+      groups.push(group);
+    } else {
+      if (group === undefined || !["user", "unii", "tool", "echo"].includes(text_of(m.kind)) || typeof m.text !== "string" || typeof m.date !== "string" || Number.isNaN(Date.parse(m.date))) throw new Error("Invalid imported message in UniiChat export.");
+      group.msgs.push({ kind: m.kind, text: m.text, date: new Date(m.date).toISOString(), more: m.more === true });
+    }
+    kept++;
+  }
+  if (groups.length === 0) throw new Error("No marked imported sessions. Export again with a current UniiChat; older unmarked exports cannot restore session watermarks.");
+  const sessions: Session[] = [];
+  for (const g of groups) {
+    const s = await import_session(new Blob(g.msgs.map((m) => JSON.stringify(m) + "\n")), "msgs", g.app, g.where);
+    if (s !== null) { s.start = g.start; s.replay = true; sessions.push(s); }
+  }
+  const count = (v: unknown) => rec(v) ? Object.keys(v).length : list(v).length;
+  const warning = "Imported-session transcripts only, NOT a full backup restore. Omitted: " + (list(dump.messages).length - kept) + " live/unmarked messages, " + count(dump.summaries) + " summaries, " + count(dump.images) + " images and " + count(dump.agents) + " agent histories; settings are not restored. Recovery replays selected transcript groups, including prior duplicates: use an empty chat to avoid additional duplication. Tool calls still require the Tool calls option.";
+  const warnings = [warning];
+  sessions.forEach((s) => s.warnings = warnings);
+  return sessions;
 }
 
 function chat_session(chat: Chat): Promise<Session | null> {
