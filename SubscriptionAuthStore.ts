@@ -31,7 +31,7 @@ function syncDir(dir: string): void {
   try { fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
 }
 function prepare(dir: string, vendor: SubscriptionVendor): { root: string; file: string } {
-  if (!["linux", "darwin"].includes(process.platform)) throw new Error("Native subscription auth currently requires Linux or macOS private storage");
+  if (!["linux", "darwin"].includes(process.platform)) throw new Error("Native subscription auth runs on Linux (macOS untested); this platform is unsupported");
   const loc = location(dir, vendor);
   fs.mkdirSync(path.resolve(dir), { recursive: true, mode: 0o700 });
   try {
