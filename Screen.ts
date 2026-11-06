@@ -137,11 +137,16 @@ function screen_feed(scr: Screen, data: string): void {
     data = data.slice(n);
   }
   scr.rest = data;
-  if (data === "\x1b") {
+  if (data === "\x1b" || data.startsWith("\x1b]")) {
     scr.escape = setTimeout(() => {
-      if (scr.rest === "\x1b") {
+      if (scr.rest === data) {
         scr.rest = "";
-        screen_press(scr, "Esc");
+        if (data === "\x1b") {
+          screen_press(scr, "Esc");
+        } else {
+          screen_press(scr, "Alt+]");
+          screen_feed(scr, data.slice(2).replace(/\x1b$/, ""));
+        }
         scr.on("");
       }
     }, ESCAPE_WAIT);
@@ -157,7 +162,10 @@ function screen_key(scr: Screen, data: string): number {
     return screen_line(scr, data);
   }
   if (data.startsWith("\x1b]")) {
-    return screen_color(scr, data);
+    const n = screen_color(scr, data);
+    if (n >= 0) {
+      return n;
+    }
   }
   if (seq !== null && seq[2] === "n" && /^\?997;[12]$/.test(seq[1] ?? "")) {
     scr.color(seq[1] === "?997;1");
@@ -196,18 +204,26 @@ function screen_key(scr: Screen, data: string): number {
 
 function screen_color(scr: Screen, data: string): number {
   const end = /\x07|\x1b\\/.exec(data);
-  if (end === null) {
-    return data.length > 256 ? data.length : 0;
-  }
-  const body = data.slice(2, end.index);
+  const body = data.slice(2, end?.index ?? data.length - (data.endsWith("\x1b") ? 1 : 0));
   const rgb = /^11;rgb:([0-9a-f]{1,4})\/([0-9a-f]{1,4})\/([0-9a-f]{1,4})$/i.exec(body);
   const hex = /^11;#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(body);
   const parts = rgb ?? hex;
-  if (parts !== null) {
-    const [r, g, b] = parts.slice(1).map((x) => parseInt(x, 16) / (16 ** x.length - 1));
-    const linear = (v: number) => v <= .04045 ? v / 12.92 : ((v + .055) / 1.055) ** 2.4;
-    scr.color(.2126 * linear(r) + .7152 * linear(g) + .0722 * linear(b) < .179);
+  if (end === null) {
+    if (data.endsWith("\x1b")) {
+      return parts === null ? -1 : 0;
+    }
+    const p = body.toLowerCase();
+    const partial = "11;rgb:".startsWith(p) || "11;#".startsWith(p)
+      || p.startsWith("11;rgb:") && /^(?:[0-9a-f]{1,4}\/){0,2}[0-9a-f]{0,4}$/.test(p.slice(7))
+      || p.startsWith("11;#") && /^[0-9a-f]{0,6}$/.test(p.slice(4));
+    return partial ? 0 : -1;
   }
+  if (parts === null) {
+    return -1;
+  }
+  const [r, g, b] = parts.slice(1).map((x) => parseInt(x, 16) / (16 ** x.length - 1));
+  const linear = (v: number) => v <= .04045 ? v / 12.92 : ((v + .055) / 1.055) ** 2.4;
+  scr.color(.2126 * linear(r) + .7152 * linear(g) + .0722 * linear(b) < .179);
   return end.index + end[0].length;
 }
 
