@@ -1,4 +1,5 @@
 import type { Again, Kind, Parked, Vendor } from "./AskAI.ts";
+import type { ChatGPTAccount } from "./ChatGPTAccounts.ts";
 import * as Call from "./Call.ts";
 import * as Md from "./Md.ts";
 import { LABELS, type Fall, type Move, Pick } from "./Pick.ts";
@@ -59,6 +60,7 @@ type Offered = {
   vendors   : Vendor[];
   models    : string[];
   profiles? : Record<string, Fall[]>;
+  accounts? : ChatGPTAccount[];
 };
 
 type ChatSet = {
@@ -583,10 +585,10 @@ export function view_shown(v: View): Knob[] {
 function view_knobs(v: View, pick: Pick, menus: boolean): Knob[] {
   const { model, effort, speed, profile } = pick;
   const ranks = (v.profiles?.[profile ?? ""] ?? []).map((f) => f.model.label).join(", ");
-  const whose = Pick.twin(pick.vendor, model, v.vendors) ? ", " + pick.vendor : "";
+  const whose = (Pick.twin(pick.vendor, model, v.vendors) ? ", " + pick.vendor : "") + (pick.account === undefined ? "" : ", account " + pick.account);
   const choices = (move: Move) => (menus ? view_choices(pick, move, v) : []);
   return [
-    { text: profile ?? model, move: "model", hint: profile === undefined ? model + whose : profile + ": " + ranks, choices: choices("model") },
+    { text: profile ?? model + (pick.account === undefined ? "" : " · account " + pick.account), move: "model", hint: profile === undefined ? model + whose : profile + ": " + ranks, choices: choices("model") },
     { text: effort, move: "effort", hint: effort + " effort", choices: choices("effort") },
     { text: speed, move: "speed", hint: speed, choices: choices("speed") },
   ];
@@ -597,8 +599,8 @@ function view_choices(pick: Pick, move: Move, v: View): Choice[] {
     const head = (p: Pick) => p.profile !== undefined ? "profiles" : p.vendor;
     const vendor = move === "model" && (i === 0 || head(all[i - 1][1]) !== head(to)) ? head(to) : null;
     const here = move !== "model" ? Pick.label(to) === Pick.label(pick) : to.profile !== undefined ? to.profile === pick.profile : pick.profile === undefined && Pick.label(to) === Pick.label(pick);
-    const by = move === "model" && to.profile === undefined ? to.vendor + ":" + text : text;
-    return { text: move === "model" ? to.profile ?? to.model : text, to: by, move, here, vendor };
+    const by = move === "model" && to.profile === undefined ? Pick.label(to) : text;
+    return { text: move === "model" ? to.profile ?? text : text, to: by, move, here, vendor };
   });
 }
 

@@ -51,7 +51,7 @@ export type Flight = { begun: () => void; end: () => void };
 // them for a fresh start of the call (a fallback, a new Claude Code)
 export type Steer = { pending: () => boolean; take: () => Promise<Said[]>; taken: Say[] };
 
-export type Parked = { until: number; known: boolean; vendor: Vendor };
+export type Parked = { until: number; known: boolean; vendor: Vendor; account?: number };
 
 export type Again = { why: string; until: number; limit: boolean };
 
@@ -75,6 +75,7 @@ export type End = {
   long?  : boolean;
   limits?: number;
   vendor?: Vendor;
+  account?: number;
 };
 
 export type Try = {
@@ -124,6 +125,7 @@ export namespace AskAI {
     const { promise, resolve } = Promise.withResolvers<End>();
     const out: Call = { wake, stop, done: promise };
     let picks = AskAI.falls(ask);
+    const first = picks.map(Pick.label)[0];
     let whys: (string | null)[] = picks.map(() => null);
     const skip = (from: number): number => {
       const to = AskAI.up(picks, from);
@@ -134,13 +136,18 @@ export namespace AskAI {
     };
     let k = skip(0);
     let limits = ask.limits ?? 0;
-    let reset: { until: number; vendor: Vendor } | undefined;
+    let reset: { until: number; vendor: Vendor; account?: number } | undefined;
     const go = (): Try => {
       const run = picks[k];
       const from = k > 0 ? picks[k - 1] : null;
       const why = from === null ? "" : whys[k - 1] ?? DOWN.get(AskAI.down_key(from))?.why ?? "";
-      let heard = picks.length === 1;
+      let heard = picks.length === 1 && Pick.label(run) === first;
       const hear = (ev: Event) => {
+        if (ev.$ === "Run") {
+          heard = true;
+          on({ ...ev, from: from && Pick.named(from), why });
+          return;
+        }
         if (!heard && (ev.$ === "Delta" || (ev.$ === "Entry" && ev.kind !== "mind"))) {
           heard = true;
           on({ $: "Run", run: Pick.named(run), from: from && Pick.named(from), why });
@@ -149,7 +156,7 @@ export namespace AskAI {
       };
       const probe = picks.length > 1 && DOWN.has(AskAI.down_key(run));
       const fallback = k < picks.length - 1;
-      return AskAI.start({ ...ask, ...run, probe, fallback, limits }, hear);
+      return AskAI.start({ ...ask, ...run, account: run.account, probe, fallback, limits }, hear);
     };
     let call = go();
     const run = async (): Promise<End> => {
@@ -168,16 +175,17 @@ export namespace AskAI {
         const left = picks[k];
         const limited = wait && end.limits !== undefined;
         if (end.limits !== undefined && end.until !== undefined && end.until < (reset?.until ?? Infinity)) {
-          reset = { until: end.until, vendor: left.vendor };
+          reset = { until: end.until, vendor: left.vendor, account: left.account };
         }
         if (wait) {
           const ms = Math.min(WEEK, Math.max(AGAIN, (end.until ?? 0) - Date.now()));
           const why = left.vendor + ":" + Pick.named(left).model + ": " + (limited ? "usage limit" : end.why ?? end.text);
           on({ $: "Again", again: { why, until: Date.now() + ms, limit: limited } });
-          await AskAI.nap_till_woken(ask, picks, limited ? left.vendor : null, ms, halt.signal);
+          await AskAI.nap_till_woken(ask, picks, limited ? left.vendor : null, ms, halt.signal, left.account);
           const now = ask.repick === undefined || halt.signal.aborted ? picks : AskAI.falls(ask.repick());
           if (!AskAI.same(now, picks)) {
             picks = now;
+            reset = undefined;
             whys = picks.map(() => null);
           }
           if (!halt.signal.aborted) {
@@ -188,7 +196,8 @@ export namespace AskAI {
           const all = whys.flatMap((why, i) => (why === null ? [] : [picks[i].vendor + ":" + Pick.named(picks[i]).model + ": " + why]));
           const until = end.limits === undefined ? end.until : reset?.until;
           const vendor = end.limits === undefined ? undefined : reset?.vendor ?? left.vendor;
-          return failed && all.length > 1 ? { ...end, until, vendor, text: "no model answered; " + all.join("; ") } : { ...end, vendor };
+          const account = end.limits === undefined || reset === undefined ? left.account : reset.account;
+          return failed && all.length > 1 ? { ...end, until, vendor, account, text: "no model answered; " + all.join("; ") } : { ...end, vendor, account };
         }
         k = skip(next ? k + 1 : 0);
         limits = limited && picks[k] === left ? end.limits ?? 0 : 0;
@@ -231,11 +240,11 @@ export namespace AskAI {
     return a.map(Pick.label).join() === b.map(Pick.label).join();
   }
 
-  export async function nap_till_woken(ask: Ask, picks: Pick[], vendor: Vendor | null, ms: number, stopped: AbortSignal): Promise<void> {
+  export async function nap_till_woken(ask: Ask, picks: Pick[], vendor: Vendor | null, ms: number, stopped: AbortSignal, account?: number): Promise<void> {
     const repicked = AskAI.repicked(ask, picks);
     try {
       const woken = AbortSignal.any([stopped, repicked.signal]);
-      await (vendor === null ? Machine.nap(ms, woken) : Limit.wait(vendor, ms, woken));
+      await (vendor === null ? Machine.nap(ms, woken) : Limit.wait(vendor, ms, woken, account));
     } finally {
       repicked.done();
     }
@@ -284,13 +293,13 @@ export namespace AskAI {
   }
 
   export function down_key(run: Pick): string {
-    return run.vendor + ":" + run.model;
+    return run.vendor + ":" + run.model + (run.account === undefined ? "" : ":" + run.account);
   }
 
   export function prefix_keys(ask: Ask): string[] {
     const last = ask.blocks.slice(0, -1).findLastIndex((b) => b.mark);
     // OpenAI caches per session (OpenAI.session)
-    const head = [ask.vendor, ask.model, ask.effort, ask.speed, ask.system, ask.searches > 0, ask.vendor.startsWith("openai") ? OpenAI.sharer(ask) : null];
+    const head = [ask.vendor, ask.account ?? null, ask.model, ask.effort, ask.speed, ask.system, ask.searches > 0, ask.vendor.startsWith("openai") ? OpenAI.sharer(ask) : null];
     let key = Bun.hash(JSON.stringify(head));
     return ask.blocks.slice(0, last + 1).map((b) => String((key = Bun.hash(b.text, key))));
   }

@@ -132,13 +132,17 @@ function not_by_sudo(cmd: string): void {
 }
 
 function plan(name: "claude" | "chatgpt", about: string): Cmd {
-  const cli = async (word: string) => {
+  const cli = async (word: string, n?: string) => {
+    if (n !== undefined && (!Number.isSafeInteger(Number(n)) || Number(n) < 1)) {
+      return fail("An account number must be a positive safe integer.");
+    }
     const mod = name === "claude" ? (await import("./ClaudeSub.ts")).ClaudeSub : (await import("./ChatGPT.ts")).ChatGPT;
-    await mod.cli([word]).catch((err: unknown) => fail(err_why(err)));
+    await mod.cli(n === undefined ? [word] : [word, n]).catch((err: unknown) => fail(err_why(err)));
   };
+  const many = name === "chatgpt";
   return { use: name, about, kids: [
-    { use: "login", about: "sign in", run: () => cli("login") },
-    { use: "logout", about: "sign out", run: () => cli("logout") },
+    { use: many ? "login [n]" : "login", about: many ? "sign in; n: another plan's account, used when one is at its usage limit" : "sign in", arg: many ? /^\d+$/ : undefined, run: (n) => cli("login", n) },
+    { use: many ? "logout [n]" : "logout", about: "sign out", arg: many ? /^\d+$/ : undefined, run: (n) => cli("logout", n) },
     { use: "status", about: "who it's signed in as", run: () => cli("status") },
   ] };
 }

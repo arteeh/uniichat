@@ -428,6 +428,7 @@ header > .imping { display: flex; flex-direction: column; justify-content: cente
 .set .field textarea { display: block; height: auto; padding: 9px 10px; line-height: 20px; resize: vertical; }
 .set .field :where(input, select, textarea):focus { outline: 2px solid var(--ink); outline-offset: -1px; }
 .set .four { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+.set .four select[name$=".account"] { grid-column: 1 / -1; }
 .set .opts { display: flex; flex-wrap: wrap; gap: 6px 18px; }
 .set .opt { display: inline-flex; gap: 6px; align-items: center; font-weight: 400; }
 .set .opt[hidden] { display: none; }

@@ -115,7 +115,7 @@ export namespace Agent {
         if (ask.vendor === "claude-api") {
           await Agent.loop(Anthropic.wire, run);
         } else if (ask.vendor === "openai-sub") {
-          await Agent.loop(ChatGPT.wire, run);
+          await Agent.loop(ChatGPT.wire(ask, on), run);
         } else {
           await Agent.loop(OpenAI.wire, run);
         }
@@ -307,7 +307,8 @@ export namespace Agent {
 
   export function seat(ask: Ask): Seat {
     const yields = ask.yields !== undefined;
-    return { model: ask.model, room: yields ? ask.model + " " + ask.yields : ask.model, yields, held: false };
+    const model = ask.vendor === "openai-sub" ? ask.vendor + ":" + (ask.account ?? "auto") + ":" + ask.model : ask.model;
+    return { model, room: yields ? model + " " + ask.yields : model, yields, held: false };
   }
 
   export function import_seated_elsewhere(seat: Seat): boolean {

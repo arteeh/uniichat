@@ -81,7 +81,7 @@ type Turn = {
   back  : number;
   sums  : { from: number; total: number } | null;
   resume: { wake: AbortController; goal: string | null } | null;
-  limits: { vendor: Vendor; n: number } | null;
+  limits: { vendor: Vendor; account?: number; n: number } | null;
 };
 
 type Chat = Parts & Doing & Turn;
@@ -529,20 +529,21 @@ export namespace Chat {
   }
 
   export function limits(chat: Chat): number {
-    return chat.limits?.vendor === chat.pick.vendor ? chat.limits.n : 0;
+    return chat.limits?.vendor === chat.pick.vendor && chat.limits.account === chat.pick.account ? chat.limits.n : 0;
   }
 
   export function park(chat: Chat, end: End, goal: string | null = null): void {
     const n = end.limits ?? 0;
     const vendor = end.vendor ?? chat.pick.vendor;
+    const account = end.vendor === undefined ? chat.pick.account : end.account;
     const { ms, known } = Limit.wait_for(end.until ?? null, n, LIMIT);
     const until = Date.now() + ms;
     Chat.unpark(chat);
     const wake = new AbortController();
     chat.resume = { wake, goal };
-    chat.limits = { vendor, n };
-    chat.main.limit = { until, known, vendor };
-    void Limit.wait(vendor, ms, wake.signal).then(() => Chat.go_on(chat, wake, goal));
+    chat.limits = { vendor, account, n };
+    chat.main.limit = { until, known, vendor, account };
+    void Limit.wait(vendor, ms, wake.signal, account).then(() => Chat.go_on(chat, wake, goal));
     Chat.change(chat);
   }
 
