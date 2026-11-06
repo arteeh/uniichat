@@ -1876,7 +1876,8 @@ var Pick;
   function on(pick, vendor, model) {
     const below = SPEEDS.slice(0, SPEEDS.indexOf(pick.speed) + 1);
     const speed = below.filter((s) => model.speeds.includes(s)).pop() ?? "slow";
-    return { ...pick, vendor, model: model.label, speed };
+    const { account, ...rest } = pick;
+    return { ...rest, vendor, model: model.label, speed, ...vendor === "openai-sub" && account !== undefined ? { account } : {} };
   }
   Pick2.on = on;
   function models(vendors, labels) {
@@ -1885,8 +1886,11 @@ var Pick;
   Pick2.models = models;
   function options(pick, move, offer) {
     const speeds = Pick.model(pick.vendor, pick.model)?.speeds ?? [];
-    const { profile: _, ...plain } = pick;
-    const all = Pick.models(offer.vendors, offer.models).map(([v, m]) => [m.label, Pick.on(plain, v, m)]);
+    const { profile: _, account: __, ...plain } = pick;
+    const all = Pick.models(offer.vendors, offer.models).flatMap(([v, m]) => {
+      const on = Pick.on(plain, v, m);
+      return [[m.label, on], ...v === "openai-sub" ? (offer.accounts ?? []).filter((a) => a.connected).map((a) => [m.label + " (account " + a.id + ")", { ...on, account: a.id }]) : []];
+    });
     const profiles = Object.keys(offer.profiles ?? {}).flatMap((name) => {
       const on = Pick.profile(name, offer, pick.effort, pick.speed);
       return on === null ? [] : [[name, on]];
@@ -1916,7 +1920,7 @@ var Pick;
     const ends = move === "up" || move === "down";
     const next = ends ? Math.max(0, Math.min(n - 1, at + d)) : (at + d + n) % n;
     const mine = ([, p]) => p.profile === undefined && p.vendor === pick.vendor;
-    const same = list.filter(([part, p]) => part === to || p.profile === undefined && p.vendor + ":" + part === to);
+    const same = list.filter(([part, p]) => part === to || p.profile === undefined && (p.vendor + ":" + part === to || Pick.label(p) === to));
     const like = list.filter(([part]) => part.toLowerCase().includes(String(to).toLowerCase()));
     const one = like.length === 1 ? like[0] : like.filter(mine).length === 1 ? like.find(mine) : undefined;
     const hit = to === undefined ? list[next] : same.find(mine) ?? same[0] ?? one;
@@ -1934,7 +1938,7 @@ var Pick;
   }
   Pick2.twin = twin;
   function label(pick) {
-    return [pick.vendor, pick.model, pick.effort, pick.speed].join(":");
+    return [pick.vendor, pick.model, pick.effort, pick.speed, ...pick.account === undefined ? [] : [pick.account]].join(":");
   }
   Pick2.label = label;
   function ask(pick) {
@@ -1948,28 +1952,35 @@ var Pick;
   }
   Pick2.named = named;
   function falls(run, falls) {
-    const own = { vendor: run.vendor, model: run.model, effort: run.effort, speed: run.speed };
+    const own = { vendor: run.vendor, model: run.model, effort: run.effort, speed: run.speed, ...run.account === undefined ? {} : { account: run.account } };
     const list = falls.map((f) => {
       const on = Pick.on(own, f.vendor, f.model);
-      return Pick.ask({ ...on, effort: f.effort ?? on.effort, speed: f.speed ?? on.speed });
+      return Pick.ask({ ...on, account: f.account, effort: f.effort ?? on.effort, speed: f.speed ?? on.speed });
     });
-    return [own, ...list].filter((p, k, all) => all.findIndex((q) => q.vendor === p.vendor && q.model === p.model) === k);
+    return [own, ...list].filter((p, k, all) => all.findIndex((q) => q.vendor === p.vendor && q.model === p.model && q.account === p.account) === k);
   }
   Pick2.falls = falls;
-  function profile(name, offer, effort, speed) {
+  function profile(name, offer, effort, speed, require_available = true) {
     const profiles = offer.profiles ?? {};
     const first = Object.hasOwn(profiles, name) ? profiles[name][0] : undefined;
-    if (first === undefined) {
+    if (first === undefined || require_available && profiles[name].some((f) => !Pick.account_available(f, offer))) {
       return null;
     }
     const on = Pick.on({ vendor: first.vendor, model: first.model.label, effort, speed }, first.vendor, first.model);
-    return { ...on, effort: first.effort ?? effort, speed: first.speed ?? on.speed, profile: name };
+    return { ...on, effort: first.effort ?? effort, speed: first.speed ?? on.speed, account: first.account, profile: name };
   }
   Pick2.profile = profile;
-  function read(x, offer) {
+  function read(x, offer, require_available = true) {
+    const account = get(x, "account");
+    if (account !== undefined && (get(x, "vendor") !== "openai-sub" || typeof account !== "number" || !Number.isSafeInteger(account) || account < 1)) {
+      return null;
+    }
+    if (require_available && !Pick.account_available({ account }, offer)) {
+      return null;
+    }
     const [profile, effort, speed, label] = [get(x, "profile"), get(x, "effort"), get(x, "speed"), get(x, "model")];
     if (profile !== undefined) {
-      return typeof profile === "string" && typeof effort === "string" && EFFORTS.includes(effort) ? Pick.profile(profile, offer, effort, String(speed)) : null;
+      return typeof profile === "string" && typeof effort === "string" && EFFORTS.includes(effort) ? Pick.profile(profile, offer, effort, String(speed), require_available) : null;
     }
     const vendor = offer.vendors.find((v) => v === get(x, "vendor"));
     if (vendor === undefined || typeof label !== "string" || !offer.models.includes(label)) {
@@ -1979,7 +1990,7 @@ var Pick;
     if (model === undefined || typeof effort !== "string" || !EFFORTS.includes(effort) || typeof speed !== "string" || !model.speeds.includes(speed)) {
       return null;
     }
-    return { vendor, model: label, effort, speed };
+    return { vendor, model: label, effort, speed, ...account === undefined ? {} : { account } };
   }
   Pick2.read = read;
   function window2(pick, offer) {
@@ -1988,8 +1999,12 @@ var Pick;
     return Math.min(...models.map((m) => m?.window ?? 272000));
   }
   Pick2.window = window2;
+  function account_available(pick, offer) {
+    return pick.account === undefined || (offer.accounts ?? []).some((a) => a.id === pick.account && a.connected);
+  }
+  Pick2.account_available = account_available;
   function load(saved, offer, def) {
-    return Pick.read(saved ?? def, offer) ?? def;
+    return Pick.read(saved ?? def, offer, false) ?? def;
   }
   Pick2.load = load;
 })(Pick ||= {});
@@ -2347,10 +2362,10 @@ function view_shown(v) {
 function view_knobs(v, pick, menus) {
   const { model, effort, speed, profile } = pick;
   const ranks = (v.profiles?.[profile ?? ""] ?? []).map((f) => f.model.label).join(", ");
-  const whose = Pick.twin(pick.vendor, model, v.vendors) ? ", " + pick.vendor : "";
+  const whose = (Pick.twin(pick.vendor, model, v.vendors) ? ", " + pick.vendor : "") + (pick.account === undefined ? "" : ", account " + pick.account);
   const choices = (move) => menus ? view_choices(pick, move, v) : [];
   return [
-    { text: profile ?? model, move: "model", hint: profile === undefined ? model + whose : profile + ": " + ranks, choices: choices("model") },
+    { text: profile ?? model + (pick.account === undefined ? "" : " · account " + pick.account), move: "model", hint: profile === undefined ? model + whose : profile + ": " + ranks, choices: choices("model") },
     { text: effort, move: "effort", hint: effort + " effort", choices: choices("effort") },
     { text: speed, move: "speed", hint: speed, choices: choices("speed") }
   ];
@@ -2360,8 +2375,8 @@ function view_choices(pick, move, v) {
     const head = (p) => p.profile !== undefined ? "profiles" : p.vendor;
     const vendor = move === "model" && (i === 0 || head(all[i - 1][1]) !== head(to)) ? head(to) : null;
     const here = move !== "model" ? Pick.label(to) === Pick.label(pick) : to.profile !== undefined ? to.profile === pick.profile : pick.profile === undefined && Pick.label(to) === Pick.label(pick);
-    const by = move === "model" && to.profile === undefined ? to.vendor + ":" + text : text;
-    return { text: move === "model" ? to.profile ?? to.model : text, to: by, move, here, vendor };
+    const by = move === "model" && to.profile === undefined ? Pick.label(to) : text;
+    return { text: move === "model" ? to.profile ?? text : text, to: by, move, here, vendor };
   });
 }
 function view_learn(v, pack) {
@@ -3259,22 +3274,28 @@ function settings_html(page) {
   const error = page.error === null ? "" : `<p class="why bad">${esc(page.error)}</p>`;
   const none = page.none === null ? "" : `<p class="why bad">${esc(page.none).replace(/`([^`]+)`/g, "<code>$1</code>")}.</p>`;
   const save = `<div class="save"><p class="why"></p><button class="chip go"${page.error === null ? "" : " disabled"}>Save</button></div>`;
-  const head = `<p class="sub">The server's settings, in config.json in its folder.</p>`;
+  const accounts = (page.accounts ?? []).map((a) => esc(a.label)).join("<br>") || "No ChatGPT accounts connected.";
+  const head = `<p class="sub">The server's settings, in config.json in its folder.</p>` + section_html("ChatGPT accounts", `<p class="sub">${accounts}<br>Choose an account per role, or use automatic switching. Add another with <code>unii serve chatgpt login 2</code>.</p>`);
   const profiles = page.profiles === null ? "" : section_html("Profiles", `<p class="sub">Ranked models: a chat on a profile runs on the first and falls back to the next when one is out.</p><div class="set profiles" data-key="profiles"><div class="field"></div><p class="err"></p></div>`);
   return head + error + none + `<form class="settings" autocomplete="off">` + group(GROUPS[0]) + profiles + keys + group(GROUPS[1]) + save + `</form>`;
 }
-function offered(vendors, models) {
-  return Pick.models(VENDORS.filter((v) => vendors.includes(v)), models).map(([v, m]) => v + ":" + m.label);
+function offered(vendors, models, accounts = []) {
+  return Pick.models(VENDORS.filter((v) => vendors.includes(v)), models).flatMap(([v, m]) => [v + ":" + m.label, ...v === "openai-sub" ? accounts.filter((a) => a.connected).map((a) => [v, m.label, "medium", "slow", a.id].join(":")) : []]);
 }
-function profiles_html(profiles, offered) {
+function profiles_html(profiles, offered, accounts = []) {
+  const account = (m) => {
+    const id = Number(m.split(":")[4]);
+    return id ? accounts.find((a) => a.id === id)?.label ?? "Account " + id + " (not connected)" : "";
+  };
+  const identity = (m) => m.split(":").slice(0, 2).join(":") + ":" + (m.split(":")[4] ?? "");
   const model = (m, i, j) => {
     const [vendor = "", label = m, ...rest] = m.split(":");
-    const more = rest.length === 0 ? "" : ` <small>${esc(rest.join(" · "))}</small>`;
+    const more = rest.length === 0 ? "" : ` <small>${esc([...rest.slice(0, 2), account(m)].filter(Boolean).join(" · "))}</small>`;
     return `<li data-j="${j}"><button type="button" class="grip" data-i="${i}" data-j="${j}" aria-label="Move ${esc(label)}">⠿</button><span>${esc(label)}${more} <small>${esc(vendor)}</small></span><button type="button" class="out" data-i="${i}" data-j="${j}" aria-label="Remove ${esc(label)}">×</button></li>`;
   };
   const add = (list, i) => {
-    const left = offered.filter((m) => !list.some((x) => x.split(":").slice(0, 2).join(":") === m));
-    const groups = [...new Set(left.map((m) => m.split(":")[0]))].map((v) => `<optgroup label="${esc(v)}">${left.filter((m) => m.startsWith(v + ":")).map((m) => `<option value="${esc(m)}">${esc(m.split(":")[1])}</option>`).join("")}</optgroup>`);
+    const left = offered.filter((m) => !list.some((x) => identity(x) === identity(m)));
+    const groups = [...new Set(left.map((m) => m.split(":")[0]))].map((v) => `<optgroup label="${esc(v)}">${left.filter((m) => m.startsWith(v + ":")).map((m) => `<option value="${esc(m)}">${esc(m.split(":")[1] + (account(m) ? " · " + account(m) : ""))}</option>`).join("")}</optgroup>`);
     return left.length === 0 ? "" : `<select class="add" data-i="${i}" aria-label="Add model"><option value="">Add model</option>${groups.join("")}</select>`;
   };
   const one = ([name, list], i) => `<div class="prof" data-i="${i}"><div class="name"><input class="pname" data-i="${i}" value="${esc(name)}" aria-label="Name" placeholder="Enter the profile name here" maxlength="60" spellcheck="false" autocapitalize="off"><button type="button" class="chip red pdel" data-i="${i}">Delete</button></div><ol>${list.map((m, j) => model(m, i, j)).join("")}</ol>${add(list, i)}</div>`;
@@ -3334,22 +3355,23 @@ function key_html(k) {
   const label = `<label for="${id}">${esc(name)}<small>${esc(about)} <code>${esc(k.env)}</code></small></label>`;
   return `<div class="set key" data-key="key.${esc(k.name)}">${label}<div class="field">${field}</div><p class="from">${from}${reset}</p><p class="err"></p></div>`;
 }
-function picks_html(key, vendors, models, value, none, profiles = []) {
-  const [vendor = "", model = "", effort = "", speed = ""] = value === "" ? [] : value.split(":");
+function picks_html(key, vendors, models, value, none, profiles = [], accounts = []) {
+  const [vendor = "", model = "", effort = "", speed = "", account = ""] = value === "" ? [] : value.split(":");
   const known = VENDORS.includes(vendor);
   const offered = VENDORS.filter((v) => vendors.includes(v));
   const labels = known ? Pick.models([vendor], models).map(([, m]) => m.label) : [];
   const speeds = known ? Pick.model(vendor, model)?.speeds ?? [] : [];
-  const select = (part, name, all, on, first) => {
+  const select = (part, name, all, on, first, labels = {}) => {
     const opts = [...first === null ? [] : [["", first]], ...all.includes(on) || on === "" && first !== null ? [] : [[on, on + " (not offered)"]], ...all.map((x) => [x, x])];
-    const items = opts.map(([v, text]) => `<option value="${esc(v)}"${v === on ? " selected" : ""}>${esc(text)}</option>`).join("");
+    const items = opts.map(([v, text]) => `<option value="${esc(v)}"${v === on ? " selected" : ""}${part === "account" && v !== "" && !accounts.some((a) => String(a.id) === v && a.connected) ? " disabled" : ""}>${esc(labels[v] ?? text)}</option>`).join("");
     return `<select id="set-${key}-${part}" name="${key}.${part}" aria-label="${name}">${items}</select>`;
   };
   const head = select("vendor", "Vendor", [...offered, ...profiles], vendor, none);
-  return vendor === "" || profiles.includes(vendor) ? head : head + select("model", "Model", labels, model, null) + select("effort", "Effort", EFFORTS, effort, null) + select("speed", "Speed", speeds, speed, null);
+  const account_pick = vendor === "openai-sub" ? select("account", "ChatGPT account", accounts.map((a) => String(a.id)), account, "Automatic (switch accounts)", Object.fromEntries(accounts.map((a) => [String(a.id), a.label]))) : "";
+  return vendor === "" || profiles.includes(vendor) ? head : head + select("model", "Model", labels, model, null) + select("effort", "Effort", EFFORTS, effort, null) + select("speed", "Speed", speeds, speed, null) + account_pick;
 }
 function pick_mend(parts, models, profiles = []) {
-  const [vendor = "", model = "", effort = "", speed = ""] = parts;
+  const [vendor = "", model = "", effort = "", speed = "", account = ""] = parts;
   if (profiles.includes(vendor)) {
     return vendor;
   }
@@ -3360,7 +3382,7 @@ function pick_mend(parts, models, profiles = []) {
   if (m === undefined) {
     return parts.join(":");
   }
-  return [vendor, m.label, effort || "medium", m.speeds.includes(speed) ? speed : m.speeds[0]].join(":");
+  return [vendor, m.label, effort || "medium", m.speeds.includes(speed) ? speed : m.speeds[0], ...vendor === "openai-sub" && account !== "" ? [account] : []].join(":");
 }
 function section_html(title, body) {
   return `<section><h2>${esc(title)}</h2>${body}</section>`;
@@ -5412,7 +5434,7 @@ function settings_draw(page) {
       const four = value?.parentElement?.querySelector(".four");
       if (value && four) {
         const focus = document.activeElement?.name;
-        four.innerHTML = picks_html(key, vendors, listed("models"), value.value, key === "agents" ? "The chat's pick" : null, names());
+        four.innerHTML = picks_html(key, vendors, listed("models"), value.value, key === "agents" ? "The chat's pick" : null, names(), page.accounts);
         four.querySelector(`select[name="${focus}"]`)?.focus();
       }
     }
@@ -5466,7 +5488,7 @@ function settings_draw(page) {
   };
   const profs_draw = (focus) => {
     if (box !== null) {
-      box.innerHTML = profiles_html(profs, offered(listed("vendors"), listed("models")));
+      box.innerHTML = profiles_html(profs, offered(listed("vendors"), listed("models"), page.accounts), page.accounts);
       (focus === undefined ? null : box.querySelector(focus) ?? box.querySelector(".pnew"))?.focus();
     }
   };

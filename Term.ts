@@ -386,7 +386,7 @@ function term_pick(t: Term, move: Move, arg: string): void {
   const pick  = t.v.pick;
   const opts  = Pick.options(pick, move, t.v);
   const head  = (p: Pick) => (p.profile !== undefined ? "profiles" : p.vendor);
-  const now   = ([part, p]: [string, Pick]) => (part === knob.text && head(p) === head(pick) ? part + " (now)" : part);
+  const now   = ([part, p]: [string, Pick]) => (Pick.label(p) === Pick.label(pick) && p.profile === pick.profile ? part + " (now)" : part);
   const heads = [...new Set(opts.map(([, p]) => head(p)))];
   const group = (v: string) => [...new Set(opts.filter(([, p]) => head(p) === v).map(now))].join(", ");
   const twins = move === "model" && heads.length > 1 && opts.some(([part, p]) => p.profile === undefined && Pick.twin(p.vendor, part, t.v.vendors));

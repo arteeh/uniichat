@@ -3,6 +3,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import type { Vendor } from "./AskAI.ts";
+import { ChatGPTAccounts } from "./ChatGPTAccounts.ts";
 import { err_code, err_why } from "./Err.ts";
 import { get, list as items, rec, text_of } from "./Json.ts";
 import { EFFORTS, LABELS, VENDORS, Pick, type Fall, type Offer } from "./Pick.ts";
@@ -84,7 +85,7 @@ export const CLAUDE     = config_path(config_get("claude", ""));
 const ENV_KEYS: Record<string, string> = Object.fromEntries(Object.entries(VARS).map(([name, v]) => [name, config_key(v)]));
 export const KEYS: Record<string, string> = config_keys(keys_read());
 
-let FOLLOWED = config_usable().join();
+let FOLLOWED = config_usable().join() + JSON.stringify(ChatGPTAccounts.list(CHATGPT));
 
 let KEPT: string[] = [];
 
@@ -199,7 +200,7 @@ function config_usable(): Vendor[] {
     return at;
   };
   const claude = field(CLAUDE_SUB + "/.credentials.json", "claudeAiOauth") != null || field(CLAUDE_SUB + "/.claude.json", "oauthAccount") != null;
-  const chatgpt = typeof field(CHATGPT, "tokens", "refresh_token") === "string";
+  const chatgpt = ChatGPTAccounts.list(CHATGPT).some((a) => a.connected);
   const has: Record<Vendor, boolean> = { "claude-sub": claude, "openai-sub": chatgpt, "claude-api": KEYS.anthropic !== "", "openai-api": KEYS.openai !== "" };
   return (Object.keys(USABLE) as Vendor[]).filter((v) => has[v]);
 }
@@ -209,7 +210,7 @@ export function config_none(): string | null {
 }
 
 export function config_follow(): boolean {
-  const now = config_usable().join();
+  const now = config_usable().join() + JSON.stringify(ChatGPTAccounts.list(CHATGPT));
   if (now === FOLLOWED) {
     return false;
   }
@@ -284,6 +285,7 @@ export function config_make(file: Record<string, unknown>): Made {
   const offer: Offer = {
     vendors : config_vendors(config_value(file, "vendors")),
     models  : config_value(file, "models").split(",").map((m) => m.trim()),
+    accounts: ChatGPTAccounts.list(CHATGPT),
   };
   offer.profiles = config_profiles(file, offer);
   const agents = config_value(file, "agents");
@@ -306,8 +308,9 @@ function config_context(text: string): number {
 }
 
 function config_run(key: string, text: string, offer: Offer): Pick {
-  const [vendor, model, effort, speed] = text.split(":");
-  const pick = Pick.read(Object.hasOwn(offer.profiles ?? {}, text) ? { profile: text, effort: "medium", speed: "slow" } : { vendor, model, effort, speed }, offer);
+  const parts = text.split(":");
+  const [vendor, model, effort, speed, account] = parts;
+  const pick = parts.length > 5 ? null : Pick.read(Object.hasOwn(offer.profiles ?? {}, text) ? { profile: text, effort: "medium", speed: "slow" } : { vendor, model, effort, speed, ...(account === undefined ? {} : { account: /^[1-9]\d*$/.test(account) ? Number(account) : NaN }) }, offer, false);
   if (pick === null) {
     throw new Error("config: " + key + " is no vendor:model:effort:speed or profile offered here: " + text);
   }
@@ -330,13 +333,13 @@ function config_profiles(file: Record<string, unknown>, offer: Offer): Record<st
 
 function config_fall(name: string, f: string, offer: Offer): Fall {
   const parts = f.split(":");
-  const [vendor, label, effort, speed] = parts as [Vendor, string, string?, string?];
+  const [vendor, label, effort, speed, account] = parts as [Vendor, string, string?, string?, string?];
   const model = offer.vendors.includes(vendor) && offer.models.includes(label) ? Pick.model(vendor, label) : undefined;
-  const bad = parts.length > 4 || (effort !== undefined && !EFFORTS.includes(effort)) || (speed !== undefined && !model?.speeds.includes(speed));
+  const bad = parts.length > 5 || (effort !== undefined && !EFFORTS.includes(effort)) || (speed !== undefined && !model?.speeds.includes(speed)) || (account !== undefined && (vendor !== "openai-sub" || !/^[1-9]\d*$/.test(account) || !Number.isSafeInteger(Number(account))));
   if (model === undefined || bad) {
     throw new Error("config: profile " + JSON.stringify(name) + " has no vendor:model[:effort[:speed]] offered here: " + f);
   }
-  return { vendor, model, effort, speed };
+  return { vendor, model, effort, speed, ...(account === undefined ? {} : { account: Number(account) }) };
 }
 
 function config_vendors(text: string): Vendor[] {
@@ -440,6 +443,7 @@ export function config_reload(): void {
   OFFER.vendors = made.offer.vendors;
   OFFER.models = made.offer.models;
   OFFER.profiles = made.offer.profiles;
+  OFFER.accounts = made.offer.accounts;
   PICK = made.pick;
   COMPACTOR = made.compactor;
   COMPACTOR_CONTEXT = made.context;

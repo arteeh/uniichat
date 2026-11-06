@@ -1,9 +1,10 @@
 import * as fs from "node:fs";
 import * as config from "./Config.ts";
-import { LABELS } from "./Pick.ts";
+import { LABELS, Pick } from "./Pick.ts";
 import { write_whole } from "./Write.ts";
 import { err_code, err_why } from "./Err.ts";
 import { get, rec } from "./Json.ts";
+import { ChatGPTAccounts, type ChatGPTAccount } from "./ChatGPTAccounts.ts";
 
 export type Row = {
   key     : string;
@@ -19,7 +20,7 @@ export type Row = {
 
 export type Key = { name: string; env: string; from: config.From; tail: string };
 
-export type Page = { version: string; settings: Row[]; keys: Key[]; profiles: Record<string, string[]> | null; error: string | null; none: string | null };
+export type Page = { version: string; settings: Row[]; keys: Key[]; profiles: Record<string, string[]> | null; error: string | null; none: string | null; accounts?: ChatGPTAccount[] };
 
 type Out = { status: number; body: object; saved: string[]; wrote: boolean };
 
@@ -69,7 +70,7 @@ export namespace Settings {
       return { name, env, from, tail: Settings.tail(key) };
     });
     const profiles = process.env.UNII_PROFILES !== undefined ? null : Settings.profiles(file.profiles) ?? {};
-    return { version: snap.version, settings, keys: shown, profiles, error, none: config.config_none() };
+    return { version: snap.version, settings, keys: shown, profiles, error, none: config.config_none(), accounts: ChatGPTAccounts.list(config.CHATGPT) };
   }
 
   export function tail(key: string): string {
@@ -226,7 +227,18 @@ export namespace Settings {
       return { error: unknown === "" ? "Offer at least one model." : "There is no model " + unknown + ".", key: "models" };
     }
     try {
-      config.config_make(file);
+      const made = config.config_make(file);
+      const current = { pick: config.PICK, compactor: config.COMPACTOR, agents: config.AGENTS };
+      if (changed.has("profiles") && Object.values(made.offer.profiles ?? {}).flat().some((f) => !Pick.account_available(f, made.offer))) {
+        return { error: "A profile selects a ChatGPT account that is not connected.", key: "profiles" };
+      }
+      for (const key of ["pick", "compactor", "agents"] as const) {
+        const pick = made[key], before = current[key];
+        const unchanged = pick !== null && before !== null && Pick.label(pick) === Pick.label(before) && pick.profile === before.profile;
+        if (pick !== null && !unchanged && Pick.read(pick, made.offer) === null) {
+          return { error: "The selected ChatGPT account is not connected.", key };
+        }
+      }
     } catch (err) {
       const text = err_why(err).replace(/^config: /, "");
       const key = text.startsWith("profile") ? "profiles" : config.SETTINGS.find((s) => text.startsWith(s.key + " "))?.key;

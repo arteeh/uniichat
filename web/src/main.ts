@@ -1223,7 +1223,7 @@ function settings_draw(page: Page): void {
       const four = value?.parentElement?.querySelector<HTMLElement>(".four");
       if (value && four) {
         const focus = (document.activeElement as HTMLSelectElement | null)?.name;
-        four.innerHTML = Html.picks_html(key, vendors, listed("models"), value.value, key === "agents" ? "The chat's pick" : null, names());
+        four.innerHTML = Html.picks_html(key, vendors, listed("models"), value.value, key === "agents" ? "The chat's pick" : null, names(), page.accounts);
         four.querySelector<HTMLSelectElement>(`select[name="${focus}"]`)?.focus();
       }
     }
@@ -1277,7 +1277,7 @@ function settings_draw(page: Page): void {
   };
   const profs_draw = (focus?: string) => {
     if (box !== null) {
-      box.innerHTML = Html.profiles_html(profs, Html.offered(listed("vendors"), listed("models")));
+      box.innerHTML = Html.profiles_html(profs, Html.offered(listed("vendors"), listed("models"), page.accounts), page.accounts);
       (focus === undefined ? null : box.querySelector<HTMLElement>(focus) ?? box.querySelector<HTMLElement>(".pnew"))?.focus();
     }
   };

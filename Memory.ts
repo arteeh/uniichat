@@ -742,7 +742,7 @@ export namespace Memory {
 
   export function ask(mem: Memory, l: number, i: number, blocks: Block[]): Call {
     const own = Memory.served(mem, l, i) === "compactor";
-    const repick = () => Pick.ask(config.COMPACTOR);
+    const repick = () => ({ ...Pick.ask(config.COMPACTOR), account: config.COMPACTOR.account });
     const told: { again: Again | null } = { again: null };
     return AskAI.ask({ ...mem.share(), ...repick(), blocks, patient: true, repick, yields: own ? undefined : mem.dir, who: own ? "compactor" : "import" }, (ev) => Memory.heard(mem, own, ev, told));
   }

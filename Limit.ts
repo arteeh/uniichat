@@ -26,10 +26,10 @@ let ANSWERING: () => { queued: boolean; busy: boolean } = () => ({ queued: false
 
 const LIMITS = new Map<string, number>();
 
-const PARKED = new Set<{ vendor: Vendor; poke: () => void }>();
+const PARKED = new Set<{ vendor: Vendor; account?: number; poke: () => void }>();
 
-const USAGE: Partial<Record<Vendor, () => Promise<boolean | null>>> = { "openai-sub": () => ChatGPT.clear() };
-const POLLS = new Map<Vendor, Timer>();
+const USAGE: Partial<Record<Vendor, (account?: number) => Promise<boolean | null>>> = { "openai-sub": (account) => ChatGPT.ready(account) };
+const POLLS = new Map<string, Timer>();
 
 export namespace Limit {
 
@@ -90,7 +90,7 @@ export namespace Limit {
     }
     const until = AbortSignal.any([l.signal, wake.signal]);
     try {
-      await Limit.wait(vendor, ms, until);
+      await Limit.wait(vendor, ms, until, l.ask.account);
       if (parked && l.ask.agent === true && !until.aborted && ANSWERING().queued) {
         await Limit.let_unii_answer_first(l, until);
       }
@@ -115,16 +115,16 @@ export namespace Limit {
     }
   }
 
-  export async function wait(vendor: Vendor, ms: number, signal: AbortSignal): Promise<void> {
+  export async function wait(vendor: Vendor, ms: number, signal: AbortSignal, account?: number): Promise<void> {
     const wake = new AbortController();
-    const me = { vendor, poke: () => wake.abort() };
+    const me = { vendor, account, poke: () => wake.abort() };
     PARKED.add(me);
-    Limit.poll_soon(vendor);
+    Limit.poll_soon(vendor, account);
     try {
       await Machine.nap(ms, AbortSignal.any([signal, wake.signal]));
     } finally {
       PARKED.delete(me);
-      Limit.poll_off(vendor);
+      Limit.poll_off(vendor, account);
     }
   }
 
@@ -148,34 +148,37 @@ export namespace Limit {
     return woken.length;
   }
 
-  export function poll_soon(vendor: Vendor): void {
-    if (USAGE[vendor] === undefined || POLLS.has(vendor)) {
+  export function poll_soon(vendor: Vendor, account?: number): void {
+    const key = vendor + ":" + (account ?? "auto");
+    if (USAGE[vendor] === undefined || POLLS.has(key)) {
       return;
     }
     const timer = setTimeout(() => {
-      POLLS.delete(vendor);
-      void Limit.poll(vendor);
+      POLLS.delete(key);
+      void Limit.poll(vendor, account);
     }, POLL);
     timer.unref?.();
-    POLLS.set(vendor, timer);
+    POLLS.set(key, timer);
   }
 
-  export function poll_off(vendor: Vendor): void {
-    if (![...PARKED].some((p) => p.vendor === vendor)) {
-      clearTimeout(POLLS.get(vendor));
-      POLLS.delete(vendor);
+  export function poll_off(vendor: Vendor, account?: number): void {
+    if (![...PARKED].some((p) => p.vendor === vendor && p.account === account)) {
+      const key = vendor + ":" + (account ?? "auto");
+      clearTimeout(POLLS.get(key));
+      POLLS.delete(key);
     }
   }
 
-  export async function poll(vendor: Vendor): Promise<boolean> {
-    if (![...PARKED].some((p) => p.vendor === vendor)) {
+  export async function poll(vendor: Vendor, account?: number): Promise<boolean> {
+    const parked = () => [...PARKED].filter((p) => p.vendor === vendor && p.account === account);
+    if (parked().length === 0) {
       return false;
     }
-    const clear = await (USAGE[vendor]?.() ?? Promise.resolve(null)).catch(() => null);
+    const clear = await (USAGE[vendor]?.(account) ?? Promise.resolve(null)).catch(() => null);
     if (clear === true) {
-      Limit.resume(vendor);
-    } else if ([...PARKED].some((p) => p.vendor === vendor)) {
-      Limit.poll_soon(vendor);
+      parked().forEach((p) => p.poke());
+    } else if (parked().length > 0) {
+      Limit.poll_soon(vendor, account);
     }
     return clear === true;
   }
