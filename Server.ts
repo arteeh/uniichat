@@ -1804,6 +1804,10 @@ export namespace Main {
       Tools.prune(Main.chat.tools, kept);
       Main.follow();
     }, PING / 2);
+    fs.watchFile(config.FILE_PATH, { interval: 2000 }, () => Main.event("config.json", () => {
+      config.config_reload();
+      Chat.offer(Main.chat);
+    }));
     for (const sig of ["SIGTERM", "SIGINT", "SIGHUP"]) {
       process.on(sig, () => process.exit(0));
     }
