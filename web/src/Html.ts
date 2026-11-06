@@ -158,7 +158,7 @@ export function account_html(prompts: View.Prompts | null, notify: Notify | null
   const mine    = section_html("Prompts", prompts === null ? unread : prompt_html("prompt", prompts.prompt.text, "The user prompt: Unii's system prompt in every turn; its subagents get it too once you change it. Add who you are and how you want work done at its end. prompt.md in the server's folder; empty: the built-in one.")
     + prompt_html("compact", prompts.compact.text, "The compaction prompt: all a summary of the memory gets, nothing else. compact.md in the server's folder; empty: the built-in one."));
   const mcp     = section_html("MCP servers", `<div class="mcp"></div>`);
-  return `<a class="back" href="/" data-go="/">← Chat</a><h1>Settings</h1>` + mine + section_html("This browser", acts.join("")) + mcp + `<div class="owned"></div>`;
+  return `<a class="back" href="/" data-go="/">← Chat</a><h1>Settings</h1><section id="s-appearance"></section>` + mine + section_html("This browser", acts.join("")) + mcp + `<div class="owned"></div>`;
 }
 
 function prompt_html(name: string, text: string, note: string): string {
@@ -437,7 +437,7 @@ function span_html(s: Md.Span): string {
       return kind === "image" ? `<a class="media" href="${k}" target="_blank"><img src="${k}" alt="${esc(s.x)}"${title} loading="lazy"></a>`
         : kind === "video" ? `<video class="media" src="${k}"${title} controls preload="metadata"></video>`
         : kind === "audio" ? `<audio class="media" src="${k}"${title} controls preload="metadata"></audio>`
-        : kind === "html" ? `<iframe class="media page" src="${k}" title="${esc(s.t || s.x)}" sandbox="allow-same-origin allow-popups" loading="lazy"></iframe>`
+        : kind === "html" ? `<iframe class="media page" src="${k}?unii-appearance=1" title="${esc(s.t || s.x)}" sandbox="allow-same-origin allow-popups" loading="lazy"></iframe>`
         : View.store_file(s.k) ? chip_html(s.k, s.x)
         : `<a href="${k}"${title} target="_blank" rel="noopener">${esc(s.x || s.k)}</a>`;
     }

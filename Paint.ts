@@ -1,4 +1,5 @@
 import type { Kind } from "./AskAI.ts";
+import type { Palette } from "./Appearance.ts";
 import * as Call from "./Call.ts";
 import * as Md from "./Md.ts";
 import * as Theme from "./Theme.ts";
@@ -20,6 +21,38 @@ const GUTTER = 7;
 const GRAPHEMES = new Intl.Segmenter("en", { granularity: "grapheme" });
 
 let SITE = "";
+let PALETTE: Palette | null = null;
+
+export function paint_theme(palette: Palette | null): void {
+  PALETTE = palette;
+}
+
+export function paint_base(): string {
+  return "\x1b[0" + color_sgr(38, PALETTE?.fg ?? "") + color_sgr(48, PALETTE?.bg ?? "") + "m";
+}
+
+function paint_color(c: string, ground: boolean, dim: boolean): string {
+  const p = PALETTE;
+  if (p === null) {
+    return c;
+  }
+  if (ground) {
+    return c === Theme.ANSI.block ? p.surface : c || p.bg;
+  }
+  if (c === Theme.ANSI.block) {
+    return p.surface;
+  }
+  if (c === Theme.ANSI.add) {
+    return p.success;
+  }
+  if (c === Theme.ANSI.del) {
+    return p.error;
+  }
+  if (c === Theme.ANSI.you) {
+    return p.accent;
+  }
+  return dim ? p.muted : c === Theme.ANSI.ink || c === "" ? p.fg : c;
+}
 
 export function Run(x: string, s: Ink = INK): Run {
   return { x, s };
@@ -93,7 +126,7 @@ function ink_ansi(was: Ink | null, s: Ink): string {
     return "";
   }
   const end  = was !== null && was.k !== "" ? "\x1b]8;;\x1b\\" : "";
-  const sgr  = "\x1b[0" + (s.b ? ";1" : "") + (s.i ? ";3" : "") + (s.u ? ";4" : "") + (s.t ? ";9" : "") + (s.d ? ";2" : "") + color_sgr(38, s.c) + color_sgr(48, s.g) + "m";
+  const sgr  = "\x1b[0" + (s.b ? ";1" : "") + (s.i ? ";3" : "") + (s.u ? ";4" : "") + (s.t ? ";9" : "") + (s.d && PALETTE === null ? ";2" : "") + color_sgr(38, paint_color(s.c, false, s.d)) + color_sgr(48, paint_color(s.g, true, false)) + "m";
   const link = s.k === "" ? "" : "\x1b]8;;" + s.k + "\x1b\\";
   return end + sgr + link;
 }
@@ -101,6 +134,9 @@ function ink_ansi(was: Ink | null, s: Ink): string {
 function color_sgr(at: number, c: string): string {
   if (c === "") {
     return "";
+  }
+  if (/^#[0-9a-f]{6}$/i.test(c)) {
+    return ";" + at + ";2;" + [1, 3, 5].map((i) => parseInt(c.slice(i, i + 2), 16)).join(";");
   }
   const i = Number(c);
   return ";" + (at - 8 + (i < 8 ? i : 60 + i - 8));

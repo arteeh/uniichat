@@ -22,12 +22,16 @@ export type Screen = {
   ed     : Ed;
   off    : boolean;
   rest   : string;
+  escape : Timer | undefined;
   up     : number;
   rows   : number;
   on     : (key: string) => void;
+  color  : (dark: boolean) => void;
 };
 
 export const EDITING = "Arrows, Home, End, Ctrl+A, E, U, K, W, Alt+B, F, D, as in a shell; Shift+Enter or Ctrl+J, a new line; Up and Down past the ends, the messages sent.";
+
+const ESCAPE_WAIT = 150;
 
 const PASTE_ON  = "\x1b[200~";
 const PASTE_OFF = "\x1b[201~";
@@ -39,8 +43,9 @@ const WIPE     = "\x1b[2J\x1b[3J\x1b[H";
 // bracketed paste, kitty's keys at flag 1 (popped before pushed), the
 // flags asked (a kitty terminal answers CSI ? flags u); off, the cursor
 // shown again
-const MODES_ON  = "\x1b[?2004h\x1b[<u\x1b[>1u\x1b[?u";
-const MODES_OFF = "\x1b[?2004l\x1b[<u\x1b[?25h";
+const COLOR_QUERY = "\x1b]11;?\x1b\\";
+const MODES_ON  = "\x1b[?2004h\x1b[<u\x1b[>1u\x1b[?u\x1b[?2031h\x1b[?996n" + COLOR_QUERY;
+const MODES_OFF = "\x1b[0m\x1b[?2031l\x1b[?2004l\x1b[<u\x1b[?25h";
 
 const CURSOR_ON  = "\x1b[?25h";
 const CURSOR_OFF = "\x1b[?25l";
@@ -79,14 +84,14 @@ const WORD = /[\p{L}\p{N}_]/u;
 
 const MODS: [number, string][] = [[4, "Ctrl+"], [2, "Alt+"], [1, "Shift+"]];
 
-export function screen_new(on: (key: string) => void): Screen {
+export function screen_new(on: (key: string) => void, color: (dark: boolean) => void): Screen {
   const tty = process.stdin.isTTY && process.stdout.isTTY;
   const ed  = { text: "", pos: 0, hist: [], at: 0, draft: "", moved: false, w: 80, tall: 1 };
-  const scr = { tty, kitty: false, ed, off: false, rest: "", up: 0, rows: 0, on };
+  const scr = { tty, kitty: false, ed, off: false, rest: "", escape: undefined, up: 0, rows: 0, on, color };
   if (tty) {
     process.stdin.setRawMode(true);
     process.stdout.write(MODES_ON);
-    process.on("exit", () => process.stdout.write(screen_erase(scr) + MODES_OFF));
+    process.on("exit", () => process.stdout.write(MODES_OFF + screen_erase(scr)));
   }
   process.stdin.setEncoding("utf8");
   process.stdin.on("data", (data: string) => screen_feed(scr, data)).resume();
@@ -107,15 +112,15 @@ export function screen_paint(scr: Screen, body: Paint.Line[], wipe: boolean, foo
   const w     = screen_width();
   const held  = Math.min(wipe ? Infinity : scr.rows, process.stdout.rows || 24);
   const pad   = Math.max(0, held - body.length - foot.length);
-  const lines = [...body.map(Paint.line_ansi), ...Array<string>(pad).fill("")].map((l) => l + "\r\n").join("");
-  const draw  = foot.map((l) => Paint.line_ansi(Paint.runs_wrap(l, w, true)[0])).join("\r\n");
+  const lines = [...body.map(Paint.line_ansi), ...Array<string>(pad).fill("")].map((l) => l + "\x1b[K\r\n").join("");
+  const draw  = foot.map((l) => Paint.line_ansi(Paint.runs_wrap(l, w, true)[0]) + "\x1b[K").join("\r\n");
   const spot  = at ?? { row: foot.length - 1, col: 0 };
   const back  = foot.length - 1 - spot.row;
   const move  = (back > 0 ? "\x1b[" + back + "A" : "") + "\r\x1b[" + (spot.col + 1) + "G";
   const erase = wipe ? WIPE : screen_erase(scr);
   scr.up   = pad + spot.row;
   scr.rows = pad + foot.length;
-  process.stdout.write(SYNC_ON + erase + lines + draw + move + (at === null ? CURSOR_OFF : CURSOR_ON) + SYNC_OFF);
+  process.stdout.write(SYNC_ON + Paint.paint_base() + erase + lines + draw + move + (at === null ? CURSOR_OFF : CURSOR_ON) + SYNC_OFF);
 }
 
 function screen_erase(scr: Screen): string {
@@ -124,6 +129,7 @@ function screen_erase(scr: Screen): string {
 }
 
 function screen_feed(scr: Screen, data: string): void {
+  clearTimeout(scr.escape);
   data = scr.rest + data;
   let n = 1;
   while (data !== "" && n > 0) {
@@ -131,6 +137,15 @@ function screen_feed(scr: Screen, data: string): void {
     data = data.slice(n);
   }
   scr.rest = data;
+  if (data === "\x1b") {
+    scr.escape = setTimeout(() => {
+      if (scr.rest === "\x1b") {
+        scr.rest = "";
+        screen_press(scr, "Esc");
+        scr.on("");
+      }
+    }, ESCAPE_WAIT);
+  }
   scr.on("");
 }
 
@@ -141,10 +156,18 @@ function screen_key(scr: Screen, data: string): number {
   if (!scr.tty) {
     return screen_line(scr, data);
   }
+  if (data.startsWith("\x1b]")) {
+    return screen_color(scr, data);
+  }
+  if (seq !== null && seq[2] === "n" && /^\?997;[12]$/.test(seq[1] ?? "")) {
+    scr.color(seq[1] === "?997;1");
+    process.stdout.write(COLOR_QUERY);
+    return seq[0].length;
+  }
   if (data.startsWith(PASTE_ON)) {
     return screen_paste(scr, data);
   }
-  if (CUT.test(data) || (scr.kitty && data === "\x1b")) {
+  if (CUT.test(data) || data === "\x1b") {
     return 0;
   }
   if (seq !== null && seq[2] === "u" && FLAGS.test(seq[1] ?? "")) {
@@ -171,6 +194,23 @@ function screen_key(scr: Screen, data: string): number {
   return 1;
 }
 
+function screen_color(scr: Screen, data: string): number {
+  const end = /\x07|\x1b\\/.exec(data);
+  if (end === null) {
+    return data.length > 256 ? data.length : 0;
+  }
+  const body = data.slice(2, end.index);
+  const rgb = /^11;rgb:([0-9a-f]{1,4})\/([0-9a-f]{1,4})\/([0-9a-f]{1,4})$/i.exec(body);
+  const hex = /^11;#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(body);
+  const parts = rgb ?? hex;
+  if (parts !== null) {
+    const [r, g, b] = parts.slice(1).map((x) => parseInt(x, 16) / (16 ** x.length - 1));
+    const linear = (v: number) => v <= .04045 ? v / 12.92 : ((v + .055) / 1.055) ** 2.4;
+    scr.color(.2126 * linear(r) + .7152 * linear(g) + .0722 * linear(b) < .179);
+  }
+  return end.index + end[0].length;
+}
+
 function screen_press(scr: Screen, key: string): void {
   if (scr.off || !ed_key(scr.ed, key)) {
     scr.on(key);
@@ -181,7 +221,7 @@ export function screen_suspend(scr: Screen): void {
   if (process.platform === "win32") {
     return; // no job control
   }
-  process.stdout.write(screen_erase(scr) + MODES_OFF);
+  process.stdout.write(MODES_OFF + screen_erase(scr));
   scr.up   = 0;
   scr.rows = 0;
   process.stdin.setRawMode(false);

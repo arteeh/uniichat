@@ -25,7 +25,6 @@ const V = {
   y     : 0,
   fit   : 1,
   swipe : 0,
-  theme : [] as string[],
 };
 
 const PTS = new Map<number, { x: number; y: number }>();
@@ -82,10 +81,7 @@ export function viewer_open(pic: Pic, push = true, el: Element | null = null): v
     show(pic);
   }
   if (!D.open) {
-    const metas = [...document.querySelectorAll<HTMLMetaElement>("meta[name=theme-color]")];
-    V.theme = metas.map((m) => m.content);
     D.showModal();
-    metas.forEach((m) => (m.content = getComputedStyle(D).backgroundColor));
   }
 }
 
@@ -101,8 +97,6 @@ export function viewer_sync(): void {
 }
 
 function closed(): void {
-  const metas = [...document.querySelectorAll<HTMLMetaElement>("meta[name=theme-color]")];
-  metas.forEach((m, k) => (m.content = V.theme[k] ?? m.content));
   V.pic = null;
   PTS.clear();
   G = TAP = null;
