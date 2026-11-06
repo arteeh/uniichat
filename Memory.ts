@@ -3,6 +3,7 @@ import { AskAI, type Again, type Ask, type Block, type Call, type End as Answere
 import { clip_page, clip_pages } from "./Clip.ts";
 import * as config from "./Config.ts";
 import { Disk } from "./Disk.ts";
+import { MemoryTree } from "./MemoryTree.ts";
 import { err_code, err_why } from "./Err.ts";
 import { Pick } from "./Pick.ts";
 import * as names from "./Names.ts";
@@ -37,9 +38,11 @@ type Saved = Kept & { seen?: Kept; main: End; tree: End; pick: object | null; go
 
 type Queues = { main: Pending[]; agents: Record<string, string[]> };
 
-type Rec = { i?: number; l?: number; act?: string; ans?: object };
+type Rec = { i?: number; l?: number; act?: string; ans?: object; text?: string | null };
 
-type Recs = { main: Root; tree: { text: string } };
+type Recs = { main: Root; tree: Part & { text: string; source?: string } };
+
+type Built = Part & { text: string; expected?: string; epoch?: number };
 
 type Logs = {
   dir    : string;
@@ -73,6 +76,7 @@ type Tree = {
   seen   : View;
   ready  : number[][][];
   busy   : Map<number, number>;
+  epochs : Map<number, number>;
   sides  : Map<number, number>;
   calls  : Map<Call, Sum>;
   hold   : Array<string | null>;
@@ -84,6 +88,7 @@ type Tree = {
 type Hooks = {
   share  : () => Omit<Share, keyof Pick>;
   made?  : (l: number, i: number) => void;
+  invalidated?: (parts: Part[], main: number[]) => void;
   acted  : (id: string, ans: object) => void;
 };
 
@@ -146,7 +151,7 @@ export namespace Memory {
     const mem: Memory = {
       dir, fds: new Map(), count: 0, open: 0, pick: null, goal: null, off: [], talk: null, talked: new Map(), used: null, used_at: 0, work: [], timers: [], queue: [], tells: {}, nodes: new Map(), agents: new Map(), ready: [[], []], ends: { main: [0, 0], tree: [0, 0] },
       view: { parts: [], size: 0, batch: false, high: VIEW_HIGH }, seen: { parts: [], size: 0, batch: false, high: config.COMPACTOR_CONTEXT },
-      busy: new Map(), sides: new Map(), calls: new Map(), hold: [null, "paused"], done: false, wait: new Set(), share, acted, again: null,
+      busy: new Map(), epochs: new Map(), sides: new Map(), calls: new Map(), hold: [null, "paused"], done: false, wait: new Set(), share, acted, again: null,
     };
     const saved = Memory.saved(dir);
     mem.pick = saved?.pick ?? null;
@@ -160,11 +165,12 @@ export namespace Memory {
     mem.queue = queues.main;
     mem.tells = queues.agents;
     mem.ends.main = Memory.index(mem, "main", saved?.main ?? [0, 0]);
-    mem.ends.tree = Memory.index(mem, "tree", saved?.tree ?? [0, 0]);
     mem.count = fs.statSync(dir + "/main.index").size / SLOT;
     while (Memory.message(mem, mem.count - 1)?.more) {
       mem.count -= 1;
     }
+    mem.ends.tree = Memory.index(mem, "tree", [0, 0]);
+    Memory.invalidate(mem, MemoryTree.audit(mem), "startup: missing or changed source", false);
     mem.used_at = saved?.used_at ?? mem.count;
     Memory.open(mem, mem.view, saved);
     Memory.open(mem, mem.seen, saved?.seen ?? saved);
@@ -217,8 +223,14 @@ export namespace Memory {
     const file = mem.dir + "/" + stream + ".index";
     let end: End = fs.existsSync(file) ? from : [0, 0];
     fs.mkdirSync(mem.dir + "/" + stream, { recursive: true });
+    const days = fs.readdirSync(mem.dir + "/" + stream).map((f) => {
+      const day = Date.parse(f.slice(0, 10)) / DAY;
+      if (stream === "tree" && (!/^\d{4}-\d{2}-\d{2}\.jsonl$/.test(f) || !Number.isInteger(day) || day <= 0 || day > 0xffffffff || new Date(day * DAY).toISOString().slice(0, 10) !== f.slice(0, 10))) {
+        throw new Error("unsupported memory tree journal: " + f);
+      }
+      return day;
+    });
     const fd = fs.openSync(file, end[0] === 0 ? "w+" : "r+");
-    const days = fs.readdirSync(mem.dir + "/" + stream).map((f) => Date.parse(f.slice(0, 10)) / DAY);
     try {
       for (const day of days.filter((day) => day >= end[0]).sort((a, b) => a - b)) {
         end = [day, Memory.scan(mem, stream, day, day === end[0] ? end[1] : 0, fd)];
@@ -234,13 +246,20 @@ export namespace Memory {
     const data = Memory.slice(file, at, fs.statSync(file).size - at);
     let k = 0;
     for (let nl = data.indexOf(10); nl >= 0; nl = data.indexOf(10, k)) {
-      const rec = Memory.parse(data.subarray(k, nl).toString("utf8"), file) as Rec | null;
+      const line = data.subarray(k, nl).toString("utf8");
+      const rec = (stream === "tree" ? JSON.parse(line) : Memory.parse(line, file)) as Rec | null;
+      if (stream === "tree") {
+        MemoryTree.record(mem, rec);
+      }
       if (rec !== null) {
         Memory.place(mem, fd, stream, rec, day, at + k, nl - k);
       }
       k = nl + 1;
     }
     if (k < data.length) {
+      if (stream === "tree") {
+        throw new Error("incomplete memory tree journal: " + file);
+      }
       console.error("skipped the last line of " + file + ": cut short");
       fs.appendFileSync(file, "\n");
       return at + data.length + 1;
@@ -254,15 +273,20 @@ export namespace Memory {
 
   export function place(mem: Memory, fd: number, stream: Stream, rec: Rec, day: number, at: number, length: number): void {
     const buf = Buffer.alloc(SLOT);
+    if (stream === "tree") {
+      MemoryTree.record(mem, rec);
+    }
     if (rec.act !== undefined) {
       mem.acted(rec.act, rec.ans ?? {});
     }
     if (rec.i === undefined) {
       return;
     }
-    buf.writeDoubleLE(at, 0);
-    buf.writeUInt32LE(day, 8);
-    buf.writeUInt32LE(length, 12);
+    if (stream !== "tree" || rec.text !== null) {
+      buf.writeDoubleLE(at, 0);
+      buf.writeUInt32LE(day, 8);
+      buf.writeUInt32LE(length, 12);
+    }
     fs.writeSync(fd, buf, 0, SLOT, (stream === "main" ? rec.i : Memory.slot(rec.l ?? 0, rec.i)) * SLOT);
   }
 
@@ -332,26 +356,52 @@ export namespace Memory {
   }
 
   export function log(mem: Memory, stream: Stream, recs: Rec[]): void {
-    const day = Date.parse(new Date().toLocaleDateString("sv-SE")) / DAY;
-    const lines = recs.map((rec) => JSON.stringify(rec));
-    let at = Memory.append(Memory.path(mem, stream, day), lines);
-    const fd = fs.openSync(mem.dir + "/" + stream + ".index", "r+");
-    try {
-      for (const [k, line] of lines.entries()) {
-        Memory.place(mem, fd, stream, recs[k], day, at, Memory.bytes(line));
-        at += Memory.bytes(line) + 1;
-      }
-    } finally {
-      fs.closeSync(fd);
+    if (mem.done) {
+      throw new Error("memory is stopped");
     }
-    mem.ends[stream] = [day, at];
+    if (stream === "tree") {
+      recs.forEach((rec) => MemoryTree.record(mem, rec));
+    }
+    const changed = stream === "main" ? recs.flatMap((rec) => rec.i !== undefined && rec.i < mem.count ? [{ l: 0, i: rec.i }] : []) : [];
+    const invalidated = Memory.invalidate(mem, changed, "message replacement", false);
+    const durable = stream === "tree" || changed.length > 0;
+    const today = Date.parse(new Date().toLocaleDateString("sv-SE")) / DAY;
+    const day = Math.max(today, mem.ends[stream][0]);
+    const lines = recs.map((rec) => JSON.stringify(rec));
+    try {
+      let at = Memory.append(Memory.path(mem, stream, day), lines, durable);
+      if (durable) {
+        MemoryTree.sync(mem.dir);
+      }
+      const fd = fs.openSync(mem.dir + "/" + stream + ".index", "r+");
+      try {
+        for (const [k, line] of lines.entries()) {
+          Memory.place(mem, fd, stream, recs[k], day, at, Memory.bytes(line));
+          at += Memory.bytes(line) + 1;
+        }
+      } finally {
+        fs.closeSync(fd);
+      }
+      mem.ends[stream] = [day, at];
+      if (invalidated.length > 0) {
+        Memory.refresh(mem, invalidated, changed.map(({ i }) => i));
+      }
+    } catch (err) {
+      mem.done = true;
+      mem.calls.forEach((_, call) => call.stop());
+      throw err;
+    }
   }
 
-  export function append(file: string, lines: string[]): number {
+  export function append(file: string, lines: string[], durable = false): number {
     const fd = fs.openSync(file, "a");
     try {
       const at = fs.fstatSync(fd).size;
-      fs.writeSync(fd, lines.map((line) => line + "\n").join(""));
+      fs.writeFileSync(fd, lines.map((line) => line + "\n").join(""));
+      if (durable) {
+        fs.fsyncSync(fd);
+        MemoryTree.sync(file.slice(0, file.lastIndexOf("/")));
+      }
       return at;
     } finally {
       fs.closeSync(fd);
@@ -526,7 +576,7 @@ export namespace Memory {
   }
 
   export function built(mem: Memory, l: number, i: number): boolean {
-    return mem.nodes.has(Memory.slot(l, i));
+    return MemoryTree.range(mem, { l, i }) && Memory.read(mem, "tree", Memory.slot(l, i)) !== null;
   }
 
   export function node(mem: Memory, part: Part): string | null {
@@ -562,12 +612,49 @@ export namespace Memory {
   }
 
   export function source(mem: Memory, l: number, i: number): string | null {
-    if (l === 0) {
-      const root = Memory.message(mem, i);
-      return root === null ? null : root.line ?? Memory.show(root);
+    return MemoryTree.input(mem, l, i)?.text ?? null;
+  }
+
+  export function invalidate(mem: Memory, parts: Part[], reason: string, refresh = true): Part[] {
+    if (parts.length === 0) {
+      return [];
     }
-    const [a, b] = Memory.halves({ l, i }).map((half) => Memory.node(mem, half));
-    return a === null || b === null ? null : Memory.flat(a) + "\n" + Memory.flat(b);
+    const closure = MemoryTree.closure(mem, parts);
+    const stored = MemoryTree.quarantine(mem, closure, reason);
+    const keys = new Set(closure.map(({ l, i }) => Memory.slot(l, i)));
+    closure.forEach(({ l, i }) => {
+      const key = Memory.slot(l, i);
+      mem.epochs.set(key, (mem.epochs.get(key) ?? 0) + 1);
+    });
+    mem.calls.forEach((part, call) => keys.has(Memory.slot(part.l, part.i)) && call.stop());
+    try {
+      if (stored.length > 0) {
+        Memory.log(mem, "tree", stored.map(({ l, i }) => ({ l, i, text: null, at: new Date().toISOString(), reason })));
+      }
+      keys.forEach((key) => mem.nodes.delete(key));
+      mem.talked.clear();
+      mem.sides.clear();
+      if (refresh) {
+        Memory.refresh(mem, closure);
+      }
+      return closure;
+    } catch (err) {
+      mem.done = true;
+      mem.calls.forEach((_, call) => call.stop());
+      throw err;
+    }
+  }
+
+  export function refresh(mem: Memory, parts: Part[], main: number[] = []): void {
+    mem.sides.clear();
+    mem.ready = [[], []];
+    Memory.roots(mem.count).flatMap((part) => Memory.todo(mem, part)).forEach((part) => Memory.ready(mem, part, true));
+    for (const view of [mem.view, mem.seen]) {
+      Memory.open(mem, view, { parts: view.parts.map(({ l, i }) => [l, i]), batch: view.batch });
+    }
+    Memory.save(mem);
+    mem.invalidated?.(parts, main);
+    mem.wait.forEach((check) => check());
   }
 
   export function ctx(l: number, i: number): number {
@@ -612,14 +699,13 @@ export namespace Memory {
   export function store_fitting_at_once(mem: Memory): boolean {
     let stored = false;
     for (let fitting = Memory.start_jobs(mem); fitting.length > 0 && !mem.done; fitting = Memory.start_jobs(mem)) {
-      Memory.store(mem, fitting);
-      stored = true;
+      stored = Memory.store(mem, fitting) > 0 || stored;
     }
     return stored;
   }
 
-  export function start_jobs(mem: Memory): Array<Part & { text: string }> {
-    const free: Array<Part & { text: string }> = [];
+  export function start_jobs(mem: Memory): Built[] {
+    const free: Built[] = [];
     for (const side of [0, 1].filter((side) => mem.hold[side] === null)) {
       const end = Memory.first(mem, JOBS - 1, side);
       const next: Part[] = [];
@@ -633,11 +719,11 @@ export namespace Memory {
         if (mem.done || Memory.running(mem, side) >= JOBS) {
           break;
         }
-        const text = mem.busy.has(Memory.slot(l, i)) ? null : Memory.source(mem, l, i);
-        if (text !== null && Memory.bytes(text) <= NODE) {
-          free.push({ l, i, text });
-        } else if (text !== null) {
-          Memory.job(mem, l, i, text);
+        const input = mem.busy.has(Memory.slot(l, i)) ? null : MemoryTree.input(mem, l, i);
+        if (input !== null && Memory.bytes(input.text) <= NODE) {
+          free.push({ l, i, text: input.text, expected: input.source, epoch: mem.epochs.get(Memory.slot(l, i)) ?? 0 });
+        } else if (input !== null) {
+          Memory.job(mem, l, i, input.text);
         }
       }
     }
@@ -646,15 +732,13 @@ export namespace Memory {
 
   export function pause(mem: Memory): void {
     mem.hold[1] = "paused";
+    mem.busy.forEach((side, key) => side === 1 && mem.epochs.set(key, (mem.epochs.get(key) ?? 0) + 1));
     mem.calls.forEach((sum, call) => sum.kind === "import" && call.stop());
   }
 
   export function todo(mem: Memory, part: Part): Part[] {
-    if (Memory.built(mem, part.l, part.i)) {
-      return [];
-    }
     const halves = Memory.halves(part);
-    const here = halves.every((half) => Memory.built(mem, half.l, half.i)) ? [part] : [];
+    const here = !Memory.built(mem, part.l, part.i) && halves.every((half) => Memory.built(mem, half.l, half.i)) ? [part] : [];
     return [...here, ...halves.flatMap((half) => Memory.todo(mem, half))];
   }
 
@@ -667,8 +751,10 @@ export namespace Memory {
     mem.busy.set(key, Memory.side(mem, l, i));
     Memory.build(mem, l, i, text).finally(() => {
       mem.busy.delete(key);
-      Memory.pump(mem);
-      Memory.fit(mem);
+      if (!mem.done) {
+        Memory.pump(mem);
+        Memory.fit(mem);
+      }
     }).catch((err: unknown) => {
       console.error("compactor: node " + l + "/" + i + ": " + err_why(err));
     });
@@ -682,18 +768,26 @@ export namespace Memory {
   }
 
   export async function build(mem: Memory, l: number, i: number, text: string): Promise<void> {
+    const input = mem.done ? null : MemoryTree.input(mem, l, i);
+    if (input === null || input.text !== text) {
+      return;
+    }
+    const epoch = mem.epochs.get(Memory.slot(l, i)) ?? 0;
     const task = { text: Memory.task(l, i) + text + "\n</input>", mark: false };
     const upto = Math.min(Memory.ctx(l, i), Memory.first(mem, 0, Memory.side(mem, l, i)));
     const blocks = [...Memory.view(mem, upto, Memory.last(mem, Memory.before(mem.seen.parts, upto), config.COMPACTOR_CONTEXT)), task];
     const { lines, end } = await Memory.ask_till_fits(mem, l, i, blocks);
+    if (mem.done || (mem.epochs.get(Memory.slot(l, i)) ?? 0) !== epoch) {
+      return;
+    }
     if (lines.length === 0 && Memory.cut_short(end)) {
       throw new Error(end.text);
     }
     if (lines.length === 0) {
       console.error("compactor: node " + l + "/" + i + ": " + (end.ok ? "an empty line" : end.text) + "; clipped");
     }
-    const line = lines.length === 0 ? Memory.cut(Memory.flat(text)) : Memory.shortest(lines);
-    Memory.store(mem, [{ l, i, text: line }]);
+    const line = Memory.cut(lines.length === 0 ? Memory.flat(text) : Memory.shortest(lines));
+    Memory.store(mem, [{ l, i, text: line, expected: input.source, epoch }]);
   }
 
   export async function ask_till_fits(mem: Memory, l: number, i: number, blocks: Block[]): Promise<{ lines: string[]; end: Answered }> {
@@ -723,21 +817,47 @@ export namespace Memory {
     return Memory.side(mem, l, i) === 1 ? "import" : "compactor";
   }
 
-  export function store(mem: Memory, parts: Array<Part & { text: string }>): void {
-    Memory.log(mem, "tree", parts.map(({ l, i, text }) => ({ l, i, text, size: Memory.bytes(text) })));
-    for (const { l, i, text } of parts) {
-      Memory.ready(mem, { l, i }, false);
-      mem.nodes.set(Memory.slot(l, i), text);
-      mem.sides.delete((i + 1) * 2 ** l - 1);
-      [mem.view, mem.seen].forEach((view) => (view.size += l === 0 && i < Memory.end(view) ? Memory.bytes(text) : 0));
+  export function store(mem: Memory, parts: Built[]): number {
+    if (mem.done) {
+      return 0;
     }
-    for (const { l, i } of parts) {
-      const up = { l: l + 1, i: i >> 1 };
-      if (Memory.built(mem, l, i ^ 1) && !Memory.built(mem, up.l, up.i)) {
-        Memory.ready(mem, up, true);
+    if (new Set(parts.map(({ l, i }) => Memory.slot(l, i))).size !== parts.length) {
+      throw new Error("duplicate memory tree store");
+    }
+    let stored = 0;
+    for (const l of [...new Set(parts.map((part) => part.l))].sort((a, b) => a - b)) {
+      const current = (part: Built) => {
+        const input = MemoryTree.input(mem, part.l, part.i);
+        return input !== null && typeof part.text === "string" && Memory.bytes(part.text) <= NODE && (part.expected === undefined || part.expected === input.source) && (part.epoch === undefined || part.epoch === (mem.epochs.get(Memory.slot(part.l, part.i)) ?? 0)) ? input : null;
+      };
+      const level = parts.filter((part) => part.l === l && current(part) !== null);
+      const replaced = level.filter((part) => Memory.built(mem, part.l, part.i));
+      Memory.invalidate(mem, replaced, "summary replacement");
+      const accepted = level.flatMap((part) => {
+        // Replacing this node changes its epoch, but not the input it was built from.
+        const input = MemoryTree.input(mem, part.l, part.i);
+        return input === null || (part.expected !== undefined && part.expected !== input.source) ? [] : [{ ...part, source: input.source }];
+      });
+      if (accepted.length === 0) {
+        continue;
       }
+      Memory.log(mem, "tree", accepted.map(({ l, i, text, source }) => ({ l, i, text, source, size: Memory.bytes(text) })));
+      for (const { l, i, text } of accepted) {
+        Memory.ready(mem, { l, i }, false);
+        mem.nodes.set(Memory.slot(l, i), text);
+        mem.sides.delete((i + 1) * 2 ** l - 1);
+        [mem.view, mem.seen].forEach((view) => (view.size += l === 0 && i < Memory.end(view) ? Memory.bytes(text) : 0));
+      }
+      for (const { l, i } of accepted) {
+        const up = { l: l + 1, i: Math.floor(i / 2) };
+        if (MemoryTree.range(mem, up) && Memory.built(mem, l, i ^ 1) && !Memory.built(mem, up.l, up.i)) {
+          Memory.ready(mem, up, true);
+        }
+      }
+      stored += accepted.length;
+      accepted.forEach(({ l, i }) => mem.made?.(l, i));
     }
-    parts.forEach(({ l, i }) => mem.made?.(l, i));
+    return stored;
   }
 
   export function ask(mem: Memory, l: number, i: number, blocks: Block[]): Call {
@@ -794,7 +914,7 @@ ${Memory.cut(line)}| ← LIMIT`;
   }
 
   export function text(mem: Memory, part: Part): string {
-    return mem.nodes.get(Memory.slot(part.l, part.i)) ?? WAIT;
+    return Memory.node(mem, part) ?? WAIT;
   }
 
   export function size(mem: Memory, part: Part): number {
