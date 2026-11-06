@@ -23,6 +23,7 @@ What this fork adds:
 - **Skills** read from the ~/.agents/skills folder.
 - **Scheduling tools** to give your agent future or repeating tasks.
 - **Image and video viewing tools** to let it see images and video files.
+- **Appearance:** Choose persistent light/dark themes in Settings or terminal `/theme`, automatically following browser/terminal color-scheme reports or using a fixed mode. Palettes adapted from [Nodecode](https://github.com/nodecode-ai/nodecode), [Everforest](https://github.com/sainnhe/everforest) and the [Ghostty palette collection](https://github.com/mbadolato/iTerm2-Color-Schemes).
 - **Settings page** where you can customize the system prompt and compaction prompt.
 - **Improved memory tree viewer** to browse what your agent knows.
 - **Full markdown** as GitHub draws it, in the web app and the terminal.

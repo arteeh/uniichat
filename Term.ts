@@ -2,6 +2,8 @@ import * as child from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import type { Kind } from "./AskAI.ts";
+import * as Appearance from "./Appearance.ts";
+import { get } from "./Json.ts";
 import * as Client from "./Client.ts";
 import * as Import from "./Import.ts";
 import * as Paint from "./Paint.ts";
@@ -12,6 +14,10 @@ import { err_why } from "./Err.ts";
 
 type Term = {
   v       : View.View;
+  theme   : Appearance.Preference;
+  terminal: boolean;
+  dark    : boolean;
+  reported: boolean;
   scr     : Screen.Screen;
   url     : string;
   token   : string;
@@ -81,6 +87,7 @@ function term_groups(): [group: string, cmds: Cmd[]][] {
       ["",                  "Shift+Tab",               "fast on, off (the next speed), typing or not",   (t) => term_move(t, "speed")],
       ["/model [name]",     "",                        "the models to pick from; with a name, that one", (t, a) => term_pick(t, "model", a)],
       ["/effort [level]",   "",                        "the efforts; with one, that one",                (t, a) => term_pick(t, "effort", a)],
+      ["/theme [name]",      "",                        "auto, light, dark, terminal, or a named palette; alone: choices", term_theme],
       ["/speed [speed]",    "",                        "the speeds; with one, that one",                 (t, a) => term_pick(t, "speed", a)],
       ["/mcp [name]",       "",                        "the MCP servers, on or off in this chat; with a name, that one turned on or off", term_mcp],
     ]],
@@ -99,11 +106,16 @@ function term_commands(): Cmd[] {
   return term_groups().flatMap(([, cmds]) => cmds);
 }
 
-function term_new(url: string, token: string): Term {
+function term_new(url: string, token: string, theme: Appearance.Preference, terminal: boolean): Term {
   Paint.paint_site(url);
+  Paint.paint_theme(terminal ? null : Appearance.resolve(theme, true));
   const t: Term = {
     v       : View.view_new(),
-    scr     : Screen.screen_new((key) => term_press(t, key)),
+    theme,
+    terminal,
+    dark    : true,
+    reported: false,
+    scr     : Screen.screen_new((key) => term_press(t, key), (dark) => term_color(t, dark)),
     url,
     token,
     ended   : false,
@@ -276,6 +288,47 @@ function term_command(t: Term, text: string): boolean {
     });
   }
   return cmd !== undefined;
+}
+
+function term_color(t: Term, dark: boolean): void {
+  const changed = t.dark !== dark;
+  t.dark = dark;
+  t.reported = true;
+  if (changed && t.theme.mode === "auto" && !t.terminal) {
+    term_apply_theme(t);
+  }
+}
+
+function term_apply_theme(t: Term): void {
+  Paint.paint_theme(t.terminal ? null : Appearance.resolve(t.theme, t.dark));
+  term_page(t);
+}
+
+function term_theme(t: Term, arg: string): void {
+  const key = arg.toLowerCase();
+  const palette = Appearance.PALETTES.find((p) => p.id === key || p.name.toLowerCase() === key);
+  if (arg === "") {
+    const now = t.terminal ? "terminal colors" : Appearance.resolve(t.theme, t.dark).name + " (" + t.theme.mode + ")";
+    const signal = t.reported ? "Terminal reports " + (t.dark ? "dark" : "light") + "." : "No terminal color report yet; automatic uses dark until one arrives.";
+    term_note(t, "Theme: " + now + ". " + signal + "\n/theme auto follows terminal light/dark reports; /theme light or dark locks the mode; /theme terminal inherits terminal colors.\nPalettes: " + Appearance.PALETTES.map((p) => p.id + " (" + p.name + ", " + p.mode + ")").join("; ") + ".");
+    return;
+  }
+  if (key === "terminal") {
+    t.terminal = true;
+  } else if (key === "auto" || key === "light" || key === "dark") {
+    t.terminal = false;
+    t.theme = { ...t.theme, mode: key };
+  } else if (palette !== undefined) {
+    t.terminal = false;
+    t.theme = { ...t.theme, [palette.mode]: palette.id, mode: palette.mode };
+  } else {
+    term_note(t, "No theme " + arg + ". /theme lists the choices.");
+    return;
+  }
+  const conf = Client.read("tui");
+  Client.write("tui", { ...conf, appearance: { ...t.theme, terminal: t.terminal } });
+  term_apply_theme(t);
+  term_note(t, "Theme: " + (t.terminal ? "terminal colors" : Appearance.resolve(t.theme, t.dark).name + " (" + t.theme.mode + ")") + ". Saved on this computer.");
 }
 
 function term_help(t: Term): void {
@@ -738,6 +791,6 @@ export async function main(given: string | undefined): Promise<void> {
     token = await Client.login(url, "the terminal on " + os.hostname());
     Client.write("tui", { ...conf, url, tokens: { ...tokens, [Client.host(url)]: token } });
   }
-  const t = term_new(url, token);
+  const t = term_new(url, token, Appearance.preference(conf.appearance), get(conf.appearance, "terminal") === true);
   term_connect(t);
 }

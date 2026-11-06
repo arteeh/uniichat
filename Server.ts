@@ -118,7 +118,7 @@ const BODIES     = ["say", "import", "voice"];
 const PAIR       = 200;
 
 const PAGE_CSP   = "default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; media-src 'self'; font-src data:; form-action 'none'; base-uri 'none'; frame-ancestors 'self'; sandbox allow-same-origin allow-popups";
-const PAGE_BASE  = `<!doctype html><meta charset="utf-8"><base target="_blank"><style>:root { color-scheme: light dark; } body { margin: 10px 12px; font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, sans-serif; color: #111111; background: #ffffff; } a { color: inherit; } @media (prefers-color-scheme: dark) { body { color: #e3e3e6; background: #171719; } }</style>\n`;
+const PAGE_BASE  = `<!doctype html><meta charset="utf-8"><base target="_blank"><style>:root { color-scheme: light dark; --unii-page-ink: #111111; --unii-page-paper: #ffffff; } body { margin: 10px 12px; font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, sans-serif; color: var(--unii-page-ink); background: var(--unii-page-paper); } a { color: inherit; } @media (prefers-color-scheme: dark) { :root { --unii-page-ink: #e3e3e6; --unii-page-paper: #171719; } }</style>\n`;
 
 const PICTURED   = 20;
 

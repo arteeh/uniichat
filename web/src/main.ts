@@ -4,6 +4,7 @@ import { get, text_of } from "../../Json.ts";
 import type { Page, Row } from "../../Settings.ts";
 import { theme_css } from "../../Theme.ts";
 import * as View from "../../View.ts";
+import * as Appearance from "./Appearance.ts";
 import * as Box from "./Box.ts";
 import { find, must } from "./Dom.ts";
 import * as Html from "./Html.ts";
@@ -88,6 +89,7 @@ function kept(fact: string): string {
 }
 
 async function boot(): Promise<void> {
+  Appearance.start();
   document.head.insertAdjacentHTML("beforeend", `<style>${theme_css()}</style>`);
   if (APP === null) {
     navigator.serviceWorker?.register("/sw.js").catch(() => {});
@@ -1056,6 +1058,7 @@ async function account(): Promise<void> {
   const prompts = got !== null && got.ok ? ((await got.json().catch(() => null)) as View.Prompts | null) : null;
   const push = await notify_state().catch(() => null);
   el.innerHTML = Html.account_html(prompts, push);
+  Appearance.settings();
   RENEW.dirty.clear();
   el.oninput = (ev) => {
     const form = (ev.target as Element).closest("form");
