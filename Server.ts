@@ -54,7 +54,7 @@ type Eye = { parts: Part[]; from: number };
 type Check = { call: Call; goal: string };
 
 type Kept  = { a: number; b: number; said: number; spent: number };
-type Batch = Kept & { micros: number[][]; open: number[]; left: number; all: number };
+type Batch = Kept & { micros: number[][]; open: number[]; left: number; all: number; built: Set<number> };
 
 type Parts = {
   mem   : Memory;
@@ -242,6 +242,7 @@ export namespace Chat {
     }
     chat.eye = Chat.eye(mem, Memory.turn(mem));
     mem.made = (l, i) => Chat.made(chat, l, i);
+    mem.invalidated = (parts, main) => Chat.invalidated(chat, parts, main);
     mem.wait.add(() => Chat.progress(chat));
     chat.batch = Chat.resumed(chat);
     Chat.timed(chat);
@@ -852,7 +853,7 @@ export namespace Chat {
   export function batch(chat: Chat, { a, b, said, spent }: Kept): Batch {
     const sizes = Array.from({ length: b - a }, (_, k) => Memory.message(chat.mem, a + k)?.size ?? 0);
     const micros = Import.import_guess(a, sizes);
-    const batch = { a, b, said, spent, micros, open: micros.map((level) => level.length), left: micros.flat().reduce((x, y) => x + y, 0), all: 0 };
+    const batch = { a, b, said, spent, micros, open: micros.map((level) => level.length), left: micros.flat().reduce((x, y) => x + y, 0), all: 0, built: new Set<number>() };
     batch.all = Chat.time(batch);
     micros.forEach((level, l) => level.forEach((_, j) => Memory.node(chat.mem, { l, i: Math.floor(a / 2 ** l) + j }) !== null && Chat.built(batch, l, j)));
     return batch;
@@ -860,7 +861,9 @@ export namespace Chat {
 
   export function built(batch: Batch, l: number, j: number): void {
     const cost = batch.micros[l]?.[j];
-    if (cost !== undefined) {
+    const key = Memory.slot(l, Math.floor(batch.a / 2 ** l) + j);
+    if (cost !== undefined && !batch.built.has(key)) {
+      batch.built.add(key);
       batch.left -= cost;
       batch.open[l] -= 1;
     }
@@ -949,6 +952,29 @@ export namespace Chat {
       if (sock.data.seen.has(a + "+" + 2 ** l)) {
         Chat.know(chat, sock, a, 2 ** l);
       }
+    }
+  }
+
+  export function invalidated(chat: Chat, parts: { l: number; i: number }[], main: number[]): void {
+    const batch = chat.batch;
+    if (batch !== null) {
+      for (const { l, i } of parts) {
+        const cost = batch.micros[l]?.[i - Math.floor(batch.a / 2 ** l)];
+        if (cost !== undefined && batch.built.delete(Memory.slot(l, i))) {
+          batch.left += cost;
+          batch.open[l] += 1;
+        }
+      }
+    }
+    const spans = parts.map(({ l, i }): Part => [i * 2 ** l, 2 ** l]);
+    for (const sock of chat.socks) {
+      if (sock.data.host !== null) {
+        continue;
+      }
+      const watched = spans.filter(([id, n]) => sock.data.seen.delete(id + "+" + n));
+      Chat.send(sock, { $: "forget", parts: spans, whole: main });
+      Chat.teach(chat, sock, watched);
+      Chat.show(chat, sock);
     }
   }
 
@@ -1568,10 +1594,10 @@ export namespace Main {
       case "/api/tree": {
         const q = new URL(req.url).searchParams.get("get");
         if (q === null) {
-          return Response.json(Memory.meta(mem));
+          return Response.json(Memory.meta(mem), { headers: { "cache-control": "no-store" } });
         }
         const get = q.split(",").slice(0, 200);
-        return Response.json(get.map((key) => Memory.card(mem, ...(key.split(".").map(Number) as [number, number]))));
+        return Response.json(get.map((key) => Memory.card(mem, ...(key.split(".").map(Number) as [number, number]))), { headers: { "cache-control": "no-store" } });
       }
       case "/export": {
         const name = "unii-memory-" + new Date().toISOString().slice(0, 10) + ".json";

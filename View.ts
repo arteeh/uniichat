@@ -102,6 +102,7 @@ type Pack = { nodes?: Record<string, Node>; whole?: Record<string, Entry> };
 
 export type Server =
   | ({ $: "know" } & Pack)
+  | { $: "forget"; parts: Part[]; whole: number[] }
   | { $: "view"; parts: Part[]; turn: number }
   | { $: "zoom"; id: number; n: number; parts: Part[] }
   | { $: "root"; parts: Part[] }
@@ -176,7 +177,7 @@ export const MAIN = "UniiChat";
 
 export const TURN = "Unii's turn";
 
-export const WIRE = 3;
+export const WIRE = 4;
 
 export const PING  = 10000;
 export const RETRY = 1000;
@@ -301,6 +302,14 @@ export function view_hear(v: View, msg: Server): Client[] {
   switch (msg.$) {
     case "know": {
       view_learn(v, msg);
+      return [];
+    }
+    case "forget": {
+      msg.parts.forEach(([id, n]) => v.nodes.delete(id + "+" + n));
+      msg.whole.forEach((id) => {
+        v.whole.delete(id);
+        v.minds.delete(id);
+      });
       return [];
     }
     case "view": {

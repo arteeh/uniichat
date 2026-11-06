@@ -2000,7 +2000,7 @@ var OPENING = 1;
 var SUMMARIES = "summaries";
 var MAIN = "UniiChat";
 var TURN = "Unii's turn";
-var WIRE = 3;
+var WIRE = 4;
 var PING = 1e4;
 var RETRY = 1000;
 var TICK = "+";
@@ -2092,6 +2092,14 @@ function view_hear(v, msg) {
   switch (msg.$) {
     case "know": {
       view_learn(v, msg);
+      return [];
+    }
+    case "forget": {
+      msg.parts.forEach(([id, n]) => v.nodes.delete(id + "+" + n));
+      msg.whole.forEach((id) => {
+        v.whole.delete(id);
+        v.minds.delete(id);
+      });
       return [];
     }
     case "view": {
