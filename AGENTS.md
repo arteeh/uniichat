@@ -4,3 +4,7 @@
 - `web/app.js` is generated and not committed: run `bun run web` after changing `web/src`.
 - Don't write docs into the codebase. The readme and code speak for themselves. The README is for users: what UniiChat does and how to use it. Don't describe the codebase. Change it only when using the app changes, and keep that to a line or two.
 - Be extremely strict on comments. Only add them if the information is essential and can't be inferred from the code.
+
+## How to test
+
+`testing/README.md` starts the test rig: a container with UniiChat on your checkout, a device, and fake models of all four vendors. Use the web app there with playwright-cli and the TUI with tmux, and steer what the models answer with `fake` (replies, tool calls, errors, stalls), never with test commands in chat messages.
