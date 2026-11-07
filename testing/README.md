@@ -35,7 +35,7 @@ fake cut                                              # the stream drops halfway
 fake reply --match "PEARS" "There are 3 pears."       # only for the call whose latest message has "PEARS"
 fake log                                              # every call: vendor, model, latest message, the answer
 fake last                                             # the last call: system prompt, tools, sender labels, cache marks
-fake last --json                                      # its whole body
+fake last --json                                      # its headers and whole body
 fake clear                                            # forget the queue, limits and refused sign-ins
 ```
 

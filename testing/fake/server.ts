@@ -11,7 +11,7 @@ export type Order =
 
 type Said = { role: string; text: string; marked: boolean };
 
-type Seen = { n: number; at: string; vendor: string; path: string; model: string; answer: string; system: string; tools: string[]; said: Said[]; latest: string; body: unknown };
+type Seen = { n: number; at: string; vendor: string; path: string; model: string; answer: string; system: string; tools: string[]; said: Said[]; latest: string; headers: Record<string, string>; body: unknown };
 
 type Used = { input: number; read: number; write: number };
 
@@ -316,7 +316,7 @@ async function model(req: Request, vendor: Vendor, url: URL): Promise<Response> 
   const until = LIMITED[vendor] ?? 0;
   const order: Order = until > Date.now() ? { what: "error", kind: "usage-limit", reset: until } : pick(latest, compaction);
   const tools = list(get(body, "tools")).map((t) => str(get(t, "name")) ?? str(get(t, "type")) ?? "");
-  LOG.push({ n: LOG.length + 1, at: new Date().toISOString(), vendor, path: url.pathname, model: name, answer: JSON.stringify(order), system: got.system, tools, said: got.said, latest, body });
+  LOG.push({ n: LOG.length + 1, at: new Date().toISOString(), vendor, path: url.pathname, model: name, answer: JSON.stringify(order), system: got.system, tools, said: got.said, latest, headers: Object.fromEntries(req.headers), body });
   LOG.splice(0, LOG.length - 200);
   const claude = vendor.startsWith("claude");
   if (order.what === "error") {
@@ -351,7 +351,7 @@ async function control(req: Request): Promise<Response> {
   }
   const match = url.searchParams.get("match") ?? "";
   const seen = LOG.filter((s) => s.latest.includes(match));
-  const brief = (s: Seen) => ({ ...s, body: undefined, said: undefined, system: undefined, latest: s.latest.slice(0, 120) });
+  const brief = (s: Seen) => ({ ...s, body: undefined, said: undefined, system: undefined, headers: undefined, latest: s.latest.slice(0, 120) });
   return json(200, { queue: QUEUE, log: url.pathname === "/last" ? seen.slice(-1) : seen.map(brief) });
 }
 
@@ -369,7 +369,7 @@ if (import.meta.main) {
         return json(200, { input_tokens: tokens(await req.text()) });
       }
       const answer = await sign_in(url, req);
-      LOG.push({ n: LOG.length + 1, at: new Date().toISOString(), vendor: url.hostname, path: url.pathname, model: "", answer: answer === null ? "{}" : String(answer.status), system: "", tools: [], said: [], latest: "", body: null });
+      LOG.push({ n: LOG.length + 1, at: new Date().toISOString(), vendor: url.hostname, path: url.pathname, model: "", answer: answer === null ? "{}" : String(answer.status), system: "", tools: [], said: [], latest: "", headers: Object.fromEntries(req.headers), body: null });
       return answer ?? json(200, {});
     },
   });

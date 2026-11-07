@@ -6,7 +6,7 @@ const USE = `fake reply "text"              the next call streams this text
 fake tool NAME 'JSON' [...]    the next call asks for these tools
 fake error KIND [--reset 5m]   the next call fails: prompt-too-long, overloaded, rate-limit, usage-limit, auth-expired
 fake stall 60s | fake cut      the next stream hangs that long, or drops halfway
-fake log | fake last [--json]  what the app sent: every call, or the last one in full
+fake log | fake last [--json]  what the app sent: every call, or the last one (--json: its headers and body)
 fake clear                     forget what's queued, limits and refused sign-ins
 --match TEXT                   only for the call whose latest message contains TEXT (the newest part of a turn's message, or a tool's result)`;
 
@@ -77,7 +77,7 @@ async function main(args: string[]): Promise<void> {
     const got: unknown = await (await fetch(BASE + "/" + what + "?match=" + encodeURIComponent(match))).json();
     const log = list(get(got, "log"));
     if (what === "last") {
-      console.log(log.length === 0 ? "no calls yet" : json ? JSON.stringify(get(log[0], "body"), null, 2) : shown(log[0]));
+      console.log(log.length === 0 ? "no calls yet" : json ? JSON.stringify({ headers: get(log[0], "headers"), body: get(log[0], "body") }, null, 2) : shown(log[0]));
     } else {
       log.forEach((s) => console.log([get(s, "n"), get(s, "at"), get(s, "vendor"), get(s, "path"), get(s, "model"), JSON.stringify(get(s, "latest")), "->", get(s, "answer")].map(String).join(" ")));
     }
