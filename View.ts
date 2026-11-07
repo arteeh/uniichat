@@ -25,7 +25,8 @@ export type Live = { kind: Kind; text: string };
 // thoughts shown live none
 type Logged = Entry & { id?: number };
 
-export type Page = { name: string; log: Logged[] | null; live: Live[]; pick: Pick | null };
+// from: how many of its log's first messages aren't here yet
+export type Page = { name: string; log: Logged[] | null; live: Live[]; pick: Pick | null; from: number; loading: boolean };
 
 export type Progress = { done: number; total: number; why: string | null; msgs: number; open: number[] };
 
@@ -109,7 +110,7 @@ export type Server =
   | { $: "delta"; agent?: string; kind: Kind; text: string; fresh?: boolean }
   | { $: "live"; agent?: string; live: Live[] }
   | ({ $: "state" } & State)
-  | { $: "agent"; name: string; found: boolean; pick?: Pick | null }
+  | { $: "agent"; name: string; found: boolean; pick?: Pick | null; from: number; before?: number; entries: Logged[] }
   | { $: "note"; text: string }
   | { $: "error"; text: string }
   | ({ $: "ack"; id: string } & Answer)
@@ -138,7 +139,7 @@ export type Client =
   | { $: "unschedule"; id: string }
   | { $: "zoom"; part: Part }
   | { $: "root" }
-  | { $: "agent"; name: string };
+  | { $: "agent"; name: string; before?: number };
 
 type Post = { msg: Client & { id: string }; ws: WebSocket | null; done: (a: Answer) => void; said: string };
 
@@ -156,6 +157,7 @@ export type Act =
   | { $: "Shut"; id: number; n: number }
   | { $: "Fold"; on: boolean }
   | { $: "Goto"; name: string | null }
+  | { $: "Earlier" }
   | { $: "Unschedule"; id: string }
   | { $: "Plug"; name: string }
   | { $: "Talk"; on: boolean }
@@ -164,7 +166,7 @@ export type Row =
   | { $: "Sum"; id: number; n: number; text: string; call: Call.Call | null }
   | { $: "Box"; id: number; n: number; text: string; rows: Row[] }
   | { $: "Msg"; id: number | null; kind: Kind; who: string; text: string; body: Md.Block[]; call: Call.Call | null; images: string[]; queued?: boolean }
-  | { $: "Cap"; text: string }
+  | { $: "Cap"; text: string; earlier?: true }
 
 export type Tab = { name: string | null; here: boolean; text: string };
 
@@ -197,6 +199,7 @@ const WAIT = "compressing…";
 const SUMS = "compressing earlier messages…";
 
 const UNSENT = "Sends once connected.";
+const EARLIER = "Loading earlier messages…";
 
 const MARKS: Array<[string, number, string]> = [
   ["image/png", 0, "\x89PNG"],
@@ -350,9 +353,13 @@ export function view_hear(v: View, msg: Server): Client[] {
       if (page === undefined) {
         return [];
       }
-      if (msg.found) {
-        page.log = [];
+      if (msg.found && (msg.before === undefined || msg.before === page.from)) {
+        page.log = [...msg.entries, ...(msg.before === undefined ? [] : page.log ?? [])];
+        [page.from, page.loading] = [msg.from, false];
         page.pick = msg.pick ?? page.pick;
+        return [];
+      }
+      if (msg.found) {
         return [];
       }
       v.pages.delete(msg.name);
@@ -443,9 +450,17 @@ export function view_act(v: View, act: Act): Client[] {
         return [];
       }
       const known = v.pages.get(act.name);
-      v.page = known ?? { name: act.name, log: null, live: [], pick: v.runs[act.name] ?? null };
+      v.page = known ?? { name: act.name, log: null, live: [], pick: v.runs[act.name] ?? null, from: 0, loading: false };
       v.pages.set(act.name, v.page);
       return known === undefined ? [{ $: "agent", name: act.name }] : [];
+    }
+    case "Earlier": {
+      const page = v.page;
+      if (page === null || page.log === null || page.from === 0 || page.loading) {
+        return [];
+      }
+      page.loading = true;
+      return [{ $: "agent", name: page.name, before: page.from }];
     }
     case "Unschedule": {
       return [{ $: "unschedule", id: act.id }];
@@ -782,7 +797,8 @@ function sum_rows(id: number, n: number, node: Node = { text: WAIT, to: "" }): R
 }
 
 function page_rows(v: View, page: Page): Row[] {
-  return [page_head(v, page), ...page_entries(v, page, 0).flat()];
+  const earlier: Row[] = page.from > 0 ? [{ $: "Cap", text: EARLIER, earlier: true }] : [];
+  return [page_head(v, page), ...earlier, ...page_entries(v, page, 0).flat()];
 }
 
 export function page_head(v: View, page: Page): Row {
@@ -793,7 +809,7 @@ export function page_head(v: View, page: Page): Row {
 // answered yet drawn queued
 export function page_entries(v: View, page: Page, from: number): Row[][] {
   const log = page.log ?? [];
-  return log.slice(from).map((e, k) => sent_rows(entry_sent(v, page.name, e.id), whole_rows(null, e, log[from + k - 1])));
+  return log.slice(from).map((e, k) => sent_rows(entry_sent(v, page.name, e.id), whole_rows(e.id ?? null, e, log[from + k - 1])));
 }
 
 export function entry_sent(v: View, name: string, id: number | undefined): boolean {

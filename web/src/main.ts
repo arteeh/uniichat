@@ -224,15 +224,7 @@ function chat(): void {
   });
   keep.observe($("#log"));
   keep.observe($("footer"));
-  let width = innerWidth;
-  addEventListener("resize", () => {
-    if (innerWidth !== width) {
-      width = innerWidth;
-      measured = new WeakSet();
-      folds();
-    }
-    frames(true);
-  });
+  addEventListener("resize", () => frames(true));
   draw(true);
 }
 
@@ -430,18 +422,37 @@ function left(ev: FocusEvent): void {
   }
 }
 
-const FOLD = 10;
-
-let measured = new WeakSet<Element>();
-
 function folds(): void {
-  for (const cut of document.querySelectorAll<HTMLElement>("#log .msg > .cut")) {
-    const msg = must(cut.parentElement, "the cut's message");
-    if (!measured.has(msg)) {
-      measured.add(msg);
-      msg.classList.toggle("long", cut.scrollHeight > FOLD * parseFloat(getComputedStyle(cut).lineHeight));
+  for (const msg of document.querySelectorAll<HTMLElement>("#log .msg.long")) {
+    const open = SCROLL.open.has(fold_key(msg));
+    if (msg.classList.contains("shown") !== open) {
+      fold_show(msg, open);
     }
-    fold_show(msg, SCROLL.open.has(msg.dataset.a ?? ""));
+  }
+}
+
+function fold_key(msg: HTMLElement): string {
+  return (v.page?.name ?? "") + "#" + (msg.dataset.a ?? "");
+}
+
+// a screen before the top of an agent's loaded messages, the next ones load
+const EARLIER = new IntersectionObserver((seen) => {
+  if (seen.some((e) => e.isIntersecting)) {
+    View.view_act(v, { $: "Earlier" }).forEach((out) => View.link_send(v, out));
+  }
+}, { rootMargin: "100% 0px 0px 0px" });
+
+let watched: { el: Element | null; from: number } = { el: null, from: 0 };
+
+function earlier_watch(): void {
+  const el = document.querySelector("#log .earlier");
+  const from = v.page?.from ?? 0;
+  if (el !== watched.el || from !== watched.from) {
+    EARLIER.disconnect();
+    if (el !== null) {
+      EARLIER.observe(el);
+    }
+    watched = { el, from };
   }
 }
 
@@ -454,7 +465,7 @@ function fold_show(msg: HTMLElement, open: boolean): void {
 
 function unfold(msg: HTMLElement): void {
   const open = !msg.classList.contains("shown");
-  const id = msg.dataset.a ?? "";
+  const id = fold_key(msg);
   open ? SCROLL.open.add(id) : SCROLL.open.delete(id);
   const [top, follow] = [msg.getBoundingClientRect().top, SCROLL.end];
   SCROLL.end = false;
@@ -622,6 +633,9 @@ function hear(msg: View.Server): void {
   const now = View.view_pick(v).filter((k) => was.length > 0 && !was.some((w) => w.text === k.text));
   if (now.length > 0) {
     toast("Now " + now.map((k) => k.hint).join("; ") + ".");
+  }
+  if ((msg.$ === "entry" || msg.$ === "delta" || msg.$ === "live") && msg.agent !== v.page?.name) {
+    return;
   }
   P.rows ||= msg.$ === "state" ? v.agents.join() !== agents || JSON.stringify(v.sent) !== sent : msg.$ !== "delta" && msg.$ !== "live";
   if (msg.$ === "state") {
@@ -893,6 +907,7 @@ function paint(): void {
   markup($("#log .tail"), View.view_tail(v).map(Html.row_html));
   Box.box_sizes($("#log .tail"));
   folds();
+  earlier_watch();
   frames();
   const back = RENEW.back === null ? null : document.querySelector<HTMLElement>(`#log [data-a="${RENEW.back.a}"]`);
   if (back !== null && RENEW.back !== null) {

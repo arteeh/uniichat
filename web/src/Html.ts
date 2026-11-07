@@ -15,6 +15,10 @@ const ESC: Record<string, string> = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"
 
 const TALL = 4000;
 
+// a result folds past this many lines, its long lines counted as wrapped
+const FOLD = 10;
+const WRAP = 70;
+
 export const SHEETS = `<svg viewBox="0 0 16 16" width="15" height="15"><rect x="5.5" y="5.5" width="8" height="8" rx="1.8"/><path d="M10.5 3.5v-.2A1.8 1.8 0 0 0 8.7 1.5H4.3A1.8 1.8 0 0 0 2.5 3.3v4.4a1.8 1.8 0 0 0 1.8 1.8h.2"/></svg>`;
 export const CHECK  = `<svg viewBox="0 0 16 16" width="15" height="15"><path d="M3 8.5l3.2 3L13 4.5"/></svg>`;
 
@@ -55,7 +59,8 @@ function row_make(row: View.Row): string {
     }
     case "Msg": {
       const at = row.id === null ? "" : ` data-a="${row.id}"`;
-      const copy = copy_html(row.call === null ? row.text : Call.call_text(row.call));
+      const whole = row.call === null ? row.text : Call.call_text(row.call);
+      const copy = copy_html(whole);
       const body = row.call === null ? row.body.map(block_html).join("") : call_html(row.call);
       const pics = images_html(row.images);
       const tall = ["user", "work"].includes(row.kind) && row.text.length + 80 * row.text.split("\n").length > TALL && !row.text.includes("](/media/");
@@ -64,10 +69,11 @@ function row_make(row: View.Row): string {
       const fold = tall ? `<div class="clip">${body}</div><details class="more"><summary></summary></details>` : cut ? `<div class="cut">${body}</div><button class="unfold" aria-expanded="false">Show all</button>` : body;
       const who = row.who === "" ? "" : ` data-who="${esc(row.who)}"`;
       const queued = row.queued === true ? " queued" : "";
-      return `<div class="msg ${row.kind}${queued}"${at}${who}>${copy}${fold}${pics}</div>`;
+      const long = cut && whole.split("\n").reduce((n, line) => n + Math.max(1, Math.ceil(line.length / WRAP)), 0) > FOLD ? " long" : "";
+      return `<div class="msg ${row.kind}${queued}${long}"${at}${who}>${copy}${fold}${pics}</div>`;
     }
     case "Cap": {
-      return `<p class="cap">${esc(row.text)}</p>`;
+      return `<p class="cap${row.earlier === true ? " earlier" : ""}">${esc(row.text)}</p>`;
     }
   }
 }

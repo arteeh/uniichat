@@ -94,6 +94,7 @@ const LOCK_DEAD  = 30000;
 const WIN        = process.platform === "win32";
 const PID        = config.DIR + "/server.pid";
 const SETTLE     = 200;
+const SHOWN      = 100;
 const CHAT       = config.DIR + "/chat";
 const HEAD       = "Turn:\n\n";
 const GOAL       = "You check a goal. Below is a chat between a user and Unii, an AI agent: its older messages as summary lines (id+n|text), then its latest messages whole, then the goal the user set with /goal. Answer yes if the chat shows the goal fully satisfied now, else no. Write that one word, nothing else.";
@@ -1236,9 +1237,14 @@ export namespace Chat {
         const log = Memory.agent(chat.mem, name);
         const agent = log === null ? null : chat.tools.agents.get(name) ?? Tools.logged(chat.tools, name);
         const pick = agent === null ? null : Tools.shown(chat.tools, agent);
-        Chat.send(sock, { $: "agent", name, found: log !== null, pick });
-        log?.forEach(({ i, kind, text, date, of, tool }) => Chat.send(sock, { $: "entry", agent: name, id: i, kind, text, date, of, tool }));
-        Chat.send(sock, { $: "live", agent: name, live: chat.tools.agents.get(name)?.run.live ?? [] });
+        const asked = typeof msg.before === "number" ? msg.before : undefined;
+        const before = asked ?? log?.length ?? 0;
+        const from = Math.max(0, before - SHOWN);
+        const entries = (log ?? []).slice(from, before).map(({ i, kind, text, date, of, tool }) => ({ id: i, kind, text, date, of, tool }));
+        Chat.send(sock, { $: "agent", name, found: log !== null, pick, from, before: asked, entries });
+        if (asked === undefined) {
+          Chat.send(sock, { $: "live", agent: name, live: chat.tools.agents.get(name)?.run.live ?? [] });
+        }
         return {};
       }
     }

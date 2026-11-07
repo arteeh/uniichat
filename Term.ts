@@ -551,6 +551,12 @@ function term_print(t: Term, msg: View.Server): void {
       term_settle(t);
       return;
     }
+    case "agent": {
+      if (msg.name === v.page?.name) {
+        term_settle(t);
+      }
+      return;
+    }
     case "entry": {
       if (msg.agent !== v.page?.name) {
         return;
