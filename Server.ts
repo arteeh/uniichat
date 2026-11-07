@@ -2,6 +2,7 @@
 
 import * as fs from "node:fs";
 import * as net from "node:net";
+import * as path from "node:path";
 import type { ServerWebSocket } from "bun";
 import { AskAI, GO_ON, type Ask, type Call, type End, type Event, type Kind, type Parked, type Said, type Say, type Vendor } from "./AskAI.ts";
 import { clip_pages } from "./Clip.ts";
@@ -1864,7 +1865,8 @@ export namespace Main {
   // an editor or Settings saves by moving a new file over the old one,
   // which a watch on the file itself stops seeing
   export function watch(): void {
-    const names = [config.FILE_PATH, config.KEYS_PATH].map((f) => f.slice(config.DIR.length + 1));
+    const names = [config.FILE_PATH, config.KEYS_PATH].map((f) => path.basename(f));
+    const off = (err: unknown) => console.error("unii: settings saved by hand apply after a restart: " + err_why(err));
     let settle: Timer | undefined;
     const reload = () => {
       try {
@@ -1874,12 +1876,16 @@ export namespace Main {
         console.error("unii: the settings changed on disk, but " + err_why(err) + "; the ones before stay");
       }
     };
-    fs.watch(config.DIR, (_, name) => {
-      if (name === null || names.includes(name)) {
-        clearTimeout(settle);
-        settle = setTimeout(reload, SETTLE);
-      }
-    }).on("error", (err) => console.error("unii: settings saved by hand apply after a restart: " + err_why(err)));
+    try {
+      fs.watch(config.DIR, (_, name) => {
+        if (name === null || names.includes(path.basename(name))) {
+          clearTimeout(settle);
+          settle = setTimeout(reload, SETTLE);
+        }
+      }).on("error", off);
+    } catch (err) {
+      off(err);
+    }
   }
 
   export function follow(): void {
