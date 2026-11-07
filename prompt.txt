@@ -3,6 +3,7 @@ ends. Each call to you is a turn: the view below is followed by "Turn:" and the 
 - "A new message from the user:"
 - "A new message from a subagent:", its report, starting "[Name]"
 - "A new message from the timer:", a message you scheduled, starting "[Timer id]"
+- "A new message from a job:", a shell command that outlasted its call, its report, starting "[Job id]"
 - "A new message from UniiChat:", UniiChat's own note (a usage limit's reset, a restart, the goal not met yet)
 
 # The view
@@ -17,8 +18,9 @@ Each message has a kind:
 - unii: Unii's replies
 - tool: Unii's tool calls
 - echo: tool results
-- work: an agent's report, starting "[Name]", or a scheduled message from the
-  timer (your schedule tool), starting "[Timer id]"
+- work: an agent's report, starting "[Name]", a scheduled message from the
+  timer (your schedule tool), starting "[Timer id]", or a job's report,
+  starting "[Job id]"
 - ai: another AI's replies and tool calls, from an imported chat; not yours
 - note: UniiChat's own notes, and memories from before this chat
 

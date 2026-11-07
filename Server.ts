@@ -23,6 +23,7 @@ import { Run, type Heard } from "./Run.ts";
 import * as Service from "./Service.ts";
 import * as Timer from "./Timer.ts";
 import { PROMPTS, SEARCHES, Tools } from "./Tools.ts";
+import { JOB } from "./Machine.ts";
 import { ACTIVE, FRAME, IDLE, IMAGES, live_push, MEDIA, PING, QUIT, SUMMARIES, TICK, TURN, WIRE, type Answer, type Live, type Part, type Pending, type Queued, type Server as Out, type Sums, type Talk as Meter, TOKEN, type Wait } from "./View.ts";
 import * as config from "./Config.ts";
 import { err_code, err_stack, err_why } from "./Err.ts";
@@ -521,7 +522,7 @@ export namespace Chat {
   // message is work, UniiChat's own (a go-on, a restart, the goal) a note
   export function said(mem: Memory, a: number, b: number): Said {
     const { kind, text } = Memory.at(mem, a);
-    const from = kind === "user" ? "the user" : kind !== "work" ? "UniiChat" : text.startsWith("[Timer ") ? "the timer" : "a subagent";
+    const from = kind === "user" ? "the user" : kind !== "work" ? "UniiChat" : text.startsWith("[Timer ") ? "the timer" : text.startsWith(JOB) ? "a job" : "a subagent";
     return { ...Memory.say(mem, a, b), from };
   }
 
@@ -1197,6 +1198,18 @@ export namespace Chat {
       case "servers": {
         if (sock.data.device !== null) {
           Tools.servers(chat.tools, sock.data.device, msg.mcp);
+        }
+        return {};
+      }
+      case "running": {
+        if (sock.data.device !== null) {
+          Tools.running(chat.tools, sock.data.device, sock.data.tab, msg.jobs);
+        }
+        return {};
+      }
+      case "done": {
+        if (sock.data.device !== null) {
+          void Tools.job_done(chat.tools, String(msg.agent), String(msg.text));
         }
         return {};
       }

@@ -4,7 +4,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import type { Out } from "./Agent.ts";
 import * as Client from "./Client.ts";
-import { Machine, SCRATCH, WIN, type Job } from "./Machine.ts";
+import { JOB, JOBS, Machine, SCRATCH, WIN, type Job } from "./Machine.ts";
 import { Mcp } from "./Mcp.ts";
 import { err_code, err_why } from "./Err.ts";
 import { get, text_of } from "./Json.ts";
@@ -38,7 +38,7 @@ export async function run(given: string | undefined): Promise<void> {
   console.log("unii device " + name + " on " + url + ", work dir " + work);
   const query = "?tab=" + crypto.randomUUID() + "&wire=" + WIRE + "&device=" + encodeURIComponent(name) + "&work=" + encodeURIComponent(work) + "&scratch=" + encodeURIComponent(SCRATCH) + (WIN ? "&shell=PowerShell" : "");
   const jobs = new Map<string, AbortController>();
-  const outs = new Map<string, { $: "out"; id: string; job: string; out: object }>();
+  const outs = new Map<string, { $: "out"; id: string; job: string; out: object } | { $: "done"; id: string; agent: string; text: string }>();
   let ws: WebSocket | null = null;
   let quitting = false;
   const send = (msg: object) => ws?.readyState === WebSocket.OPEN && ws.send(JSON.stringify(msg));
@@ -62,6 +62,7 @@ export async function run(given: string | undefined): Promise<void> {
       outs.forEach((msg) => sock.send(JSON.stringify(msg)));
       told = "";
       tell();
+      JOBS.changed();
     };
     sock.onmessage = (ev) => {
       heard = Date.now();
@@ -69,7 +70,7 @@ export async function run(given: string | undefined): Promise<void> {
         return;
       }
       const msg = JSON.parse(String(ev.data)) as Server;
-      if (msg.$ === "job" && !jobs.has(msg.id) && ![...outs.values()].some((o) => o.job === msg.id)) {
+      if (msg.$ === "job" && !jobs.has(msg.id) && ![...outs.values()].some((o) => o.$ === "out" && o.job === msg.id)) {
         void job(msg.id, msg.job);
       } else if (msg.$ === "jobs") {
         jobs.forEach((abort, id) => msg.ids.includes(id) || abort.abort());
@@ -100,6 +101,12 @@ export async function run(given: string | undefined): Promise<void> {
     const act = { $: "out" as const, id: crypto.randomUUID(), job: id, out: sendable_or_its_size(out) };
     outs.set(act.id, act);
     send(act);
+  };
+  JOBS.changed = () => send({ $: "running", id: crypto.randomUUID(), jobs: [...JOBS.running.values()] });
+  JOBS.ended = (job, text) => {
+    const done = { $: "done" as const, id: crypto.randomUUID(), agent: job.agent, text: JOB + job.id + "] " + name + ": " + text };
+    outs.set(done.id, done);
+    send(done);
   };
   process.on("exit", Machine.end);
   on_stop(() => {

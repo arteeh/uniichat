@@ -4,7 +4,7 @@ import * as Md from "./Md.ts";
 import { LABELS, type Fall, type Move, Pick } from "./Pick.ts";
 import { GLYPH, WHO } from "./Theme.ts";
 import type { Timer } from "./Timer.ts";
-import type { Job } from "./Machine.ts";
+import type { Bg, Job } from "./Machine.ts";
 import { rec } from "./Json.ts";
 
 export type Part = [number, number];
@@ -133,6 +133,8 @@ export type Client =
   | { $: "mcp"; name: string; on: boolean }
   | { $: "talk"; on: boolean }
   | { $: "out"; job: string; out: object }
+  | { $: "done"; agent: string; text: string }
+  | { $: "running"; jobs: Bg[] }
   | { $: "unschedule"; id: string }
   | { $: "zoom"; part: Part }
   | { $: "root" }

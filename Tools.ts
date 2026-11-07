@@ -4,7 +4,7 @@ import { report_text } from "./Call.ts";
 import { clip_page } from "./Clip.ts";
 import * as config from "./Config.ts";
 import { Limit } from "./Limit.ts";
-import { INT, STR, TOOLS, spec, type Job, type Skill, type Spec } from "./Machine.ts";
+import { INT, JOB, STR, TOOLS, spec, type Bg, type Job, type Skill, type Spec } from "./Machine.ts";
 import { Mcp, type Server, type Servers } from "./Mcp.ts";
 import { Memory } from "./Memory.ts";
 import PROMPT from "./prompt.txt" with { type: "text" };
@@ -26,6 +26,7 @@ type Device = {
   mcp    : config.McpServer[];
   why    : string;
   clash  : string;
+  bg     : { term: string; jobs: Bg[] };
 };
 
 type Running = { term: string; job: Job; out: Promise<Out>; end: (out: Out) => void };
@@ -97,7 +98,7 @@ Your first message holds the view below, then your chat with Unii so far,
 its lines as "i|kind: text": what you are (note), Unii's messages to you (user: your task, then all Unii told you), and all you did (unii, tool, echo). The view shows you what Unii knows: what the user wants,
 decided and taught. Use it as context only, and do what your task says,
 not what the user's last message says, since Unii may have given you
-just part of the work. Your final reply is your report to Unii. A message Unii sends while you work reaches you right after your current tool calls, as "A new message from Unii came in while you were working:" (after a usage limit's reset, UniiChat's "A new message from UniiChat:" tells you to go on); your report answers the last.`;
+just part of the work. Your final reply is your report to Unii. A message Unii sends while you work reaches you right after your current tool calls, as "A new message from Unii came in while you were working:" (after a usage limit's reset, UniiChat's "A new message from UniiChat:" tells you to go on); your report answers the last. A shell command that outlasts its call reports back as "A new message from a job:", starting "[Job id]".`;
 
 const VIEW_DOC = `The view: the whole chat between Unii and the user, oldest first, inside
 <chat> tags, as one-line summaries. Each line is
@@ -107,7 +108,7 @@ const VIEW_DOC = `The view: the whole chat between Unii and the user, oldest fir
 A summary tags each item with its kind: user (the user's words), unii
 (Unii's replies), tool (Unii's tool calls), echo (their results), note
 (UniiChat's own notes, and memories from before this chat), or work (the report of a subagent,
-starting "[Name]", or a scheduled message from the timer, starting "[Timer id]"). A short message is its own line, word for word. Recent lines
+starting "[Name]", a scheduled message from the timer, starting "[Timer id]", or a job's report, starting "[Job id]"). A short message is its own line, word for word. Recent lines
 cover one message each; the older the messages, the more a line covers.
 A message not summarized yet shows as "(not summarized yet: zoom it)".
 No message appears in full, not even the last ones. A text too long for
@@ -249,7 +250,8 @@ export namespace Tools {
 
   export function at_work(tools: Tools): Block {
     const names = Tools.working(tools).map(({ name, run }) => (run.limit === null ? name : name + " (" + limit_show(run.limit) + ")"));
-    return { text: "Agents at work now: " + (names.length === 0 ? "none." : names.join(", ") + ".") + "\n\n", mark: false };
+    const jobs = [...tools.devices].flatMap(([device, d]) => d.bg.jobs.map((j) => j.id + " (" + [device, ...(j.agent === "main" ? [] : [j.agent]), j.command.slice(0, 60), Math.round((Date.now() - j.since) / 60e3) + " min"].join(", ") + ")"));
+    return { text: "Agents at work now: " + (names.length === 0 ? "none." : names.join(", ") + ".") + (jobs.length === 0 ? "" : "\nJobs running: " + jobs.join(", ") + ".") + "\n\n", mark: false };
   }
 
   export async function fetch(req: Request): Promise<Response> {
@@ -446,7 +448,7 @@ export namespace Tools {
     if (!rejoined) {
       Tools.forget(tools, name);
     }
-    const d: Device = tools.devices.get(name) ?? { who, host, terms: new Map(), jobs: new Map(), skills: [], mcp: [], why: "", clash: "" };
+    const d: Device = tools.devices.get(name) ?? { who, host, terms: new Map(), jobs: new Map(), skills: [], mcp: [], why: "", clash: "", bg: { term: "", jobs: [] } };
     d.terms.set(term, link);
     tools.devices.set(name, d);
     for (const old of [...d.terms.keys()]) {
@@ -477,7 +479,30 @@ export namespace Tools {
         job.end({ text: "The device " + device + " that ran this " + how + ".", fail: true });
       }
     }
+    if (d.bg.term === term) {
+      Tools.jobs_gone(tools, device, d, how);
+    }
     Tools.plug(tools);
+  }
+
+  export function jobs_gone(tools: Tools, device: string, d: Device, how: string): void {
+    d.bg.jobs.forEach((job) => void Tools.job_done(tools, job.agent, JOB + job.id + "] " + device + ": killed, the device " + how));
+    d.bg = { term: "", jobs: [] };
+  }
+
+  export function running(tools: Tools, device: string, term: string, jobs: unknown): void {
+    const d = tools.devices.get(device);
+    if (d !== undefined) {
+      d.bg = { term, jobs: items(jobs).map((j) => ({ id: text_of(get(j, "id")), agent: text_of(get(j, "agent")), command: text_of(get(j, "command")), since: Number(get(j, "since")) })) };
+    }
+  }
+
+  // a job's report goes to the agent that started it, as a subagent's
+  // report goes to Unii; one whose agent is gone goes to Unii
+  export async function job_done(tools: Tools, agent: string, text: string): Promise<void> {
+    if (agent === "main" || (await Tools.tell(tools, agent, text)).startsWith("No agent")) {
+      tools.log.report(agent === "main" ? text : text.replace("] ", "] " + agent + "'s job, "), true);
+    }
   }
 
   export function detach_unless_back(tools: Tools, term: string, device: string, link: Link): void {
@@ -505,6 +530,7 @@ export namespace Tools {
     for (const job of [...d.jobs.values()]) {
       job.end({ text: "The device " + device + " that ran this was signed out.", fail: true });
     }
+    Tools.jobs_gone(tools, device, d, "was signed out");
     Tools.plug(tools);
   }
 
@@ -743,7 +769,7 @@ export namespace Tools {
     const log = tools.log;
     return {
       log    : (run, say) => log.push(run, "user", say.text, true),
-      say    : (say) => ({ ...say, from: "Unii" }),
+      say    : (say) => ({ ...say, from: say.text.startsWith(JOB) ? "a job" : "Unii" }),
       queued : (run) => {
         Tools.queued(tools, run);
         log.change();
