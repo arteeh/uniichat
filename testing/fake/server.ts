@@ -19,6 +19,11 @@ type Sent = { blocks: Array<{ text: string } | { id: string; name: string; json:
 
 export const CONTROL = 9999;
 
+// the compactor's task, as Memory.ts words it, past its view
+const TASK = /^Compaction: (?:compress message \d+ |merge lines \d+\+\d+ and \d+\+\d+, )/m;
+
+const REMINDER = /<system-reminder>[\s\S]*?<\/system-reminder>/g;
+
 const QUEUE: Array<Order & { match: string }> = [];
 const LOG: Seen[] = [];
 const CACHED = new Set<string>();
@@ -53,7 +58,8 @@ function said(vendor: Vendor, body: unknown): { system: string; said: Said[]; se
   if (vendor.startsWith("claude")) {
     add(get(body, "tools") ?? [], false);
     const system = list(get(body, "system"));
-    system.forEach((b) => add(b, get(b, "cache_control") !== undefined));
+    // (Claude Code's billing block changes every request; the API doesn't cache it)
+    system.filter((b) => !text_of([b]).startsWith("x-anthropic-billing-header:")).forEach((b) => add(b, get(b, "cache_control") !== undefined));
     for (const m of list(get(body, "messages"))) {
       const blocks = typeof get(m, "content") === "string" ? [{ type: "text", text: get(m, "content") }] : list(get(m, "content"));
       blocks.forEach((b) => add(b, get(b, "cache_control") !== undefined));
@@ -104,7 +110,7 @@ function pick(latest: string, compaction: boolean): Order {
   if (k >= 0) {
     return QUEUE.splice(k, 1)[0];
   }
-  return { what: "reply", text: compaction ? "Summary: " + latest.slice(0, 80).replace(/\s+/g, " ").trim() : "ok" };
+  return { what: "reply", text: compaction ? "Summary: " + (latest.split("<input>").pop() ?? "").slice(0, 80).replace(/\s+/g, " ").trim() : "ok" };
 }
 
 function chunks(text: string): string[] {
@@ -311,9 +317,10 @@ async function model(req: Request, vendor: Vendor, url: URL): Promise<Response> 
   }
   const name = str(get(body, "model")) ?? "";
   const got = said(vendor, body);
-  const last = (got.said.findLast((m) => m.role !== "system")?.text ?? "").replace(/<system-reminder>[\s\S]*?<\/system-reminder>/g, "");
+  const last = (got.said.findLast((m) => m.role !== "system")?.text ?? "").replace(REMINDER, "");
   const latest = (last.replace(/<chat>[\s\S]*<\/chat>/, "").split(/^A new message from [^:\n]+:$/m).pop() ?? "").trim();
-  const compaction = last.includes("Compaction:");
+  const first = got.said.find((m) => m.role === "user")?.text.replace(REMINDER, "") ?? "";
+  const compaction = TASK.test(first.replace(/<chat>[\s\S]*<\/chat>/, ""));
   const until = LIMITED[vendor] ?? 0;
   const order: Order = until > Date.now() ? { what: "error", kind: "usage-limit", reset: until } : pick(latest, compaction);
   const tools = list(get(body, "tools")).map((t) => str(get(t, "name")) ?? str(get(t, "type")) ?? "");
