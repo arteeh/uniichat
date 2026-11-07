@@ -552,13 +552,19 @@ function term_print(t: Term, msg: View.Server): void {
       return;
     }
     case "agent": {
-      if (msg.name === v.page?.name) {
-        term_settle(t);
+      // its whole log, asked 100 at a time, prints once it's all here
+      if (msg.name !== v.page?.name) {
+        return;
       }
+      if (v.page.from > 0) {
+        term_act(t, { $: "Earlier" });
+        return;
+      }
+      term_settle(t);
       return;
     }
     case "entry": {
-      if (msg.agent !== v.page?.name) {
+      if (msg.agent !== v.page?.name || (v.page !== null && v.page.from > 0)) {
         return;
       }
       const text = term_logged(t, msg.kind, msg.text);
