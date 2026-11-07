@@ -800,6 +800,21 @@ export namespace Chat {
     });
   }
 
+  // a device's job report, acked once it's queued or with its subagent, and
+  // taken once: a device sends it again until acked
+  export async function job_done(chat: Chat, id: string, agent: string, text: string): Promise<Answer> {
+    if (await Tools.job_done(chat.tools, agent, text)) {
+      Chat.mark(chat, id, {});
+      return {};
+    }
+    if (chat.main.queue.some((x) => x.q.act === id)) {
+      return {};
+    }
+    const why = await Run.take(chat.main, { kind: "work", text: Tools.job_text(agent, text), images: [], act: id });
+    Chat.change(chat);
+    return why === null ? {} : { error: why };
+  }
+
   export function phone(chat: Chat): void {
     const last = Memory.message(chat.mem, chat.mem.count - 1);
     const used = [...chat.socks].some((sock) => Date.now() - sock.data.active < ACTIVE_MS);
@@ -1209,12 +1224,6 @@ export namespace Chat {
         }
         return {};
       }
-      case "done": {
-        if (sock.data.device !== null) {
-          void Tools.job_done(chat.tools, String(msg.agent), String(msg.text));
-        }
-        return {};
-      }
       case "zoom": {
         if (!Array.isArray(msg.part)) {
           throw new Error("A zoom has no part.");
@@ -1336,6 +1345,9 @@ export namespace Chat {
       case "out": {
         Tools.done(chat.tools, device, String(msg.job), Tools.out(msg.out));
         return {};
+      }
+      case "done": {
+        return device === "" ? { error: "Only a device reports jobs." } : Chat.job_done(chat, String(msg.id), String(msg.agent), String(msg.text));
       }
       case "unschedule": {
         const id = String(msg.id);

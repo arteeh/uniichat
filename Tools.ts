@@ -172,7 +172,7 @@ const BOSS: Spec[] = [
   }, ["message", "zone"]),
   spec("schedules", "List the chat's schedules: id, when each comes next, its message.", {}, []),
   spec("unschedule", "Cancel a schedule, by its id.", { id: STR }, ["id"]),
-  spec("stop", "Stop a subagent at once, by name, whatever it is doing (mid-call, waiting on a usage limit, running a tool on a device: that job is cancelled). Others keep running. Its report says it was stopped; its chat and scratch folder stay, so a later tell resumes it.", { name: STR, why: { type: "string", description: "Why, for its report." } }, ["name"]),
+  spec("stop", "Stop a subagent at once, by name, whatever it is doing (mid-call, waiting on a usage limit, running a tool on a device: that job is cancelled). Others keep running, and so do its background jobs, whose reports then reach you. Its report says it was stopped; its chat and scratch folder stay, so a later tell resumes it.", { name: STR, why: { type: "string", description: "Why, for its report." } }, ["name"]),
   spec("resume", "Wake every call on this server waiting for an AI service's usage limit (subagents, summaries), when the user says a limit was reset early. Each asks again once; one still limited waits again.", {}, []),
 ];
 const DEVICE = { device: { type: "string", description: "The name of the device to run on, one listed under Devices." } };
@@ -250,7 +250,7 @@ export namespace Tools {
 
   export function at_work(tools: Tools): Block {
     const names = Tools.working(tools).map(({ name, run }) => (run.limit === null ? name : name + " (" + limit_show(run.limit) + ")"));
-    const jobs = [...tools.devices].flatMap(([device, d]) => d.bg.jobs.map((j) => j.id + " (" + [device, ...(j.agent === "main" ? [] : [j.agent]), j.command.slice(0, 60), Math.round((Date.now() - j.since) / 60e3) + " min"].join(", ") + ")"));
+    const jobs = [...tools.devices].flatMap(([device, d]) => d.bg.jobs.map((j) => j.id + " (" + [device, ...(j.agent === "main" ? [] : [j.agent]), j.command.replace(/\s+/g, " ").trim().slice(0, 60), Math.round((Date.now() - j.since) / 60e3) + " min"].join(", ") + ")"));
     return { text: "Agents at work now: " + (names.length === 0 ? "none." : names.join(", ") + ".") + (jobs.length === 0 ? "" : "\nJobs running: " + jobs.join(", ") + ".") + "\n\n", mark: false };
   }
 
@@ -485,8 +485,14 @@ export namespace Tools {
     Tools.plug(tools);
   }
 
+  // only a device that stops kills its jobs; one gone otherwise may still
+  // run them, and one that comes back reports them
   export function jobs_gone(tools: Tools, device: string, d: Device, how: string): void {
-    d.bg.jobs.forEach((job) => void Tools.job_done(tools, job.agent, JOB + job.id + "] " + device + ": killed, the device " + how));
+    const said = how === "stopped" ? "killed, the device stopped" : "no word on it: the device " + how + " while it ran" + (how === "went away" ? "; its report follows if the device comes back" : "");
+    for (const job of d.bg.jobs) {
+      const text = JOB + job.id + "] " + device + ": " + said;
+      void Tools.job_done(tools, job.agent, text).then((sent) => sent || tools.log.report(Tools.job_text(job.agent, text), true));
+    }
     d.bg = { term: "", jobs: [] };
   }
 
@@ -497,17 +503,20 @@ export namespace Tools {
     }
   }
 
-  // a job's report goes to the agent that started it, as a subagent's
-  // report goes to Unii; one whose agent is gone goes to Unii
-  export async function job_done(tools: Tools, agent: string, text: string): Promise<void> {
-    if (agent === "main" || (await Tools.tell(tools, agent, text)).startsWith("No agent")) {
-      tools.log.report(agent === "main" ? text : text.replace("] ", "] " + agent + "'s job, "), true);
-    }
+  // a job's report goes to the subagent that started it, as a tell; false:
+  // Unii's job, or one of a subagent stopped or gone, whose report goes to Unii
+  export async function job_done(tools: Tools, agent: string, text: string): Promise<boolean> {
+    const a = agent === "main" ? null : Tools.agent(tools, agent);
+    return a !== null && !a.run.halt.signal.aborted && (await Tools.tell(tools, agent, text)).startsWith("Sent.");
+  }
+
+  export function job_text(agent: string, text: string): string {
+    return agent === "main" ? text : text.replace("] ", "] " + agent + "'s job, ");
   }
 
   export function detach_unless_back(tools: Tools, term: string, device: string, link: Link): void {
     if (tools.devices.get(device)?.terms.get(term) === link && !link.live()) {
-      Tools.detach(tools, term, device);
+      Tools.detach(tools, term, device, "went away");
     }
   }
 

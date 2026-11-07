@@ -33,7 +33,7 @@ const PWSH  = "$ProgressPreference = 'SilentlyContinue'; $OutputEncoding = [Cons
 
 const RUN = crypto.randomUUID();
 const UID = String(process.getuid?.() ?? "");
-const PS  = process.platform === "darwin" ? ["ps", "-wwE", "-U", UID, "-o", "pid=,command="] : ["ps", "-wwe", "-u", UID, "-o", "pid=,args=", "e"];
+const PS  = process.platform === "darwin" ? ["ps", "-wwE", "-U", UID, "-o", "pid=,pgid=,command="] : ["ps", "-wwe", "-u", UID, "-o", "pid=,pgid=,args=", "e"];
 
 const SHELLS = new Map<Bun.Subprocess, string>();
 
@@ -43,7 +43,7 @@ export const JOB = "[Job ";
 
 // the shells that outlasted their call, and what the device does when one
 // changes or ends (Device.ts)
-export const JOBS = { running: new Map<Bun.Subprocess, Bg>(), hushed: new Set<Bun.Subprocess>(), n: 0, changed: () => {}, ended: (_job: Bg, _text: string) => {} };
+export const JOBS = { running: new Map<Bun.Subprocess, Bg>(), n: 0, changed: () => {}, ended: (_job: Bg, _text: string) => {} };
 
 const GONE = 3000;
 
@@ -77,7 +77,7 @@ const WAIT = 60;
 const EDIT = { type: "object", properties: { path: STR, old: STR, new: STR, all: { type: "boolean" } }, required: ["path", "old", "new"] };
 
 export const TOOLS: Spec[] = [
-  spec("shell", "Run a command with the device's shell ($SHELL -c), stdout and stderr together, and return its output, then its exit code and time, as (exit 0 in 0.4 s); output past " + CAP + " characters keeps its head and tail. Each call is a new shell. The call waits until the command and everything holding its output end, up to timeout seconds. A command still running then moves to the background as a job: the call returns its output so far, its pid and its log file, and when it ends, its exit code and output reach you as a new message from a job, starting \"[Job id]\" (Jobs running lists those at work; a later call can end one by its pid; a stop kills them). So run builds and tests in the call, however long they take, and never sleep a fixed time to wait for something. Start only a server that never ends detached (&, with its own output file). Stopping the device kills every process the calls started.", { command: STR, timeout: { type: "integer", minimum: TIMEOUT[0], maximum: TIMEOUT[1], description: "Seconds to wait here, " + TIMEOUT[0] + " to " + TIMEOUT[1] + " (default " + WAIT + "): then the command moves to the background and reports back when it ends." } }, ["command"]),
+  spec("shell", "Run a command with the device's shell ($SHELL -c), stdout and stderr together, and return its output, then its exit code and time, as (exit 0 in 0.4 s); output past " + CAP + " characters keeps its head and tail. Each call is a new shell. The call waits until the command and everything holding its output end, up to timeout seconds. A command still running then moves to the background as a job: the call returns its output so far, its pid and its log file, and when it ends, its exit code and output reach you as a new message from a job, starting \"[Job id]\" (Jobs running lists those at work, and a later call can end one by its pid; stopping you or a subagent leaves them running). So run builds and tests in the call, however long they take, and never sleep a fixed time to wait for something. Start only a server that never ends detached (&, with its own output file). Stopping the device kills every process the calls started.", { command: STR, timeout: { type: "integer", minimum: TIMEOUT[0], maximum: TIMEOUT[1], description: "Seconds to wait here, " + TIMEOUT[0] + " to " + TIMEOUT[1] + " (default " + WAIT + "): then the command moves to the background and reports back when it ends." } }, ["command"]),
   spec("read", "Read a text file. offset: the first line to show (from 1); limit: how many lines; at: the character of the first line to start from. It ends saying the lines shown, as [lines 4-7 of 15]; output past " + CAP + " characters comes in pages, saying where to go on. An image file (png, jpeg, gif, webp) comes as the picture, scaled to fit " + FIT + " px, or max_side px if given (a GIF shows its first frame; view_video plays it).", { path: STR, offset: INT, limit: INT, at: INT, max_side: INT }, ["path"]),
   spec("write", "Write a whole file, making its directories. Answers a unified diff of what changed (a new file: all its lines added).", { path: STR, content: STR }, ["path", "content"]),
   spec("view_video", "See part of a video (any file ffmpeg opens: mp4, mkv, webm, mov, avi, gif...) as ONE image: a grid of its frames, row by row, each stamped with its frame number (top) and time (bottom), fitting " + FIT + " px, or max_side px. It also answers a line on the whole video (duration, fps, frames, size). start and end: the range, ends included, in frames from 0 (or seconds, with unit \"second\"); by default the whole video. step: take every step-th frame; by default the one that gives at most 16. Each frame gets smaller as more share the sheet: past about 25 they get hard to read, and " + SHEET + " is the most. For a long stretch, raise step, narrow the range, or call again on the next range. Needs ffmpeg and ffprobe on the device.", { path: STR, start: { type: "number" }, end: { type: "number" }, unit: { type: "string", enum: ["frame", "second"] }, step: INT, max_side: INT }, ["path"]),
@@ -169,8 +169,25 @@ export namespace Machine {
       });
     };
     signal.addEventListener("abort", kill, { once: true });
-    const sink = { add: out.add };
-    const read = Machine.read_into(readers, sink).then(() => proc.exited);
+    const jobs = path.join(path.dirname(cwd), "jobs");
+    const log = { file: path.join(jobs, "." + crypto.randomUUID() + ".log"), ok: true };
+    try {
+      fs.mkdirSync(jobs, { recursive: true });
+      fs.writeFileSync(log.file, "");
+    } catch {
+      log.ok = false;
+    }
+    const add = (str: string) => {
+      out.add(str);
+      try {
+        if (log.ok) {
+          fs.appendFileSync(log.file, str);
+        }
+      } catch {
+        log.ok = false;
+      }
+    };
+    const read = Machine.read_into(readers, { add }).then(() => proc.exited);
     const ended = await Machine.within(read, ms);
     signal.removeEventListener("abort", kill);
     const shown = () => {
@@ -179,28 +196,44 @@ export namespace Machine {
     };
     const took = () => (performance.now() - start) / 1000;
     if (ended === "late" && !signal.aborted) {
-      const job: Bg = { id: "j" + ++JOBS.n, agent, command, since: Date.now() };
-      const log = path.join(cwd, "jobs", job.id + ".log");
-      fs.mkdirSync(path.dirname(log), { recursive: true });
-      fs.writeFileSync(log, out.text());
-      sink.add = (str) => {
-        out.add(str);
-        fs.appendFileSync(log, str);
-      };
+      const job: Bg = { id: Machine.job_id(jobs), agent, command, since: Date.now() };
+      const spool = log.file;
+      log.file = path.join(jobs, job.id + ".log");
+      try {
+        fs.renameSync(spool, log.file);
+      } catch {
+        log.ok = false;
+      }
+      const where = () => "output in " + log.file + (log.ok ? "" : " (incomplete: it couldn't be written)");
       JOBS.running.set(proc, job);
       JOBS.changed();
       void read.then(() => {
         JOBS.running.delete(proc);
         JOBS.changed();
-        if (!JOBS.hushed.delete(proc)) {
-          JOBS.ended(job, Machine.exit(proc) + " in " + Math.round(took()) + " s, output in " + log + Machine.fenced(shown()));
-        }
+        JOBS.ended(job, Machine.exit(proc) + " in " + Math.round(took()) + " s, " + where() + Machine.fenced(shown()));
       });
-      return { text: shown() + "(moved to the background after " + Math.round(took()) + " s as job " + job.id + ", pid " + proc.pid + ", output in " + log + "; it reports back when it ends)", fail: false };
+      return { text: shown() + "(moved to the background after " + Math.round(took()) + " s as job " + job.id + ", pid " + proc.pid + ", " + where() + "; it reports back when it ends)", fail: false };
     }
+    fs.rm(log.file, { force: true }, () => {});
     await proc.exited;
     const exit = signal.aborted ? "stopped" : Machine.exit(proc);
     return { text: shown() + "(" + exit + " in " + took().toFixed(1) + " s)", fail: exit !== "exit 0" };
+  }
+
+  // the next job id on this device: one no log in jobs has, across restarts
+  export function job_id(jobs: string): string {
+    JOBS.n ||= Math.max(0, ...fs.readdirSync(jobs).map((f) => Number(/^j(\d+)\.log$/.exec(f)?.[1] ?? 0)));
+    for (;;) {
+      const id = "j" + ++JOBS.n;
+      try {
+        fs.writeFileSync(path.join(jobs, id + ".log"), "", { flag: "wx" });
+        return id;
+      } catch (err) {
+        if (err_code(err) !== "EEXIST") {
+          return id;
+        }
+      }
+    }
   }
 
   export function fenced(text: string): string {
@@ -291,10 +324,7 @@ export namespace Machine {
 
   export function sweep(agent: string | null): number | null {
     for (const [proc, who] of SHELLS) {
-      if ((agent === null || who === agent) && Machine.group_may_hold_job(proc)) {
-        if (JOBS.running.has(proc)) {
-          JOBS.hushed.add(proc);
-        }
+      if ((agent === null || (who === agent && !JOBS.running.has(proc))) && Machine.group_may_hold_job(proc)) {
         Machine.kill(-proc.pid);
       }
     }
@@ -302,7 +332,8 @@ export namespace Machine {
       return null; // no ps: a process that left its shell's tree lives on
     }
     const marks = ["UNII_RUN=" + RUN, ...(agent === null ? [] : ["UNII_AGENT=" + agent])];
-    const found = Bun.spawnSync(PS).stdout.toString().split("\n").map((line) => line.trim().split(/\s+/)).filter((words) => marks.every((m) => words.includes(m)));
+    const jobs = new Set(agent === null ? [] : [...JOBS.running.keys()].map((p) => String(p.pid)));
+    const found = Bun.spawnSync(PS).stdout.toString().split("\n").map((line) => line.trim().split(/\s+/)).filter((words) => marks.every((m) => words.includes(m)) && !jobs.has(words[1]));
     found.forEach((words) => Machine.kill(Number(words[0])));
     return found.length;
   }
