@@ -92,6 +92,7 @@ const LOCK_BEAT  = 5000;
 const LOCK_DEAD  = 30000;
 const WIN        = process.platform === "win32";
 const PID        = config.DIR + "/server.pid";
+const SETTLE     = 200;
 const CHAT       = config.DIR + "/chat";
 const HEAD       = "Turn:\n\n";
 const GOAL       = "You check a goal. Below is a chat between a user and Unii, an AI agent: its older messages as summary lines (id+n|text), then its latest messages whole, then the goal the user set with /goal. Answer yes if the chat shows the goal fully satisfied now, else no. Write that one word, nothing else.";
@@ -1757,6 +1758,7 @@ export namespace Main {
     Owner.open();
     Push.keys();
     Main.chat = Chat.open();
+    Main.watch();
     process.on("unhandledRejection", Main.unowned);
     Main.server = Bun.serve<Sock["data"]>({
       port               : port,
@@ -1838,6 +1840,27 @@ export namespace Main {
       Chat.offer(Main.chat);
     }
     return Response.json(out.body, { status: out.status, headers: fresh });
+  }
+
+  // an editor or Settings saves by moving a new file over the old one,
+  // which a watch on the file itself stops seeing
+  export function watch(): void {
+    const names = [config.FILE_PATH, config.KEYS_PATH].map((f) => f.slice(config.DIR.length + 1));
+    let settle: Timer | undefined;
+    const reload = () => {
+      try {
+        config.config_reload();
+        Chat.offer(Main.chat);
+      } catch (err) {
+        console.error("unii: the settings changed on disk, but " + err_why(err) + "; the ones before stay");
+      }
+    };
+    fs.watch(config.DIR, (_, name) => {
+      if (name === null || names.includes(name)) {
+        clearTimeout(settle);
+        settle = setTimeout(reload, SETTLE);
+      }
+    }).on("error", (err) => console.error("unii: settings saved by hand apply after a restart: " + err_why(err)));
   }
 
   export function follow(): void {
