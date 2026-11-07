@@ -15,9 +15,11 @@ const ESC: Record<string, string> = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"
 
 const TALL = 4000;
 
-// a result folds past this many lines, its long lines counted as wrapped
+// a result folds past this many rows, its lines wrapped at the characters a
+// row holds in the widest column (740 px of 12.5 px mono): never more rows
+// than it takes, so a folded one always overflows
 const FOLD = 10;
-const WRAP = 70;
+const WRAP = 100;
 
 export const SHEETS = `<svg viewBox="0 0 16 16" width="15" height="15"><rect x="5.5" y="5.5" width="8" height="8" rx="1.8"/><path d="M10.5 3.5v-.2A1.8 1.8 0 0 0 8.7 1.5H4.3A1.8 1.8 0 0 0 2.5 3.3v4.4a1.8 1.8 0 0 0 1.8 1.8h.2"/></svg>`;
 export const CHECK  = `<svg viewBox="0 0 16 16" width="15" height="15"><path d="M3 8.5l3.2 3L13 4.5"/></svg>`;
