@@ -137,7 +137,7 @@ const TASK = { type: "object", properties: {
 
 const DEVICES = `Devices: the user's computers that run unii's device now, by name, listed
 at the start of each message. Your shell, read, write, edit, view_video and
-show tools run on the one their \`device\` field names. A computer is listed only
+host tools run on the one their \`device\` field names. A computer is listed only
 while its device runs, and leaves the list when it stops: a task that needs
 one not listed can't be done now, so tell the user it isn't available. Each
 names its work dir, where the user's projects are, and its scratch dir, which

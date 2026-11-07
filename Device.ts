@@ -124,8 +124,8 @@ export async function run(given: string | undefined): Promise<void> {
 }
 
 function run_job(job: Job, url: string, token: string, signal: AbortSignal): Promise<Out> {
-  if (job.name === "show") {
-    return show(job, url, token, signal);
+  if (job.name === "host") {
+    return host(job, url, token, signal);
   }
   if (job.name === "mcp") {
     return Mcp.here(job.input, signal).catch((err: unknown) => ({ text: err_why(err), fail: true }));
@@ -144,12 +144,12 @@ function on_stop(stop: () => void): void {
   }
 }
 
-async function show(job: Job, url: string, token: string, signal: AbortSignal): Promise<{ text: string; fail: boolean }> {
+async function host(job: Job, url: string, token: string, signal: AbortSignal): Promise<{ text: string; fail: boolean }> {
   const cwd = Machine.agent_dir(job.cwd);
   const lines: string[] = [];
   let fail = false;
   for (const p of [job.input.paths ?? []].flat().map(String)) {
-    const out = await show_one(path.resolve(cwd, p), p, url, token, signal);
+    const out = await host_one(path.resolve(cwd, p), p, url, token, signal);
     fail ||= "error" in out;
     const stored = "error" in out ? "" : "/media/" + out.name;
     lines.push("error" in out ? out.error : (media_kind(stored) === null ? "" : "!") + "[" + path.basename(p).replace(/[[\]\\\n]/g, "") + "](" + stored + ")");
@@ -157,7 +157,7 @@ async function show(job: Job, url: string, token: string, signal: AbortSignal): 
   return { text: lines.join("\n"), fail };
 }
 
-async function show_one(file: string, shown: string, url: string, token: string, signal: AbortSignal): Promise<{ name: string } | { error: string }> {
+async function host_one(file: string, shown: string, url: string, token: string, signal: AbortSignal): Promise<{ name: string } | { error: string }> {
   if (signal.aborted) {
     return { error: "Stopped." };
   }

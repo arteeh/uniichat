@@ -869,5 +869,6 @@ function entry_body(kind: Kind, text: string, label: string, tool: string): Md.B
   if (kind !== "echo") {
     return Md.md_parse(text, kind === "user" || kind === "work");
   }
-  return Call.tool_name(tool) === "show" ? Md.md_shown(text, label) : Md.md_output(text, label);
+  const name = Call.tool_name(tool);
+  return name === "show" ? Md.md_shown(text, label) : name === "host" ? Md.md_parse(text.replaceAll("![", "["), false) : Md.md_output(text, label);
 }
