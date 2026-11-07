@@ -98,8 +98,9 @@ function cache(segs: string[], marks: number[]): Used {
   return { input: Math.max(1, total - read - write), read, write };
 }
 
+// the compactor's calls take only what's matched to their task, "Compaction:"
 function pick(latest: string, compaction: boolean): Order {
-  const k = QUEUE.findIndex((o) => (o.match === "" ? !compaction : latest.includes(o.match)));
+  const k = QUEUE.findIndex((o) => (compaction ? o.match.startsWith("Compaction:") && latest.includes(o.match) : o.match === "" || latest.includes(o.match)));
   if (k >= 0) {
     return QUEUE.splice(k, 1)[0];
   }
@@ -311,7 +312,7 @@ async function model(req: Request, vendor: Vendor, url: URL): Promise<Response> 
   const name = str(get(body, "model")) ?? "";
   const got = said(vendor, body);
   const last = (got.said.findLast((m) => m.role !== "system")?.text ?? "").replace(/<system-reminder>[\s\S]*?<\/system-reminder>/g, "");
-  const latest = (last.split(/^A new message from [^:\n]+:$/m).pop() ?? "").trim();
+  const latest = (last.replace(/<chat>[\s\S]*<\/chat>/, "").split(/^A new message from [^:\n]+:$/m).pop() ?? "").trim();
   const compaction = last.includes("Compaction:");
   const until = LIMITED[vendor] ?? 0;
   const order: Order = until > Date.now() ? { what: "error", kind: "usage-limit", reset: until } : pick(latest, compaction);

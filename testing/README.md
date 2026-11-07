@@ -39,6 +39,6 @@ fake last --json                                      # its headers and whole bo
 fake clear                                            # forget the queue, limits and refused sign-ins
 ```
 
-`--match` matters when calls run at once: the main chat and subagents, or the compactor. A usage limit lasts until its reset for every call to that vendor. `auth-expired` also refuses the sign-in renewal that follows, so the app sees a sign-in that's gone.
+`--match` matters when calls run at once, as the main chat and subagents do. The compactor's calls get a short summary and take only commands matched to their task: `--match Compaction:`. A usage limit lasts until its reset for every call to that vendor. `auth-expired` also refuses the sign-in renewal that follows, so the app sees a sign-in that's gone.
 
 When a real provider answers in a way the fake doesn't know, add it as a case in `testing/fake/cases.ts`: the real response with every secret stripped (keys, tokens, account, org and user ids, emails, cookies), and where and when it was seen.
