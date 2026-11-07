@@ -39,4 +39,5 @@ if (!fs.existsSync(exe)) {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
 }
+run(["bun", "run", "web"]);
 run(["bun", "build", "--compile", "--target=" + target, "Cli.ts", exe, "--outfile", out]);
