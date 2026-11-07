@@ -180,7 +180,7 @@ export const MAIN = "UniiChat";
 
 export const TURN = "Unii's turn";
 
-export const WIRE = 3;
+export const WIRE = 4;
 
 export const PING  = 10000;
 export const RETRY = 1000;
@@ -369,7 +369,8 @@ export function view_hear(v: View, msg: Server): Client[] {
       v.notes.push("No agent " + msg.name + ".");
       return [];
     }
-    case "note": {
+    case "note":
+    case "error": {
       v.notes.push(msg.text);
       return [];
     }
