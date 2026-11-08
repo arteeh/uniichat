@@ -41,29 +41,35 @@ async function fresh(req, key) {
   }
 }
 
+// a reply of an agent: its name, picture and chat
 self.addEventListener("push", (ev) => {
-  let text = "";
+  let msg = {};
   try {
-    text = String(ev.data?.json().text ?? "");
+    msg = ev.data?.json() ?? {};
   } catch {}
-  ev.waitUntil(notify(text));
+  ev.waitUntil(notify(msg));
 });
 
-async function notify(text) {
+async function notify(msg) {
   const tabs = await self.clients.matchAll({ type: "window" });
   if (QUIET && tabs.some((tab) => tab.focused)) {
     return;
   }
-  await self.registration.showNotification("UniiChat", { body: text, icon: "/icon-192.png", tag: "unii", renotify: true });
+  const url = typeof msg.url === "string" ? msg.url : "/";
+  await self.registration.showNotification(String(msg.title ?? "UniiChat"), { body: String(msg.text ?? ""), icon: String(msg.icon ?? "/icon-192.png"), tag: String(msg.tag ?? "unii"), renotify: true, data: { url } });
 }
 
 self.addEventListener("notificationclick", (ev) => {
   ev.notification.close();
-  ev.waitUntil(open_chat());
+  ev.waitUntil(open_chat(ev.notification.data?.url ?? "/"));
 });
 
-async function open_chat() {
+async function open_chat(url) {
   const tabs = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
   const tab = tabs.find((t) => new URL(t.url).origin === location.origin);
-  return tab !== undefined ? tab.focus() : self.clients.openWindow("/");
+  if (tab === undefined) {
+    return self.clients.openWindow(url);
+  }
+  await tab.focus();
+  return tab.navigate(url).catch(() => null);
 }

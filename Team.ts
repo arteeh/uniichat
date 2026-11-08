@@ -118,4 +118,9 @@ export namespace Team {
     Owner.open().query("delete from agents where id = ? and id <> 'unii'").run(id);
   }
 
+  export function unread(id: string, n: number | null): void {
+    const sql = n === null ? "update agents set unread = unread + 1 where id = ?" : "update agents set unread = ? where id = ?";
+    Owner.open().query(sql).run(...(n === null ? [id] : [n, id]));
+  }
+
 }

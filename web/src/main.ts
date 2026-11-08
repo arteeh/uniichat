@@ -582,7 +582,7 @@ function connect(): void {
 function notes_close(): void {
   const seen = () => APP === null && document.visibilityState === "visible";
   if (seen()) {
-    navigator.serviceWorker?.ready.then((reg) => reg.getNotifications({ tag: "unii" })).then((notes) => notes.forEach((n) => seen() && n.close())).catch(() => {});
+    navigator.serviceWorker?.ready.then((reg) => reg.getNotifications()).then((notes) => notes.forEach((n) => seen() && n.close())).catch(() => {});
   }
 }
 

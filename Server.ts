@@ -94,6 +94,7 @@ type Turn = {
   resume: { wake: AbortController; goal: string | null } | null;
   limits: { vendor: Vendor; n: number } | null;
   hop   : number;
+  told  : boolean;
 };
 
 type Chat = Parts & Doing & Turn;
@@ -249,7 +250,7 @@ export namespace Chat {
     const who = id === UNII ? "main" : id;
     const chat: Chat = {
       id, who, mem, tools, pick, socks: new Set(), acts: new Map(), main, model: "", check: null, asked: false, open: 0,
-      eye: { parts: [], from: 0 }, after: Promise.resolve(), batch: null, writes: Promise.resolve(), held: null, back: -1, sums: null, resume: null, limits: null, bell: undefined, hop: 0,
+      eye: { parts: [], from: 0 }, after: Promise.resolve(), batch: null, writes: Promise.resolve(), held: null, back: -1, sums: null, resume: null, limits: null, bell: undefined, hop: 0, told: false,
     };
     const seat: Seat = { mem, note: (text) => Chat.note(chat, text), report: (text) => Chat.report(chat, text, true), timed: () => Chat.timed(chat), message: (to, text) => Chat.message(chat, to, text) };
     tools.seats.set(who, seat);
@@ -714,6 +715,10 @@ export namespace Chat {
   export function put(chat: Chat, msg: Log, sent = false): Msg {
     const queued = sent ? { sent } : {};
     const roots = Memory.push(chat.mem, [msg]);
+    if (msg.kind === "unii" && chat.hop === 0 && msg.imported !== true && !Chat.seen(chat)) {
+      Team.unread(chat.id, null);
+      chat.told = true;
+    }
     for (const { i, kind, text, date, images, of, tool, from } of roots) {
       Chat.all(chat, { $: "entry", id: i, kind, text, date, images, of, tool, from, ...queued });
     }
@@ -941,11 +946,28 @@ export namespace Chat {
     return why === null ? {} : { error: why };
   }
 
+  // whether someone has this chat in front of them now
+  export function seen(chat: Chat): boolean {
+    return [...chat.socks].some((sock) => Date.now() - sock.data.active < ACTIVE_MS);
+  }
+
+  export function opened(chat: Chat): void {
+    if ((Team.get(chat.id)?.unread ?? 0) > 0) {
+      Team.unread(chat.id, 0);
+      Main.team_soon();
+    }
+  }
+
+  // a push for a turn whose reply counts as unread: one the user, a timer
+  // or a job started
   export function phone(chat: Chat): void {
+    const told = chat.told;
+    chat.told = false;
     const last = Memory.message(chat.mem, chat.mem.count - 1);
-    const used = [...chat.socks].some((sock) => Date.now() - sock.data.active < ACTIVE_MS);
-    if (!used && last !== null && (last.kind === "unii" || last.kind === "note")) {
-      Push.notify(Owner.open(), last.text);
+    const agent = Team.get(chat.id);
+    if (told && agent !== null && !Chat.seen(chat) && last !== null && last.kind === "unii") {
+      const icon = agent.picture === UNII ? "/icon-192.png" : agent.picture.startsWith("/") ? agent.picture : "/heads/" + agent.picture + ".svg";
+      Push.notify(Owner.open(), last.text, { title: agent.name, icon, url: "/a/" + agent.id, tag: "unii-" + agent.id });
     }
   }
 
@@ -1651,6 +1673,7 @@ export namespace Main {
     if (msg.$ === "open") {
       chat?.socks.delete(sock);
       Chat.join(Main.chat_of(text_of(msg.agent)), sock);
+      Chat.opened(Main.chat_of(text_of(msg.agent)));
       return Chat.send(sock, { $: "ack", id: text_of(msg.id) });
     }
     if (chat !== undefined) {
@@ -2084,6 +2107,10 @@ export namespace Main {
           const text = String(data);
           if (text === ACTIVE || text === IDLE) {
             ws.data.active = text === ACTIVE ? Date.now() : 0;
+            const chat = Main.chats.get(ws.data.agent);
+            if (text === ACTIVE && chat !== undefined && chat.socks.has(ws)) {
+              Chat.opened(chat);
+            }
           } else if (Main.socks.has(ws)) {
             Main.heard(ws, text);
           }

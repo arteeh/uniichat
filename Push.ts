@@ -21,6 +21,8 @@ import { get, text_of } from "./Json.ts";
 
 type Sub = { endpoint: string; p256dh: string; auth: string };
 
+type Who = { title: string; icon: string; url: string; tag: string };
+
 type Keys = { jwk: JsonWebKey; public: string };
 
 const FILE   = config.DIR + "/vapid.json";
@@ -70,17 +72,18 @@ let KEYS: Keys | Broken | undefined;
 
 export namespace Push {
 
-  export function notify(db: Database, text: string): void {
-    Push.phones(db, text);
-    Push.browsers(db, text);
+  // who: the agent whose reply it is, its name, picture and chat
+  export function notify(db: Database, text: string, who: Who): void {
+    Push.phones(db, text, who);
+    Push.browsers(db, text, who);
   }
 
-  export function phones(db: Database, text: string): void {
+  export function phones(db: Database, text: string, who: Who): void {
     if (!config.APNS || !config.KEYS.apns) {
       return;
     }
         const phones = db.query("select token from pushes").all() as { token: string }[];
-    const body = JSON.stringify({ aps: { alert: { body: Push.gist(text) }, sound: "default" } });
+    const body = JSON.stringify({ aps: { alert: { title: who.title, body: Push.gist(text) }, sound: "default" }, url: who.url });
     for (const { token } of phones) {
       const link = Push.apns();
       const head = { ":method": "POST", ":path": "/3/device/" + token, authorization: "bearer " + Push.apns_jwt(), "apns-topic": config.APPLE.replace(/^[^.]*\./, ""), "apns-push-type": "alert" };
@@ -104,9 +107,9 @@ export namespace Push {
     return text.replace(/\s+/g, " ").slice(0, GIST);
   }
 
-  export function browsers(db: Database, text: string): void {
+  export function browsers(db: Database, text: string, who: Who): void {
         const subs = db.query("select endpoint, p256dh, auth from web_pushes").all() as Sub[];
-    const body = JSON.stringify({ text: Push.gist(text) });
+    const body = JSON.stringify({ text: Push.gist(text), ...who });
     for (const sub of subs) {
       void Push.send(sub, body).then((status) => {
         if (status === 404 || status === 410) {
