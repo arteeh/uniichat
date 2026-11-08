@@ -60,7 +60,7 @@ export namespace Team {
     const text = (k: string) => (typeof field(x, k) === "string" ? String(field(x, k)) : "");
     const name = text("name").trim();
     const about = text("about").trim();
-    const picture = text("picture").trim();
+    const picture = text("picture").trim() || Team.head_random();
     const own = text("prompt").trim();
     const taken = Team.by_name(name);
     if (name === "" || name.length > NAME) {
@@ -92,6 +92,10 @@ export namespace Team {
     return (head !== null && Number(head[1]) >= 1 && Number(head[1]) <= HEADS) || /^\/media\/[0-9a-f]{16}\.(png|jpeg|webp)$/.test(picture) || (picture === UNII && id === UNII);
   }
 
+  export function head_random(): string {
+    return "head-" + String(1 + Math.floor(Math.random() * HEADS)).padStart(2, "0");
+  }
+
   export function add(f: Fields): Agent {
     let id = "";
     do {
@@ -99,6 +103,19 @@ export namespace Team {
     } while (Team.get(id) !== null);
     Owner.open().query("insert into agents (id, name, about, picture, prompt, made) values (?, ?, ?, ?, ?, ?)").run(id, f.name, f.about, f.picture, f.prompt, Date.now());
     return Team.get(id) as Agent;
+  }
+
+  export function set(id: string, f: Fields): Agent | null {
+    Owner.open().query("update agents set name = ?, about = ?, picture = ?, prompt = ? where id = ?").run(f.name, f.about, f.picture, f.prompt, id);
+    return Team.get(id);
+  }
+
+  export function archive(id: string, on: boolean): void {
+    Owner.open().query("update agents set archived = ? where id = ? and id <> 'unii'").run(on ? Date.now() : 0, id);
+  }
+
+  export function drop(id: string): void {
+    Owner.open().query("delete from agents where id = ? and id <> 'unii'").run(id);
   }
 
 }

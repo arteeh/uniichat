@@ -362,6 +362,9 @@ export namespace Chat {
     if (chat.main.queue.some((x) => x.q.act === id)) {
       return {};
     }
+    if (Chat.archived(chat)) {
+      return { error: Chat.name(chat) + " is archived: restore it in Settings to message it." };
+    }
     const images: string[] = [];
     let at = 0;
     for (const size of sizes) {
@@ -899,7 +902,20 @@ export namespace Chat {
     Chat.all(chat, { $: "live", live });
   }
 
+  export function archived(chat: Chat): boolean {
+    return (Team.get(chat.id)?.archived ?? 0) !== 0;
+  }
+
+  // what comes for an archived agent waits for its restore
+  export function held(chat: Chat, post: Pending): void {
+    chat.mem.queue.push(post);
+    Memory.save_queue(chat.mem);
+  }
+
   export function report(chat: Chat, text: string, take: boolean): void {
+    if (Chat.archived(chat)) {
+      return Chat.held(chat, { kind: "work", text, images: [] });
+    }
     if (take) {
       void Run.take(chat.main, { kind: "work", text, images: [] });
       return Chat.change(chat);
@@ -913,7 +929,11 @@ export namespace Chat {
   // a device's job report, acked once it's queued, and taken once: a device
   // sends it again until acked
   export async function job_done(chat: Chat, id: string, text: string): Promise<Answer> {
-    if (chat.main.queue.some((x) => x.q.act === id)) {
+    if (chat.main.queue.some((x) => x.q.act === id) || chat.mem.queue.some((q) => q.act === id)) {
+      return {};
+    }
+    if (Chat.archived(chat)) {
+      Chat.held(chat, { kind: "work", text, images: [], act: id });
       return {};
     }
     const why = await Run.take(chat.main, { kind: "work", text, images: [], act: id });
@@ -1119,6 +1139,9 @@ export namespace Chat {
   }
 
   export function resume(chat: Chat, work: string[]): void {
+    if (Chat.archived(chat)) {
+      return;
+    }
     const text = "The server restarted, cutting your turn; nothing was lost: go on.";
     const queued = chat.mem.queue.filter((post) => post.act === undefined || Owner.act_get(post.act) === null);
     const posts: Pending[] = [...(work.length > 0 ? [{ kind: "note" as const, text, images: [] }] : []), ...queued];
@@ -1135,6 +1158,9 @@ export namespace Chat {
   }
 
   export function fire(chat: Chat, now: number): void {
+    if (Chat.archived(chat)) {
+      return;
+    }
     Chat.hold(chat, () => {
       const mem = chat.mem;
       const at = Math.max(now, Date.now());
@@ -1648,7 +1674,92 @@ export namespace Main {
       const out = Main.made(await req.json().catch(() => null));
       return Response.json(out, { status: out.error === undefined ? 200 : 400 });
     }
-    return Response.json(Team.all());
+    return Response.json(Team.all().map((a) => {
+      const pick = Main.chats.get(a.id)?.mem.pick ?? null;
+      return { ...a, prompt: Team.prompt(a), own: a.prompt !== null, pick: pick === null ? "" : Chat.pick_name(pick as Pick) };
+    }));
+  }
+
+  // /api/agents/<id>: edit; /archive, /restore; DELETE: delete (archived
+  // only); GET /api/agents/<id>/left: the folders a delete leaves
+  export async function agent(req: Request, id: string, what: string): Promise<Response> {
+    const chat = Main.chats.get(id);
+    const agent = Team.get(id);
+    const out = (body: Answer & object) => Response.json(body, { status: body.error === undefined ? 200 : 400 });
+    if (chat === undefined || agent === null) {
+      return out({ error: "No agent " + id + "." });
+    }
+    if (req.method === "GET" && what === "left") {
+      return Response.json({ left: Main.left(chat) });
+    }
+    if (req.method === "DELETE" && what === "") {
+      return out(Main.forget(chat));
+    }
+    if (req.method !== "POST") {
+      return new Response("an agent is edited with a POST", { status: 405 });
+    }
+    if (what === "archive" || what === "restore") {
+      return out(id === UNII ? { error: "Unii can't be archived." } : Main.shelve(chat, what === "archive"));
+    }
+    const body: unknown = await req.json().catch(() => null);
+    const fields = Team.fields(body, id);
+    const given = get(body, "pick");
+    const pick = typeof given !== "string" || given === "" ? null : config.config_pick(given);
+    if (typeof fields === "string") {
+      return out({ error: fields });
+    }
+    if (typeof given === "string" && given !== "" && pick === null) {
+      return out({ error: given + " isn't offered here." });
+    }
+    Team.set(id, fields);
+    if (typeof given === "string" && (pick === null) !== (chat.mem.pick === null || given !== Chat.pick_name(chat.mem.pick as Pick))) {
+      chat.mem.pick = pick;
+      chat.pick = Pick.load(pick, config.OFFER, config.PICK);
+      chat.mem.used = null;
+      Memory.save(chat.mem);
+      Main.keep_picks();
+    }
+    Main.chats.forEach((c) => Chat.change(c));
+    return out({});
+  }
+
+  export function shelve(chat: Chat, on: boolean): Answer {
+    Team.archive(chat.id, on);
+    if (!on) {
+      const held = chat.mem.queue.splice(0);
+      Memory.save_queue(chat.mem);
+      held.forEach((post) => void Run.take(chat.main, post));
+      Chat.timed(chat);
+    }
+    Main.chats.forEach((c) => Chat.change(c));
+    return {};
+  }
+
+  // the scratch folders a delete can't reach: on devices not open now
+  export function left(chat: Chat): string[] {
+    return [...Main.tools.devices].filter(([, d]) => ![...d.terms.values()].some((t) => t.live())).map(([name, d]) => name + ": " + ([...d.terms.values()][0]?.scratch ?? "~/.unii/scratch") + "/" + chat.who);
+  }
+
+  export function forget(chat: Chat): Answer {
+    if (!Chat.archived(chat)) {
+      return { error: "Archive " + Chat.name(chat) + " before deleting it." };
+    }
+    if (chat.main.busy) {
+      return { error: Chat.name(chat) + " is still finishing a turn: delete it once that ends." };
+    }
+    Chat.stop(chat, null);
+    clearTimeout(chat.bell);
+    Memory.stop(chat.mem);
+    Main.chats.delete(chat.id);
+    Main.tools.seats.delete(chat.who);
+    Team.drop(chat.id);
+    fs.rmSync(chat.mem.dir, { recursive: true, force: true });
+    for (const [device] of Tools.opened(Main.tools)) {
+      void Tools.job(Main.tools, device, { name: "drop", input: { agent: chat.who }, cwd: "main" }, AbortSignal.timeout(60e3), crypto.randomUUID());
+    }
+    chat.socks.forEach((sock) => Chat.join(Main.unii(), sock));
+    Main.team_soon();
+    return {};
   }
 
   export async function lock(): Promise<void> {
@@ -1782,6 +1893,12 @@ export namespace Main {
       case "/api/agents": {
         return await Main.team(req);
       }
+    }
+    const one = /^\/api\/agents\/([a-z0-9]{1,16})(?:\/(archive|restore|left))?$/.exec(p);
+    if (one !== null) {
+      return await Main.agent(req, one[1], one[2] ?? "");
+    }
+    switch (p) {
       case "/api/settings": {
         return await Main.settings(req);
       }

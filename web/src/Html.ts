@@ -178,15 +178,43 @@ export function timers_html(timers: Timer.Timer[]): string[] {
   });
 }
 
+// an agent as its settings page reads and saves it
+export type Agent = { id: string; name: string; about: string; picture: string; prompt: string; own: boolean; pick: string; archived: number };
+
+export function agent_html(a: Agent | null, unii: boolean): string {
+  const id = a?.id ?? "";
+  const heads = Array.from({ length: 24 }, (_, k) => "head-" + String(k + 1).padStart(2, "0"));
+  const faces = (unii ? ["unii"] : []).concat(heads).map((f) => `<label class="face"><input type="radio" name="picture" value="${f}"${f === a?.picture ? " checked" : ""}>${face_html(f)}</label>`);
+  const set = (key: string, name: string, about: string, control: string) => `<div class="set" data-key="${key}"><label for="ag-${key}">${esc(name)}<small>${esc(about)}</small></label><div class="field">${control}</div></div>`;
+  const back = a === null ? "/" : "/a/" + esc(id);
+  const archive = a === null || unii ? "" : section_html("Archive", `<div class="item"><p>Archive ${esc(a.name)}<small>It leaves the chat list and the team. A running turn and its jobs finish; its timers pause. Restore it in Settings.</small></p><button type="button" class="chip red archive">Archive</button></div>`);
+  return `<a class="back" href="${back}" data-go="${back}">← Back</a><h1>${a === null ? "New agent" : esc(a.name)}</h1>`
+    + `<form class="settings agent" autocomplete="off">`
+    + section_html("Picture", `<div class="faces">${faces.join("")}</div>`)
+    + section_html("Agent",
+      set("name", "Name", "1 to 24 characters, no @.", `<input id="ag-name" name="name" maxlength="24" value="${esc(a?.name ?? "")}" spellcheck="false">`)
+      + set("about", "Description", "One line, for the chat list and the other agents.", `<input id="ag-about" name="about" maxlength="120" value="${esc(a?.about ?? "")}">`)
+      + set("prompt", "System prompt", "Who this agent is and what it does. It follows the name until you edit it.", `<textarea id="ag-prompt" name="prompt" rows="6" spellcheck="true">${esc(a?.prompt ?? "")}</textarea>`)
+      + set("pick", "Model and effort", "What it runs on.", `<input type="hidden" name="pick" value="${esc(a?.pick ?? "")}"><div class="four"></div>`))
+    + `<div class="save"><p class="why"></p><button class="chip go">${a === null ? "Create" : "Save"}</button></div></form>` + archive;
+}
+
+export function archived_html(team: View.Mate[]): string {
+  const gone = team.filter((m) => m.archived !== 0);
+  const one = (m: View.Mate) => `<div class="item" data-id="${esc(m.id)}">${face_html(m.picture)}<p>${esc(m.name)}<small>${esc(m.about)}</small></p><button class="chip restore">Restore</button><button class="chip red delete">Delete</button></div>`;
+  return gone.length === 0 ? "" : section_html("Archived agents", gone.map(one).join(""));
+}
+
 export function account_html(notify: Notify | null = null): string {
   const item    = (what: string, note: string, act: string) => `<div class="item"><p>${what}${note === "" ? "" : `<small>${note}</small>`}</p>${act}</div>`;
   const acts    = [
     item("This browser", "Signed in to this server.", `<button class="chip out">Sign out</button>`),
     ...(notify === null ? [] : [notify_html(notify)]),
-    item("Export memory", "The chat and its summaries, in one file.", `<a class="chip" href="/export">Download</a>`),
+    item("Export memory", "Unii's chat and its summaries, in one file.", `<a class="chip" href="/export">Download</a>`),
   ];
   const mcp     = section_html("MCP servers", `<div class="mcp"></div>`);
-  return `<a class="back" href="/" data-go="/">← Chat</a><h1>Settings</h1>` + section_html("This browser", acts.join("")) + mcp + `<div class="owned"></div>`;
+  const history = section_html("History", item("Import history", "Past Claude and ChatGPT chats, into Unii's memory.", `<button class="chip imp">Import</button>`));
+  return `<a class="back" href="/" data-go="/">← Chats</a><h1>Settings</h1>` + section_html("This browser", acts.join("")) + history + `<div class="archived"></div>` + mcp + `<div class="owned"></div>`;
 }
 
 function notify_html(notify: Notify): string {

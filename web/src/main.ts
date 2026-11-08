@@ -158,6 +158,8 @@ async function boot_me(): Promise<unknown> {
 
 const PAGES = ["/settings", "/account"];
 
+const FORM = /^\/(new|a\/([a-z0-9]{1,16})\/edit)$/;
+
 const TREE = "/tree";
 
 const OLDER = "This page is older than the server: reload it.";
@@ -637,6 +639,9 @@ function hear(msg: View.Server): void {
   }
   if (msg.$ === "team") {
     Html.team_set(v.team);
+    if (location.pathname === "/settings") {
+      archived_draw();
+    }
   }
   if (AGENT.test(location.pathname) && AGENT.exec(location.pathname)?.[1] !== v.agent) {
     history.replaceState(null, "", "/a/" + v.agent);
@@ -1056,7 +1061,8 @@ function chat_to(agent: string): void {
 
 function route(): void {
   const p = location.pathname;
-  const page = PAGES.includes(p);
+  const form = FORM.test(p);
+  const page = PAGES.includes(p) || form;
   const tree = p === TREE;
   const list = p === "/" && !WIDE.matches;
   const chat = !page && !tree && !list;
@@ -1083,7 +1089,9 @@ function route(): void {
     SCROLL.y = scrollY;
     SCROLL.away = null;
   }
-  if (page) {
+  if (page && form) {
+    void agent_page(FORM.exec(p)?.[2] ?? null);
+  } else if (page) {
     void account();
   }
   if (tree) {
@@ -1102,11 +1110,117 @@ function popped(): void {
   draw(true);
 }
 
+async function agents(): Promise<Html.Agent[] | null> {
+  const res = await fetch("/api/agents").catch(() => null);
+  return res?.ok ? ((await res.json().catch(() => null)) as Html.Agent[] | null) : null;
+}
+
+// new agent (id null) or an agent's settings
+async function agent_page(id: string | null): Promise<void> {
+  const el = $("#account");
+  const all = await agents();
+  for (let k = 0; k < 30 && v.vendors.length === 0; k++) {
+    await new Promise((ok) => setTimeout(ok, 100));
+  }
+  const a = id === null ? null : all?.find((x) => x.id === id) ?? null;
+  if (all === null || (id !== null && a === null)) {
+    el.innerHTML = `<a class="back" href="/" data-go="/">← Chats</a><p class="sub">${all === null ? "Could not read the agents. Try again in a moment." : "No such agent."}</p>`;
+    return;
+  }
+  el.innerHTML = Html.agent_html(a, id === UNII);
+  const form = find(el, "form", HTMLFormElement);
+  const [name, prompt, pick] = [find(form, "[name=name]", HTMLInputElement), find(form, "[name=prompt]", HTMLTextAreaElement), find(form, "[name=pick]", HTMLInputElement)];
+  const was = { name: a?.name ?? "", prompt: a?.own ? null : a?.prompt ?? "You are {Name}." };
+  const follow = () => {
+    if (was.prompt !== null) {
+      prompt.value = a === null ? was.prompt.replace("{Name}", name.value.trim()) : was.prompt.replaceAll(was.name, name.value.trim() || was.name);
+    }
+  };
+  if (a === null) {
+    form.querySelectorAll<HTMLInputElement>("[name=picture]")[Math.floor(Math.random() * 24)].checked = true;
+    follow();
+  }
+  const four = () => {
+    const box = must(form.querySelector(".four"), "the agent's model");
+    box.innerHTML = Html.picks_html("pick", v.vendors, v.models, pick.value, "The default model", Object.keys(v.profiles ?? {}));
+  };
+  four();
+  RENEW.dirty.clear();
+  form.oninput = (ev) => {
+    RENEW.dirty.add(form);
+    const t = ev.target as HTMLElement;
+    if (t === prompt) {
+      was.prompt = null;
+    } else if (t === name) {
+      follow();
+    } else if (t instanceof HTMLSelectElement) {
+      pick.value = Html.pick_mend([...form.querySelectorAll<HTMLSelectElement>(".four select")].map((s) => s.value), v.models, Object.keys(v.profiles ?? {}));
+      four();
+    }
+  };
+  form.onsubmit = (ev) => {
+    ev.preventDefault();
+    void agent_save(form, a);
+  };
+  el.querySelector<HTMLButtonElement>(".archive")?.addEventListener("click", () => {
+    if (a !== null && confirm("Archive " + a.name + "? It leaves the chat list and the team. A running turn and its jobs finish; its timers pause. You can restore it in Settings.")) {
+      void View.post("/api/agents/" + a.id + "/archive", {}).then((out) => (out.error === undefined ? go("/") : toast(text_of(out.error))));
+    }
+  });
+}
+
+async function agent_save(form: HTMLFormElement, a: Html.Agent | null): Promise<void> {
+  const data = new FormData(form);
+  const body = Object.fromEntries(["name", "about", "picture", "prompt", "pick"].map((k) => [k, text_of(data.get(k))]));
+  const why = must(form.querySelector(".save .why"), "the save's why");
+  RENEW.saving++;
+  const out = await View.post("/api/agents" + (a === null ? "" : "/" + a.id), body);
+  RENEW.saving--;
+  if (out.error !== undefined) {
+    why.textContent = text_of(out.error);
+    return;
+  }
+  RENEW.dirty.delete(form);
+  RENEW.since = true;
+  const id = a?.id ?? text_of(get(out.agent, "id"));
+  go("/a/" + id);
+}
+
+function archived_draw(): void {
+  const box = document.querySelector<HTMLElement>("#account .archived");
+  if (box === null) {
+    return;
+  }
+  box.innerHTML = Html.archived_html(v.team);
+  box.onclick = async (ev) => {
+    const b = (ev.target as HTMLElement).closest<HTMLButtonElement>("button");
+    const id = b?.closest<HTMLElement>("[data-id]")?.dataset.id;
+    const m = v.team.find((x) => x.id === id);
+    if (b === null || m === undefined) {
+      return;
+    }
+    if (b.classList.contains("restore")) {
+      const out = await View.post("/api/agents/" + m.id + "/restore", {});
+      toast(out.error === undefined ? m.name + " is back in the chat list." : text_of(out.error));
+      return;
+    }
+    const left = (await fetch("/api/agents/" + m.id + "/left").then((r) => r.json()).catch(() => ({ left: [] }))) as { left: string[] };
+    const folders = left.left.length === 0 ? "" : "\n\nThese scratch folders stay, on devices not open now: " + left.left.join(", ") + ".";
+    if (!confirm("Delete " + m.name + " for good? Its memory is deleted and can't be brought back, and so are its scratch folders on the open devices." + folders)) {
+      return;
+    }
+    const res = await fetch("/api/agents/" + m.id, { method: "DELETE" }).catch(() => null);
+    const out = ((await res?.json().catch(() => null)) ?? { error: "Can't reach UniiChat." }) as { error?: string };
+    toast(out.error ?? m.name + " is deleted.");
+  };
+}
+
 async function account(): Promise<void> {
   const el = $("#account");
   const set = await fetch("/api/settings").catch(() => null);
   const push = await notify_state().catch(() => null);
   el.innerHTML = Html.account_html(push);
+  archived_draw();
   RENEW.dirty.clear();
   el.oninput = (ev) => {
     const form = (ev.target as Element).closest("form");

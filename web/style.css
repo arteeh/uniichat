@@ -109,6 +109,14 @@ body.list footer > :not(#toast) { display: none; }
 .msg.said summary .pic { width: 26px; height: 26px; }
 .msg.said summary span:last-child { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--mid); }
 .msg.said details[open] > :not(summary) { margin: 10px 14px 0; }
+.faces { display: grid; grid-template-columns: repeat(auto-fill, minmax(52px, 1fr)); gap: 8px; }
+.faces .face { display: grid; place-items: center; padding: 3px; border-radius: 50%; cursor: pointer; }
+.faces input { position: absolute; opacity: 0; pointer-events: none; }
+.faces .face:has(:checked) { outline: 2.5px solid var(--ink); }
+.faces .face:has(:focus-visible) { outline: 2.5px dashed var(--mid); }
+.faces .pic { width: 46px; height: 46px; }
+#account .archived .item .pic { width: 36px; height: 36px; }
+#account .archived .item p { flex: 1; }
 .pill { flex: none; min-width: 22px; height: 22px; padding: 0 7px; border-radius: 11px; background: var(--ink); color: var(--paper); font: 600 12px/22px var(--sans); text-align: center; }
 @media (min-width: 900px) {
   body.wide { padding-left: 33.333vw; }
@@ -520,3 +528,4 @@ body.tree { height: 100dvh; }
 #tree .bracket.drag { scroll-snap-type: none; user-select: none; cursor: grabbing; }
 @media (prefers-reduced-motion: reduce) { #tree .s.ease { transition: none; } }
 @media (max-width: 600px) { #tree section { padding: 0 14px 14px; } #tree .bracket { scroll-padding: 0 14px; } #tree .top { padding: 4px 14px 0; } #tree .top .tab { height: 30px; padding: 0 10px; font-size: 13px; } }
+body.account > header { display: none; }

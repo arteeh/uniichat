@@ -139,6 +139,15 @@ export namespace Machine {
         case "skill": {
           return Machine.skill(os.homedir(), String(input.name));
         }
+        case "drop": {
+          const agent = path.basename(String(input.agent));
+          if (agent === "main" || agent === "jobs" || agent === "") {
+            return { text: "Not an agent's folder: " + agent, fail: true };
+          }
+          await Machine.halt(agent);
+          fs.rmSync(Machine.agent_dir(agent), { recursive: true, force: true });
+          return { text: "Removed " + Machine.agent_dir(agent) + ".", fail: false };
+        }
         case "halt": {
           const left = await Machine.halt(String(input.agent));
           return { text: left === null ? "Its shells' trees killed; Windows can't find a process that left one." : left + " left", fail: (left ?? 0) > 0 };
