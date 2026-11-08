@@ -9,13 +9,13 @@ import { rec } from "./Json.ts";
 
 export type Part = [number, number];
 
-export type Entry = { kind: Kind; text: string; date?: string; images?: string[]; of?: string; tool?: string };
+type Entry = { kind: Kind; text: string; date?: string; images?: string[]; of?: string; tool?: string };
 
 export type Queued = { kind: Kind; text: string };
 
 export type Pending = Queued & { images: string[]; act?: string };
 
-export type Of = { tool: string; apart: boolean };
+type Of = { tool: string; apart: boolean };
 
 type Node = { text: string; to: string };
 
@@ -26,7 +26,7 @@ export type Live = { kind: Kind; text: string };
 type Logged = Entry & { id?: number };
 
 // from: how many of its log's first messages aren't here yet
-export type Page = { name: string; log: Logged[] | null; live: Live[]; pick: Pick | null; from: number; loading: boolean };
+type Page = { name: string; log: Logged[] | null; live: Live[]; pick: Pick | null; from: number; loading: boolean };
 
 export type Progress = { done: number; total: number; why: string | null; msgs: number; open: number[] };
 
@@ -177,7 +177,7 @@ export type Choice = { text: string; to: string; move: Move; here: boolean; vend
 
 export type Prompts = Record<"prompt" | "compact", { text: string; def: string }>;
 
-export const MAIN = "UniiChat";
+const MAIN = "UniiChat";
 
 export const TURN = "Unii's turn";
 
@@ -253,7 +253,7 @@ export const PIXELS = 2 ** 28;
 const TOOL = "tool: ";
 const FOLD = "The whole chat, folded into the fewest blocks.";
 
-export function Cap(text: string): Row {
+function Cap(text: string): Row {
   return { $: "Cap", text };
 }
 
@@ -412,7 +412,7 @@ export function view_act(v: View, act: Act): Client[] {
         return [];
       }
       if (word !== undefined && goal === null) {
-        v.notes.push(word + " is no command; nothing was sent. The terminal's /help lists its commands; the site's are in its ☰ menu.");
+        v.notes.push(word + " is no command; nothing was sent.");
         return [];
       }
       const blob = new Blob([...images, text]);
@@ -498,12 +498,8 @@ export function view_body(v: View): Row[] {
   return view_rows(v, v.parts).flat();
 }
 
-export function view_rows(v: View, parts: Part[]): Row[][] {
+function view_rows(v: View, parts: Part[]): Row[][] {
   return parts.map(([id, n]) => part_rows(v, id, n, v.turn, true));
-}
-
-export function rows_wait(v: View, rows: Row[]): boolean {
-  return rows.some((row) => (row.$ === "Sum" && !v.nodes.has(row.id + "+" + row.n)) || (row.$ === "Msg" && row.queued === true) || (row.$ === "Box" && rows_wait(v, row.rows)));
 }
 
 export function view_tail(v: View, live = view_stream(v)): Row[] {
@@ -552,7 +548,7 @@ function clock(at: number, now = Date.now()): string {
   return new Date(at).toLocaleString(undefined, { ...day, hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
 }
 
-export function view_stream(v: View): Live[] {
+function view_stream(v: View): Live[] {
   return v.page === null ? v.live : v.page.live;
 }
 
@@ -588,10 +584,6 @@ export function view_stoppable(v: View): boolean {
   return v.busy || v.limits[TURN] !== undefined;
 }
 
-export function view_running(v: View): boolean {
-  return v.busy || v.agents.length > 0;
-}
-
 export function view_pick(v: View): Knob[] {
   return v.pick === null ? [] : view_knobs(v, v.pick, true);
 }
@@ -623,10 +615,6 @@ function view_choices(pick: Pick, move: Move, v: View): Choice[] {
     const by = move === "model" && to.profile === undefined ? to.vendor + ":" + text : text;
     return { text: move === "model" ? to.profile ?? to.model : text, to: by, move, here, vendor };
   });
-}
-
-export function view_count(v: View): number {
-  return v.parts.reduce((end, [id, n]) => Math.max(end, id + n), 0);
 }
 
 function view_learn(v: View, pack: Pack): void {
@@ -781,10 +769,6 @@ export async function post(url: string, body: object, auth: Record<string, strin
   return { ...(rec(out) ? out : {}), ok: res?.ok === true, status: res?.status ?? 0 };
 }
 
-export function block_name(id: number, n: number): string {
-  return "#" + id + (n === 1 ? "" : "+" + n);
-}
-
 function part_rows(v: View, id: number, n: number, t: number, talk: boolean): Row[] {
   const key   = id + "+" + n;
   const entry = v.whole.get(id);
@@ -829,18 +813,18 @@ function page_rows(v: View, page: Page): Row[] {
   return [page_head(v, page), ...earlier, ...page_entries(v, page, 0).flat()];
 }
 
-export function page_head(v: View, page: Page): Row {
+function page_head(v: View, page: Page): Row {
   return Cap(page.name + (v.agents.includes(page.name) ? " · at work" : " · done"));
 }
 
 // the page's log from from on, a row list per entry, a message taken but not
 // answered yet drawn queued
-export function page_entries(v: View, page: Page, from: number): Row[][] {
+function page_entries(v: View, page: Page, from: number): Row[][] {
   const log = page.log ?? [];
   return log.slice(from).map((e, k) => sent_rows(entry_sent(v, page.name, e.id), whole_rows(e.id ?? null, e, log[from + k - 1])));
 }
 
-export function entry_sent(v: View, name: string, id: number | undefined): boolean {
+function entry_sent(v: View, name: string, id: number | undefined): boolean {
   return id !== undefined && (v.sent[name] ?? []).includes(id);
 }
 
@@ -874,11 +858,11 @@ export function image_kind(head: Uint8Array): string | null {
   return MARKS.find(([, at, mark]) => text.slice(at, at + mark.length) === mark)?.[0] ?? null;
 }
 
-export function entry_of(entry: Entry, before: Entry | undefined): Of {
+function entry_of(entry: Entry, before: Entry | undefined): Of {
   return { tool: entry.tool ?? "", apart: entry.kind === "echo" && entry.of !== undefined && before?.of !== entry.of };
 }
 
-export function entry_rows(id: number | null, kind: Kind, text: string, images: string[] = [], of: Of = { tool: "", apart: false }): Row[] {
+function entry_rows(id: number | null, kind: Kind, text: string, images: string[] = [], of: Of = { tool: "", apart: false }): Row[] {
   const call = kind === "tool" ? Call.call_parse(text) : null;
   const report = kind === "work" ? Call.report_read(text) : null;
   const label = of.apart ? "↳ " + (of.tool === "" ? "" : Call.tool_name(of.tool) + " ") + "result" : "result";
@@ -887,10 +871,6 @@ export function entry_rows(id: number | null, kind: Kind, text: string, images: 
   const who = report?.name ?? WHO[kind] ?? (kind === "echo" && of.apart && !named ? label : "");
   const pics = images.filter((name) => !text.includes("/media/" + name));
   return call === null && body.length === 0 && pics.length === 0 ? [] : [{ $: "Msg", id, kind, who, text, body, call, images: pics }];
-}
-
-export function entry_settled(kind: Kind, text: string, ended: boolean): number {
-  return ["user", "work", "echo", "tool"].includes(kind) || !ended ? 0 : text.length;
 }
 
 function entry_body(kind: Kind, text: string, label: string, tool: string): Md.Block[] {

@@ -2,11 +2,9 @@ import type { Kind } from "./AskAI.ts";
 
 type Look = { dim: boolean; it: boolean };
 
-export const ANSI = { block: "7", ink: "0", add: "2", del: "1", you: "4" };
-
 export const WHO: Record<string, string> = { work: "Report", note: "Note" };
 
-export const KIND: Record<Kind, Look> = {
+const KIND: Record<Kind, Look> = {
   user : { dim: false, it: false },
   work : { dim: false, it: false },
   unii : { dim: false, it: false },
@@ -15,9 +13,6 @@ export const KIND: Record<Kind, Look> = {
   note : { dim: true, it: true },
   mind : { dim: true, it: true },
 };
-
-export const FILLED: Kind[] = ["tool"];
-export const FRAMED: Kind[] = ["user", "work"];
 
 const TOOL: Record<string, string> = {
   zoom       : "🔍",

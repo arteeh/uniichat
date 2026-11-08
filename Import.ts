@@ -26,8 +26,6 @@ const COMPACTION_MICRO_USD_FIT = { base: 187, per_source_doubling: 735, per_summ
 
 const PIECE_KEPT_AS_BLOB = 2 ** 20;
 
-export const APPS = ["Claude", "ChatGPT"];
-
 export const OLD = "Nothing new: these chats are in Unii's memory already.";
 
 const NOT_EXPORT = "Not a Claude or ChatGPT export.";
@@ -140,10 +138,6 @@ export function import_cells(s: Session): string[] {
   const day   = DAY.format(new Date(s.start));
   const where = s.where.startsWith("session in ") ? path_short(s.where.slice(11)) : s.where.replace(/^chat "(.*)"$/, "$1") || "untitled";
   return [day, count_short(s.heads.length), where];
-}
-
-export function import_line(s: Session): string {
-  return import_cells(s).join(" · ");
 }
 
 function count_short(n: number): string {

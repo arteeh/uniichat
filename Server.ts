@@ -136,7 +136,7 @@ const PIECE      = 2 ** 16;
 const OWN        = ["/ws", "/export"];
 
 const HELLO      = hello_md.trim().replace("{install}", config.SITE + "/install.sh");
-const HELLO_LINE = "unii: hello: UniiChat, one endless chat kept in a memory tree, recent days in more detail; build anything for years; recalls the past (ad2cat.py); a chatbot with a memory system; the user's terminal install.";
+const HELLO_LINE = "unii: hello: UniiChat, one endless chat kept in a memory tree, recent days in more detail; build anything for years; recalls the past (ad2cat.py); a chatbot with a memory system; unii device on the user's computers.";
 
 // the site's page, index.html: imported as a file, a path (Bun's types
 // take any .html for an HTML bundle)

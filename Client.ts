@@ -18,10 +18,6 @@ export function read(name: string): Record<string, unknown> {
   }
 }
 
-export function tokens(conf: Record<string, unknown>): Record<string, string> {
-  return rec(conf.tokens) ? Object.fromEntries(Object.entries(conf.tokens).flatMap(([k, v]) => (typeof v === "string" ? [[k, v]] : []))) : {};
-}
-
 export function write(name: string, conf: object): void {
   const file = DIR + "/" + name + ".json";
   fs.mkdirSync(DIR, { recursive: true, mode: 0o700 });
@@ -74,8 +70,4 @@ export async function login(url: string, what: string): Promise<string> {
 export function fail(why: string): never {
   console.error("unii: " + why);
   process.exit(1);
-}
-
-export function host(url: string): string {
-  return new URL(url).host;
 }

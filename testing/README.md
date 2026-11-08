@@ -16,7 +16,6 @@ It copies your checkout in at every start, so after a change, `podman restart ri
 Use it from inside: `podman exec -it rig bash`.
 
 - **Web:** `unii serve link` prints a sign-in link. `playwright-cli open <link>`, press "Sign in", then use the app with `playwright-cli snapshot`, `click`, `fill`, `press`.
-- **Terminal:** `tmux new -d -s tui unii`, read it with `tmux capture-pane -p -t tui`, type with `tmux send -t tui "..." Enter`. It asks you to sign in like any terminal: open its link in the browser above and type its code.
 - **Models:** pick any vendor and model in the app. `unii serve chatgpt login` and `unii serve claude login` sign in again against the fake.
 - **Logs:** `/rig/logs` (server, device, fake).
 

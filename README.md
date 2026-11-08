@@ -8,7 +8,7 @@ Based on [Victor Taelin's UniiChat source code](https://github.com/VictorTaelin/
 Features
 --------
 
-- **One chat, forever.** No new chats or sessions. Every tab, phone and terminal shows the same live chat.
+- **One chat, forever.** No new chats or sessions. Every tab and phone shows the same live chat.
 - **A memory system that keeps everything.** Messages are summarized into a tree that the agent sees every turn: recent messages in detail, older ones more broadly. It can zoom into any line, down to the original message.
 - **All your computers.** Run `unii device` on a machine and the agent can run commands and edit files there.
 - **Subagents** do the grunt work in the background and report back.
@@ -18,14 +18,14 @@ Features
 What this fork adds:
 
 - **Claude and ChatGPT plans** as vendors (`claude-sub`, `openai-sub`) beside API keys; profiles that fall back to the next model when one is out; auto-resume after hitting usage limits; a model per subagent.
-- **Native Windows**: server, devices and terminal, with a one-line PowerShell install.
+- **Native Windows**: server and devices, with a one-line PowerShell install.
 - **MCP servers** per device.
 - **Skills** read from the ~/.agents/skills folder.
 - **Scheduling tools** to give your agent future or repeating tasks.
 - **Image and video viewing tools** to let it see images and video files.
 - **Settings page** where you can customize the system prompt and compaction prompt.
 - **Improved memory tree viewer** to browse what your agent knows.
-- **Full markdown** as GitHub draws it, in the web app and the terminal.
+- **Full markdown** as GitHub draws it.
 - **Images, video, audio and HTML pages inline** for the agent to show you things, or for you to show the agent.
 - **Conversation mode** for when you want a short continuous back-and-forth without the agent forgetting anything you said.
 - **An installable web app (PWA)** on phones and desktops: icons, an offline shell, Web Push for replies, a nav bar that shows on Android; the composer stays above a phone's keyboard.
@@ -79,8 +79,7 @@ Use
 ---
 
 - **Web:** open the server's address. Install it as an app from your browser to get notifications when Unii replies.
-- **Terminal:** `unii [url]`. `/help` lists its commands; `/import` brings in this computer's Claude Code and Codex sessions. Without a url it uses `$UNII_URL`, else the last one, else http://127.0.0.1:8788. The terminal and devices keep their server and sign-in in `~/.config/unii`.
-- **Conversation mode:** the switch next to "fold all" (`/mode` in the terminal). From then on, your and Unii's messages stay word for word in Unii's memory, for a real discussion. It costs more per turn and turns itself off when the model's context window fills up.
+- **Conversation mode:** the switch next to "fold all". From then on, your and Unii's messages stay word for word in Unii's memory, for a real discussion. It costs more per turn and turns itself off when the model's context window fills up.
 - `unii help` lists every command.
 
 From source (Bun): `bun install`, `bun run web`, `bun Cli.ts <command>`, `bun run build` for a single `unii` program.

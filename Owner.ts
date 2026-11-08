@@ -95,7 +95,7 @@ export namespace Owner {
     const rows = db.query("select hash, what, at from sessions order by rowid").all() as { hash: string; what: string; at: number }[];
     if (revoke === "--all") {
       db.query("delete from sessions").run();
-      return console.log("Signed out " + rows.length + " session" + (rows.length === 1 ? "" : "s") + ": every browser, terminal and device signs in again.");
+      return console.log("Signed out " + rows.length + " session" + (rows.length === 1 ? "" : "s") + ": every browser and device signs in again.");
     }
     if (revoke !== undefined) {
       const row = rows[Number(revoke) - 1];
@@ -106,9 +106,8 @@ export namespace Owner {
       return console.log("Signed out " + revoke + " (" + (row.what || "a session") + ").");
     }
     const Client = await import("./Client.ts");
-    const tui = Client.tokens(Client.read("tui"));
-    const mine = new Map<string, string>([...Object.values(tui).map((t) => [Owner.hash(t), "this computer's terminal"] as [string, string]), [Owner.hash(text_of(Client.read("device").token)), "this computer's device"]]);
-    const kind = (what: string) => (what.startsWith("the device ") ? "device" : what.startsWith("the terminal ") ? "terminal" : what === "a browser" ? "browser" : "-");
+    const mine = new Map<string, string>([[Owner.hash(text_of(Client.read("device").token)), "this computer's device"]]);
+    const kind = (what: string) => (what.startsWith("the device ") ? "device" : what === "a browser" ? "browser" : "-");
     const when = (at: number) => (at > 0 ? new Date(at).toISOString().slice(0, 16).replace("T", " ") + " UTC" : "before arteeh.17");
     rows.forEach((r, i) => console.log(String(i + 1).padStart(3) + ". " + kind(r.what).padEnd(9) + (r.what || "-").padEnd(32) + " signed in " + when(r.at) + (mine.has(r.hash) ? "  (" + mine.get(r.hash) + ")" : "")));
     console.log(rows.length === 0 ? "No sessions." : "Last use isn't tracked. `unii serve sessions revoke <n>` signs one out; `--all`, all.");
@@ -142,7 +141,7 @@ export namespace Owner {
           return Response.json({ error: key.length < 32 ? "No key." : "Too many sign-ins waiting: try again in 15 minutes." }, { status: key.length < 32 ? 400 : 429 });
         }
         const session = Owner.hash(key);
-        const what = text_of(get(body, "what"), "a terminal").replace(/[^\w .,:@()-]/g, "").slice(0, 80);
+        const what = text_of(get(body, "what"), "a device").replace(/[^\w .,:@()-]/g, "").slice(0, 80);
         const link = config.SITE + "/auth?t=" + Owner.ticket({ session, what });
         return Response.json({ url: link, code: Owner.code(session) });
       }
@@ -153,7 +152,7 @@ export namespace Owner {
         }
         const link = Owner.ticket_read(t, false);
         if (link === null) {
-          return Owner.page("This sign-in link expired", "Ask for a new one: run <code>unii serve link</code> on the server, or start the terminal or device again.");
+          return Owner.page("This sign-in link expired", "Ask for a new one: run <code>unii serve link</code> on the server, or start the device again.");
         }
         if (link.session !== null) {
           return owner ? Owner.page_confirm(t, link.what, "") : Owner.page("Sign in this browser first", "Run <code>unii serve link</code> on the server, open the link it prints, then open this link again.");
@@ -256,7 +255,7 @@ export namespace Owner {
       return new Response(null, { status: 303, headers: { location: config.SITE + "/", "set-cookie": COOKIE + "=" + token + KEEP } });
     }
     if (link === null || link.session === null || !Owner.is(req)) {
-      return Owner.page("This sign-in link expired", "Start the terminal or device again for a new one.");
+      return Owner.page("This sign-in link expired", "Start the device again for a new one.");
     }
     if (typed !== Owner.code(link.session)) {
       return Owner.page_confirm(t, link.what, "That code didn't match. Check the code it shows and try again.");

@@ -143,7 +143,7 @@ function plan(name: "claude" | "chatgpt", about: string): Cmd {
   ] };
 }
 
-const TREE: Cmd = { use: "unii [url]", about: "the chat in this terminal", url: true, run: async () => (await import("./Term.ts")).main(URL_), kids: [
+const TREE: Cmd = { use: "unii", about: "UniiChat: open your server's address in a browser to chat", kids: [
   { use: "device [url]", about: "this computer as a device of a server", url: true, run: async () => { await run_here("device"); await (await import("./Device.ts")).run(URL_); }, kids: service("device", async () => {
     unmark_from_parent_shell();
     const Service = await import("./Service.ts");
@@ -159,7 +159,7 @@ const TREE: Cmd = { use: "unii [url]", about: "the chat in this terminal", url: 
       await Service.start("serve", port === undefined ? [] : [port], Service.admin("serve"));
     }),
     { use: "link", about: "a link that signs a browser in", run: async () => { (await import("./Owner.ts")).Owner.cli(); } },
-    { use: "sessions", about: "the browsers, terminals and devices signed in", run: async () => (await import("./Owner.ts")).Owner.sessions(), kids: [
+    { use: "sessions", about: "the browsers and devices signed in", run: async () => (await import("./Owner.ts")).Owner.sessions(), kids: [
       { use: "revoke <n>|--all", about: "sign one out, or all", arg: /^(\d+|--all)$/, need: true, run: async (n) => (await import("./Owner.ts")).Owner.sessions(n).catch((err: unknown) => fail(err_why(err))) },
     ] },
     plan("claude", "your Claude plan (claude-sub)"),
@@ -177,7 +177,7 @@ function rows(c: Cmd, head: string, depth: number): [string, string][] {
 }
 
 const words = REST[0] === "-v" || REST[0] === "--version" ? ["version", ...REST.slice(1)] : [...REST];
-const help = ARGS.some((a) => HELPS.includes(a));
+const help = ARGS.some((a) => HELPS.includes(a)) || ARGS.length === 0;
 let cmd = TREE;
 const trail = ["unii"];
 while (words.length > 0) {
