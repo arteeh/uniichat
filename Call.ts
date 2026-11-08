@@ -21,7 +21,7 @@ const READS = new Map<string, (x: Input) => Shown>([
   ["write",    (x) => ({ head: text_of(x.path), blocks: [] })],
   ["view_video", (x) => ({ head: text_of(x.path) + range_show(x.start, x.end, x.unit) + (x.step === undefined ? "" : " every " + text_of(x.step, "null")), blocks: [] })],
   ["edit",     (x) => (Array.isArray(x.edits) ? { head: edits_files(x.edits), blocks: [] } : input_shown(x))],
-  ["zoom",     (x) => ({ head: msg_show(x.id, x.n) + (x.at === undefined ? "" : " from char " + text_of(x.at, "null")), blocks: [] })],
+  ["zoom",     (x) => ({ head: (x.agent === undefined ? "" : text_of(x.agent, "null") + " ") + msg_show(x.id, x.n) + (x.at === undefined ? "" : " from char " + text_of(x.at, "null")), blocks: [] })],
   ["date",     (x) => ({ head: msg_show(x.id, 1), blocks: [] })],
   ["computer", (x) => ({ head: "", blocks: text_block(x.task) })],
   ["schedule", (x) => ({ head: (x.cron === undefined ? text_of(x.at) : "cron " + text_of(x.cron, "null")) + " " + text_of(x.zone), blocks: text_block(x.message) })],
