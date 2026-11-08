@@ -60,7 +60,7 @@ body { text-wrap: balance; }
 .msg:not(.note) { text-wrap: pretty; }
 textarea { text-wrap: wrap; }
 
-body.guest :is(.net, .all, .menu, .attach, .mic, #pick, #tabs) { display: none !important; }
+body.guest :is(.net, .all, .menu, .attach, .mic, #pick) { display: none !important; }
 body.solo main { width: min(420px, 100% - 48px); margin: 18vh auto; text-align: center; }
 body.solo h1 { margin: 0; font: 400 46px/1.05 var(--serif); letter-spacing: -.015em; }
 .sub { margin: 18px 0 0; color: var(--mid); font-size: 14.5px; }
@@ -137,11 +137,6 @@ body:is(.account, .tree) footer > :not(#toast) { display: none; }
 :is(.mine, .down) svg { width: 14px; height: 14px; stroke-width: 2.2; }
 #toast { width: fit-content; max-width: min(560px, 100%); margin: 0 auto 10px; padding: 8px 16px; border-radius: 12px; background: var(--ink); color: var(--paper); font-size: 13.5px; }
 #toast button { margin-left: 12px; font-weight: 600; text-decoration: underline; }
-
-#tabs { width: min(var(--col), 100%); margin: 6px auto 0; display: flex; gap: 16px; overflow-x: auto; white-space: nowrap; scrollbar-width: none; font: 13px/20px var(--sans); color: var(--mid); }
-#tabs button { flex: none; }
-#tabs button:hover, #tabs .here { color: var(--ink); }
-#tabs .here { font-weight: 600; }
 
 [popover] { inset: 60px 20px auto auto; margin: 0; width: 280px; padding: 10px 14px; border: 1px solid var(--hair); border-radius: 14px; color: var(--ink); background: var(--lift); box-shadow: var(--shadow); }
 [popover] p { margin: 8px 0 6px; font-size: 14px; }
@@ -279,8 +274,6 @@ header > .imping { display: flex; flex-direction: column; justify-content: cente
 .msg pre .lang { display: block; margin-bottom: 4px; font: 600 11px var(--sans); color: var(--mid); }
 .msg.note, .msg.mind { font-size: 14.5px; line-height: 1.6; }
 .msg .brand { font: 600 .92em var(--brand); font-style: normal; letter-spacing: -.01em; color: var(--accent); }
-.msg .name { font: inherit; text-decoration: underline; text-underline-offset: 3px; }
-.msg .name:hover { background: var(--ink); color: var(--paper); }
 
 .copy { position: absolute; right: 0; bottom: calc(100% + 4px); z-index: 1; display: grid; place-items: center; width: 26px; height: 26px; color: var(--mid); background: var(--paper); border-radius: 6px; opacity: 0; user-select: none; }
 .copy:hover { color: var(--ink); background: var(--hover); }
@@ -297,8 +290,8 @@ header > .imping { display: flex; flex-direction: column; justify-content: cente
 /* a touch browser zooms the page into a field whose font is under 16px */
 @media (hover: none) { input, select { font-size: 16px; } }
 @media (pointer: coarse) {
-  :is(header > :is(button, a), #pick > button, #tabs button, #tree .tab) { position: relative; }
-  :is(header > :is(button, a), #pick > button, #tabs button, #tree .tab, .mine, .down, .copy, .open.one > .fold)::after { content: ""; position: absolute; left: 50%; top: 50%; width: max(100%, 44px); height: max(100%, 44px); transform: translate(-50%, -50%); }
+  :is(header > :is(button, a), #pick > button, #tree .tab) { position: relative; }
+  :is(header > :is(button, a), #pick > button, #tree .tab, .mine, .down, .copy, .open.one > .fold)::after { content: ""; position: absolute; left: 50%; top: 50%; width: max(100%, 44px); height: max(100%, 44px); transform: translate(-50%, -50%); }
   .foot a { padding: 14px 0; }
   .chip { height: 44px; }
   [popover] > button { min-height: 44px; }

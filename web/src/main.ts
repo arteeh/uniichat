@@ -195,7 +195,7 @@ function chat(): void {
   document.ondragover = (ev) => ev.preventDefault();
   document.ondrop = (ev) => {
     ev.preventDefault();
-    if (View.view_typing(v) && (ev.dataTransfer?.files.length ?? 0) > 0) {
+    if ((ev.dataTransfer?.files.length ?? 0) > 0) {
       attach([...(ev.dataTransfer?.files ?? [])]);
     }
   };
@@ -434,28 +434,7 @@ function folds(): void {
 }
 
 function fold_key(msg: HTMLElement): string {
-  return (v.page?.name ?? "") + "#" + (msg.dataset.a ?? "");
-}
-
-// a screen before the top of an agent's loaded messages, the next ones load
-const EARLIER = new IntersectionObserver((seen) => {
-  if (seen.some((e) => e.isIntersecting)) {
-    View.view_act(v, { $: "Earlier" }).forEach((out) => View.link_send(v, out));
-  }
-}, { rootMargin: "100% 0px 0px 0px" });
-
-let watched: { el: Element | null; from: number } = { el: null, from: 0 };
-
-function earlier_watch(): void {
-  const el = document.querySelector("#log .earlier");
-  const from = v.page?.from ?? 0;
-  if (el !== watched.el || from !== watched.from) {
-    EARLIER.disconnect();
-    if (el !== null) {
-      EARLIER.observe(el);
-    }
-    watched = { el, from };
-  }
+  return "#" + (msg.dataset.a ?? "");
 }
 
 function fold_show(msg: HTMLElement, open: boolean): void {
@@ -643,7 +622,6 @@ function hear(msg: View.Server): void {
     in_use();
   }
   const was = View.view_pick(v);
-  const agents = v.agents.join();
   const sent = JSON.stringify(v.sent);
   for (const out of View.view_hear(v, msg)) {
     View.link_send(v, out);
@@ -652,10 +630,7 @@ function hear(msg: View.Server): void {
   if (now.length > 0) {
     toast("Now " + now.map((k) => k.hint).join("; ") + ".");
   }
-  if ((msg.$ === "entry" || msg.$ === "delta" || msg.$ === "live") && msg.agent !== v.page?.name) {
-    return;
-  }
-  P.rows ||= msg.$ === "state" ? v.agents.join() !== agents || JSON.stringify(v.sent) !== sent : msg.$ !== "delta" && msg.$ !== "live";
+  P.rows ||= msg.$ === "state" ? JSON.stringify(v.sent) !== sent : msg.$ !== "delta" && msg.$ !== "live";
   if (msg.$ === "state") {
     renew_due(msg.build);
   }
@@ -935,7 +910,6 @@ function paint(): void {
   markup($("#log .tail"), View.view_tail(v).map(Html.row_html));
   Box.box_sizes($("#log .tail"));
   folds();
-  earlier_watch();
   frames();
   const back = RENEW.back === null ? null : document.querySelector<HTMLElement>(`#log [data-a="${RENEW.back.a}"]`);
   if (back !== null && RENEW.back !== null) {
@@ -967,7 +941,7 @@ function paint(): void {
 }
 
 function shown_key(): string {
-  return (v.page === null ? "" : v.page.name) + (v.fold === null ? "" : "/fold");
+  return v.fold === null ? "" : "/fold";
 }
 
 function at_end(): boolean {
@@ -982,9 +956,7 @@ function bars(): void {
     RENEW.going = true;
     setTimeout(() => void renew());
   }
-  const on = View.view_typing(v);
-  const stop = on && View.view_stoppable(v) && Box.box_blank();
-  const tabs = View.view_tabs(v);
+  const stop = View.view_stoppable(v) && Box.box_blank();
   const send = $(".send", HTMLButtonElement);
   $(".net").hidden = v.up;
   $(".timers").hidden = v.timers.length === 0;
@@ -994,18 +966,15 @@ function bars(): void {
     $("#timers").hidePopover();
   }
   send.classList.toggle("stop", stop);
-  $(".composer").hidden = !on;
   $(".mic", HTMLButtonElement).disabled = v.out.some((p) => p.msg.$ === "voice");
   $(".mic").classList.toggle("rec", P.rec !== null);
   $(".composer").classList.toggle("rec", P.rec !== null);
   const knob = (document.activeElement as HTMLElement | null)?.dataset?.knob;
-  markup($("#pick"), Html.pick_html(View.view_fold(v), v.fold === null, View.view_shown(v), v.page === null ? v.talk : undefined));
+  markup($("#pick"), Html.pick_html(View.view_fold(v), v.fold === null, View.view_pick(v), v.talk));
   if (knob !== undefined) {
     $("#pick [data-knob=" + knob + "]").focus();
   }
   mcp_draw();
-  $("#tabs").hidden = tabs.length < 2;
-  markup($("#tabs"), Html.tabs_html(tabs));
   import_bar();
 }
 
@@ -1266,7 +1235,7 @@ function settings_draw(page: Page): void {
       const four = value?.parentElement?.querySelector<HTMLElement>(".four");
       if (value && four) {
         const focus = (document.activeElement as HTMLSelectElement | null)?.name;
-        four.innerHTML = Html.picks_html(key, vendors, listed("models"), value.value, key === "agents" ? "The chat's pick" : null, names());
+        four.innerHTML = Html.picks_html(key, vendors, listed("models"), value.value, null, names());
         four.querySelector<HTMLSelectElement>(`select[name="${focus}"]`)?.focus();
       }
     }

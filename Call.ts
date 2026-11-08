@@ -1,4 +1,4 @@
-import { get, list, rec, text_of } from "./Json.ts";
+import { get, rec, text_of } from "./Json.ts";
 import type * as Md from "./Md.ts";
 
 export type Call = { name: string; head: string; device: string; blocks: Md.Code[] };
@@ -23,20 +23,14 @@ const READS = new Map<string, (x: Input) => Shown>([
   ["edit",     (x) => (Array.isArray(x.edits) ? { head: edits_files(x.edits), blocks: [] } : input_shown(x))],
   ["zoom",     (x) => ({ head: msg_show(x.id, x.n) + (x.at === undefined ? "" : " from char " + text_of(x.at, "null")), blocks: [] })],
   ["date",     (x) => ({ head: msg_show(x.id, 1), blocks: [] })],
-  ["spawn",    (x) => ({ head: tasks_show(x.tasks, x.model, x.effort), blocks: list(x.tasks).flatMap(task_block) })],
-  ["tell",     (x) => ({ head: text_of(x.name), blocks: text_block(x.message) })],
   ["computer", (x) => ({ head: "", blocks: text_block(x.task) })],
   ["schedule", (x) => ({ head: (x.cron === undefined ? text_of(x.at) : "cron " + text_of(x.cron, "null")) + " " + text_of(x.zone), blocks: text_block(x.message) })],
 ]);
 
 export type Report = { name: string; text: string };
 
-export function report_text(name: string, text: string): string {
-  return "[" + name + "]\n" + text + "\n\nFull chat: zoom(\"" + name + "\")";
-}
-
 export function report_read(text: string): Report | null {
-  const m = /^\[([^\]\n]+)\]\s*([\s\S]*?)(?:\s*Full chat: zoom\("[^"\n]*"\))?\s*$/.exec(text);
+  const m = /^\[([^\]\n]+)\]\s*([\s\S]*?)\s*$/.exec(text);
   return m === null ? null : { name: m[1], text: m[2] };
 }
 
@@ -98,20 +92,6 @@ function text_block(x: unknown): Md.Code[] {
 function msg_show(id: unknown, n: unknown): string {
   const many = typeof n === "number" && n > 1 ? "+" + n : "";
   return typeof id === "number" ? "#" + id + many : text_of(id);
-}
-
-function tasks_show(tasks: unknown, model: unknown, effort: unknown): string {
-  const all = list(tasks);
-  const knobs = [...new Set([knobs_show(model, effort), ...all.map((t) => knobs_show(get(t, "model"), get(t, "effort")))])].filter((k) => k !== "").map((k) => " · " + k).join("");
-  return all.length + (all.length === 1 ? " agent" : " agents") + knobs;
-}
-
-function knobs_show(model: unknown, effort: unknown): string {
-  return [model, effort].filter((k) => typeof k === "string").join(" ");
-}
-
-function task_block(t: unknown): Md.Code[] {
-  return typeof t === "string" ? text_block(t) : text_block(get(t, "task")).map((b) => ({ ...b, k: knobs_show(get(t, "model"), get(t, "effort")) }));
 }
 
 function lines_show(offset: unknown, limit: unknown): string {

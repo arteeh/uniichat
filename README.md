@@ -11,13 +11,12 @@ Features
 - **One chat, forever.** No new chats or sessions. Every tab and phone shows the same live chat.
 - **A memory system that keeps everything.** Messages are summarized into a tree that the agent sees every turn: recent messages in detail, older ones more broadly. It can zoom into any line, down to the original message.
 - **All your computers.** Run `unii device` on a machine and the agent can run commands and edit files there.
-- **Subagents** do the grunt work in the background and report back.
 - **Goals.** `/goal` keeps UniiChat working until something is done.
 - **Don't start from scratch.** Import past conversations from either Claude Code, Codex or another UniiChat instance into your memory tree.
 
 What this fork adds:
 
-- **Claude and ChatGPT plans** as vendors (`claude-sub`, `openai-sub`) beside API keys; profiles that fall back to the next model when one is out; auto-resume after hitting usage limits; a model per subagent.
+- **Claude and ChatGPT plans** as vendors (`claude-sub`, `openai-sub`) beside API keys; profiles that fall back to the next model when one is out; auto-resume after hitting usage limits.
 - **Native Windows**: server and devices, with a one-line PowerShell install.
 - **MCP servers** per device.
 - **Skills** read from the ~/.agents/skills folder.
@@ -31,7 +30,6 @@ What this fork adds:
 - **An installable web app (PWA)** on phones and desktops: icons, an offline shell, Web Push for replies, a nav bar that shows on Android; the composer stays above a phone's keyboard.
 - **One owner per server**, no accounts, email, billing, or anything else exclusive to the uniichat.com version; `unii serve sessions` and `unii serve sessions revoke` to sign a lost device out.
 - **Background services** (`-d`, `stop`, `logs`) that updates restart.
-- **Subagent improvements**: their own tab, a `stop` that ends one and its jobs, and a report when one hits a usage limit.
 - **No telemetry or update checker**: `unii update` when you want it.
 - **Better defaults**: Sonnet 5.5 medium does the compaction, seeing 4 KB of chat around each message (was Haiku 5.5 high with 32 KB), so summaries make up less.
 

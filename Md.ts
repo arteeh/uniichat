@@ -1,5 +1,4 @@
 import { ENTITIES } from "./Entities.ts";
-import * as Names from "./Names.ts";
 
 export type Span =
   | { $: "Text"; x: string }
@@ -9,7 +8,6 @@ export type Span =
   | { $: "Strk"; x: Span[] }
   | { $: "Link"; x: Span[]; k: string; t: string }
   | { $: "Pict"; x: string; k: string; t: string }
-  | { $: "Name"; x: string }
   | { $: "Brk" };
 
 export type Code = { $: "Code"; k: string; x: string };
@@ -27,7 +25,6 @@ export type Block =
   | { $: "Diff"; k: string; x: Line[][] }
   | { $: "File"; k: string; n: number; x: string[] }
 
-const ONLY  = new RegExp("^(?:" + Names.NAME + ")$");
 export const MEDIA: ReadonlyMap<string, string> = new Map([
   ["png", "image/png"], ["jpeg", "image/jpeg"], ["gif", "image/gif"], ["webp", "image/webp"], ["svg", "image/svg+xml"],
   ["mp4", "video/mp4"], ["webm", "video/webm"], ["mov", "video/quicktime"],
@@ -67,7 +64,7 @@ const LABEL_SCAN_MAX = 1000;
 
 let DEFS = new Map<string, { k: string; t: string }>();
 let COLLECT = false;
-// a user's or subagent's own words: a backslash shows, as typed (a path
+// a user's own words, or a report's: a backslash shows, as typed (a path
 // like C:\Users), still keeping the mark after it text; no line is taken
 // for a link definition and hidden
 let SAID = false;
@@ -76,10 +73,6 @@ let UNSHUT: { lines: string[]; from: Map<string, [number, number]> } = { lines: 
 
 function Text(x: string): Span {
   return { $: "Text", x };
-}
-
-function Name(x: string): Span {
-  return { $: "Name", x };
 }
 
 type Node = { x: Span; m: Mark | null; prev: Node | null; next: Node | null };
@@ -191,16 +184,9 @@ function span_parse(s: string): Span[] {
         marks = mark_drop(marks, o);
         i = got.end;
       } else {
-        const name = o.c === "[" && o.node.next !== null && o.node.next === tail && tail.x.$ === "Text" && ONLY.test(tail.x.x) ? tail.x.x : null;
         marks = mark_drop(marks, o);
         o.node.m = null;
-        if (name !== null) {
-          tail = o.node;
-          o.node.next = null;
-          o.node.x = Name(name);
-        } else {
-          text += c;
-        }
+        text += c;
         i++;
       }
     } else if (c === "*" || c === "_" || c === "~") {
@@ -379,7 +365,7 @@ function spans_push(spans: Span[], span: Span): void {
 }
 
 export function spans_text(spans: Span[]): string {
-  return spans.map((x) => (x.$ === "Brk" ? " " : x.$ === "Name" ? "[" + x.x + "]" : typeof x.x === "string" ? x.x : spans_text(x.x))).join("");
+  return spans.map((x) => (x.$ === "Brk" ? " " : typeof x.x === "string" ? x.x : spans_text(x.x))).join("");
 }
 
 function run_len(s: string, i: number, c: string): number {

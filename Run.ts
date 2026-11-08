@@ -34,7 +34,7 @@ type Calling = {
 
 export type Run<Q, M> = { name: string; kind: Kind<Q, M> } & Loop & Inbox<Q, M> & Calling;
 
-export type LoopHooks<Q, M> = {
+type LoopHooks<Q, M> = {
   begin  : (run: Run<Q, M>) => void;
   failed : (run: Run<Q, M>, why: string) => void;
   ending : (run: Run<Q, M>) => void;
@@ -42,14 +42,14 @@ export type LoopHooks<Q, M> = {
   parked : (run: Run<Q, M>) => boolean;
 };
 
-export type InboxHooks<Q, M> = {
+type InboxHooks<Q, M> = {
   log    : (run: Run<Q, M>, q: Q) => M | Promise<M>;
   say    : (q: Q, m: M) => Said;
   queued : (run: Run<Q, M>) => void;
   again  : (q: Q) => boolean;
 };
 
-export type CallHooks<Q, M> = {
+type CallHooks<Q, M> = {
   pick   : () => Pick;
   ask    : (run: Run<Q, M>, take: () => M[]) => Ask | null | Promise<Ask | null>;
   ended  : (run: Run<Q, M>, end: End) => boolean | Promise<boolean>;

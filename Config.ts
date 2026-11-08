@@ -18,7 +18,6 @@ type Made = {
   pick      : Pick;
   compactor : Pick;
   context   : number;
-  agents    : Pick | null;
   after     : string;
 };
 
@@ -45,7 +44,6 @@ export const SETTINGS: Setting[] = [
   { key: "pick",      def: "claude-api:sonnet-5.5:medium:slow", apply: "now",     server_only: null },
   { key: "compactor", def: "claude-api:sonnet-5.5:medium:slow", apply: "now",     server_only: null },
   { key: "compactor_context", def: "4",                         apply: "now",     server_only: null },
-  { key: "agents",    def: "",                                  apply: "now",     server_only: null },
   { key: "site",      def: "http://127.0.0.1:8788",             apply: "restart", server_only: null },
   { key: "apple",     def: "",                                  apply: "restart", server_only: null },
   { key: "apns",      def: "",                                  apply: "restart", server_only: null },
@@ -102,7 +100,6 @@ export let   PICK       = MADE.pick;
 
 export let   COMPACTOR  = MADE.compactor;
 export let   COMPACTOR_CONTEXT = MADE.context;
-export let   AGENTS     = MADE.agents;
 
 export const APPLE      = config_value(FILE, "apple");
 export const APNS       = config_value(FILE, "apns");
@@ -155,7 +152,7 @@ function config_default_pick(file: Record<string, unknown>, def: string, usable:
 }
 
 function config_named(file: Record<string, unknown>): Vendor[] {
-  const set = ["pick", "compactor", "agents"].map((key) => config_env_value(key) ?? config_str(file[key]) ?? "");
+  const set = ["pick", "compactor"].map((key) => config_env_value(key) ?? config_str(file[key]) ?? "");
   let profiles: unknown = file.profiles;
   try {
     profiles = process.env.UNII_PROFILES === undefined ? profiles : JSON.parse(process.env.UNII_PROFILES);
@@ -286,13 +283,11 @@ export function config_make(file: Record<string, unknown>): Made {
     models  : config_value(file, "models").split(",").map((m) => m.trim()),
   };
   offer.profiles = config_profiles(file, offer);
-  const agents = config_value(file, "agents");
   return {
     offer,
     pick      : config_run("pick", config_value(file, "pick"), offer),
     compactor : config_run("compactor", config_value(file, "compactor"), offer),
     context   : config_context(config_value(file, "compactor_context")),
-    agents    : agents ? config_run("agents", agents, offer) : null,
     after     : config_value(file, "after"),
   };
 }
@@ -443,7 +438,6 @@ export function config_reload(): void {
   PICK = made.pick;
   COMPACTOR = made.compactor;
   COMPACTOR_CONTEXT = made.context;
-  AGENTS = made.agents;
   AFTER = made.after;
   Object.assign(KEYS, keys);
   RELOADED.forEach((f) => f());

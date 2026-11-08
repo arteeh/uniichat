@@ -3,9 +3,8 @@ import { AskAI, type Again, type Ask, type Block, type Call, type End as Answere
 import { clip_page, clip_pages } from "./Clip.ts";
 import * as config from "./Config.ts";
 import { Disk } from "./Disk.ts";
-import { err_code, err_why } from "./Err.ts";
+import { err_why } from "./Err.ts";
 import { Pick } from "./Pick.ts";
-import * as names from "./Names.ts";
 import type { Timer } from "./Timer.ts";
 import { FIT, HEAD, IMAGE, image_kind, MEDIA, media_ext, PIXELS, STORED, TOKEN, type Pending } from "./View.ts";
 import { move_over } from "./Write.ts";
@@ -35,7 +34,7 @@ type Kept = { parts: Array<[number, number]>; batch: boolean };
 
 type Saved = Kept & { seen?: Kept; main: End; tree: End; pick: object | null; goal?: string | null; work?: string[]; timers?: Timer[]; off?: string[]; talk?: number | null; used?: number | null; used_at?: number };
 
-type Queues = { main: Pending[]; agents: Record<string, string[]> };
+type Queues = { main: Pending[] };
 
 type Rec = { i?: number; l?: number; act?: string; ans?: object };
 
@@ -47,7 +46,6 @@ type Logs = {
   count  : number;
   open   : number;
   ends   : Record<Stream, End>;
-  agents : Map<string, number>;
 };
 
 type Chosen = {
@@ -64,7 +62,6 @@ type Chosen = {
 
 type Unlogged = {
   queue  : Pending[];
-  tells  : Record<string, string[]>;
 };
 
 type Tree = {
@@ -124,8 +121,6 @@ const MEDIA_DIR = "/docs/media/";
 
 const PAGE_MAX = 4 * 2 ** 20;
 
-const AGENTS = "/docs/agent/";
-
 const LEAF = `Compaction: compress message {id} into one line of at most ${NODE} bytes
 (about 70 words), the length of this ruler:
 ${NODE_RULER}
@@ -144,7 +139,7 @@ export namespace Memory {
 
   export function load(dir: string, share: Memory["share"], acted: Memory["acted"] = () => {}): Memory {
     const mem: Memory = {
-      dir, fds: new Map(), count: 0, open: 0, pick: null, goal: null, off: [], talk: null, talked: new Map(), used: null, used_at: 0, work: [], timers: [], queue: [], tells: {}, nodes: new Map(), agents: new Map(), ready: [[], []], ends: { main: [0, 0], tree: [0, 0] },
+      dir, fds: new Map(), count: 0, open: 0, pick: null, goal: null, off: [], talk: null, talked: new Map(), used: null, used_at: 0, work: [], timers: [], queue: [], nodes: new Map(), ready: [[], []], ends: { main: [0, 0], tree: [0, 0] },
       view: { parts: [], size: 0, batch: false, high: VIEW_HIGH }, seen: { parts: [], size: 0, batch: false, high: config.COMPACTOR_CONTEXT },
       busy: new Map(), sides: new Map(), calls: new Map(), hold: [null, "paused"], done: false, wait: new Set(), share, acted, again: null,
     };
@@ -156,9 +151,7 @@ export namespace Memory {
     mem.used = saved?.used ?? null;
     mem.work = saved?.work ?? [];
     mem.timers = saved?.timers ?? [];
-    const queues = Memory.queues(dir);
-    mem.queue = queues.main;
-    mem.tells = queues.agents;
+    mem.queue = Memory.queues(dir).main;
     mem.ends.main = Memory.index(mem, "main", saved?.main ?? [0, 0]);
     mem.ends.tree = Memory.index(mem, "tree", saved?.tree ?? [0, 0]);
     mem.count = fs.statSync(dir + "/main.index").size / SLOT;
@@ -200,15 +193,15 @@ export namespace Memory {
   export function queues(dir: string): Queues {
     try {
       const got = JSON.parse(fs.readFileSync(dir + "/queue.json", "utf8")) as Partial<Queues>;
-      return { main: got.main ?? [], agents: got.agents ?? {} };
+      return { main: got.main ?? [] };
     } catch {
-      return { main: [], agents: {} };
+      return { main: [] };
     }
   }
 
   export function save_queue(mem: Memory): void {
     const file = mem.dir + "/queue.json";
-    fs.writeFileSync(file + ".new", JSON.stringify({ main: mem.queue, agents: mem.tells }));
+    fs.writeFileSync(file + ".new", JSON.stringify({ main: mem.queue }));
     move_over(file + ".new", file);
     void Disk.wrote(file);
   }
@@ -1120,18 +1113,7 @@ ${Memory.cut(line)}| ← LIMIT`;
         sep = ",\n";
       }
     }
-    yield '],\n"agents": {';
-    sep = "\n";
-    for (const name of ls(AGENTS).map((file) => file.replace(/\.jsonl$/, ""))) {
-      const log = Memory.agent(mem, name);
-      if (log === null) {
-        continue;
-      }
-      const entries = log.map(({ i, kind, text, date, of, tool }) => ({ id: i, kind, text, date, of, tool }));
-      yield sep + JSON.stringify(name) + ": " + JSON.stringify(entries);
-      sep = ",\n";
-    }
-    yield '},\n"images": {';
+    yield '],\n"images": {';
     sep = "\n";
     for (const name of ls(IMAGES)) {
       const file = Memory.image_file(mem, name);
@@ -1167,42 +1149,6 @@ ${Memory.cut(line)}| ← LIMIT`;
     const when = Memory.date(mem, a) + (a === b ? "" : " – " + Memory.date(mem, b));
     const head = root === null ? ["LVL" + l + " #" + a + (a === b ? "" : "-" + b), when, Memory.bytes(text) + " B"] : ["ROOT #" + i, when, root.kind, root.size + " B"];
     return { h: head.join(" · "), t: text, k: root?.kind };
-  }
-
-  export function agent(mem: Memory, name: string): Root[] | null {
-    const file = mem.dir + AGENTS + name + ".jsonl";
-    return /^[A-Za-z-]+$/.test(name) && fs.existsSync(file) ? Memory.file(file) : null;
-  }
-
-  export function agent_new(mem: Memory): string {
-    const name = names.name_random();
-    fs.mkdirSync(mem.dir + AGENTS, { recursive: true });
-    try {
-      fs.writeFileSync(mem.dir + AGENTS + name + ".jsonl", "", { flag: "wx" });
-    } catch (err) {
-      if (err_code(err) === "EEXIST") {
-        return Memory.agent_new(mem);
-      }
-      throw err;
-    }
-    mem.agents.set(name, 0);
-    return name;
-  }
-
-  export function agent_push(mem: Memory, name: string, kind: Kind, text: string, pair: Pair = {}): number {
-    const n = mem.agents.get(name) ?? Memory.agent(mem, name)?.length ?? 0;
-    const root = Memory.root(n, { kind, text, ...pair });
-    Memory.append(mem.dir + AGENTS + name + ".jsonl", [JSON.stringify(root)]);
-    mem.agents.set(name, n + 1);
-    return root.i;
-  }
-
-  export function agent_show(mem: Memory, name: string): string {
-    return Memory.agent(mem, name)?.map(Memory.agent_line).join("\n\n") ?? "No agent " + name + ".";
-  }
-
-  export function agent_line(root: Root): string {
-    return root.i + "|" + Memory.show(root);
   }
 
 }

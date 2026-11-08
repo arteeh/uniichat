@@ -36,7 +36,7 @@ type Kept = {
   gone  : boolean;
 };
 
-export type Server = Kept & Started & Told;
+type Server = Kept & Started & Told;
 
 type Run = (device: string, job: Job, signal: AbortSignal) => Promise<Out>;
 export type Servers = { all: Map<string, Server>; note: (text: string) => void; run: Run; open: (device: string) => boolean };

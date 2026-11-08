@@ -4,7 +4,7 @@ import * as fs from "node:fs";
 import * as net from "node:net";
 import * as path from "node:path";
 import type { ServerWebSocket } from "bun";
-import { AskAI, GO_ON, type Ask, type Call, type End, type Event, type Kind, type Parked, type Said, type Say, type Vendor } from "./AskAI.ts";
+import { AskAI, GO_ON, type Ask, type Call, type End, type Event, type Kind, type Parked, type Said, type Vendor } from "./AskAI.ts";
 import { clip_pages } from "./Clip.ts";
 import { Disk } from "./Disk.ts";
 import { Mcp } from "./Mcp.ts";
@@ -49,7 +49,7 @@ type Body = { fh: fs.promises.FileHandle; size: number };
 
 export type Msg = { id: number; end: number };
 
-type Talk = Run<Pending, Msg> | Run<Say, Msg>;
+type Talk = Run<Pending, Msg>;
 
 type Eye = { parts: Part[]; from: number };
 
@@ -95,7 +95,6 @@ const LOCK_DEAD  = 30000;
 const WIN        = process.platform === "win32";
 const PID        = config.DIR + "/server.pid";
 const SETTLE     = 200;
-const SHOWN      = 100;
 const CHAT       = config.DIR + "/chat";
 const HEAD       = "Turn:\n\n";
 const GOAL       = "You check a goal. Below is a chat between a user and Unii, an AI agent: its older messages as summary lines (id+n|text), then its latest messages whole, then the goal the user set with /goal. Answer yes if the chat shows the goal fully satisfied now, else no. Write that one word, nothing else.";
@@ -251,7 +250,8 @@ export namespace Chat {
     Chat.timed(chat);
     Memory.pump(mem);
     Chat.progress(chat);
-    Chat.resume(chat, cut).finally(() => Chat.change(chat)).catch((err: unknown) => console.error("unii: resuming the chat: " + err_why(err)));
+    Main.event("resuming the chat", () => Chat.resume(chat, cut));
+    Chat.change(chat);
     return chat;
   }
 
@@ -373,9 +373,7 @@ export namespace Chat {
 
   export function begin(chat: Chat): void {
     Tools.left(chat.tools);
-    if (Tools.holding(chat.tools).length === 0) {
-      Tools.apply(chat.tools);
-    }
+    Tools.apply(chat.tools);
   }
 
   export function ending(chat: Chat): void {
@@ -524,7 +522,7 @@ export namespace Chat {
   // message is work, UniiChat's own (a go-on, a restart, the goal) a note
   export function said(mem: Memory, a: number, b: number): Said {
     const { kind, text } = Memory.at(mem, a);
-    const from = kind === "user" ? "the user" : kind !== "work" ? "UniiChat" : text.startsWith("[Timer ") ? "the timer" : text.startsWith(JOB) ? "a job" : "a subagent";
+    const from = kind === "user" ? "the user" : kind !== "work" ? "UniiChat" : text.startsWith(JOB) ? "a job" : "the timer";
     return { ...Memory.say(mem, a, b), from };
   }
 
@@ -589,17 +587,11 @@ export namespace Chat {
   // sent: a message the run takes from its queue, shown queued till answered (Run.sent)
   export function push(chat: Chat, run: Talk, kind: Kind, text: string, images: string[] = [], more = false, act?: string, pair: Pair = {}, sent = false): Msg {
     Chat.flush(chat, run, kind === "echo" ? pair.of : undefined);
-    return Chat.put(chat, run, { kind, text, images, more, act, ...pair }, sent);
+    return Chat.put(chat, { kind, text, images, more, act, ...pair }, sent);
   }
 
-  export function put(chat: Chat, run: Talk, msg: Log, sent = false): Msg {
+  export function put(chat: Chat, msg: Log, sent = false): Msg {
     const queued = sent ? { sent } : {};
-    if (run !== chat.main) {
-      const { kind, text, of, tool } = msg;
-      const id = Memory.agent_push(chat.mem, run.name, kind, text, { of, tool });
-      Chat.all(chat, { $: "entry", agent: run.name, id, kind, text, of, tool, ...queued });
-      return { id, end: id + 1 };
-    }
     const roots = Memory.push(chat.mem, [msg]);
     for (const { i, kind, text, date, images, of, tool } of roots) {
       Chat.all(chat, { $: "entry", id: i, kind, text, date, images, of, tool, ...queued });
@@ -625,7 +617,7 @@ export namespace Chat {
     }
     for (const [of, call] of left) {
       call.logged = true;
-      Chat.put(chat, run, { kind: "tool", text: call.text, of });
+      Chat.put(chat, { kind: "tool", text: call.text, of });
     }
     Chat.live(chat, run, Chat.waiting(run));
   }
@@ -690,7 +682,6 @@ export namespace Chat {
   }
 
   export function on(chat: Chat, run: Talk, ev: Heard): void {
-    const name = run === chat.main ? undefined : run.name;
     if (ev.$ === "Ended") {
       run.limit = null;
       Chat.unanswered(chat, run);
@@ -712,7 +703,7 @@ export namespace Chat {
     }
     if (ev.$ === "Delta") {
       live_push(run.live, ev.kind, ev.text, ev.fresh);
-      Chat.all(chat, { $: "delta", agent: name, kind: ev.kind, text: ev.text, fresh: ev.fresh });
+      Chat.all(chat, { $: "delta", kind: ev.kind, text: ev.text, fresh: ev.fresh });
       return;
     }
     if (ev.$ === "Start") {
@@ -725,7 +716,7 @@ export namespace Chat {
     if (ev.kind === "tool" && ev.of !== undefined) {
       run.calls.set(ev.of, { text: ev.text, tool: ev.text.split(" ", 1)[0], logged: false, started: ev.queued !== true });
     } else if (ev.kind === "mind") {
-      Chat.all(chat, { $: "entry", agent: name, kind: ev.kind, text: ev.text });
+      Chat.all(chat, { $: "entry", kind: ev.kind, text: ev.text });
     } else if (ev.kind !== "user") {
       const { kind, text, of } = ev;
       const call = of === undefined ? undefined : run.calls.get(of);
@@ -786,7 +777,7 @@ export namespace Chat {
 
   export function live(chat: Chat, run: Talk, live: Live[]): void {
     run.live = live;
-    Chat.all(chat, { $: "live", agent: run === chat.main ? undefined : run.name, live });
+    Chat.all(chat, { $: "live", live });
   }
 
   export function report(chat: Chat, text: string, take: boolean): void {
@@ -800,17 +791,13 @@ export namespace Chat {
     });
   }
 
-  // a device's job report, acked once it's queued or with its subagent, and
-  // taken once: a device sends it again until acked
-  export async function job_done(chat: Chat, id: string, agent: string, text: string): Promise<Answer> {
-    if (await Tools.job_done(chat.tools, agent, text)) {
-      Chat.mark(chat, id, {});
-      return {};
-    }
+  // a device's job report, acked once it's queued, and taken once: a device
+  // sends it again until acked
+  export async function job_done(chat: Chat, id: string, text: string): Promise<Answer> {
     if (chat.main.queue.some((x) => x.q.act === id)) {
       return {};
     }
-    const why = await Run.take(chat.main, { kind: "work", text: Tools.job_text(agent, text), images: [], act: id });
+    const why = await Run.take(chat.main, { kind: "work", text, images: [], act: id });
     Chat.change(chat);
     return why === null ? {} : { error: why };
   }
@@ -1012,17 +999,11 @@ export namespace Chat {
     return {};
   }
 
-  export async function resume(chat: Chat, work: string[]): Promise<void> {
-    const tells = chat.mem.tells;
-    const agents = [...new Set([...work.filter((w) => w !== TURN), ...Object.keys(tells)])];
-    const text = Tools.restarted([...(work.includes(TURN) ? [TURN] : []), ...agents]);
-    if (agents.length > 0 && !work.includes(TURN)) {
-      Chat.push(chat, chat.main, "note", text);
-    }
+  export function resume(chat: Chat, work: string[]): void {
+    const text = Tools.restarted(work);
     const queued = chat.mem.queue.filter((post) => post.act === undefined || Owner.act_get(post.act) === null);
     const posts: Pending[] = [...(work.includes(TURN) ? [{ kind: "note" as const, text, images: [] }] : []), ...queued];
     posts.forEach((post) => void Run.take(chat.main, post));
-    await Promise.all(agents.map((w) => Tools.tell(chat.tools, w, text, tells[w] ?? [])));
   }
 
   export function timed(chat: Chat, retry = false): void {
@@ -1067,7 +1048,7 @@ export namespace Chat {
   }
 
   export function running(chat: Chat): string[] {
-    return [...(chat.main.busy || chat.resume !== null ? [TURN] : []), ...Tools.working(chat.tools).map((a) => a.name)];
+    return chat.main.busy || chat.resume !== null ? [TURN] : [];
   }
 
   export function interrupt(chat: Chat, why: string | null): void {
@@ -1086,7 +1067,6 @@ export namespace Chat {
   export function stop(chat: Chat, why: string | null): void {
     const turn = chat.main.busy && !chat.main.halt.signal.aborted;
     Run.stop(chat.main, turn ? why : null);
-    Tools.stop(chat.tools, null);
     if (!turn && why !== null) {
       Chat.note(chat, why);
     }
@@ -1101,34 +1081,17 @@ export namespace Chat {
   }
 
   export function state(chat: Chat): Out {
-    const working = Tools.working(chat.tools);
-    const agents = working.map((a) => a.name);
-    const runs = Object.fromEntries(working.flatMap((a) => {
-      const pick = Tools.shown(chat.tools, a);
-      return pick === null ? [] : [[a.name, pick]];
-    }));
     const batch = chat.batch;
     const why = chat.mem.hold[1];
     const importing = batch && { done: batch.all - Chat.time(batch), total: batch.all, why, msgs: batch.b - batch.a, open: batch.open };
     const timers = chat.mem.timers.map((t) => ({ ...t, text: t.text.length > TIMER_TEXT ? t.text.slice(0, TIMER_TEXT) + "…" : t.text }));
     const mcp = [...chat.tools.mcp.all.keys()].map((name) => ({ name, on: !chat.mem.off.includes(name) }));
     const talk = Chat.meter(chat);
-    const limits: Record<string, Parked> = {};
-    const queue: Record<string, Queued[]> = {};
-    const sent: Record<string, number[]> = {};
     const shown = (text: string): string => (text.length > QUEUED_TEXT ? text.slice(0, QUEUED_TEXT) + "…" : text);
-    for (const run of [chat.main, ...[...chat.tools.agents.values()].map((a) => a.run)]) {
-      if (run.limit !== null) {
-        limits[run.name] = run.limit;
-      }
-      if (run.queue.length > 0) {
-        queue[run.name] = run.queue.map(({ q }) => ({ kind: "kind" in q ? q.kind : "user", text: shown(q.text) }));
-      }
-      if (run.sent.length > 0) {
-        sent[run.name] = run.sent.flatMap(({ m }) => Array.from({ length: m.end - m.id }, (_, k) => m.id + k));
-      }
-    }
-    return { $: "state", busy: chat.main.busy, wait: Chat.waits(chat), agents, runs, pick: chat.pick, ...config.OFFER, importing, limits, queue, sent, sums: Chat.sums(chat), again: chat.mem.again, timers, mcp, talk, build: BUILD, site: config.SITE };
+    const run = chat.main;
+    const queue: Queued[] = run.queue.map(({ q }) => ({ kind: q.kind, text: shown(q.text) }));
+    const sent = run.sent.flatMap(({ m }) => Array.from({ length: m.end - m.id }, (_, k) => m.id + k));
+    return { $: "state", busy: run.busy, wait: Chat.waits(chat), pick: chat.pick, ...config.OFFER, importing, limit: run.limit, queue, sent, sums: Chat.sums(chat), again: chat.mem.again, timers, mcp, talk, build: BUILD, site: config.SITE };
   }
 
   export function sums(chat: Chat): Sums | null {
@@ -1161,7 +1124,7 @@ export namespace Chat {
 
   export function change(chat: Chat): void {
     const work = Chat.running(chat);
-    if (!chat.main.busy && Tools.holding(chat.tools).length === 0) {
+    if (!chat.main.busy) {
       Tools.apply(chat.tools);
     }
     if (String(work) !== String(chat.mem.work)) {
@@ -1242,21 +1205,6 @@ export namespace Chat {
         Chat.send(sock, { $: "root", parts });
         return {};
       }
-      case "agent": {
-        const name = String(msg.name);
-        const log = Memory.agent(chat.mem, name);
-        const agent = log === null ? null : chat.tools.agents.get(name) ?? Tools.logged(chat.tools, name);
-        const pick = agent === null ? null : Tools.shown(chat.tools, agent);
-        const asked = typeof msg.before === "number" ? msg.before : undefined;
-        const before = asked ?? log?.length ?? 0;
-        const from = Math.max(0, before - SHOWN);
-        const entries = (log ?? []).slice(from, before).map(({ i, kind, text, date, of, tool }) => ({ id: i, kind, text, date, of, tool }));
-        Chat.send(sock, { $: "agent", name, found: log !== null, pick, from, before: asked, entries });
-        if (asked === undefined) {
-          Chat.send(sock, { $: "live", agent: name, live: chat.tools.agents.get(name)?.run.live ?? [] });
-        }
-        return {};
-      }
     }
     return null;
   }
@@ -1281,26 +1229,17 @@ export namespace Chat {
       return Chat.post(chat, id, msg.$, msg.req, msg);
     }
     if (msg.$ === "stop") {
-      return Chat.stop_recorded(chat, id, msg.name === undefined ? null : text_of(msg.name, "null"));
+      return Chat.stop_recorded(chat, id);
     }
     return Chat.set_state(chat, msg, device);
   }
 
-  export function stop_recorded(chat: Chat, id: string, name: string | null): Answer {
-    const what = Chat.running(chat).filter((w) => name === null || w === name);
-    const why = "Stopped by the user: " + what.join(", ") + ".";
-    const turn = what.includes(TURN);
-    if (what.length === 0) {
+  export function stop_recorded(chat: Chat, id: string): Answer {
+    if (Chat.running(chat).length === 0) {
       return {};
     }
     Chat.mark(chat, id, {});
-    if (turn) {
-      Chat.interrupt(chat, why);
-    }
-    what.forEach((w) => Tools.stop(chat.tools, w));
-    if (!turn) {
-      Chat.note(chat, why);
-    }
+    Chat.interrupt(chat, "Stopped by the user: " + TURN + ".");
     return {};
   }
 
@@ -1335,7 +1274,6 @@ export namespace Chat {
         }
         chat.pick = chat.mem.pick = pick;
         chat.main.fell = null;
-        chat.tools.agents.forEach((a) => (a.run.fell = null));
         Memory.save(chat.mem);
         Chat.keep_pick(pick);
         Chat.change(chat);
@@ -1347,7 +1285,7 @@ export namespace Chat {
         return {};
       }
       case "done": {
-        return device === "" ? { error: "Only a device reports jobs." } : Chat.job_done(chat, String(msg.id), String(msg.agent), String(msg.text));
+        return device === "" ? { error: "Only a device reports jobs." } : Chat.job_done(chat, String(msg.id), String(msg.text));
       }
       case "unschedule": {
         const id = String(msg.id);

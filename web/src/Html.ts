@@ -75,7 +75,7 @@ function row_make(row: View.Row): string {
       return `<div class="msg ${row.kind}${queued}${long}"${at}${who}>${copy}${fold}${pics}</div>`;
     }
     case "Cap": {
-      return `<p class="cap${row.earlier === true ? " earlier" : ""}">${esc(row.text)}</p>`;
+      return `<p class="cap">${esc(row.text)}</p>`;
     }
   }
 }
@@ -141,13 +141,6 @@ export function mcp_html(plugs: View.Plug[]): string[] {
   return plugs.length === 0 ? [none] : plugs.map(one);
 }
 
-export function tabs_html(tabs: View.Tab[]): string[] {
-  return tabs.map((tab) => {
-    const here = tab.here ? ` class="here"` : "";
-    return `<button${here}${act_html({ $: "Goto", name: tab.name })}>${esc(tab.text)}</button>`;
-  });
-}
-
 export function timers_html(timers: Timer.Timer[]): string[] {
   return timers.map((t) => {
     const cancel = `<button class="cancel"${act_html({ $: "Unschedule", id: t.id })}>Cancel</button>`;
@@ -163,7 +156,7 @@ export function account_html(prompts: View.Prompts | null, notify: Notify | null
     item("Export memory", "The chat and its summaries, in one file.", `<a class="chip" href="/export">Download</a>`),
   ];
   const unread  = item("Could not read the prompts.", "", `<button class="chip retry">Try again</button>`);
-  const mine    = section_html("Prompts", prompts === null ? unread : prompt_html("prompt", prompts.prompt.text, "The user prompt: Unii's system prompt in every turn; its subagents get it too once you change it. Add who you are and how you want work done at its end. prompt.md in the server's folder; empty: the built-in one.")
+  const mine    = section_html("Prompts", prompts === null ? unread : prompt_html("prompt", prompts.prompt.text, "The user prompt: Unii's system prompt in every turn. Add who you are and how you want work done at its end. prompt.md in the server's folder; empty: the built-in one.")
     + prompt_html("compact", prompts.compact.text, "The compaction prompt: all a summary of the memory gets, nothing else. compact.md in the server's folder; empty: the built-in one."));
   const mcp     = section_html("MCP servers", `<div class="mcp"></div>`);
   return `<a class="back" href="/" data-go="/">← Chat</a><h1>Settings</h1>` + mine + section_html("This browser", acts.join("")) + mcp + `<div class="owned"></div>`;
@@ -191,7 +184,6 @@ const SETTING: Record<string, [string, string]> = {
   pick      : ["Default model", "What a chat runs on until it picks another."],
   compactor : ["Compactor model", "What writes the memory's summaries. Sonnet medium summarizes more faithfully than Haiku, using more of a plan's limits."],
   compactor_context : ["Compactor context", "How much of the chat each summary sees, in KB (1 to 128). More context lets it copy more into a summary that its message doesn't say. New summaries only."],
-  agents    : ["Subagent model", "What subagents run on."],
   site      : ["Site", "The server's address, for sign-in links and the installer."],
   apple     : ["iOS App ID", "The app's team and bundle ID, whose sign-in links it opens."],
   apns      : ["APNs key ID", "The ID of the key the app's pushes are signed with."],
@@ -205,10 +197,10 @@ const KEY: Record<string, [string, string]> = {
 
 export const VENDOR_KEY: Record<string, string> = { "claude-api": "anthropic", "openai-api": "openai" };
 
-export const PICKS = ["pick", "compactor", "agents"];
+export const PICKS = ["pick", "compactor"];
 
 const GROUPS: Array<[string, string[]]> = [
-  ["Models", ["vendors", "models", "pick", "compactor", "compactor_context", "agents"]],
+  ["Models", ["vendors", "models", "pick", "compactor", "compactor_context"]],
   ["Server", ["site", "apple", "apns"]],
 ];
 
@@ -264,8 +256,7 @@ function control_html(r: Row): string {
       return checks_html("models", LABELS, list(r.value), (x) => Pick.models(VENDORS, [x]).map(([vendor]) => vendor).join(" "));
     }
     case "pick":
-    case "compactor":
-    case "agents": {
+    case "compactor": {
       return `<input type="hidden" name="${r.key}" value="${esc(r.value)}"><div class="four"></div>`;
     }
     case "compactor_context": {
@@ -451,9 +442,6 @@ function span_html(s: Md.Span): string {
     }
     case "Brk": {
       return "<br>";
-    }
-    case "Name": {
-      return `<button class="name"${act_html({ $: "Goto", name: s.x })}>[${esc(s.x)}]</button>`;
     }
   }
 }
