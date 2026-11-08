@@ -112,7 +112,7 @@ export type Server =
   | ({ $: "state" } & State)
   | { $: "agent"; name: string; found: boolean; pick?: Pick | null; from: number; before?: number; entries: Logged[] }
   | { $: "note"; text: string }
-  | { $: "error"; text: string }
+  | { $: "error"; text: string; build?: string }
   | ({ $: "ack"; id: string } & Answer)
   | { $: "jobs"; ids: string[] }
   | { $: "job"; id: string; job: Job };
@@ -669,13 +669,16 @@ export function link_open(v: View, link: Link): void {
       void drop();
     }
   }, PING / 2);
-  async function drop(): Promise<void> {
-    const up = v.up;
+  function shut(): void {
     ws.onmessage = null;
     ws.onclose   = null;
     clearInterval(tick);
     ws.close();
     [v.ws, v.up] = [null, false];
+  }
+  async function drop(): Promise<void> {
+    const up = v.up;
+    shut();
     if (await link.lost(up)) {
       setTimeout(() => link_open(v, link), RETRY);
     }
@@ -721,6 +724,9 @@ export function link_open(v: View, link: Link): void {
       v.pages.clear();
     }
     link.hear(msg);
+    if (msg.$ === "error" && msg.build !== undefined) {
+      shut();
+    }
     if (join) {
       view_act(v, { $: "Goto", name: v.page?.name ?? null }).forEach((out) => link_send(v, out));
       flush();

@@ -1806,7 +1806,7 @@ export namespace Main {
         open(ws: Sock) {
           Main.event("a socket", () => {
             if (ws.data.wire !== String(WIRE)) {
-              ws.send(JSON.stringify({ $: "error", text: "This page or unii is older than the server: reload or reopen it (`unii update` for the latest)." }));
+              ws.send(JSON.stringify({ $: "error", text: "This page or unii is older than the server: reload or reopen it (`unii update` for the latest).", build: BUILD }));
               return;
             }
             Chat.join(Main.chat, ws);

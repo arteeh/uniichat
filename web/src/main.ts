@@ -621,6 +621,14 @@ async function lost(up: boolean): Promise<boolean> {
 }
 
 function hear(msg: View.Server): void {
+  if (msg.$ === "error" && msg.build !== undefined) {
+    v.build = msg.build;
+    renew_due(msg.build);
+    if (!RENEW.due || !renew_free()) {
+      toast(msg.text, true);
+    }
+    return;
+  }
   if (v.ws !== P.used.ws) {
     in_use();
   }
