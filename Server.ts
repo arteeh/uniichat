@@ -19,12 +19,12 @@ import { Reap } from "./Reap.ts";
 import { Settings } from "./Settings.ts";
 import { Team, UNII, type Agent } from "./Team.ts";
 import { update_cmd } from "./Update.ts";
-import { move_over, write_whole } from "./Write.ts";
+import { move_over } from "./Write.ts";
 import { LIMIT, Limit } from "./Limit.ts";
 import { Run, type Heard } from "./Run.ts";
 import * as Service from "./Service.ts";
 import * as Timer from "./Timer.ts";
-import { PROMPTS, SEARCHES, Tools, type Seat } from "./Tools.ts";
+import { SEARCHES, Tools, type Seat } from "./Tools.ts";
 import { JOB } from "./Machine.ts";
 import { ACTIVE, FRAME, IDLE, IMAGES, live_push, MEDIA, PING, QUIT, SUMMARIES, TICK, TURN, WIRE, type Answer, type Live, type Part, type Pending, type Queued, type Server as Out, type Sums, type Talk as Meter, TOKEN, type Wait } from "./View.ts";
 import * as config from "./Config.ts";
@@ -104,7 +104,7 @@ const PID        = config.DIR + "/server.pid";
 const SETTLE     = 200;
 const AGENTS     = config.DIR + "/agents";
 const HEAD       = "Turn:\n\n";
-const GOAL       = "You check a goal. Below is a chat between a user and Unii, an AI agent: its older messages as summary lines (id+n|text), then its latest messages whole, then the goal the user set with /goal. Answer yes if the chat shows the goal fully satisfied now, else no. Write that one word, nothing else.";
+const GOAL       = "You check a goal. Below is a chat between a user and {Name}, an AI agent: its older messages as summary lines (id+n|text), then its latest messages whole, then the goal the user set with /goal. Answer yes if the chat shows the goal fully satisfied now, else no. Write that one word, nothing else.";
 const GOAL_ASK   = "\nThe goal:\n\n";
 const GOAL_NO    = "The goal isn't satisfied yet: keep working.";
 const TALK_FULL  = "Conversation mode switched itself off: it was full.";
@@ -204,7 +204,7 @@ function file_path(x: unknown): string {
 export namespace Chat {
 
   export function open(id: string, tools: Tools): Chat {
-    const mem = Memory.load(AGENTS + "/" + id, () => ({ system: Tools.prompt("compact"), searches: 0, server: "" }), Owner.act_put, AGENTS + "/" + UNII);
+    const mem = Memory.load(AGENTS + "/" + id, () => ({ system: Tools.prompt("compact", Team.get(id)?.name ?? ""), searches: 0, server: "" }), Owner.act_put, AGENTS + "/" + UNII);
     const cut = mem.work;
     const main = Run.make<Pending, Msg>(id, {
       pick   : () => chat.pick,
@@ -257,6 +257,24 @@ export namespace Chat {
 
   export function pick_name(pick: Pick): string {
     return pick.profile ?? Pick.label(pick);
+  }
+
+  export function name(chat: Chat): string {
+    return Team.get(chat.id)?.name ?? "";
+  }
+
+  // the fixed base, the user's instructions, the team, the agent's own prompt
+  export function system(chat: Chat): string {
+    const agent = Team.get(chat.id);
+    const name = agent?.name ?? "";
+    const team = Team.active().map((a) => "- " + a.name + (a.id === chat.id ? " (you)" : "") + ": " + a.about);
+    const told = config.INSTRUCTIONS.trim();
+    return [
+      Tools.prompt("prompt", name),
+      ...(told === "" ? [] : ["# The user's instructions\n\n" + told]),
+      "# The team\n\nThe agents the user works with, each in its own chat with them:\n" + team.join("\n"),
+      "# You\n\n" + (agent === null ? "" : Team.prompt(agent)),
+    ].join("\n\n");
   }
 
   export function share(chat: Chat, system: string): Share {
@@ -445,7 +463,7 @@ export namespace Chat {
         Chat.used(chat, tokens);
       }
     };
-    const ask = { ...Chat.share(chat, Tools.prompt("prompt")), searches: SEARCHES, server, blocks, imgs, talk: mem.talk !== null, no_wait: true, limits, who: chat.who, used };
+    const ask = { ...Chat.share(chat, Chat.system(chat)), searches: SEARCHES, server, blocks, imgs, talk: mem.talk !== null, no_wait: true, limits, who: chat.who, used };
     chat.model = model;
     chat.asked = true;
     chat.open = 0;
@@ -486,7 +504,7 @@ export namespace Chat {
       return Memory.line({ l: 0, i }, msg.kind + ": " + msg.text) + "\n";
     });
     const blocks = [...Memory.view(mem, at, Memory.fitted(mem)), { text: tail.join("") + GOAL_ASK + goal, mark: true }];
-    return { call: AskAI.ask({ ...Chat.share(chat, GOAL), blocks, no_wait: true, limits: Chat.limits(chat), who: "goal" }, () => {}), goal };
+    return { call: AskAI.ask({ ...Chat.share(chat, GOAL.replace("{Name}", Chat.name(chat))), blocks, no_wait: true, limits: Chat.limits(chat), who: "goal" }, () => {}), goal };
   }
 
   export async function checked(chat: Chat, check: Check, halt: AbortController): Promise<boolean> {
@@ -657,7 +675,7 @@ export namespace Chat {
   export function guess(chat: Chat): number {
     const mem = chat.mem;
     const blocks = [...Memory.view(mem, mem.count, mem.view.parts, mem.talk), Tools.devices(chat.tools), Tools.skills(chat.tools), Tools.at_work(chat.tools, chat.who)];
-    const texts = [Tools.prompt("prompt"), JSON.stringify(Tools.list(chat.who)), ...blocks.map((b) => b.text)];
+    const texts = [Chat.system(chat), JSON.stringify(Tools.list(chat.who)), ...blocks.map((b) => b.text)];
     return Math.ceil(texts.reduce((n, text) => n + Memory.bytes(text), 0) / TOKEN);
   }
 
@@ -1624,9 +1642,6 @@ export namespace Main {
       case "/api/agents": {
         return await Main.team(req);
       }
-      case "/api/prompts": {
-        return await Main.prompts(req);
-      }
       case "/api/settings": {
         return await Main.settings(req);
       }
@@ -1717,25 +1732,6 @@ export namespace Main {
       return new Response(null, { status: 416, headers: { ...headers, "content-range": "bytes */" + size } });
     }
     return new Response(Bun.file(file).slice(a, b + 1), { status: 206, headers: { ...headers, "content-range": "bytes " + a + "-" + b + "/" + size } });
-  }
-
-  export async function prompts(req: Request): Promise<Response> {
-    const read = () => Object.fromEntries(Object.entries(PROMPTS).map(([k, p]) => [k, { text: Tools.prompt(k as keyof typeof PROMPTS), def: p.def }]));
-    if (req.method !== "POST") {
-      return Response.json(read());
-    }
-    const msg: unknown = await req.json().catch(() => null);
-    const which = (["prompt", "compact"] as const).find((k) => typeof get(msg, k) === "string");
-    if (which === undefined) {
-      return Response.json({ error: "Send { prompt } or { compact }, a text." }, { status: 400 });
-    }
-    const text = String(get(msg, which)).trim();
-    if (Buffer.byteLength(text) > 64 * 1024) {
-      return Response.json({ error: "A prompt holds at most 64 KB." }, { status: 413 });
-    }
-    const { file, def } = PROMPTS[which];
-    write_whole(file, text === "" || text === def ? null : text + "\n");
-    return Response.json(read());
   }
 
   export async function http(req: Request, server: Bun.Server<Sock["data"]>): Promise<Response | undefined> {

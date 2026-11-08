@@ -159,8 +159,6 @@ export type Knob = { text: string; move: Move; hint: string; choices: Choice[] }
 
 export type Choice = { text: string; to: string; move: Move; here: boolean; vendor: string | null };
 
-export type Prompts = Record<"prompt" | "compact", { text: string; def: string }>;
-
 export const TURN = "Unii's turn";
 
 export const WIRE = 4;

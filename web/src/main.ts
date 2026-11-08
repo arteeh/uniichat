@@ -1064,10 +1064,9 @@ function popped(): void {
 
 async function account(): Promise<void> {
   const el = $("#account");
-  const [got, set] = await Promise.all([fetch("/api/prompts").catch(() => null), fetch("/api/settings").catch(() => null)]);
-  const prompts = got !== null && got.ok ? ((await got.json().catch(() => null)) as View.Prompts | null) : null;
+  const set = await fetch("/api/settings").catch(() => null);
   const push = await notify_state().catch(() => null);
-  el.innerHTML = Html.account_html(prompts, push);
+  el.innerHTML = Html.account_html(push);
   RENEW.dirty.clear();
   el.oninput = (ev) => {
     const form = (ev.target as Element).closest("form");
@@ -1075,10 +1074,6 @@ async function account(): Promise<void> {
       RENEW.dirty.add(form);
     }
   };
-  el.querySelectorAll<HTMLFormElement>("form.prompt").forEach((form) => (form.onsubmit = (ev) => {
-    ev.preventDefault();
-    void account_prompt(form);
-  }));
   mcp_draw();
   el.querySelectorAll<HTMLButtonElement>(".retry").forEach((retry) => (retry.onclick = () => void account()));
   $("#account .out").onclick = () => void signout();
@@ -1110,29 +1105,6 @@ async function signout(): Promise<void> {
   await notify_sub().then((sub) => sub?.unsubscribe()).catch(() => {});
   await View.post("/api/logout", {});
   location.href = "/";
-}
-
-async function account_prompt(form: HTMLFormElement): Promise<void> {
-  const area = find(form, "textarea", HTMLTextAreaElement);
-  const why  = must(form.querySelector(".why"), "the prompt's why");
-  const save = find(form, "button", HTMLButtonElement);
-  const sent = area.value;
-  save.disabled = true;
-  RENEW.saving++;
-  const out = await View.post("/api/prompts", { [area.name]: sent });
-  RENEW.saving--;
-  save.disabled = false;
-  const saved = get(out[area.name], "text");
-  if (out.error === undefined && area.value === sent) {
-    area.value = text_of(saved, sent);
-  }
-  why.textContent = text_of(out.error, area.value === saved ? "Saved." : "Not saved yet: Save again.");
-  form.classList.toggle("bad", out.error !== undefined);
-  if (out.error === undefined && area.value === sent) {
-    RENEW.dirty.delete(form);
-    RENEW.since = true;
-  }
-  draw(false);
 }
 
 async function notify_state(): Promise<Html.Notify | null> {
@@ -1390,7 +1362,7 @@ async function settings_save(form: HTMLFormElement, page: Page, unset: Set<strin
     if (form.querySelector(`.set[data-key="${r.key}"]`) === null) {
       continue;
     }
-    const field = form.querySelector<HTMLInputElement>(`input[name="${r.key}"]`);
+    const field = form.querySelector<HTMLInputElement | HTMLTextAreaElement>(`:is(input, textarea)[name="${r.key}"]`);
     const now = r.key === "vendors" || r.key === "models" ? Html.list_changed(Html.list(r.value), listed(r.key))?.join(",") ?? r.value : field?.value.trim() ?? r.value;
     if (unset.has(r.key)) {
       set[r.key] = null;

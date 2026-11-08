@@ -34,12 +34,20 @@ export namespace Team {
     return Owner.open().query("select * from agents order by id <> 'unii', made").all() as Agent[];
   }
 
+  export function active(): Agent[] {
+    return Team.all().filter((a) => a.archived === 0);
+  }
+
   export function get(id: string): Agent | null {
     return (Owner.open().query("select * from agents where id = ?").get(id) as Agent | null) ?? null;
   }
 
   export function by_name(name: string): Agent | null {
     return Team.all().find((a) => a.name.toLowerCase() === name.trim().toLowerCase()) ?? null;
+  }
+
+  export function prompt(a: Agent): string {
+    return a.prompt ?? Team.default_prompt(a.id, a.name);
   }
 
   export function default_prompt(id: string, name: string): string {

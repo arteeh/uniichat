@@ -25,6 +25,7 @@ type Out = { status: number; body: object; saved: string[]; wrote: boolean };
 
 const BODY  = 2 ** 16;
 const VALUE = 4096;
+const TEXT  = 16000;
 const KEY   = 16384;
 
 const PROFILES = 50;
@@ -137,8 +138,8 @@ export namespace Settings {
         delete next[key];
         continue;
       }
-      if (typeof value !== "string" || value.length > VALUE || /[\x00-\x1f\x7f]/.test(value)) {
-        return refuse(400, "That " + key + " isn't one line of text.", key);
+      if (typeof value !== "string" || (key === "instructions" ? value.length > TEXT || /[\x00-\x08\x0b-\x1f\x7f]/.test(value) : value.length > VALUE || /[\x00-\x1f\x7f]/.test(value))) {
+        return refuse(400, key === "instructions" ? "Instructions are text of at most " + TEXT + " characters." : "That " + key + " isn't one line of text.", key);
       }
       next[key] = value.trim();
     }
@@ -230,7 +231,7 @@ export namespace Settings {
     } catch (err) {
       const text = err_why(err).replace(/^config: /, "");
       const key = text.startsWith("profile") ? "profiles" : config.SETTINGS.find((s) => text.startsWith(s.key + " "))?.key;
-      const pick = key === "pick" || key === "compactor" || key === "agents";
+      const pick = key === "pick" || key === "compactor";
       const error = pick ? config.config_value(file, key) + " isn't offered by the vendors and models checked: pick another." : key === "vendors" ? "There is no vendor " + text.replace(/^vendors can't offer /, "") + "." : text + ".";
       return { error, key };
     }

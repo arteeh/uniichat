@@ -19,6 +19,7 @@ type Made = {
   compactor : Pick;
   context   : number;
   after     : string;
+  instructions : string;
 };
 
 export type McpServer = {
@@ -36,6 +37,9 @@ export type McpServer = {
 export const DIR = config_path(process.env.UNII_DIR ?? "~/.unii");
 
 export const FILE_PATH = DIR + "/config.json";
+
+// the fixed prompts' files, which the installer writes
+export const SHARE = process.platform === "win32" ? (process.env.LOCALAPPDATA ?? os.homedir() + "\\AppData\\Local") + "\\unii" : (process.env.XDG_DATA_HOME || os.homedir() + "/.local/share") + "/unii";
 export const KEYS_PATH = DIR + "/keys.json";
 
 export const SETTINGS: Setting[] = [
@@ -44,6 +48,7 @@ export const SETTINGS: Setting[] = [
   { key: "pick",      def: "claude-api:sonnet-5.5:medium:slow", apply: "now",     server_only: null },
   { key: "compactor", def: "claude-api:sonnet-5.5:medium:slow", apply: "now",     server_only: null },
   { key: "compactor_context", def: "4",                         apply: "now",     server_only: null },
+  { key: "instructions", def: "",                               apply: "now",     server_only: null },
   { key: "site",      def: "http://127.0.0.1:8788",             apply: "restart", server_only: null },
   { key: "apple",     def: "",                                  apply: "restart", server_only: null },
   { key: "apns",      def: "",                                  apply: "restart", server_only: null },
@@ -96,6 +101,7 @@ export const SITE    = config_value(FILE, "site").replace(/\/$/, "");
 export const OFFER: Offer = MADE.offer;
 
 export let   AFTER      = MADE.after;
+export let   INSTRUCTIONS = MADE.instructions;
 export let   PICK       = MADE.pick;
 
 export let   COMPACTOR  = MADE.compactor;
@@ -289,6 +295,7 @@ export function config_make(file: Record<string, unknown>): Made {
     compactor : config_run("compactor", config_value(file, "compactor"), offer),
     context   : config_context(config_value(file, "compactor_context")),
     after     : config_value(file, "after"),
+    instructions : config_value(file, "instructions"),
   };
 }
 
@@ -439,6 +446,7 @@ export function config_reload(): void {
   COMPACTOR = made.compactor;
   COMPACTOR_CONTEXT = made.context;
   AFTER = made.after;
+  INSTRUCTIONS = made.instructions;
   Object.assign(KEYS, keys);
   RELOADED.forEach((f) => f());
 }
