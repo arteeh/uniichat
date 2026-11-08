@@ -1,5 +1,6 @@
 import { Owner } from "./Owner.ts";
 import { get as field } from "./Json.ts";
+import * as Prompts from "./Prompts.ts";
 
 // prompt null: the default, which follows renames until it's edited
 export type Agent = { id: string; name: string; about: string; picture: string; prompt: string | null; archived: number; made: number; unread: number };
@@ -16,8 +17,6 @@ const OWN   = 64 * 1024;
 
 const HEADS = 24;
 
-const PROMPT      = "You are {Name}.";
-const UNII_PROMPT = "You are {Name}, the user's executive assistant and main point of contact. You see what every agent does and what the user tells them; keep track of it all and answer for the whole team.";
 const UNII_ABOUT  = "Executive assistant: keeps track of the whole team.";
 
 export namespace Team {
@@ -51,7 +50,7 @@ export namespace Team {
   }
 
   export function default_prompt(id: string, name: string): string {
-    return (id === UNII ? UNII_PROMPT : PROMPT).replace("{Name}", name);
+    return Prompts.prompt(id === UNII ? "unii" : "agent", { Name: name });
   }
 
   // the fields a form sent, checked: a text saying what's wrong, or the

@@ -1123,16 +1123,17 @@ function popped(): void {
   draw(true);
 }
 
-async function agents(): Promise<Html.Agent[] | null> {
+// the agents, and a new one's default prompt
+async function agents(): Promise<{ agents: Html.Agent[]; template: string } | null> {
   const res = await fetch("/api/agents").catch(() => null);
-  return res?.ok ? ((await res.json().catch(() => null)) as Html.Agent[] | null) : null;
+  return res?.ok ? ((await res.json().catch(() => null)) as { agents: Html.Agent[]; template: string } | null) : null;
 }
 
 // new agent (id null) or an agent's settings
 async function agent_page(id: string | null): Promise<void> {
   const el = $("#account");
   const all = await agents();
-  const a = id === null ? null : all?.find((x) => x.id === id) ?? null;
+  const a = id === null ? null : all?.agents.find((x) => x.id === id) ?? null;
   if (all === null || (id !== null && a === null)) {
     el.innerHTML = `<a class="back" href="/" data-go="/">← Chats</a><p class="sub">${all === null ? "Could not read the agents. Try again in a moment." : "No such agent."}</p>`;
     return;
@@ -1140,10 +1141,10 @@ async function agent_page(id: string | null): Promise<void> {
   el.innerHTML = Html.agent_html(a, id === UNII);
   const form = find(el, "form", HTMLFormElement);
   const [name, prompt] = [find(form, "[name=name]", HTMLInputElement), find(form, "[name=prompt]", HTMLTextAreaElement)];
-  const was = { name: a?.name ?? "", prompt: a?.own ? null : a?.prompt ?? "You are {Name}." };
+  const was = { prompt: a?.own === true ? null : a?.template ?? all.template };
   const follow = () => {
     if (was.prompt !== null) {
-      prompt.value = a === null ? was.prompt.replace("{Name}", name.value.trim()) : was.prompt.replaceAll(was.name, name.value.trim() || was.name);
+      prompt.value = was.prompt.replaceAll("{Name}", name.value.trim() || a?.name || "");
     }
   };
   if (a === null) {

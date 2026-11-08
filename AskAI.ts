@@ -17,7 +17,7 @@ export type Img = { type: string; data: string };
 
 export type Say = { text: string; imgs: Img[] };
 
-// a message with who sent it, as the prompts name them (prompt.txt, Tools.ts)
+// a message with who sent it, as the prompts name them (prompts/prompt.md)
 export type Said = Say & { from: string };
 
 export type Block = { text: string; mark: boolean; back?: boolean };

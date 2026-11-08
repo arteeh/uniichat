@@ -19,6 +19,7 @@ import { ACTIVE_MS, Push } from "./Push.ts";
 import { Reap } from "./Reap.ts";
 import { Settings } from "./Settings.ts";
 import { Team, UNII, type Agent } from "./Team.ts";
+import * as Prompts from "./Prompts.ts";
 import { update_cmd } from "./Update.ts";
 import { move_over } from "./Write.ts";
 import { LIMIT, Limit } from "./Limit.ts";
@@ -108,7 +109,6 @@ const PID        = config.DIR + "/server.pid";
 const SETTLE     = 200;
 const AGENTS     = config.DIR + "/agents";
 const HEAD       = "Turn:\n\n";
-const GOAL       = "You check a goal. Below is a chat between a user and {Name}, an AI agent: its older messages as summary lines (id+n|text), then its latest messages whole, then the goal the user set with /goal. Answer yes if the chat shows the goal fully satisfied now, else no. Write that one word, nothing else.";
 const GOAL_ASK   = "\nThe goal:\n\n";
 const GOAL_NO    = "The goal isn't satisfied yet: keep working.";
 const TALK_FULL  = "Conversation mode switched itself off: it was full.";
@@ -122,19 +122,6 @@ const BATCH      = "/import.json";
 const SPARE      = 2 ** 30;
 
 const TEAM_VIEW  = 16000;
-const TEAM_DOC   = `# The team view
-
-You see what the other agents do and what the user tells them: just before the
-new messages, <team> holds one timeline over the team's other agents, oldest
-first, from their memories. Each line is
-
-  Name id+n|text   that agent's n messages from id on, summarized
-
-The newest lines are one message each: the user's messages to that agent, its
-replies to the user, and messages between agents. Older lines are summaries of
-everything, coarser further back. zoom(id, n, agent: "Name") opens a line of that
-agent's memory, as zoom does yours.`;
-
 const TIMER_TEXT = 200;
 const LAST       = 120;
 const RING       = 60000;
@@ -228,7 +215,7 @@ function file_path(x: unknown): string {
 export namespace Chat {
 
   export function open(id: string, tools: Tools): Chat {
-    const mem = Memory.load(AGENTS + "/" + id, () => ({ system: Tools.prompt("compact", Team.get(id)?.name ?? ""), searches: 0, server: "" }), Owner.act_put, AGENTS + "/" + UNII);
+    const mem = Memory.load(AGENTS + "/" + id, () => ({ system: Prompts.prompt("compact", { Name: Team.get(id)?.name ?? "" }), searches: 0, server: "" }), Owner.act_put, AGENTS + "/" + UNII);
     const cut = mem.work;
     const main = Run.make<Pending, Msg>(id, {
       pick   : () => chat.pick,
@@ -291,14 +278,14 @@ export namespace Chat {
   export function system(chat: Chat): string {
     const agent = Team.get(chat.id);
     const name = agent?.name ?? "";
-    const team = Team.active().map((a) => "- " + a.name + (a.id === chat.id ? " (you)" : "") + ": " + a.about);
     const told = config.INSTRUCTIONS.trim();
+    const team = Prompts.prompt("team", { Name: name }).split("\n").flatMap((line) => (line.includes("{name}") ? Team.active().map((a) => Prompts.fill(line, { name: a.name, about: a.about })) : [line]));
     return [
-      Tools.prompt("prompt", name),
-      ...(told === "" ? [] : ["# The user's instructions\n\n" + told]),
-      "# The team\n\nThe agents the user works with, each in its own chat with them:\n" + team.join("\n"),
-      ...(chat.id === UNII ? [TEAM_DOC] : []),
-      "# You\n\n" + (agent === null ? "" : Team.prompt(agent)),
+      Prompts.prompt("prompt", { Name: name }),
+      ...(told === "" ? [] : [Prompts.prompt("instructions", { instructions: told })]),
+      team.join("\n"),
+      ...(chat.id === UNII ? [Prompts.prompt("team-view")] : []),
+      Prompts.prompt("you", { prompt: agent === null ? "" : Team.prompt(agent) }),
     ].join("\n\n");
   }
 
@@ -590,7 +577,7 @@ export namespace Chat {
       return Memory.line({ l: 0, i }, msg.kind + ": " + msg.text) + "\n";
     });
     const blocks = [...Memory.view(mem, at, Memory.fitted(mem)), { text: tail.join("") + GOAL_ASK + goal, mark: true }];
-    return { call: AskAI.ask({ ...Chat.share(chat, GOAL.replace("{Name}", Chat.name(chat))), blocks, no_wait: true, limits: Chat.limits(chat), who: "goal" }, () => {}), goal };
+    return { call: AskAI.ask({ ...Chat.share(chat, Prompts.prompt("goal", { Name: Chat.name(chat) })), blocks, no_wait: true, limits: Chat.limits(chat), who: "goal" }, () => {}), goal };
   }
 
   export async function checked(chat: Chat, check: Check, halt: AbortController): Promise<boolean> {
@@ -1697,9 +1684,8 @@ export namespace Main {
       const out = Main.made(await req.json().catch(() => null));
       return Response.json(out, { status: out.error === undefined ? 200 : 400 });
     }
-    return Response.json(Team.all().map((a) => {
-      return { ...a, prompt: Team.prompt(a), own: a.prompt !== null };
-    }));
+    const agents = Team.all().map((a) => ({ ...a, prompt: Team.prompt(a), own: a.prompt !== null, template: Main.template(a.id) }));
+    return Response.json({ agents, template: Main.template("") });
   }
 
   // /api/agents/<id>: edit; /archive, /restore; DELETE: delete (archived
@@ -1730,6 +1716,11 @@ export namespace Main {
     Team.set(id, fields);
     Main.chats.forEach((c) => Chat.change(c));
     return out({});
+  }
+
+  // an agent's default prompt, its name left as {Name}
+  export function template(id: string): string {
+    return Prompts.prompt(id === UNII ? "unii" : "agent");
   }
 
   export function shelve(chat: Chat, on: boolean): Answer {

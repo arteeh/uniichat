@@ -5,8 +5,6 @@ import { Limit } from "./Limit.ts";
 import { INT, JOB, STR, TOOLS, spec, type Bg, type Job, type Skill, type Spec } from "./Machine.ts";
 import { Mcp, type Servers } from "./Mcp.ts";
 import { Memory } from "./Memory.ts";
-import PROMPT from "./prompt.txt" with { type: "text" };
-import COMPACT_PROMPT from "./compact.txt" with { type: "text" };
 import { Team, UNII } from "./Team.ts";
 import * as Timer from "./Timer.ts";
 import { PING } from "./View.ts";
@@ -67,16 +65,6 @@ let HTTP: ReturnType<typeof Bun.serve> | null = null;
 const RUNNING = new Map<string, Set<AbortController>>();
 const SESSION = "mcp-session-id";
 
-// the two fixed prompts: the base of every turn's (prompt.txt), and the
-// compaction prompt, every summary's and nothing else (compact.txt, after
-// upstream #37 by @tinqr: with one prompt for both, a turn sometimes came
-// back a summary). Each is read from its file beside the installed unii,
-// which the installer writes again each time, else built in
-const PROMPTS = {
-  prompt  : { def: PROMPT.trim(), file: config.SHARE + "/prompt.md" },
-  compact : { def: COMPACT_PROMPT.trim(), file: config.SHARE + "/compact.md" },
-};
-
 const DEVICES_NONE = "(None is open now.)";
 const MEDIA_AT = "Media and files in the chat, /media/<name>, are the files {dir}<name> on the server's computer.";
 
@@ -131,14 +119,6 @@ export namespace Tools {
 
   export function at(tools: Tools, who: string): string {
     return tools.url + who;
-  }
-
-  export function prompt(which: keyof typeof PROMPTS, name: string): string {
-    let text = "";
-    try {
-      text = Memory.file_text(PROMPTS[which].file);
-    } catch {}
-    return (text || PROMPTS[which].def).replaceAll("{Name}", name);
   }
 
   export function devices(tools: Tools): Block {

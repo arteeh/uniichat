@@ -197,7 +197,7 @@ export function timers_html(timers: Timer.Timer[]): string[] {
 }
 
 // an agent as its settings page reads and saves it
-export type Agent = { id: string; name: string; about: string; picture: string; prompt: string; own: boolean; archived: number };
+export type Agent = { id: string; name: string; about: string; picture: string; prompt: string; own: boolean; template: string; archived: number };
 
 export function agent_html(a: Agent | null, unii: boolean): string {
   const id = a?.id ?? "";
