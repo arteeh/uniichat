@@ -153,6 +153,8 @@ const PAGES = ["/settings", "/account"];
 
 const TREE = "/tree";
 
+const OLDER = "This page is older than the server: reload it.";
+
 function tree_view(): boolean {
   return location.hash.toLowerCase() === "#view";
 }
@@ -621,14 +623,21 @@ async function lost(up: boolean): Promise<boolean> {
 }
 
 function hear(msg: View.Server): void {
-  if (msg.$ === "error" && msg.build !== undefined) {
-    unsent_back();
-    v.build = msg.build;
-    renew_due(msg.build);
-    if (!RENEW.due || !renew_free()) {
-      toast(msg.text, true);
+  if (msg.$ === "error" && v.refused !== null) {
+    const old = v.refused.old;
+    if (old && msg.build !== undefined) {
+      unsent_back();
+      v.build = msg.build;
+      renew_due(msg.build);
     }
+    if (!RENEW.due || !renew_free()) {
+      toast(old ? OLDER : msg.text, true, old);
+    }
+    draw(false);
     return;
+  }
+  if (msg.$ === "view" && v.refused !== null) {
+    $("#toast").hidden = true;
   }
   if (v.ws !== P.used.ws) {
     in_use();
@@ -1549,9 +1558,18 @@ function renewed(): void {
   y();
 }
 
-function toast(text: string, stay = false): void {
+function toast(text: string, stay = false, reload = false): void {
   const el = $("#toast");
   el.textContent = text;
+  if (reload) {
+    const again = document.createElement("button");
+    again.textContent = "Reload";
+    again.onclick = () => {
+      unsent_back();
+      location.reload();
+    };
+    el.append(again);
+  }
   el.hidden = false;
   clearTimeout(P.toast);
   P.toast = stay ? 0 : (setTimeout(() => (el.hidden = true), 7000) as unknown as number);

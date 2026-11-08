@@ -91,6 +91,7 @@ export type View = State & {
   pages : Map<string, Page>;
   page  : Page | null;
   notes : string[];
+  refused : { text: string; old: boolean } | null;
   tab   : string;
   out   : Post[];
   ws    : WebSocket | null;
@@ -112,7 +113,7 @@ export type Server =
   | ({ $: "state" } & State)
   | { $: "agent"; name: string; found: boolean; pick?: Pick | null; from: number; before?: number; entries: Logged[] }
   | { $: "note"; text: string }
-  | { $: "error"; text: string; build?: string }
+  | { $: "error"; text: string; build?: string; wire?: number }
   | ({ $: "ack"; id: string } & Answer)
   | { $: "jobs"; ids: string[] }
   | { $: "job"; id: string; job: Job };
@@ -184,6 +185,7 @@ export const WIRE = 4;
 
 export const PING  = 10000;
 export const RETRY = 1000;
+export const SLOW  = 30000;
 export const TICK  = "+";
 export const QUIT  = 4000;
 
@@ -199,6 +201,8 @@ const WAIT = "compressing…";
 const SUMS = "compressing earlier messages…";
 
 const UNSENT = "Sends once connected.";
+const OLDER  = "This unii is older than the server: run `unii update`.";
+const NEWER  = "The server runs an older unii than this one: run `unii update` there. Trying again every " + SLOW / 1000 + " s.";
 const EARLIER = "Loading earlier messages…";
 
 const MARKS: Array<[string, number, string]> = [
@@ -293,6 +297,7 @@ export function view_new(): View {
     pages     : new Map(),
     page      : null,
     notes     : [],
+    refused   : null,
     tab       : uuid(),
     out       : [],
     ws        : null,
@@ -711,6 +716,20 @@ export function link_open(v: View, link: Link): void {
       void drop();
     }
   }
+  // the server took no part in this link: its wire is not ours. An older
+  // client stops, a newer one tries again slowly till the server is updated
+  function refused(msg: Extract<Server, { $: "error" }>): void {
+    const old = (msg.wire ?? 0) > WIRE;
+    shut();
+    if (!old) {
+      setTimeout(() => link_open(v, link), SLOW);
+    }
+    const text = old ? OLDER : NEWER;
+    if (v.refused?.text !== text) {
+      v.refused = { text, old };
+      link.hear({ $: "error", text, ...(old && msg.build !== undefined ? { build: msg.build } : {}) });
+    }
+  }
   [v.ws, v.flush, v.wake] = [ws, flush, wake];
   ws.onmessage = (ev) => {
     heard = Date.now();
@@ -718,16 +737,18 @@ export function link_open(v: View, link: Link): void {
       return;
     }
     const msg = JSON.parse(String(ev.data)) as Server;
+    if (msg.$ === "error" && !v.up) {
+      refused(msg);
+      return;
+    }
     const join = msg.$ === "view" && !v.up;
     if (join) {
       v.up = true;
       v.pages.clear();
     }
     link.hear(msg);
-    if (msg.$ === "error" && msg.build !== undefined) {
-      shut();
-    }
     if (join) {
+      v.refused = null;
       view_act(v, { $: "Goto", name: v.page?.name ?? null }).forEach((out) => link_send(v, out));
       flush();
     }

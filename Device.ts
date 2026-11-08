@@ -9,7 +9,7 @@ import { Mcp } from "./Mcp.ts";
 import { err_code, err_why } from "./Err.ts";
 import { get, text_of } from "./Json.ts";
 import * as Service from "./Service.ts";
-import { FRAME, media_kind, PING, QUIT, RETRY, TICK, WIRE, type Server } from "./View.ts";
+import { FRAME, media_kind, PING, QUIT, RETRY, SLOW, TICK, WIRE, type Server } from "./View.ts";
 
 const LOCAL = process.platform === "darwin" ? child.spawnSync("scutil", ["--get", "LocalHostName"]).stdout?.toString().trim() : "";
 const HOST  = LOCAL || os.hostname();
@@ -41,6 +41,7 @@ export async function run(given: string | undefined): Promise<void> {
   const outs = new Map<string, { $: "out"; id: string; job: string; out: object } | { $: "done"; id: string; agent: string; text: string }>();
   let ws: WebSocket | null = null;
   let quitting = false;
+  let refused: boolean | null = null;
   const send = (msg: object) => ws?.readyState === WebSocket.OPEN && ws.send(JSON.stringify(msg));
   let told = "";
   const tell = () => {
@@ -55,6 +56,8 @@ export async function run(given: string | undefined): Promise<void> {
     const sock = (ws = new Client.Socket(url.replace(/^http/, "ws") + "/ws" + query, { headers: Client.auth(token) }));
     let heard = Date.now();
     let up = false;
+    let joined = false;
+    let next: number | null = RETRY;
     const tick = setInterval(() => Date.now() - heard > PING && sock.close(), PING / 2);
     sock.onopen = () => {
       up = true;
@@ -76,8 +79,18 @@ export async function run(given: string | undefined): Promise<void> {
         jobs.forEach((abort, id) => msg.ids.includes(id) || abort.abort());
       } else if (msg.$ === "ack") {
         outs.delete(msg.id);
+      } else if (msg.$ === "error" && !joined) {
+        const old = (msg.wire ?? 0) > WIRE;
+        if (refused !== old) {
+          console.error("unii: " + (old ? "this device's unii is older than the server: run `unii update`; it stops trying till then" : "the server runs an older unii than this device: run `unii update` there; trying again every " + SLOW / 1000 + " s"));
+        }
+        [refused, next] = [old, old ? null : SLOW];
+        sock.close();
       } else if (msg.$ === "note" || msg.$ === "error") {
         console.error("unii: " + msg.text);
+      }
+      if (msg.$ !== "error") {
+        [joined, refused] = [true, null];
       }
     };
     sock.onclose = async () => {
@@ -90,7 +103,9 @@ export async function run(given: string | undefined): Promise<void> {
       if (!up && !await Client.signed(url, token)) {
         Client.fail("this device is signed out: run unii device to sign it in again");
       }
-      setTimeout(open, RETRY);
+      if (next !== null) {
+        setTimeout(open, next);
+      }
     };
   };
   const job = async (id: string, job: Job) => {
