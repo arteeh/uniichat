@@ -175,6 +175,7 @@ const SETTING: Record<string, [string, string]> = {
   models    : ["Models", "The models offered, of those vendors."],
   pick      : ["Default model", "What a chat runs on until it picks another."],
   compactor : ["Compactor model", "What writes the memory's summaries. Sonnet medium summarizes more faithfully than Haiku, using more of a plan's limits."],
+  hops      : ["Hop limit", "How many messages in a row agents may send each other before they wait for you; 0: none."],
   instructions : ["Instructions", "Every agent's prompt has these: who you are, how your files are organised, how you want work done."],
   compactor_context : ["Compactor context", "How much of the chat each summary sees, in KB (1 to 128). More context lets it copy more into a summary that its message doesn't say. New summaries only."],
   site      : ["Site", "The server's address, for sign-in links and the installer."],
@@ -194,6 +195,7 @@ export const PICKS = ["pick", "compactor"];
 
 const GROUPS: Array<[string, string[]]> = [
   ["Instructions", ["instructions"]],
+  ["Agents", ["hops"]],
   ["Models", ["vendors", "models", "pick", "compactor", "compactor_context"]],
   ["Server", ["site", "apple", "apns"]],
 ];
@@ -211,7 +213,7 @@ export function settings_html(page: Page): string {
   const save = `<div class="save"><p class="why"></p><button class="chip go"${page.error === null ? "" : " disabled"}>Save</button></div>`;
   const head = `<p class="sub">The server's settings, in config.json in its folder.</p>`;
   const profiles = page.profiles === null ? "" : section_html("Profiles", `<p class="sub">Ranked models: a chat on a profile runs on the first and falls back to the next when one is out.</p><div class="set profiles" data-key="profiles"><div class="field"></div><p class="err"></p></div>`);
-  return head + error + none + `<form class="settings" autocomplete="off">` + group(GROUPS[0]) + group(GROUPS[1]) + profiles + keys + group(GROUPS[2]) + save + `</form>`;
+  return head + error + none + `<form class="settings" autocomplete="off">` + group(GROUPS[0]) + group(GROUPS[1]) + group(GROUPS[2]) + profiles + keys + group(GROUPS[3]) + save + `</form>`;
 }
 
 export function offered(vendors: string[], models: string[]): string[] {
@@ -255,6 +257,9 @@ function control_html(r: Row): string {
     }
     case "instructions": {
       return `<textarea id="set-${r.key}" name="${r.key}" rows="8" spellcheck="true">${esc(r.value)}</textarea>`;
+    }
+    case "hops": {
+      return `<input id="set-${r.key}" name="${r.key}" type="number" min="0" max="100" step="1" inputmode="numeric" value="${esc(r.value)}" placeholder="${esc(r.def)}">`;
     }
     case "compactor_context": {
       return `<input id="set-${r.key}" name="${r.key}" type="number" min="1" max="128" step="1" inputmode="numeric" value="${esc(r.value)}" placeholder="${esc(r.def)}">`;

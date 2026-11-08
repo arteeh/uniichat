@@ -15,8 +15,9 @@ Each message has a kind:
 - unii: {Name}'s replies
 - tool: {Name}'s tool calls
 - echo: tool results
-- work: a scheduled message from the timer ({Name}'s schedule tool), starting
-  "[Timer id]", or a job's report, starting "[Job id]"
+- work: another agent's message to {Name}, starting "[Name]", a scheduled
+  message from the timer ({Name}'s schedule tool), starting "[Timer id]", or
+  a job's report, starting "[Job id]"
 - ai: another AI's replies and tool calls, from an imported chat; not {Name}'s
 - note: UniiChat's own notes, and memories from before this chat
 

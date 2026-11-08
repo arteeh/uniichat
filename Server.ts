@@ -4,6 +4,7 @@ import * as fs from "node:fs";
 import * as net from "node:net";
 import * as path from "node:path";
 import type { ServerWebSocket } from "bun";
+import type { Out as Done } from "./Agent.ts";
 import { AskAI, GO_ON, type Ask, type Call, type End, type Event, type Kind, type Parked, type Said, type Vendor } from "./AskAI.ts";
 import { clip_pages } from "./Clip.ts";
 import { Disk } from "./Disk.ts";
@@ -91,6 +92,7 @@ type Turn = {
   sums  : { from: number; total: number } | null;
   resume: { wake: AbortController; goal: string | null } | null;
   limits: { vendor: Vendor; n: number } | null;
+  hop   : number;
 };
 
 type Chat = Parts & Doing & Turn;
@@ -226,9 +228,9 @@ export namespace Chat {
     const who = id === UNII ? "main" : id;
     const chat: Chat = {
       id, who, mem, tools, pick, socks: new Set(), acts: new Map(), main, model: "", check: null, asked: false, open: 0,
-      eye: { parts: [], from: 0 }, after: Promise.resolve(), batch: null, writes: Promise.resolve(), held: null, back: -1, sums: null, resume: null, limits: null, bell: undefined,
+      eye: { parts: [], from: 0 }, after: Promise.resolve(), batch: null, writes: Promise.resolve(), held: null, back: -1, sums: null, resume: null, limits: null, bell: undefined, hop: 0,
     };
-    const seat: Seat = { mem, note: (text) => Chat.note(chat, text), report: (text) => Chat.report(chat, text, true), timed: () => Chat.timed(chat) };
+    const seat: Seat = { mem, note: (text) => Chat.note(chat, text), report: (text) => Chat.report(chat, text, true), timed: () => Chat.timed(chat), message: (to, text) => Chat.message(chat, to, text) };
     tools.seats.set(who, seat);
     Main.chats.set(id, chat);
     Main.keep_picks();
@@ -307,12 +309,15 @@ export namespace Chat {
     return buf.subarray(0, got.bytesRead);
   }
 
+  // the turn's hop: the user's message sets it to 0, another agent's raises
+  // it to that one's
   export function posted(chat: Chat, post: Pending): Msg {
     const pages = post.kind === "user" ? clip_pages(post.text) : [post.text];
     let id = -1;
+    chat.hop = post.kind === "user" ? 0 : Math.max(chat.hop, post.hop ?? 0);
     pages.forEach((page, k) => {
       const last = k === pages.length - 1;
-      const msg = Chat.push(chat, chat.main, post.kind, page, last ? post.images : [], !last, last ? post.act : undefined, {}, true);
+      const msg = Chat.push(chat, chat.main, post.kind, page, last ? post.images : [], !last, last ? post.act : undefined, post.from === undefined ? {} : { from: post.from }, true);
       id = id < 0 ? msg.id : id;
     });
     return { id, end: chat.mem.count };
@@ -400,6 +405,7 @@ export namespace Chat {
   }
 
   export function finish(chat: Chat): void {
+    chat.hop = 0;
     Chat.live(chat, chat.main, []);
     Chat.phone(chat);
     Chat.after(chat);
@@ -535,8 +541,31 @@ export namespace Chat {
   // message is work, UniiChat's own (a go-on, a restart, the goal) a note
   export function said(mem: Memory, a: number, b: number): Said {
     const { kind, text } = Memory.at(mem, a);
-    const from = kind === "user" ? "the user" : kind !== "work" ? "UniiChat" : text.startsWith(JOB) ? "a job" : "the timer";
+    const sender = Memory.at(mem, a).from;
+    const from = kind === "user" ? "the user" : kind !== "work" ? "UniiChat" : sender !== undefined ? Team.get(sender)?.name ?? "an agent" : text.startsWith(JOB) ? "a job" : "the timer";
     return { ...Memory.say(mem, a, b), from };
+  }
+
+  // another agent's message, as it lands in that one's chat: a turn there,
+  // one hop on from this turn's
+  export async function message(chat: Chat, to: string, text: string): Promise<Done> {
+    const name = Chat.name(chat);
+    const them = Team.by_name(to);
+    const hop = chat.hop + 1;
+    if (them === null || them.id === chat.id) {
+      const others = Team.active().filter((a) => a.id !== chat.id).map((a) => a.name);
+      return { text: (them === null ? "No agent " + to + "." : "That's you.") + " The others: " + (others.join(", ") || "none") + ".", fail: true };
+    }
+    if (them.archived !== 0) {
+      return { text: them.name + " is archived.", fail: true };
+    }
+    if (hop > config.HOPS) {
+      Chat.note(chat, config.HOPS === 0 ? name + " can't message " + them.name + ": messages between agents are off (Settings, Hop limit)." : name + "'s message to " + them.name + " waits for you: the agents reached the hop limit, " + config.HOPS + " in a row (Settings).");
+      return { text: "hop limit reached, wait for the user", fail: true };
+    }
+    const there = Main.chats.get(them.id);
+    const why = there === undefined ? "No chat for " + them.name + "." : await Run.take(there.main, { kind: "work", text: "[" + name + "] " + text, images: [], hop, from: chat.id });
+    return why === null ? { text: "Sent to " + them.name + ". It doesn't answer by itself: a reply comes only if it messages you.", fail: false } : { text: why, fail: true };
   }
 
   export function failed(chat: Chat, why: string): void {
@@ -598,7 +627,7 @@ export namespace Chat {
   }
 
   // sent: a message the run takes from its queue, shown queued till answered (Run.sent)
-  export function push(chat: Chat, run: Talk, kind: Kind, text: string, images: string[] = [], more = false, act?: string, pair: Pair = {}, sent = false): Msg {
+  export function push(chat: Chat, run: Talk, kind: Kind, text: string, images: string[] = [], more = false, act?: string, pair: Pair & { from?: string } = {}, sent = false): Msg {
     Chat.flush(chat, run, kind === "echo" ? pair.of : undefined);
     return Chat.put(chat, { kind, text, images, more, act, ...pair }, sent);
   }
@@ -606,8 +635,8 @@ export namespace Chat {
   export function put(chat: Chat, msg: Log, sent = false): Msg {
     const queued = sent ? { sent } : {};
     const roots = Memory.push(chat.mem, [msg]);
-    for (const { i, kind, text, date, images, of, tool } of roots) {
-      Chat.all(chat, { $: "entry", id: i, kind, text, date, images, of, tool, ...queued });
+    for (const { i, kind, text, date, images, of, tool, from } of roots) {
+      Chat.all(chat, { $: "entry", id: i, kind, text, date, images, of, tool, from, ...queued });
     }
     Chat.talked(chat);
     return { id: roots[0].i, end: chat.mem.count };
@@ -1403,7 +1432,7 @@ export namespace Chat {
       sock.data.seen.add(id + "+" + n);
       if (n === 1) {
         const m = Memory.at(chat.mem, id);
-        Chat.send(sock, { $: "know", whole: { [id]: { kind: m.kind, text: m.text, date: m.date, images: m.images, of: m.of, tool: m.tool } } });
+        Chat.send(sock, { $: "know", whole: { [id]: { kind: m.kind, text: m.text, date: m.date, images: m.images, of: m.of, tool: m.tool, from: m.from } } });
       }
       Chat.know(chat, sock, id, n);
     }

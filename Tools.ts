@@ -34,6 +34,7 @@ export type Seat = {
   note   : (text: string) => void;
   report : (text: string) => void;
   timed  : () => void;
+  message: (to: string, text: string) => Promise<Out>;
 };
 
 // what the agents share: their notes on devices and MCP servers go to Unii
@@ -95,6 +96,7 @@ const BOSS: Spec[] = [
   }, ["message", "zone"]),
   spec("schedules", "List the chat's schedules: id, when each comes next, its message.", {}, []),
   spec("unschedule", "Cancel a schedule, by its id.", { id: STR }, ["id"]),
+  spec("message", "Send a message to another agent of the team, by name. It lands in their chat as a new message from you, starting \"[your name]\", and starts a turn there; one at work gets it right after its current tool calls. No one answers by itself: the only way to answer an agent is to call message to it, and your plain reply stays in your own chat, for the user.", { agent: STR, text: STR }, ["agent", "text"]),
   spec("resume", "Wake every call on this server waiting for an AI service's usage limit (other turns, summaries), when the user says a limit was reset early. Each asks again once; one still limited waits again.", {}, []),
 ];
 const DEVICE = { device: { type: "string", description: "The name of the device to run on, one listed under Devices." } };
@@ -292,6 +294,9 @@ export namespace Tools {
       case "unschedule": {
         const id = String(args.id);
         return Tools.unschedule(seat, id) ? { text: "Cancelled " + id + ".", fail: false } : { text: "No schedule " + id + ".", fail: true };
+      }
+      case "message": {
+        return await seat.message(text_of(args.agent), text_of(args.text));
       }
       case "resume": {
         const n = Limit.resume();

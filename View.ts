@@ -9,11 +9,12 @@ import { rec } from "./Json.ts";
 
 export type Part = [number, number];
 
-type Entry = { kind: Kind; text: string; date?: string; images?: string[]; of?: string; tool?: string };
+type Entry = { kind: Kind; text: string; date?: string; images?: string[]; of?: string; tool?: string; from?: string };
 
 export type Queued = { kind: Kind; text: string };
 
-export type Pending = Queued & { images: string[]; act?: string };
+// hop and from: another agent's message, the hop it is on and whose it is
+export type Pending = Queued & { images: string[]; act?: string; hop?: number; from?: string };
 
 type Of = { tool: string; apart: boolean };
 

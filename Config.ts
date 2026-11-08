@@ -20,6 +20,7 @@ type Made = {
   context   : number;
   after     : string;
   instructions : string;
+  hops      : number;
 };
 
 export type McpServer = {
@@ -49,6 +50,7 @@ export const SETTINGS: Setting[] = [
   { key: "compactor", def: "claude-api:sonnet-5.5:medium:slow", apply: "now",     server_only: null },
   { key: "compactor_context", def: "4",                         apply: "now",     server_only: null },
   { key: "instructions", def: "",                               apply: "now",     server_only: null },
+  { key: "hops",      def: "4",                                 apply: "now",     server_only: null },
   { key: "site",      def: "http://127.0.0.1:8788",             apply: "restart", server_only: null },
   { key: "apple",     def: "",                                  apply: "restart", server_only: null },
   { key: "apns",      def: "",                                  apply: "restart", server_only: null },
@@ -102,6 +104,7 @@ export const OFFER: Offer = MADE.offer;
 
 export let   AFTER      = MADE.after;
 export let   INSTRUCTIONS = MADE.instructions;
+export let   HOPS       = MADE.hops;
 export let   PICK       = MADE.pick;
 
 export let   COMPACTOR  = MADE.compactor;
@@ -296,7 +299,16 @@ export function config_make(file: Record<string, unknown>): Made {
     context   : config_context(config_value(file, "compactor_context")),
     after     : config_value(file, "after"),
     instructions : config_value(file, "instructions"),
+    hops      : config_hops(config_value(file, "hops")),
   };
+}
+
+function config_hops(text: string): number {
+  const n = Number(text.trim());
+  if (!Number.isInteger(n) || n < 0 || n > 100) {
+    throw new Error("config: hops is a whole number from 0 to 100, not " + text);
+  }
+  return n;
 }
 
 function config_context(text: string): number {
@@ -447,6 +459,7 @@ export function config_reload(): void {
   COMPACTOR_CONTEXT = made.context;
   AFTER = made.after;
   INSTRUCTIONS = made.instructions;
+  HOPS = made.hops;
   Object.assign(KEYS, keys);
   RELOADED.forEach((f) => f());
 }
