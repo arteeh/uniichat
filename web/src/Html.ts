@@ -197,7 +197,7 @@ export function timers_html(timers: Timer.Timer[]): string[] {
 }
 
 // an agent as its settings page reads and saves it
-export type Agent = { id: string; name: string; about: string; picture: string; prompt: string; own: boolean; pick: string; archived: number };
+export type Agent = { id: string; name: string; about: string; picture: string; prompt: string; own: boolean; archived: number };
 
 export function agent_html(a: Agent | null, unii: boolean): string {
   const id = a?.id ?? "";
@@ -214,8 +214,7 @@ export function agent_html(a: Agent | null, unii: boolean): string {
     + section_html("Agent",
       set("name", "Name", "1 to 24 characters, no @.", `<input id="ag-name" name="name" maxlength="24" value="${esc(a?.name ?? "")}" spellcheck="false">`)
       + set("about", "Description", "One line, for the chat list and the other agents.", `<input id="ag-about" name="about" maxlength="120" value="${esc(a?.about ?? "")}">`)
-      + set("prompt", "System prompt", "Who this agent is and what it does. It follows the name until you edit it.", `<textarea id="ag-prompt" name="prompt" rows="6" spellcheck="true">${esc(a?.prompt ?? "")}</textarea>`)
-      + set("pick", "Model and effort", "What it runs on.", `<input type="hidden" name="pick" value="${esc(a?.pick ?? "")}"><div class="four"></div>`))
+      + set("prompt", "System prompt", "Who this agent is and what it does. It follows the name until you edit it.", `<textarea id="ag-prompt" name="prompt" rows="6" spellcheck="true">${esc(a?.prompt ?? "")}</textarea>`))
     + `<div class="save"><p class="why"></p><button class="chip go">${a === null ? "Create" : "Save"}</button></div></form>` + archive;
 }
 

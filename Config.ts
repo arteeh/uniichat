@@ -327,14 +327,6 @@ function config_context(text: string): number {
   return kb * 1000;
 }
 
-export function config_pick(text: string): Pick | null {
-  try {
-    return config_run("pick", text, OFFER);
-  } catch {
-    return null;
-  }
-}
-
 function config_run(key: string, text: string, offer: Offer): Pick {
   const [vendor, model, effort, speed] = text.split(":");
   const pick = Pick.read(Object.hasOwn(offer.profiles ?? {}, text) ? { profile: text, effort: "medium", speed: "slow" } : { vendor, model, effort, speed }, offer);

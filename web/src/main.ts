@@ -1140,9 +1140,6 @@ async function agents(): Promise<Html.Agent[] | null> {
 async function agent_page(id: string | null): Promise<void> {
   const el = $("#account");
   const all = await agents();
-  for (let k = 0; k < 30 && v.vendors.length === 0; k++) {
-    await new Promise((ok) => setTimeout(ok, 100));
-  }
   const a = id === null ? null : all?.find((x) => x.id === id) ?? null;
   if (all === null || (id !== null && a === null)) {
     el.innerHTML = `<a class="back" href="/" data-go="/">← Chats</a><p class="sub">${all === null ? "Could not read the agents. Try again in a moment." : "No such agent."}</p>`;
@@ -1150,7 +1147,7 @@ async function agent_page(id: string | null): Promise<void> {
   }
   el.innerHTML = Html.agent_html(a, id === UNII);
   const form = find(el, "form", HTMLFormElement);
-  const [name, prompt, pick] = [find(form, "[name=name]", HTMLInputElement), find(form, "[name=prompt]", HTMLTextAreaElement), find(form, "[name=pick]", HTMLInputElement)];
+  const [name, prompt] = [find(form, "[name=name]", HTMLInputElement), find(form, "[name=prompt]", HTMLTextAreaElement)];
   const was = { name: a?.name ?? "", prompt: a?.own ? null : a?.prompt ?? "You are {Name}." };
   const follow = () => {
     if (was.prompt !== null) {
@@ -1161,11 +1158,6 @@ async function agent_page(id: string | null): Promise<void> {
     form.querySelectorAll<HTMLInputElement>("[name=picture]")[Math.floor(Math.random() * 24)].checked = true;
     follow();
   }
-  const four = () => {
-    const box = must(form.querySelector(".four"), "the agent's model");
-    box.innerHTML = Html.picks_html("pick", v.vendors, v.models, pick.value, "The default model", Object.keys(v.profiles ?? {}));
-  };
-  four();
   RENEW.dirty.clear();
   form.oninput = (ev) => {
     RENEW.dirty.add(form);
@@ -1174,9 +1166,6 @@ async function agent_page(id: string | null): Promise<void> {
       was.prompt = null;
     } else if (t === name) {
       follow();
-    } else if (t instanceof HTMLSelectElement) {
-      pick.value = Html.pick_mend([...form.querySelectorAll<HTMLSelectElement>(".four select")].map((s) => s.value), v.models, Object.keys(v.profiles ?? {}));
-      four();
     }
   };
   form.onsubmit = (ev) => {
@@ -1227,7 +1216,7 @@ async function picture_up(form: HTMLFormElement, file: File): Promise<void> {
 
 async function agent_save(form: HTMLFormElement, a: Html.Agent | null): Promise<void> {
   const data = new FormData(form);
-  const body = Object.fromEntries(["name", "about", "picture", "prompt", "pick"].map((k) => [k, text_of(data.get(k))]));
+  const body = Object.fromEntries(["name", "about", "picture", "prompt"].map((k) => [k, text_of(data.get(k))]));
   const why = must(form.querySelector(".save .why"), "the save's why");
   RENEW.saving++;
   const out = await View.post("/api/agents" + (a === null ? "" : "/" + a.id), body);

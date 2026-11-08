@@ -1698,8 +1698,7 @@ export namespace Main {
       return Response.json(out, { status: out.error === undefined ? 200 : 400 });
     }
     return Response.json(Team.all().map((a) => {
-      const pick = Main.chats.get(a.id)?.mem.pick ?? null;
-      return { ...a, prompt: Team.prompt(a), own: a.prompt !== null, pick: pick === null ? "" : Chat.pick_name(pick as Pick) };
+      return { ...a, prompt: Team.prompt(a), own: a.prompt !== null };
     }));
   }
 
@@ -1724,24 +1723,11 @@ export namespace Main {
     if (what === "archive" || what === "restore") {
       return out(id === UNII ? { error: "Unii can't be archived." } : Main.shelve(chat, what === "archive"));
     }
-    const body: unknown = await req.json().catch(() => null);
-    const fields = Team.fields(body, id);
-    const given = get(body, "pick");
-    const pick = typeof given !== "string" || given === "" ? null : config.config_pick(given);
+    const fields = Team.fields(await req.json().catch(() => null), id);
     if (typeof fields === "string") {
       return out({ error: fields });
     }
-    if (typeof given === "string" && given !== "" && pick === null) {
-      return out({ error: given + " isn't offered here." });
-    }
     Team.set(id, fields);
-    if (typeof given === "string" && (pick === null) !== (chat.mem.pick === null || given !== Chat.pick_name(chat.mem.pick as Pick))) {
-      chat.mem.pick = pick;
-      chat.pick = Pick.load(pick, config.OFFER, config.PICK);
-      chat.mem.used = null;
-      Memory.save(chat.mem);
-      Main.keep_picks();
-    }
     Main.chats.forEach((c) => Chat.change(c));
     return out({});
   }
