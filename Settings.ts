@@ -35,8 +35,6 @@ const NAME     = 60;
 const TAIL = 4;
 const MASK = 20;
 
-const APPLE = /^[A-Z0-9]{10}\.[A-Za-z0-9.-]+$/;
-const APNS  = /^[A-Z0-9]{10}$/;
 
 export namespace Settings {
 
@@ -169,9 +167,8 @@ export namespace Settings {
         continue;
       }
       const key = typeof value === "string" ? value.trim() : "";
-      const ok = name === "apns" ? /^[\x20-\x7e\r\n\t]+$/ : /^[\x21-\x7e]+$/;
-      if (key.length === 0 || key.length > KEY || !ok.test(key)) {
-        return refuse(400, "That doesn't look like a " + name + " key" + (name === "apns" ? "." : " (one word, no spaces)."), "key." + name);
+      if (key.length === 0 || key.length > KEY || !/^[\x21-\x7e]+$/.test(key)) {
+        return refuse(400, "That doesn't look like a " + name + " key (one word, no spaces).", "key." + name);
       }
       kept[name] = key;
     }
@@ -242,14 +239,6 @@ export namespace Settings {
     } catch {}
     if (changed.has("site") && (url === null || !/^https?:$/.test(url.protocol) || url.pathname.replace(/\/$/, "") !== "" || url.search !== "" || url.hash !== "" || url.username !== "" || url.password !== "")) {
       return { error: "The site is the address the server is reached at, like https://chat.example.com.", key: "site" };
-    }
-    const apple = config.config_value(file, "apple");
-    if (changed.has("apple") && apple !== "" && !APPLE.test(apple)) {
-      return { error: "The App ID is the team's ID, a dot, then the bundle's: TEAM123456.com.example.uniichat.", key: "apple" };
-    }
-    const apns = config.config_value(file, "apns");
-    if (changed.has("apns") && apns !== "" && !APNS.test(apns)) {
-      return { error: "The APNs key ID is 10 letters and digits.", key: "apns" };
     }
     return null;
   }

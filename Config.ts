@@ -56,8 +56,6 @@ export const SETTINGS: Setting[] = [
   { key: "thinking",  def: "off",                               apply: "now",     server_only: null },
   { key: "verbose",   def: "on",                                apply: "now",     server_only: null },
   { key: "site",      def: "http://127.0.0.1:8788",             apply: "restart", server_only: null },
-  { key: "apple",     def: "",                                  apply: "restart", server_only: null },
-  { key: "apns",      def: "",                                  apply: "restart", server_only: null },
   { key: "after",     def: "",                                  apply: "now",     server_only: "runs a command" },
 ];
 
@@ -80,7 +78,6 @@ const NONE_WHY = "not signed in, no key";
 export const VARS: Record<string, string> = {
   anthropic       : "ANTHROPIC_API_KEY",
   openai          : "OPENAI_API_KEY",
-  apns            : "APNS_KEY",
 };
 
 const FILE: Record<string, unknown> = config_file();
@@ -116,8 +113,6 @@ export let   PICK       = MADE.pick;
 export let   COMPACTOR  = MADE.compactor;
 export let   COMPACTOR_CONTEXT = MADE.context;
 
-export const APPLE      = config_value(FILE, "apple");
-export const APNS       = config_value(FILE, "apns");
 
 export const MEDIA_MAX  = (Number(config_get("media_mb", "")) || 1024) * 2 ** 20;
 
@@ -493,13 +488,10 @@ export function keys_of(text: string | null): Record<string, string> {
   }
   const json = config_json(KEYS_PATH, text);
   const keys = rec(json) ? json : {};
-  return Object.fromEntries(Object.keys(VARS).flatMap((name) => {
-    const key = keys[name];
-    return typeof key === "string" && key !== "" ? [[name, key]] : [];
-  }));
+  return Object.fromEntries(Object.entries(keys).flatMap(([name, key]) => (typeof key === "string" && key !== "" ? [[name, key]] : [])));
 }
 
 export function keys_text(keys: Record<string, string>): string | null {
-  const kept = Object.fromEntries(Object.entries(keys).filter(([name, key]) => VARS[name] !== undefined && key !== ""));
+  const kept = Object.fromEntries(Object.entries(keys).filter(([, key]) => key !== ""));
   return Object.keys(kept).length === 0 ? null : JSON.stringify(kept, null, 2) + "\n";
 }

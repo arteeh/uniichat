@@ -51,7 +51,7 @@ Set up
 
 1. **Start the server** on the computer that keeps your chat: `unii serve -d`. It runs in the background from then on, at http://127.0.0.1:8788, with its data in `~/.unii` (or `$UNII_DIR`). To use it from other devices, put it behind HTTPS (see Q&A) and set `site` in Settings to that address.
 2. **Sign in.** `unii serve link` on that computer prints a link that signs your browser in. Terminals and devices sign in with a link and a code you confirm in that browser.
-3. **Pick a model.** In the web app, ☰ › Settings: add API keys. To use your Claude or ChatGPT plan instead, run `unii serve claude login` or `unii serve chatgpt login` on the server's computer, then pick `claude-sub` or `openai-sub`.
+3. **Pick a model.** In the web app, Settings (the cogwheel): add API keys. To use your Claude or ChatGPT plan instead, run `unii serve claude login` or `unii serve chatgpt login` on the server's computer, then pick `claude-sub` or `openai-sub`.
 4. **Add your computers.** On each one Unii may work on: `unii device -d https://your-server`. Unii works in `~/.unii/work` there. Want it working on the server's computer too? Run a device there as well.
 
 **MCP servers** belong to a device: list them in that device's `~/.unii/config.json`, in the same shape as Claude's `mcpServers`:

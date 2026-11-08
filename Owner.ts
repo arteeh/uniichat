@@ -27,8 +27,6 @@ const WEB_PUSHES = 32;
 const SCHEMA = `
 create table if not exists sessions (hash text primary key, what text not null default '', at integer not null default 0);
 create table if not exists tickets  (hash text primary key, data text not null, expires integer not null);
-create table if not exists pushes   (token text primary key, session text not null);
-create trigger if not exists pushes_go after delete on sessions begin delete from pushes where session = old.hash; end;
 create table if not exists web_pushes (endpoint text primary key, p256dh text not null, auth text not null, session text not null);
 create trigger if not exists web_pushes_go after delete on sessions begin delete from web_pushes where session = old.hash; end;
 create table if not exists acts     (id text primary key, ans text not null, at integer not null);
@@ -177,10 +175,6 @@ export namespace Owner {
         WAITS.delete(hash);
         return Response.json({ ok: signed }, signed ? {} : { status: 408 });
       }
-      case "/.well-known/apple-app-site-association": {
-        const links = [{ "/": "/auth" }];
-        return config.APPLE ? Response.json({ applinks: { details: [{ appIDs: [config.APPLE], components: links }] } }) : null;
-      }
       case "/api/logout": {
         db.query("delete from sessions where hash = ?").run(Owner.hash(Owner.token(req)));
         return Owner.out();
@@ -191,14 +185,6 @@ export namespace Owner {
     }
     switch (url.pathname) {
       case "/api/me": {
-        return Response.json({ ok: true });
-      }
-      case "/api/push": {
-        const token = (await req.text()).trim();
-        if (!/^[0-9a-f]{64,256}$/.test(token)) {
-          return Response.json({ error: "Not a push token" }, { status: 400 });
-        }
-        db.query("insert or replace into pushes values (?, ?)").run(token, Owner.hash(Owner.token(req)));
         return Response.json({ ok: true });
       }
       case "/api/webpush": {

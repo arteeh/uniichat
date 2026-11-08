@@ -262,14 +262,11 @@ const SETTING: Record<string, [string, string]> = {
   instructions : ["Instructions", "Every agent's prompt has these: who you are, how your files are organised, how you want work done."],
   compactor_context : ["Compactor context", "How much of the chat each summary sees, in KB (1 to 128). More context lets it copy more into a summary that its message doesn't say. New summaries only."],
   site      : ["Site", "The server's address, for sign-in links and the installer."],
-  apple     : ["iOS App ID", "The app's team and bundle ID, whose sign-in links it opens."],
-  apns      : ["APNs key ID", "The ID of the key the app's pushes are signed with."],
 };
 
 const KEY: Record<string, [string, string]> = {
   anthropic : ["Anthropic key", "For claude-api's models."],
   openai    : ["OpenAI key", "For openai-api's models and dictation."],
-  apns      : ["APNs key", "The .p8 key the iOS app's pushes are signed with."],
 };
 
 export const VENDOR_KEY: Record<string, string> = { "claude-api": "anthropic", "openai-api": "openai" };
@@ -281,7 +278,7 @@ const GROUPS: Array<[string, string[]]> = [
   ["Chat", ["thinking", "verbose"]],
   ["Agents", ["hops"]],
   ["Models", ["vendors", "models", "pick", "compactor", "compactor_context"]],
-  ["Server", ["site", "apple", "apns"]],
+  ["Server", ["site"]],
 ];
 
 export function settings_html(page: Page): string {
@@ -382,7 +379,7 @@ function from_html(r: Row): string {
 function key_html(k: Key): string {
   const [name, about] = KEY[k.name] ?? [k.name, ""];
   const id = "set-key-" + k.name;
-  const field = k.name === "apns" ? `<textarea id="${id}" name="key.${k.name}" rows="3" placeholder="Paste a new key to set it" spellcheck="false"></textarea>` : `<input id="${id}" type="password" name="key.${k.name}" autocomplete="new-password" placeholder="Paste a new key to set it" spellcheck="false" autocapitalize="off">`;
+  const field = `<input id="${id}" type="password" name="key.${k.name}" autocomplete="new-password" placeholder="Paste a new key to set it" spellcheck="false" autocapitalize="off">`;
   const tail = k.tail === "" ? "" : `, ending in <code>${esc(k.tail)}</code>`;
   const from = k.from === "file" ? `Set${tail}, in keys.json` : "Not set";
   const reset = k.from === "file" ? ` <button type="button" class="reset">Remove</button>` : "";

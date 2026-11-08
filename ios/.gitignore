@@ -1,7 +1,0 @@
-# made by xcodegen from project.yml
-UniiChat.xcodeproj/
-App/Info.plist
-App/App.entitlements
-Share/Info.plist
-Share/Share.entitlements
-build/

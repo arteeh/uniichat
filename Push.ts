@@ -1,7 +1,6 @@
 // Push
 // ====
-// Each turn's last message to the owner's phones (the iOS app, by APNs)
-// and browsers (notify). Web Push (RFC 8030) with no vendor's account: the server's own VAPID
+// Each turn's last message to the owner's browsers (notify). Web Push (RFC 8030) with no vendor's account: the server's own VAPID
 // key pair (RFC 8292), made at its first start and kept beside its config
 // (config.DIR/vapid.json; a new pair loses every browser's subscription),
 // signs each request, and each message is encrypted to its browser's
@@ -12,7 +11,6 @@ import type { Database } from "bun:sqlite";
 import * as crypto from "node:crypto";
 import * as dns from "node:dns";
 import * as fs from "node:fs";
-import * as http2 from "node:http2";
 import * as net from "node:net";
 import * as config from "./Config.ts";
 import { write_whole } from "./Write.ts";
@@ -61,11 +59,6 @@ const GIST = 200;
 
 export const ACTIVE_MS = 60 * 1000;
 
-// the connection to APNs, kept open as Apple asks, and the token its
-// requests carry, signed again past 40 minutes (Apple takes 20 to 60)
-const PUSH = { link: null as http2.ClientHttp2Session | null, jwt: "", at: 0, by: "" };
-const PUSH_AGE = 40 * 60 * 1000;
-
 type Broken = { broken: string };
 
 let KEYS: Keys | Broken | undefined;
@@ -74,33 +67,7 @@ export namespace Push {
 
   // who: the agent whose reply it is, its name, picture and chat
   export function notify(db: Database, text: string, who: Who): void {
-    Push.phones(db, text, who);
     Push.browsers(db, text, who);
-  }
-
-  export function phones(db: Database, text: string, who: Who): void {
-    if (!config.APNS || !config.KEYS.apns) {
-      return;
-    }
-        const phones = db.query("select token from pushes").all() as { token: string }[];
-    const body = JSON.stringify({ aps: { alert: { title: who.title, body: Push.gist(text) }, sound: "default" }, url: who.url });
-    for (const { token } of phones) {
-      const link = Push.apns();
-      const head = { ":method": "POST", ":path": "/3/device/" + token, authorization: "bearer " + Push.apns_jwt(), "apns-topic": config.APPLE.replace(/^[^.]*\./, ""), "apns-push-type": "alert" };
-      const req = link.request(head);
-      let out = "";
-      req.setEncoding("utf8");
-      req.on("data", (got: string) => (out += got));
-      req.on("error", (err) => console.error("push: " + err.message));
-      req.on("end", () => {
-        if (/Unregistered|BadDeviceToken/.test(out)) {
-          db.query("delete from pushes where token = ?").run(token);
-        } else if (out !== "") {
-          console.error("push: " + out);
-        }
-      });
-      req.end(body);
-    }
   }
 
   export function gist(text: string): string {
@@ -119,32 +86,6 @@ export namespace Push {
         }
       });
     }
-  }
-
-  export function apns(): http2.ClientHttp2Session {
-    const old = PUSH.link;
-    if (old !== null && !old.closed && !old.destroyed) {
-      return old;
-    }
-    const link = (PUSH.link = http2.connect("https://api.push.apple.com"));
-    link.on("error", (err) => console.error("push: " + err.message));
-    link.on("close", () => PUSH.link === link && (PUSH.link = null));
-    return link;
-  }
-
-  export function apns_jwt(): string {
-    const by = crypto.createHash("sha256").update(config.APNS + "\0" + config.APPLE + "\0" + config.KEYS.apns).digest("hex");
-    if (Date.now() - PUSH.at > PUSH_AGE || PUSH.by !== by) {
-      const b64 = (obj: object) => Buffer.from(JSON.stringify(obj)).toString("base64url");
-      const head = b64({ alg: "ES256", kid: config.APNS }) + "." + b64({ iss: config.APPLE.split(".")[0], iat: Math.floor(Date.now() / 1000) });
-      const der = Buffer.from(config.KEYS.apns.replace(/-----[^-]+-----|\s/g, ""), "base64");
-      const key = crypto.createPrivateKey({ key: der, format: "der", type: "pkcs8" });
-      const sig = crypto.sign("sha256", Buffer.from(head), { key, dsaEncoding: "ieee-p1363" });
-      PUSH.jwt = head + "." + sig.toString("base64url");
-      PUSH.at = Date.now();
-      PUSH.by = by;
-    }
-    return PUSH.jwt;
   }
 
 

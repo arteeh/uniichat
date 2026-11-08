@@ -14,12 +14,6 @@ type Read = { sessions: Import.Session[]; moved: number };
 
 type Back = { at: { a: number; top: number } | null; y: number | null; away: { y: number; end: boolean } | null; caret: [number, number]; focus: boolean; open: string[] };
 
-declare global {
-  interface Window { webkit?: { messageHandlers?: { unii?: { postMessage: (msg: unknown) => void } } } }
-}
-
-const APP = window.webkit?.messageHandlers?.unii ?? null;
-
 const DESK = matchMedia("(hover: hover)");
 
 const ME_WAIT = 4000;
@@ -95,10 +89,8 @@ function kept(fact: string): string {
 
 async function boot(): Promise<void> {
   document.head.insertAdjacentHTML("beforeend", `<style>${theme_css()}</style>`);
-  if (APP === null) {
-    navigator.serviceWorker?.register("/sw.js").catch(() => {});
-    notes_close();
-  }
+  navigator.serviceWorker?.register("/sw.js").catch(() => {});
+  notes_close();
   const tree = location.pathname === TREE ? TREE + location.search + (tree_view() ? "#view" : "") : null;
   const own = AGENT.test(location.pathname) || location.pathname === "/new" ? location.pathname : null;
   const state: unknown = history.state;
@@ -581,7 +573,7 @@ function connect(): void {
 
 // only while the app is still in view once they are found
 function notes_close(): void {
-  const seen = () => APP === null && document.visibilityState === "visible";
+  const seen = () => document.visibilityState === "visible";
   if (seen()) {
     navigator.serviceWorker?.ready.then((reg) => reg.getNotifications()).then((notes) => notes.forEach((n) => seen() && n.close())).catch(() => {});
   }
@@ -1308,9 +1300,6 @@ async function signout(): Promise<void> {
 
 async function notify_state(): Promise<Html.Notify | null> {
   P.push = null;
-  if (APP !== null) {
-    return null;
-  }
   if (navigator.serviceWorker === undefined || !("PushManager" in window) || !("Notification" in window)) {
     return /iPhone|iPad/.test(navigator.userAgent) ? "home" : null;
   }
