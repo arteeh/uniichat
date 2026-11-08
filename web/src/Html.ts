@@ -38,6 +38,30 @@ function copy_html(text: string): string {
   return `<button class="copy" data-copy="${esc(text)}" title="Copy">${SHEETS}</button>`;
 }
 
+// an agent's picture: Unii's logo, a premade head, or an upload
+export function face_html(picture: string): string {
+  if (picture === "unii") {
+    return `<span class="pic logo"><i class="mark"></i></span>`;
+  }
+  const src = /^head-\d\d$/.test(picture) ? "/heads/" + picture + ".svg" : picture;
+  return src === "" ? `<span class="pic"></span>` : `<img class="pic" src="${esc(src)}" alt="">`;
+}
+
+const TEAM = new Map<string, View.Mate>();
+
+export function team_set(team: View.Mate[]): void {
+  TEAM.clear();
+  team.forEach((m) => TEAM.set(m.id, m));
+}
+
+export function list_html(team: View.Mate[], here: string | null): string[] {
+  return team.filter((m) => m.archived === 0).map((m) => {
+    const pill = m.unread > 0 ? `<span class="pill">${m.unread}</span>` : "";
+    const on = m.id === here ? ` aria-current="page"` : "";
+    return `<a class="mate" href="/a/${esc(m.id)}" data-go="/a/${esc(m.id)}"${on}>${face_html(m.picture)}<span class="text"><b>${esc(m.name)}</b><small>${esc(m.last || m.about)}</small></span>${pill}</a>`;
+  });
+}
+
 const MADE = new WeakMap<View.Row, string>();
 
 export function row_html(row: View.Row): string {
@@ -72,6 +96,12 @@ function row_make(row: View.Row): string {
       const who = row.who === "" ? "" : ` data-who="${esc(row.who)}"`;
       const queued = row.queued === true ? " queued" : "";
       const long = cut && whole.split("\n").reduce((n, line) => n + Math.max(1, Math.ceil(line.length / WRAP)), 0) > FOLD ? " long" : "";
+      if (row.from !== undefined) {
+        const mate = TEAM.get(row.from);
+        const gist = Md.md_flat(Call.report_read(row.text)?.text ?? row.text);
+        const head = `<summary>${face_html(mate?.picture ?? "")}<b>${esc(mate?.name ?? row.who)}</b><span>${esc(gist)}</span></summary>`;
+        return `<div class="msg ${row.kind} said${queued}"${at}><details>${head}${copy}${body}${pics}</details></div>`;
+      }
       return `<div class="msg ${row.kind}${queued}${long}"${at}${who}>${copy}${fold}${pics}</div>`;
     }
     case "Cap": {

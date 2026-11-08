@@ -1,6 +1,6 @@
 const CACHE = "unii-shell-{build}";
 const SHELL = ["/", "/app.js", "/style.css", "/favicon.svg", "/mark.svg", "/manifest.webmanifest", "/icon-192.png"];
-const PAGES = ["/", "/settings", "/account", "/tree"];
+const PAGES = ["/", "/settings", "/account", "/tree", "/new"];
 
 // Safari takes a subscription back from a site whose pushes show nothing,
 // so there every push shows
@@ -17,7 +17,7 @@ self.addEventListener("activate", (ev) => {
 self.addEventListener("fetch", (ev) => {
   const req = ev.request;
   const url = new URL(req.url);
-  const page = req.mode === "navigate" && PAGES.includes(url.pathname);
+  const page = req.mode === "navigate" && (PAGES.includes(url.pathname) || /^\/a\/[a-z0-9]+(\/edit)?$/.test(url.pathname));
   if (req.method !== "GET" || url.origin !== location.origin || !(page || SHELL.includes(url.pathname))) {
     return;
   }

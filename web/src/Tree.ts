@@ -19,15 +19,21 @@ type Old = Map<string, number[]> & { total?: number };
 
 type Which = "TREE" | "VIEW";
 
-const LEGEND: Record<Which, string> = { VIEW: "What Unii's prompt holds now, in order: old messages as summaries, recent ones whole.", TREE: "" };
+const LEGEND: Record<Which, string> = { VIEW: "What {Name}'s prompt holds now, in order: old messages as summaries, recent ones whole.", TREE: "" };
 
 const S = {
+  agent : "",
+  name  : "",
   want  : null as Which | null,
   asked : 0,
   run   : null as { show: (which: Which) => void; stop: () => void } | null,
 };
 
-export function tree_show(which: Which): void {
+export function tree_show(which: Which, agent: string, name: string): void {
+  if (agent !== S.agent) {
+    tree_hide();
+  }
+  [S.agent, S.name] = [agent, name];
   const was = S.want;
   S.want = which;
   tabs(which);
@@ -40,7 +46,7 @@ export function tree_show(which: Which): void {
     return;
   }
   const me = ++S.asked;
-  fetch("/api/tree").then((r) => (r.ok ? (r.json() as Promise<Meta>) : Promise.reject(new Error("HTTP " + r.status)))).then((meta) => {
+  fetch("/api/tree?agent=" + encodeURIComponent(S.agent)).then((r) => (r.ok ? (r.json() as Promise<Meta>) : Promise.reject(new Error("HTTP " + r.status)))).then((meta) => {
     if (me === S.asked && S.want !== null) {
       S.run = start(meta);
       S.run.show(S.want);
@@ -79,7 +85,7 @@ function focus(which: Which): void {
 
 function tabs(which: Which): void {
   $(".prev").hidden = $(".next").hidden = which !== "TREE";
-  $(".legend").innerHTML = LEGEND[which];
+  $(".legend").textContent = LEGEND[which].replace("{Name}", S.name);
   document.querySelectorAll<HTMLElement>("#tree .tab").forEach((a) => a.classList.toggle("here", a.dataset.tab === which));
   $(".view").classList.toggle("on", which === "VIEW");
   $(".bracket").classList.toggle("on", which === "TREE");
@@ -213,7 +219,7 @@ const load = () => {
       moving || draw();
     };
     part.forEach((k) => got.set(k, null));
-    fetch("/api/tree?get=" + part.join(","), { signal }).then((r) => r.json() as Promise<(Got | null)[]>).then(put, () => put(part.map((k) => ({ h: k, t: "Could not load this: reload the page." }))));
+    fetch("/api/tree?agent=" + encodeURIComponent(S.agent) + "&get=" + part.join(","), { signal }).then((r) => r.json() as Promise<(Got | null)[]>).then(put, () => put(part.map((k) => ({ h: k, t: "Could not load this: reload the page." }))));
   }
 };
 const draw = (y = tree.scrollTop, e = 1, old?: Old) => {

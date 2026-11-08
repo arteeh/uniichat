@@ -22,6 +22,9 @@ type Node = { text: string; to: string };
 
 export type Live = { kind: Kind; text: string };
 
+// an agent as the chat list shows it: last, its last message's gist
+export type Mate = { id: string; name: string; about: string; picture: string; unread: number; last: string; busy: boolean; archived: number };
+
 export type Progress = { done: number; total: number; why: string | null; msgs: number; open: number[] };
 
 const PACE = 1e-4;
@@ -72,7 +75,11 @@ export type Talk = { from: number; used: number; tokens: number; window: number;
 
 export type Plug = { name: string; on: boolean };
 
+// agent: the agent whose chat is wanted; on: whose chat the server sends
 export type View = State & {
+  agent : string;
+  on    : string;
+  team  : Mate[];
   parts : Part[];
   turn  : number;
   fold  : Part[] | null;
@@ -103,6 +110,7 @@ export type Server =
   | { $: "live"; live: Live[] }
   | ({ $: "state" } & State)
   | { $: "note"; text: string }
+  | { $: "team"; agents: Mate[] }
   | { $: "error"; text: string; build?: string; wire?: number }
   | ({ $: "ack"; id: string } & Answer)
   | { $: "jobs"; ids: string[] }
@@ -115,7 +123,7 @@ type Upload = BodyInit | AsyncIterable<string>;
 type Body   = () => Upload | Promise<Upload>;
 
 export type Client =
-  | { $: "say"; sizes: number[]; body: Body }
+  | { $: "say"; sizes: number[]; body: Body; agent?: string }
   | { $: "import"; body: Body }
   | { $: "voice"; type: string; body: Body }
   | { $: "stop" }
@@ -129,7 +137,8 @@ export type Client =
   | { $: "running"; jobs: Bg[] }
   | { $: "unschedule"; id: string }
   | { $: "zoom"; part: Part }
-  | { $: "root" };
+  | { $: "root" }
+  | { $: "open"; agent: string };
 
 type Post = { msg: Client & { id: string }; ws: WebSocket | null; done: (a: Answer) => void; said: string };
 
@@ -153,7 +162,7 @@ export type Act =
 export type Row =
   | { $: "Sum"; id: number; n: number; text: string; call: Call.Call | null }
   | { $: "Box"; id: number; n: number; text: string; rows: Row[] }
-  | { $: "Msg"; id: number | null; kind: Kind; who: string; text: string; body: Md.Block[]; call: Call.Call | null; images: string[]; queued?: boolean }
+  | { $: "Msg"; id: number | null; kind: Kind; who: string; text: string; body: Md.Block[]; call: Call.Call | null; images: string[]; queued?: boolean; from?: string }
   | { $: "Cap"; text: string }
 
 export type Knob = { text: string; move: Move; hint: string; choices: Choice[] };
@@ -248,8 +257,11 @@ export function talk_tokens(talk: Talk): string {
   return "about " + k(talk.tokens) + " of " + talk.model + "'s " + k(talk.window) + " tokens" + (talk.guess ? ", guessed: no request yet" : ", in its last request and the messages since");
 }
 
-export function view_new(): View {
+export function view_new(agent: string): View {
   return {
+    agent     : agent,
+    on        : "",
+    team      : [],
     busy      : false,
     wait      : "",
     pick      : null,
@@ -283,8 +295,41 @@ export function view_new(): View {
   };
 }
 
+// another chat's state starts the wanted one's chat afresh, and what the
+// server sent of the chat before it is dropped
+export function view_switch(v: View, agent: string): Client[] {
+  if (v.agent === agent) {
+    return [];
+  }
+  v.agent = agent;
+  return v.up ? [{ $: "open", agent }] : [];
+}
+
+function view_chat(v: View): void {
+  const fresh = view_new(v.agent);
+  for (const k of ["busy", "wait", "importing", "limit", "queue", "sent", "sums", "again", "timers", "talk", "parts", "turn", "fold", "nodes", "whole", "open", "live", "minds"] as const) {
+    Object.assign(v, { [k]: fresh[k] });
+  }
+}
+
+const OWN = ["team", "ack", "error", "note", "jobs", "job"];
+
 export function view_hear(v: View, msg: Server): Client[] {
+  if (msg.$ === "state" && msg.agent !== undefined && v.on === "" && msg.agent !== v.agent) {
+    v.agent = msg.agent;
+  }
+  if (msg.$ === "state" && msg.agent !== undefined && msg.agent !== v.on && msg.agent === v.agent) {
+    view_chat(v);
+    v.on = msg.agent;
+  }
+  if (!OWN.includes(msg.$) && v.on !== v.agent) {
+    return [];
+  }
   switch (msg.$) {
+    case "team": {
+      v.team = msg.agents;
+      return [];
+    }
     case "know": {
       view_learn(v, msg);
       return [];
@@ -534,7 +579,8 @@ function view_entry(v: View, msg: Server & { $: "entry" }): void {
 }
 
 export function link_open(v: View, link: Link): void {
-  const ws   = link.open("?tab=" + v.tab + "&wire=" + WIRE);
+  const ws   = link.open("?tab=" + v.tab + "&wire=" + WIRE + "&agent=" + v.agent);
+  v.on = "";
   let heard  = Date.now();
   const tick = setInterval(() => {
     if (Date.now() - heard > PING) {
@@ -622,7 +668,8 @@ export function link_open(v: View, link: Link): void {
 }
 
 export function link_send(v: View, msg: Client, done = (a: Answer) => link_note(v, a), said = ""): void {
-  v.out.push({ msg: { id: uuid(), ...msg }, ws: null, done, said });
+  const to = msg.$ === "say" ? { agent: v.agent } : {};
+  v.out.push({ msg: { id: uuid(), ...msg, ...to }, ws: null, done, said });
   v.flush();
 }
 
@@ -674,7 +721,7 @@ const APART = new WeakMap<Entry, Row[]>();
 function whole_rows(id: number | null, entry: Entry, before: Entry | undefined): Row[] {
   const of = entry_of(entry, before);
   const made = of.apart ? APART : ROWS;
-  const rows = made.get(entry) ?? entry_rows(id, entry.kind, entry.text, entry.images, of);
+  const rows = made.get(entry) ?? entry_rows(id, entry.kind, entry.text, entry.images, of, entry.from);
   made.set(entry, rows);
   return rows;
 }
@@ -719,7 +766,7 @@ function entry_of(entry: Entry, before: Entry | undefined): Of {
   return { tool: entry.tool ?? "", apart: entry.kind === "echo" && entry.of !== undefined && before?.of !== entry.of };
 }
 
-function entry_rows(id: number | null, kind: Kind, text: string, images: string[] = [], of: Of = { tool: "", apart: false }): Row[] {
+function entry_rows(id: number | null, kind: Kind, text: string, images: string[] = [], of: Of = { tool: "", apart: false }, from?: string): Row[] {
   const call = kind === "tool" ? Call.call_parse(text) : null;
   const report = kind === "work" ? Call.report_read(text) : null;
   const label = of.apart ? "↳ " + (of.tool === "" ? "" : Call.tool_name(of.tool) + " ") + "result" : "result";
@@ -727,7 +774,8 @@ function entry_rows(id: number | null, kind: Kind, text: string, images: string[
   const named = body.some((b) => b.$ === "File" && b.k.startsWith(label));
   const who = report?.name ?? WHO[kind] ?? (kind === "echo" && of.apart && !named ? label : "");
   const pics = images.filter((name) => !text.includes("/media/" + name));
-  return call === null && body.length === 0 && pics.length === 0 ? [] : [{ $: "Msg", id, kind, who, text, body, call, images: pics }];
+  const sent = from === undefined ? {} : { from };
+  return call === null && body.length === 0 && pics.length === 0 ? [] : [{ $: "Msg", id, kind, who, text, body, call, images: pics, ...sent }];
 }
 
 function entry_body(kind: Kind, text: string, label: string, tool: string): Md.Block[] {

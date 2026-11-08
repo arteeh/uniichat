@@ -27,7 +27,8 @@ import * as Service from "./Service.ts";
 import * as Timer from "./Timer.ts";
 import { SEARCHES, Tools, type Seat } from "./Tools.ts";
 import { JOB } from "./Machine.ts";
-import { ACTIVE, FRAME, IDLE, IMAGES, live_push, MEDIA, PING, QUIT, SUMMARIES, TICK, TURN, WIRE, type Answer, type Live, type Part, type Pending, type Queued, type Server as Out, type Sums, type Talk as Meter, TOKEN, type Wait } from "./View.ts";
+import { HEADS } from "./Heads.ts";
+import { ACTIVE, FRAME, IDLE, IMAGES, live_push, MEDIA, PING, QUIT, SUMMARIES, TICK, TURN, WIRE, type Answer, type Live, type Part, type Pending, type Queued, type Server as Out, type Sums, type Talk as Meter, TOKEN, type Wait, type Mate } from "./View.ts";
 import * as config from "./Config.ts";
 import { err_code, err_stack, err_why } from "./Err.ts";
 import { get, rec, text_of } from "./Json.ts";
@@ -134,6 +135,7 @@ everything, coarser further back. zoom(id, n, agent: "Name") opens a line of tha
 agent's memory, as zoom does yours.`;
 
 const TIMER_TEXT = 200;
+const LAST       = 120;
 const RING       = 60000;
 const WAKE       = 60000;
 
@@ -183,6 +185,11 @@ const WEB: Record<string, string> = {
 
 WEB["/settings"] = WEB["/"];
 WEB["/tree"]     = WEB["/"];
+WEB["/new"]      = WEB["/"];
+Object.assign(WEB, HEADS);
+
+// an agent's pages: /a/<id>, /a/<id>/edit
+const AGENT_PAGE = /^\/a\/[a-z0-9]{1,16}(\/edit)?$/;
 
 const HASHED_INTO_BUILD = [app_js, style_css, PAGE, sw_js, manifest];
 const BUILD      = Bun.hash(HASHED_INTO_BUILD.map((f) => fs.readFileSync(f, "utf8")).join("\0")).toString(36);
@@ -708,6 +715,7 @@ export namespace Chat {
       Chat.all(chat, { $: "entry", id: i, kind, text, date, images, of, tool, from, ...queued });
     }
     Chat.talked(chat);
+    Main.team_soon();
     return { id: roots[0].i, end: chat.mem.count };
   }
 
@@ -1243,6 +1251,19 @@ export namespace Chat {
       Memory.save(chat.mem);
     }
     Chat.all(chat, Chat.state(chat));
+    Main.team_soon();
+  }
+
+  // a message's gist for the chat list: the last the user or agent said
+  export function last(chat: Chat): string {
+    for (let i = chat.mem.count - 1; i >= Math.max(0, chat.mem.count - 40); i--) {
+      const m = Memory.at(chat.mem, i);
+      if (m.kind === "user" || m.kind === "unii" || m.kind === "work") {
+        const text = Memory.flat(m.text).replace(/[*_`#>]+/g, "").trim();
+        return (m.kind === "user" ? "You: " : "") + (text.length > LAST ? text.slice(0, LAST) + "…" : text);
+      }
+    }
+    return "";
   }
 
   export function join(chat: Chat, sock: Sock): void {
@@ -1543,6 +1564,26 @@ export namespace Main {
     Main.chats.forEach((chat) => Chat.offer(chat));
   }
 
+  let teamed: ReturnType<typeof setTimeout> | undefined;
+
+  export function mates(): Mate[] {
+    return Team.all().map((a) => {
+      const chat = Main.chats.get(a.id);
+      return { id: a.id, name: a.name, about: a.about, picture: a.picture, unread: a.unread, last: chat === undefined ? "" : Chat.last(chat), busy: chat?.main.busy === true, archived: a.archived };
+    });
+  }
+
+  // the chat list to every browser, once things settle
+  export function team_soon(): void {
+    if (teamed === undefined) {
+      teamed = setTimeout(() => {
+        teamed = undefined;
+        const msg = { $: "team", agents: Main.mates() };
+        Main.socks.forEach((sock) => sock.data.host === null && Chat.send(sock, msg));
+      }, 100);
+    }
+  }
+
   export function attach(sock: Sock): void {
     const { tab, host, work, scratch, shell } = sock.data;
     if (host === null) {
@@ -1598,6 +1639,7 @@ export namespace Main {
     }
     const agent = Team.add(fields);
     Chat.open(agent.id, Main.tools);
+    Main.team_soon();
     return { agent };
   }
 
@@ -1844,7 +1886,7 @@ export namespace Main {
         return own;
       }
       if (!OWN.includes(p) && !p.startsWith("/image/") && !p.startsWith("/media/") && !p.startsWith("/api/")) {
-        return Main.file(p, req);
+        return Main.file(AGENT_PAGE.test(p) ? "/" : p, req);
       }
       if (!Owner.is(req)) {
         return new Response("sign in first", { status: 401 });
@@ -1914,6 +1956,7 @@ export namespace Main {
             }
             Main.socks.add(ws);
             if (ws.data.host === null) {
+              Chat.send(ws, { $: "team", agents: Main.mates() });
               Chat.join(Main.chat_of(ws.data.agent), ws);
             } else {
               Main.attach(ws);

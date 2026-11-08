@@ -30,7 +30,13 @@ const SCENES = `
   <div class="scene"><p>Your entire life.</p><p>One single chat.</p></div>
   <div class="scene"><i class="mark"></i><h1>UniiChat</h1></div>`;
 
-const v = View.view_new();
+const WIDE = matchMedia("(min-width: 900px)");
+
+const UNII = "unii";
+
+const AGENT = /^\/a\/([a-z0-9]{1,16})(\/edit)?$/;
+
+const v = View.view_new(AGENT.exec(location.pathname)?.[1] ?? UNII);
 
 const BOX = $(".composer .field", HTMLElement);
 
@@ -93,10 +99,11 @@ async function boot(): Promise<void> {
     navigator.serviceWorker?.register("/sw.js").catch(() => {});
     notes_close();
   }
-  const tree = location.pathname === TREE ? TREE + (tree_view() ? "#view" : "") : null;
+  const tree = location.pathname === TREE ? TREE + location.search + (tree_view() ? "#view" : "") : null;
+  const own = AGENT.test(location.pathname) || location.pathname === "/new" ? location.pathname : null;
   const state: unknown = history.state;
   const pic = get(state, "pic") != null;
-  history.replaceState(null, "", PAGES.includes(location.pathname) ? "/settings" : tree ?? "/");
+  history.replaceState(null, "", PAGES.includes(location.pathname) ? "/settings" : tree ?? own ?? "/");
   if (pic) {
     history.back();
   }
@@ -183,7 +190,9 @@ function chat(): void {
   $(".attach").onclick = () => file.click();
   $("#pick").onkeydown = roam;
   $("#pick").addEventListener("focusout", left);
-  $("#menu .out").onclick = signout;
+  $("header .who").onclick = () => go("/a/" + v.agent + "/edit");
+  $("header .brain").onclick = () => go("/tree?a=" + v.agent);
+  WIDE.onchange = () => route();
   $(".mic").onclick = mic;
   file.onchange = () => {
     attach([...(file.files ?? [])]);
@@ -233,12 +242,12 @@ function chat(): void {
 function signed(): void {
   document.body.className = "";
   BOX.dataset.placeholder = View.HINT;
-  Box.box_set(sessionStorage.getItem(kept("draft")) ?? "");
+  Box.box_set(sessionStorage.getItem(kept("draft." + v.agent)) ?? "");
   renewed();
 }
 
 function typed(): void {
-  sessionStorage.setItem(kept("draft"), Box.box_text());
+  sessionStorage.setItem(kept("draft." + v.agent), Box.box_text());
   for (const [item, xhr] of UPS) {
     if (!item.isConnected) {
       UPS.delete(item);
@@ -343,7 +352,7 @@ function act(a: View.Act): void {
 
 function click(ev: MouseEvent): void {
   const target = ev.target as HTMLElement;
-  const el = target.closest<HTMLElement>("[data-act], [data-copy], [data-go], [data-knob], .choices > button");
+  const el = target.closest<HTMLElement>("[data-act], [data-copy], [data-go], [data-knob], .choices > button, .imp");
   const sel = getSelection();
   const pic = Viewer.viewer_pic(target);
   if (pic !== null && !(ev.ctrlKey || ev.metaKey || ev.shiftKey || ev.altKey) && (sel === null || sel.isCollapsed)) {
@@ -368,13 +377,13 @@ function click(ev: MouseEvent): void {
   }
   el.closest<HTMLElement>(".choices")?.hidePopover();
   const { act: a, copy: text, go: path } = el.dataset;
-  const menu = el.closest("#menu") !== null;
-  if (menu) {
-    $("#menu").hidePopover();
+  if (el.classList.contains("imp")) {
+    void import_open(false);
+    return;
   }
-  if (path !== undefined || (a !== undefined && menu)) {
+  if (path !== undefined) {
     ev.preventDefault();
-    go(path ?? "/");
+    go(path);
   }
   if (a !== undefined) {
     act(JSON.parse(a) as View.Act);
@@ -626,6 +635,12 @@ function hear(msg: View.Server): void {
   for (const out of View.view_hear(v, msg)) {
     View.link_send(v, out);
   }
+  if (msg.$ === "team") {
+    Html.team_set(v.team);
+  }
+  if (AGENT.test(location.pathname) && AGENT.exec(location.pathname)?.[1] !== v.agent) {
+    history.replaceState(null, "", "/a/" + v.agent);
+  }
   const now = View.view_pick(v).filter((k) => was.length > 0 && !was.some((w) => w.text === k.text));
   if (now.length > 0) {
     toast("Now " + now.map((k) => k.hint).join("; ") + ".");
@@ -651,7 +666,6 @@ function unsent_back(): void {
 function importer(): void {
   const form = $("#import form", HTMLFormElement);
   const dir  = $("#import [name=dir]", HTMLInputElement);
-  $(".imp").onclick = () => void import_open(false);
   const zip  = $("#import [name=zip]", HTMLInputElement);
   $(".pickdir").onclick = () => dir.click();
   for (const src of import_srcs()) {
@@ -718,7 +732,6 @@ function import_flow(): void {
 }
 
 async function import_open(first: boolean): Promise<void> {
-  $("#menu").hidePopover();
   IMPORT.done = (await fetch("/api/imported").then((res) => res.json()).catch(() => ({}))) as Import.Done;
   $("#import form .skip").textContent = first ? "Start fresh" : "Close";
   IMPORT.step = first ? "start" : IMPORT.step === "done" ? "" : IMPORT.step;
@@ -941,7 +954,7 @@ function paint(): void {
 }
 
 function shown_key(): string {
-  return v.fold === null ? "" : "/fold";
+  return v.agent + (v.fold === null ? "" : "/fold");
 }
 
 function at_end(): boolean {
@@ -956,6 +969,11 @@ function bars(): void {
     RENEW.going = true;
     setTimeout(() => void renew());
   }
+  const mate = v.team.find((m) => m.id === v.agent);
+  BOX.dataset.placeholder = "Message " + (mate?.name ?? "");
+  markup($("#list .rows"), Html.list_html(v.team, WIDE.matches || location.pathname !== "/" ? v.agent : null));
+  $("header .who .name").textContent = mate?.name ?? "";
+  markup($("header .who .face"), [Html.face_html(mate?.picture ?? "")]);
   const stop = View.view_stoppable(v) && Box.box_blank();
   const send = $(".send", HTMLButtonElement);
   $(".net").hidden = v.up;
@@ -1015,16 +1033,38 @@ function mine_above(el: HTMLElement): boolean {
 }
 
 function go(path: string): void {
-  if (location.pathname + location.hash !== path) {
+  if (location.pathname + location.search + location.hash !== path) {
     history.pushState(null, "", path);
   }
   route();
 }
 
+// to another agent's chat: the server sends it, the box holds its draft
+function chat_to(agent: string): void {
+  if (agent === v.agent) {
+    return;
+  }
+  sessionStorage.setItem(kept("draft." + v.agent), Box.box_text());
+  for (const msg of View.view_switch(v, agent)) {
+    View.link_send(v, msg);
+  }
+  Box.box_set(sessionStorage.getItem(kept("draft." + agent)) ?? "");
+  SCROLL.open.clear();
+  SCROLL.end = true;
+  P.rows = true;
+}
+
 function route(): void {
-  const page = PAGES.includes(location.pathname);
-  const tree = location.pathname === TREE;
-  const chat = !page && !tree;
+  const p = location.pathname;
+  const page = PAGES.includes(p);
+  const tree = p === TREE;
+  const list = p === "/" && !WIDE.matches;
+  const chat = !page && !tree && !list;
+  chat_to(AGENT.exec(p)?.[1] ?? (tree ? new URLSearchParams(location.search).get("a") ?? UNII : p === "/" ? UNII : v.agent));
+  document.body.classList.toggle("wide", WIDE.matches);
+  document.body.classList.toggle("list", list);
+  $("#tree .back").dataset.go = "/a/" + v.agent;
+  $("#tree .back").setAttribute("href", "/a/" + v.agent);
   if (!chat && !$("#log").hidden && SCROLL.away === null) {
     SCROLL.away = { y: scrollY, end: SCROLL.end };
   }
@@ -1033,7 +1073,7 @@ function route(): void {
   document.body.classList.toggle("tree", tree);
   $("#account").hidden = !page;
   $("#tree").hidden = !tree;
-  P.at = location.pathname + location.hash;
+  P.at = location.pathname + location.search + location.hash;
   P.shown = chat && SCROLL.away !== null ? shown_key() : location.pathname;
   if (chat && SCROLL.away !== null) {
     SCROLL.end = SCROLL.away.end;
@@ -1047,7 +1087,7 @@ function route(): void {
     void account();
   }
   if (tree) {
-    Tree.tree_show(tree_view() ? "VIEW" : "TREE");
+    Tree.tree_show(tree_view() ? "VIEW" : "TREE", v.agent, v.team.find((m) => m.id === v.agent)?.name ?? "");
   } else {
     Tree.tree_hide();
   }
@@ -1055,7 +1095,7 @@ function route(): void {
 }
 
 function popped(): void {
-  if (location.pathname + location.hash !== P.at) {
+  if (location.pathname + location.search + location.hash !== P.at) {
     route();
   }
   Viewer.viewer_sync();
