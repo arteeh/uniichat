@@ -115,6 +115,8 @@ body.list footer > :not(#toast) { display: none; }
 .faces .face:has(:checked) { outline: 2.5px solid var(--ink); }
 .faces .face:has(:focus-visible) { outline: 2.5px dashed var(--mid); }
 .faces .pic { width: 46px; height: 46px; }
+#account .up { display: flex; align-items: center; gap: 12px; margin: 14px 0 0; }
+#account .up .why { font-size: 13.5px; color: var(--mid); }
 #account .archived .item .pic { width: 36px; height: 36px; }
 #account .archived .item p { flex: 1; }
 .cap.think::after { content: ""; animation: dots 4s steps(1) infinite; }

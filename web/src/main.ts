@@ -1162,11 +1162,46 @@ async function agent_page(id: string | null): Promise<void> {
     ev.preventDefault();
     void agent_save(form, a);
   };
+  const file = find(form, ".upfile", HTMLInputElement);
+  find(form, ".upload", HTMLButtonElement).onclick = () => file.click();
+  file.onchange = () => {
+    const got = file.files?.[0];
+    file.value = "";
+    if (got !== undefined) {
+      void picture_up(form, got);
+    }
+  };
   el.querySelector<HTMLButtonElement>(".archive")?.addEventListener("click", () => {
     if (a !== null && confirm("Archive " + a.name + "? It leaves the chat list and the team. A running turn and its jobs finish; its timers pause. You can restore it in Settings.")) {
       void View.post("/api/agents/" + a.id + "/archive", {}).then((out) => (out.error === undefined ? go("/") : toast(text_of(out.error))));
     }
   });
+}
+
+// an upload, cropped square to 256 px, into the media store, picked
+async function picture_up(form: HTMLFormElement, file: File): Promise<void> {
+  const why = must(form.querySelector(".up .why"), "the upload's why");
+  why.textContent = "Uploading…";
+  try {
+    const img = await createImageBitmap(file);
+    const side = Math.min(img.width, img.height);
+    const canvas = document.createElement("canvas");
+    canvas.width = canvas.height = Math.min(256, side);
+    must(canvas.getContext("2d"), "a 2d canvas").drawImage(img, (img.width - side) / 2, (img.height - side) / 2, side, side, 0, 0, canvas.width, canvas.height);
+    const blob = await new Promise<Blob | null>((ok) => canvas.toBlob(ok, "image/png"));
+    const res = await fetch("/api/media?name=picture.png", { method: "POST", body: blob });
+    const out = (await res.json()) as { name?: string; error?: string };
+    if (out.name === undefined) {
+      throw new Error(out.error ?? "HTTP " + res.status);
+    }
+    const faces = must(form.querySelector(".faces"), "the faces");
+    faces.querySelector(`[value^="/media/"]`)?.closest("label")?.remove();
+    faces.insertAdjacentHTML("afterbegin", Html.face_pick_html("/media/" + out.name, true));
+    RENEW.dirty.add(form);
+    why.textContent = "";
+  } catch (err) {
+    why.textContent = "Could not upload it: " + err_why(err);
+  }
 }
 
 async function agent_save(form: HTMLFormElement, a: Html.Agent | null): Promise<void> {

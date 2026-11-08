@@ -202,19 +202,25 @@ export type Agent = { id: string; name: string; about: string; picture: string; 
 export function agent_html(a: Agent | null, unii: boolean): string {
   const id = a?.id ?? "";
   const heads = Array.from({ length: 24 }, (_, k) => "head-" + String(k + 1).padStart(2, "0"));
-  const faces = (unii ? ["unii"] : []).concat(heads).map((f) => `<label class="face"><input type="radio" name="picture" value="${f}"${f === a?.picture ? " checked" : ""}>${face_html(f)}</label>`);
+  const own = a !== null && a.picture.startsWith("/media/") ? [a.picture] : [];
+  const faces = (unii ? ["unii"] : []).concat(own, heads).map((f) => face_pick_html(f, f === a?.picture));
+  const upload = `<button type="button" class="chip upload">Upload a picture</button><input type="file" class="upfile" accept="image/png,image/jpeg,image/webp,image/gif" hidden>`;
   const set = (key: string, name: string, about: string, control: string) => `<div class="set" data-key="${key}"><label for="ag-${key}">${esc(name)}<small>${esc(about)}</small></label><div class="field">${control}</div></div>`;
   const back = a === null ? "/" : "/a/" + esc(id);
   const archive = a === null || unii ? "" : section_html("Archive", `<div class="item"><p>Archive ${esc(a.name)}<small>It leaves the chat list and the team. A running turn and its jobs finish; its timers pause. Restore it in Settings.</small></p><button type="button" class="chip red archive">Archive</button></div>`);
   return `<a class="back" href="${back}" data-go="${back}">← Back</a><h1>${a === null ? "New agent" : esc(a.name)}</h1>`
     + `<form class="settings agent" autocomplete="off">`
-    + section_html("Picture", `<div class="faces">${faces.join("")}</div>`)
+    + section_html("Picture", `<div class="faces">${faces.join("")}</div><p class="up">${upload}<span class="why"></span></p>`)
     + section_html("Agent",
       set("name", "Name", "1 to 24 characters, no @.", `<input id="ag-name" name="name" maxlength="24" value="${esc(a?.name ?? "")}" spellcheck="false">`)
       + set("about", "Description", "One line, for the chat list and the other agents.", `<input id="ag-about" name="about" maxlength="120" value="${esc(a?.about ?? "")}">`)
       + set("prompt", "System prompt", "Who this agent is and what it does. It follows the name until you edit it.", `<textarea id="ag-prompt" name="prompt" rows="6" spellcheck="true">${esc(a?.prompt ?? "")}</textarea>`)
       + set("pick", "Model and effort", "What it runs on.", `<input type="hidden" name="pick" value="${esc(a?.pick ?? "")}"><div class="four"></div>`))
     + `<div class="save"><p class="why"></p><button class="chip go">${a === null ? "Create" : "Save"}</button></div></form>` + archive;
+}
+
+export function face_pick_html(picture: string, on: boolean): string {
+  return `<label class="face"><input type="radio" name="picture" value="${esc(picture)}"${on ? " checked" : ""}>${face_html(picture)}</label>`;
 }
 
 export function archived_html(team: View.Mate[]): string {
