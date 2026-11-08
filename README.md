@@ -77,6 +77,7 @@ Use
 ---
 
 - **Web:** open the server's address. Install it as an app from your browser to get notifications when Unii replies.
+- **Agents** (beta): **+** in the chat list makes another agent, with its own chat, memory and prompt; agents can message each other, and Unii sees what all of them do. Settings holds the instructions every agent gets.
 - **Conversation mode:** the switch next to "fold all". From then on, your and Unii's messages stay word for word in Unii's memory, for a real discussion. It costs more per turn and turns itself off when the model's context window fills up.
 - `unii help` lists every command.
 
