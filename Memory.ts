@@ -40,8 +40,10 @@ type Rec = { i?: number; l?: number; act?: string; ans?: object };
 
 type Recs = { main: Root; tree: { text: string } };
 
+// docs: the folder whose docs/ holds the images and media, which the agents share
 type Logs = {
   dir    : string;
+  docs   : string;
   fds    : Map<string, number>;
   count  : number;
   open   : number;
@@ -137,9 +139,10 @@ of them from there too.
 
 export namespace Memory {
 
-  export function load(dir: string, share: Memory["share"], acted: Memory["acted"] = () => {}): Memory {
+  export function load(dir: string, share: Memory["share"], acted: Memory["acted"] = () => {}, docs = dir): Memory {
+    fs.mkdirSync(dir, { recursive: true });
     const mem: Memory = {
-      dir, fds: new Map(), count: 0, open: 0, pick: null, goal: null, off: [], talk: null, talked: new Map(), used: null, used_at: 0, work: [], timers: [], queue: [], nodes: new Map(), ready: [[], []], ends: { main: [0, 0], tree: [0, 0] },
+      dir, docs, fds: new Map(), count: 0, open: 0, pick: null, goal: null, off: [], talk: null, talked: new Map(), used: null, used_at: 0, work: [], timers: [], queue: [], nodes: new Map(), ready: [[], []], ends: { main: [0, 0], tree: [0, 0] },
       view: { parts: [], size: 0, batch: false, high: VIEW_HIGH }, seen: { parts: [], size: 0, batch: false, high: config.COMPACTOR_CONTEXT },
       busy: new Map(), sides: new Map(), calls: new Map(), hold: [null, "paused"], done: false, wait: new Set(), share, acted, again: null,
     };
@@ -445,21 +448,21 @@ export namespace Memory {
     const name = hash.digest("hex").slice(0, 16) + "." + kind.split("/")[1];
     const k = Math.min(1, FIT / Math.max(size.width, size.height));
     const fit = (k < 1 || bytes.length > IMAGE) && size.width * size.height <= PIXELS;
-    fs.mkdirSync(mem.dir + IMAGES, { recursive: true });
+    fs.mkdirSync(mem.docs + IMAGES, { recursive: true });
     if (fit) {
       const out = img.resize(Math.round(size.width * k), Math.round(size.height * k)).jpeg({ quality: 85 });
-      await Bun.write(mem.dir + IMAGES + name + ".jpg", await out.bytes());
-      void Disk.wrote(mem.dir + IMAGES + name + ".jpg");
+      await Bun.write(mem.docs + IMAGES + name + ".jpg", await out.bytes());
+      void Disk.wrote(mem.docs + IMAGES + name + ".jpg");
     }
-    await Bun.write(mem.dir + IMAGES + name, bytes);
-    void Disk.wrote(mem.dir + IMAGES + name);
+    await Bun.write(mem.docs + IMAGES + name, bytes);
+    void Disk.wrote(mem.docs + IMAGES + name);
     return name;
   }
 
   export async function media_add(mem: Memory, body: ReadableStream<Uint8Array>, file: string, room: Room): Promise<{ name: string } | { error: string }> {
     const named = media_ext(file);
-    fs.mkdirSync(mem.dir + MEDIA_DIR, { recursive: true });
-    const tmp = mem.dir + MEDIA_DIR + ".up-" + crypto.randomUUID();
+    fs.mkdirSync(mem.docs + MEDIA_DIR, { recursive: true });
+    const tmp = mem.docs + MEDIA_DIR + ".up-" + crypto.randomUUID();
     const out = await fs.promises.open(tmp, "wx");
     const hash = new Bun.CryptoHasher("sha256");
     const reader = body.getReader();
@@ -486,8 +489,8 @@ export namespace Memory {
       const ext = picture || named === "" ? sniffed ?? "bin" : named;
       await out.close();
       const name = hash.digest("hex").slice(0, 16) + "." + ext;
-      fs.renameSync(tmp, mem.dir + MEDIA_DIR + name);
-      await Disk.wrote(mem.dir + MEDIA_DIR + name);
+      fs.renameSync(tmp, mem.docs + MEDIA_DIR + name);
+      await Disk.wrote(mem.docs + MEDIA_DIR + name);
       return { name };
     } finally {
       if (!done) {
@@ -500,20 +503,20 @@ export namespace Memory {
   }
 
   export function media_file(mem: Memory, name: string): string | null {
-    const file = mem.dir + MEDIA_DIR + name;
+    const file = mem.docs + MEDIA_DIR + name;
     return STORED.test(name) && fs.existsSync(file) ? file : Memory.image_file(mem, name);
   }
 
   export function image_file(mem: Memory, name: string): string | null {
-    const file = mem.dir + IMAGES + name;
+    const file = mem.docs + IMAGES + name;
     return /^[0-9a-f]{16}\.(png|jpeg|gif|webp)$/.test(name) && fs.existsSync(file) ? file : null;
   }
 
   export function images(mem: Memory, id: number): Img[] {
     const names = (Memory.message(mem, id)?.images ?? []).filter((name) => Memory.image_file(mem, name) !== null);
     return names.map((name) => {
-      const fit = fs.existsSync(mem.dir + IMAGES + name + ".jpg");
-      const data = fs.readFileSync(mem.dir + IMAGES + name + (fit ? ".jpg" : "")).toString("base64");
+      const fit = fs.existsSync(mem.docs + IMAGES + name + ".jpg");
+      const data = fs.readFileSync(mem.docs + IMAGES + name + (fit ? ".jpg" : "")).toString("base64");
       return { type: fit ? "image/jpeg" : "image/" + name.split(".")[1], data };
     });
   }
@@ -1099,7 +1102,7 @@ ${Memory.cut(line)}| ← LIMIT`;
   }
 
   export function* dump(mem: Memory): Generator<string> {
-    const ls = (sub: string) => (fs.existsSync(mem.dir + sub) ? fs.readdirSync(mem.dir + sub).sort() : []);
+    const ls = (sub: string) => (fs.existsSync(mem.docs + sub) ? fs.readdirSync(mem.docs + sub).sort() : []);
     let sep = "\n";
     yield '{"messages": [';
     for (let i = 0; i < mem.count; i++) {

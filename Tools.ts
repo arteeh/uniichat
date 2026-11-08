@@ -1,4 +1,4 @@
-import type { Block, Kind } from "./AskAI.ts";
+import type { Block } from "./AskAI.ts";
 import type { Out } from "./Agent.ts";
 import * as config from "./Config.ts";
 import { Limit } from "./Limit.ts";
@@ -7,10 +7,8 @@ import { Mcp, type Servers } from "./Mcp.ts";
 import { Memory } from "./Memory.ts";
 import PROMPT from "./prompt.txt" with { type: "text" };
 import COMPACT_PROMPT from "./compact.txt" with { type: "text" };
-import type { Run, Heard } from "./Run.ts";
-import type { Msg } from "./Server.ts";
 import * as Timer from "./Timer.ts";
-import { PING, type Pending } from "./View.ts";
+import { PING } from "./View.ts";
 import { err_why } from "./Err.ts";
 import { get, list as items, rec, text_of } from "./Json.ts";
 
@@ -30,25 +28,31 @@ type Running = { term: string; job: Job; out: Promise<Out>; end: (out: Out) => v
 
 type Link = { send: (msg: object) => void; live: () => boolean; work: string; scratch: string | null; shell: string | null };
 
-type Log = {
-  push   : (run: Run<Pending, Msg>, kind: Kind, text: string, sent?: boolean) => Msg;
+// an agent's place at the tools: its memory, and its chat's hooks
+export type Seat = {
+  mem    : Memory;
   note   : (text: string) => void;
-  on     : (run: Run<Pending, Msg>, ev: Heard) => void;
-  report : (text: string, take: boolean) => void;
-  change : () => void;
+  report : (text: string) => void;
   timed  : () => void;
 };
 
+// what the agents share: their notes on devices and MCP servers go to Unii
+type Hub = {
+  note   : (text: string) => void;
+  change : () => void;
+  off    : () => string[];
+  docs   : string;
+};
+
 export type Tools = {
-  mem     : Memory;
   devices : Map<string, Device>;
+  seats   : Map<string, Seat>;
   mcp     : Servers;
   next    : config.McpServer[] | null;
   left    : boolean;
   key     : string;
   url     : string;
-  main    : Run<Pending, Msg>;
-  log     : Log;
+  hub     : Hub;
 };
 
 export const SEARCHES = 10;
@@ -105,12 +109,12 @@ const SKILL: Spec = spec("skill", "Load a skill listed under Skills: its SKILL.m
 
 export namespace Tools {
 
-  export function serve(mem: Memory, main: Run<Pending, Msg>, log: Log): Tools {
+  export function serve(hub: Hub): Tools {
     const key = crypto.randomUUID();
     const url = Tools.base() + key + "/";
     const run = (device: string, job: Job, signal: AbortSignal) => Tools.job(tools, device, job, signal, crypto.randomUUID());
-    const mcp = Mcp.servers((text) => log.note(text), run, (device) => Tools.live(tools.devices.get(device)));
-    const tools: Tools = { mem, devices: new Map(), mcp, next: null, left: false, key, url, main, log };
+    const mcp = Mcp.servers((text) => hub.note(text), run, (device) => Tools.live(tools.devices.get(device)));
+    const tools: Tools = { devices: new Map(), seats: new Map(), mcp, next: null, left: false, key, url, hub };
     CHATS.set(key, tools);
     return tools;
   }
@@ -134,7 +138,7 @@ export namespace Tools {
     const shell = (d: Device) => [...d.terms.values()][0]?.shell;
     const line  = ([name, d]: [string, Device]) => "- " + name + ", work dir " + work(d) + " (the user's projects), scratch dir " + temp(d) + (shell(d) ? ", shell " + shell(d) + " (stopping the device does not kill a process a call left running after its shell ended)" : "");
     const lines = Tools.opened(tools).map(line);
-    return { text: "Devices open now:\n" + (lines.length === 0 ? DEVICES_NONE : lines.join("\n")) + "\n" + MEDIA_AT.replace("{dir}", tools.mem.dir + "/docs/media/") + "\n\n", mark: false };
+    return { text: "Devices open now:\n" + (lines.length === 0 ? DEVICES_NONE : lines.join("\n")) + "\n" + MEDIA_AT.replace("{dir}", tools.hub.docs + "/docs/media/") + "\n\n", mark: false };
   }
 
   export function skills(tools: Tools): Block {
@@ -166,15 +170,15 @@ export namespace Tools {
     }));
   }
 
-  export function at_work(tools: Tools): Block {
-    const jobs = [...tools.devices].flatMap(([device, d]) => d.bg.jobs.map((j) => j.id + " (" + [device, j.command.replace(/\s+/g, " ").trim().slice(0, 60), Math.round((Date.now() - j.since) / 60e3) + " min"].join(", ") + ")"));
+  export function at_work(tools: Tools, who: string): Block {
+    const jobs = [...tools.devices].flatMap(([device, d]) => d.bg.jobs.filter((j) => j.agent === who).map((j) => j.id + " (" + [device, j.command.replace(/\s+/g, " ").trim().slice(0, 60), Math.round((Date.now() - j.since) / 60e3) + " min"].join(", ") + ")"));
     return { text: jobs.length === 0 ? "" : "Jobs running: " + jobs.join(", ") + ".\n\n", mark: false };
   }
 
   export async function fetch(req: Request): Promise<Response> {
     const [, key, who, ...rest] = new URL(req.url).pathname.split("/");
     const tools = CHATS.get(key);
-    const caller = who === "main";
+    const caller = tools?.seats.has(who) === true;
     const msg: unknown = await req.json().catch(() => ({}));
     const [asked, method, params] = [get(msg, "id"), get(msg, "method"), get(msg, "params")];
     const id = crypto.randomUUID();
@@ -247,7 +251,7 @@ export namespace Tools {
   }
 
   export function off(tools: Tools): string[] {
-    return tools.mem.off ?? [];
+    return tools.hub.off();
   }
 
   export function unplug(tools: Tools, name: string): void {
@@ -258,7 +262,11 @@ export namespace Tools {
   }
 
   export async function call(tools: Tools, who: string, name: string, args: Record<string, unknown>, signal: AbortSignal, id: string): Promise<Out> {
-    const mem = tools.mem;
+    const seat = tools.seats.get(who);
+    if (seat === undefined) {
+      return { text: "No agent " + who + ".", fail: true };
+    }
+    const mem = seat.mem;
     switch (name) {
       case "zoom": {
         const id = Number(args.id);
@@ -271,7 +279,7 @@ export namespace Tools {
         return { text: Memory.date(mem, Number(args.id)), fail: false };
       }
       case "schedule": {
-        return Tools.schedule(tools, Timer.timer_new(args, Date.now()));
+        return Tools.schedule(seat, Timer.timer_new(args, Date.now()));
       }
       case "schedules": {
         const lines = mem.timers.map(Timer.timer_line);
@@ -279,7 +287,7 @@ export namespace Tools {
       }
       case "unschedule": {
         const id = String(args.id);
-        return Tools.unschedule(tools, id) ? { text: "Cancelled " + id + ".", fail: false } : { text: "No schedule " + id + ".", fail: true };
+        return Tools.unschedule(seat, id) ? { text: "Cancelled " + id + ".", fail: false } : { text: "No schedule " + id + ".", fail: true };
       }
       case "resume": {
         const n = Limit.resume();
@@ -295,8 +303,8 @@ export namespace Tools {
     }
   }
 
-  export function schedule(tools: Tools, timer: Timer.Timer | string): Out {
-    const mem = tools.mem;
+  export function schedule(seat: Seat, timer: Timer.Timer | string): Out {
+    const mem = seat.mem;
     if (typeof timer !== "string" && mem.timers.length >= Timer.TIMERS) {
       timer = "The chat has " + Timer.TIMERS + " schedules, the most it keeps: cancel one first.";
     }
@@ -305,19 +313,19 @@ export namespace Tools {
     }
     mem.timers = [...mem.timers, timer];
     Memory.save(mem);
-    tools.log.timed();
+    seat.timed();
     return { text: "Scheduled " + timer.id + ": " + Timer.timer_when(timer) + ".", fail: false };
   }
 
-  export function unschedule(tools: Tools, id: string): boolean {
-    const mem = tools.mem;
+  export function unschedule(seat: Pick<Seat, "mem" | "timed">, id: string): boolean {
+    const mem = seat.mem;
     const left = mem.timers.filter((t) => t.id !== id);
     if (left.length === mem.timers.length) {
       return false;
     }
     mem.timers = left;
     Memory.save(mem);
-    tools.log.timed();
+    seat.timed();
     return true;
   }
 
@@ -381,7 +389,7 @@ export namespace Tools {
   export function jobs_gone(tools: Tools, device: string, d: Device, how: string): void {
     const said = how === "stopped" ? "killed, the device stopped" : "no word on it: the device " + how + " while it ran" + (how === "went away" ? "; its report follows if the device comes back" : "");
     for (const job of d.bg.jobs) {
-      tools.log.report(JOB + job.id + "] " + device + ": " + said, true);
+      Tools.report(tools, job.agent, JOB + job.id + "] " + device + ": " + said);
     }
     d.bg = { term: "", jobs: [] };
   }
@@ -439,7 +447,7 @@ export namespace Tools {
       d.why = why;
       if (why !== "") {
         console.error("unii: device " + device + ": " + why);
-        tools.log.note("The device " + device + "'s MCP servers: " + why + ".");
+        tools.hub.note("The device " + device + "'s MCP servers: " + why + ".");
       }
     }
     Tools.plug(tools);
@@ -460,7 +468,7 @@ export namespace Tools {
         d.clash = clash;
         if (clash !== "") {
           console.error("unii: " + clash);
-          tools.log.note(clash);
+          tools.hub.note(clash);
         }
       }
       if (d.mcp.length > 0 && other === undefined) {
@@ -469,13 +477,13 @@ export namespace Tools {
       }
     }
     tools.next = next;
-    tools.log.change();
+    tools.hub.change();
   }
 
   export function left(tools: Tools): void {
     if (!tools.left && config.MCP_ENV_NOTE !== null) {
       tools.left = true;
-      tools.log.note(config.MCP_ENV_NOTE);
+      tools.hub.note(config.MCP_ENV_NOTE);
     }
   }
 
@@ -558,8 +566,9 @@ export namespace Tools {
     tools.devices.get(device)?.jobs.get(id)?.end(out);
   }
 
-  export function restarted(work: string[]): string {
-    return "The server restarted, cutting " + work.join(", ") + "; nothing was lost: go on.";
+  // a job's report goes to the agent that started it, or to Unii if that one is gone
+  export function report(tools: Tools, who: string, text: string): void {
+    (tools.seats.get(who) ?? tools.seats.get("main"))?.report(text);
   }
 
 }

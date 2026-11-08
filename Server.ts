@@ -17,13 +17,14 @@ import { Pick } from "./Pick.ts";
 import { ACTIVE_MS, Push } from "./Push.ts";
 import { Reap } from "./Reap.ts";
 import { Settings } from "./Settings.ts";
+import { Team, UNII, type Agent } from "./Team.ts";
 import { update_cmd } from "./Update.ts";
 import { move_over, write_whole } from "./Write.ts";
 import { LIMIT, Limit } from "./Limit.ts";
 import { Run, type Heard } from "./Run.ts";
 import * as Service from "./Service.ts";
 import * as Timer from "./Timer.ts";
-import { PROMPTS, SEARCHES, Tools } from "./Tools.ts";
+import { PROMPTS, SEARCHES, Tools, type Seat } from "./Tools.ts";
 import { JOB } from "./Machine.ts";
 import { ACTIVE, FRAME, IDLE, IMAGES, live_push, MEDIA, PING, QUIT, SUMMARIES, TICK, TURN, WIRE, type Answer, type Live, type Part, type Pending, type Queued, type Server as Out, type Sums, type Talk as Meter, TOKEN, type Wait } from "./View.ts";
 import * as config from "./Config.ts";
@@ -43,7 +44,8 @@ import icon_mask_192 from "./web/icon-maskable-192.png" with { type: "file" };
 import icon_mask from "./web/icon-maskable-512.png" with { type: "file" };
 import icon_apple from "./web/apple-touch-icon.png" with { type: "file" };
 
-type Sock = ServerWebSocket<{ who: string; tab: string; wire: string | null; host: string | null; work: string; scratch: string | null; shell: string | null; device: string | null; seen: Set<string>; active: number }>;
+// agent: the chat a browser shows, by its agent's id
+type Sock = ServerWebSocket<{ who: string; tab: string; wire: string | null; host: string | null; work: string; scratch: string | null; shell: string | null; device: string | null; seen: Set<string>; active: number; agent: string }>;
 
 type Body = { fh: fs.promises.FileHandle; size: number };
 
@@ -58,7 +60,11 @@ type Check = { call: Call; goal: string };
 type Kept  = { a: number; b: number; said: number; spent: number };
 type Batch = Kept & { micros: number[][]; open: number[]; left: number; all: number };
 
+// id: its agent's; who: its name at the tools and its scratch folder's (Unii's
+// is main)
 type Parts = {
+  id    : string;
+  who   : string;
   mem   : Memory;
   tools : Tools;
   socks : Set<Sock>;
@@ -73,6 +79,7 @@ type Doing = {
   writes: Promise<unknown>;
   held  : Array<() => void> | null;
   after : Promise<void>;
+  bell  : ReturnType<typeof setTimeout> | undefined;
 };
 
 type Turn = {
@@ -95,7 +102,7 @@ const LOCK_DEAD  = 30000;
 const WIN        = process.platform === "win32";
 const PID        = config.DIR + "/server.pid";
 const SETTLE     = 200;
-const CHAT       = config.DIR + "/chat";
+const AGENTS     = config.DIR + "/agents";
 const HEAD       = "Turn:\n\n";
 const GOAL       = "You check a goal. Below is a chat between a user and Unii, an AI agent: its older messages as summary lines (id+n|text), then its latest messages whole, then the goal the user set with /goal. Answer yes if the chat shows the goal fully satisfied now, else no. Write that one word, nothing else.";
 const GOAL_ASK   = "\nThe goal:\n\n";
@@ -194,15 +201,12 @@ function file_path(x: unknown): string {
   return x;
 }
 
-let bell: ReturnType<typeof setTimeout> | undefined;
-
 export namespace Chat {
 
-  export function open(): Chat {
-    const mem = Memory.load(CHAT, () => ({ system: Tools.prompt("compact"), searches: 0, server: "" }), Owner.act_put);
+  export function open(id: string, tools: Tools): Chat {
+    const mem = Memory.load(AGENTS + "/" + id, () => ({ system: Tools.prompt("compact"), searches: 0, server: "" }), Owner.act_put, AGENTS + "/" + UNII);
     const cut = mem.work;
-    Limit.answering(() => ({ queued: Run.waiting(chat.main), busy: chat.main.busy }));
-    const main = Run.make<Pending, Msg>(TURN, {
+    const main = Run.make<Pending, Msg>(id, {
       pick   : () => chat.pick,
       begin  : () => Chat.begin(chat),
       log    : (_, post) => Chat.writing(chat, () => Promise.try(() => Chat.posted(chat, post))),
@@ -218,29 +222,25 @@ export namespace Chat {
       on     : (run, ev) => Chat.on(chat, run, ev),
       change : () => Chat.change(chat),
     });
-    const tools = Tools.serve(mem, main, {
-      push   : (run, kind, text, sent) => Chat.push(chat, run, kind, text, [], false, undefined, {}, sent),
-      note   : (text) => Chat.note(chat, text),
-      on     : (run, ev) => Chat.on(chat, run, ev),
-      report : (text, take) => Chat.report(chat, text, take),
-      change : () => Chat.change(chat),
-      timed  : () => Chat.timed(chat),
-    });
-    Chat.keep_pick(mem.pick);
     const pick = Pick.load(mem.pick, config.OFFER, config.PICK);
+    const who = id === UNII ? "main" : id;
     const chat: Chat = {
-      mem, tools, pick, socks: new Set(), acts: new Map(), main, model: "", check: null, asked: false, open: 0,
-      eye: { parts: [], from: 0 }, after: Promise.resolve(), batch: null, writes: Promise.resolve(), held: null, back: -1, sums: null, resume: null, limits: null,
+      id, who, mem, tools, pick, socks: new Set(), acts: new Map(), main, model: "", check: null, asked: false, open: 0,
+      eye: { parts: [], from: 0 }, after: Promise.resolve(), batch: null, writes: Promise.resolve(), held: null, back: -1, sums: null, resume: null, limits: null, bell: undefined,
     };
+    const seat: Seat = { mem, note: (text) => Chat.note(chat, text), report: (text) => Chat.report(chat, text, true), timed: () => Chat.timed(chat) };
+    tools.seats.set(who, seat);
+    Main.chats.set(id, chat);
+    Main.keep_picks();
     const saved = mem.pick === null ? null : Chat.pick_name(mem.pick as Pick);
     if (saved !== null && saved !== Chat.pick_name(pick)) {
       mem.pick = pick;
       mem.used = null;
       Memory.save(mem);
-      Chat.keep_pick(mem.pick);
+      Main.keep_picks();
       Chat.note(chat, saved + " isn't offered here, so the chat now runs on " + Chat.pick_name(pick) + ".");
     }
-    if (mem.count === 0) {
+    if (mem.count === 0 && id === UNII) {
       Memory.push(mem, [{ kind: "unii", text: HELLO, line: HELLO_LINE }]);
     }
     chat.eye = Chat.eye(mem, Memory.turn(mem));
@@ -257,11 +257,6 @@ export namespace Chat {
 
   export function pick_name(pick: Pick): string {
     return pick.profile ?? Pick.label(pick);
-  }
-
-  export function keep_pick(pick: object | null): void {
-    const vendor = pick === null ? undefined : (pick as Partial<Pick>).vendor;
-    config.config_keep(typeof vendor === "string" ? [vendor] : []);
   }
 
   export function share(chat: Chat, system: string): Share {
@@ -437,20 +432,20 @@ export namespace Chat {
     const says = msgs.filter((m) => m.end > from).map((m) => Chat.said(mem, Math.max(m.id, from), m.end));
     const view = Memory.view(mem, from, mem.view.parts, mem.talk, mem.talk === null ? -1 : chat.back);
     chat.back = mem.talk === null ? -1 : view.length - 3;
-    Mcp.heard(chat.tools.mcp, Tools.off(chat.tools), "main", true);
+    Mcp.heard(chat.tools.mcp, Tools.off(chat.tools), chat.who, true);
     const text = says.map((say) => AskAI.labeled(say)).join("\n\n");
     const imgs = says.flatMap((say) => say.imgs);
-    const server = Tools.at(chat.tools, "main");
+    const server = Tools.at(chat.tools, chat.who);
     chat.eye = Chat.eye(mem, from);
     chat.socks.forEach((sock) => Chat.show(chat, sock));
-    const blocks = [...view, Tools.devices(chat.tools), Tools.skills(chat.tools), Tools.at_work(chat.tools), { text: HEAD + text, mark: true }];
+    const blocks = [...view, Tools.devices(chat.tools), Tools.skills(chat.tools), Tools.at_work(chat.tools, chat.who), { text: HEAD + text, mark: true }];
     const model = chat.pick.model;
     const used = (tokens: number) => {
       if (chat.pick.model === model) {
         Chat.used(chat, tokens);
       }
     };
-    const ask = { ...Chat.share(chat, Tools.prompt("prompt")), searches: SEARCHES, server, blocks, imgs, talk: mem.talk !== null, no_wait: true, limits, who: "main", used };
+    const ask = { ...Chat.share(chat, Tools.prompt("prompt")), searches: SEARCHES, server, blocks, imgs, talk: mem.talk !== null, no_wait: true, limits, who: chat.who, used };
     chat.model = model;
     chat.asked = true;
     chat.open = 0;
@@ -661,8 +656,8 @@ export namespace Chat {
 
   export function guess(chat: Chat): number {
     const mem = chat.mem;
-    const blocks = [...Memory.view(mem, mem.count, mem.view.parts, mem.talk), Tools.devices(chat.tools), Tools.skills(chat.tools), Tools.at_work(chat.tools)];
-    const texts = [Tools.prompt("prompt"), JSON.stringify(Tools.list("main")), ...blocks.map((b) => b.text)];
+    const blocks = [...Memory.view(mem, mem.count, mem.view.parts, mem.talk), Tools.devices(chat.tools), Tools.skills(chat.tools), Tools.at_work(chat.tools, chat.who)];
+    const texts = [Tools.prompt("prompt"), JSON.stringify(Tools.list(chat.who)), ...blocks.map((b) => b.text)];
     return Math.ceil(texts.reduce((n, text) => n + Memory.bytes(text), 0) / TOKEN);
   }
 
@@ -1000,17 +995,17 @@ export namespace Chat {
   }
 
   export function resume(chat: Chat, work: string[]): void {
-    const text = Tools.restarted(work);
+    const text = "The server restarted, cutting your turn; nothing was lost: go on.";
     const queued = chat.mem.queue.filter((post) => post.act === undefined || Owner.act_get(post.act) === null);
-    const posts: Pending[] = [...(work.includes(TURN) ? [{ kind: "note" as const, text, images: [] }] : []), ...queued];
+    const posts: Pending[] = [...(work.length > 0 ? [{ kind: "note" as const, text, images: [] }] : []), ...queued];
     posts.forEach((post) => void Run.take(chat.main, post));
   }
 
   export function timed(chat: Chat, retry = false): void {
-    clearTimeout(bell);
+    clearTimeout(chat.bell);
     const first = retry ? Date.now() + RING : Math.min(...chat.mem.timers.map((t) => Date.parse(t.at)));
     if (first < Infinity) {
-      bell = setTimeout(() => Chat.fire(chat, Date.now()), Math.min(WAKE, Math.max(0, first - Date.now())));
+      chat.bell = setTimeout(() => Chat.fire(chat, Date.now()), Math.min(WAKE, Math.max(0, first - Date.now())));
     }
     Chat.change(chat);
   }
@@ -1073,7 +1068,7 @@ export namespace Chat {
   }
 
   export function all(chat: Chat, msg: Out): void {
-    chat.socks.forEach((sock) => sock.data.host === null && Chat.send(sock, msg));
+    chat.socks.forEach((sock) => Chat.send(sock, msg));
   }
 
   export function send(sock: Sock, msg: object): void {
@@ -1091,7 +1086,7 @@ export namespace Chat {
     const run = chat.main;
     const queue: Queued[] = run.queue.map(({ q }) => ({ kind: q.kind, text: shown(q.text) }));
     const sent = run.sent.flatMap(({ m }) => Array.from({ length: m.end - m.id }, (_, k) => m.id + k));
-    return { $: "state", busy: run.busy, wait: Chat.waits(chat), pick: chat.pick, ...config.OFFER, importing, limit: run.limit, queue, sent, sums: Chat.sums(chat), again: chat.mem.again, timers, mcp, talk, build: BUILD, site: config.SITE };
+    return { $: "state", agent: chat.id, busy: run.busy, wait: Chat.waits(chat), pick: chat.pick, ...config.OFFER, importing, limit: run.limit, queue, sent, sums: Chat.sums(chat), again: chat.mem.again, timers, mcp, talk, build: BUILD, site: config.SITE };
   }
 
   export function sums(chat: Chat): Sums | null {
@@ -1115,7 +1110,7 @@ export namespace Chat {
       chat.mem.pick = pick;
       chat.mem.used = null;
       Memory.save(chat.mem);
-      Chat.keep_pick(chat.mem.pick);
+      Main.keep_picks();
       Chat.note(chat, saved + " isn't offered here, so the chat now runs on " + Chat.pick_name(pick) + ".");
     }
     Chat.change(chat);
@@ -1135,38 +1130,17 @@ export namespace Chat {
   }
 
   export function join(chat: Chat, sock: Sock): void {
-    const { tab, host, work, scratch, shell } = sock.data;
+    sock.data.agent = chat.id;
+    sock.data.seen = new Set();
     chat.socks.add(sock);
-    if (host === null) {
-      Chat.send(sock, Chat.state(chat));
-      Chat.show(chat, sock);
-      Chat.send(sock, { $: "live", live: chat.main.live });
-      return;
-    }
-    const link = { send: (msg: object) => Chat.send(sock, msg), live: () => chat.socks.has(sock), work, scratch, shell };
-    sock.data.device = Tools.attach(chat.tools, tab, host, sock.data.who, link, Owner.kept());
-    if (sock.data.device !== host) {
-      Chat.send(sock, { $: "note", text: host + " was taken: Unii calls this computer " + sock.data.device + "." });
-    }
+    Chat.send(sock, Chat.state(chat));
+    Chat.show(chat, sock);
+    Chat.send(sock, { $: "live", live: chat.main.live });
   }
 
-  export function leave(chat: Chat, sock: Sock, quit: boolean): void {
-    chat.socks.delete(sock);
-    if (quit && sock.data.device !== null) {
-      Tools.detach(chat.tools, sock.data.tab, sock.data.device);
-    } else if (sock.data.device !== null) {
-      Tools.lost(chat.tools, sock.data.tab, sock.data.device);
-    }
-  }
-
-  export async function answer(chat: Chat, sock: Sock, data: string): Promise<void> {
-    let msg: unknown = null;
-    const out = await Promise.try(() => {
-      msg = JSON.parse(data);
-      const got = rec(msg) ? msg : {};
-      return Chat.ask(chat, sock, got) ?? Chat.apply(chat, got, sock.data.device ?? "");
-    }).catch(Chat.fail);
-    Chat.send(sock, { $: "ack", id: text_of(get(msg, "id")), ...out });
+  export async function answer(chat: Chat, sock: Sock, msg: Record<string, unknown>): Promise<void> {
+    const out = await Promise.try(() => Chat.ask(chat, sock, msg) ?? Chat.apply(chat, msg, sock.data.device ?? "")).catch(Chat.fail);
+    Chat.send(sock, { $: "ack", id: text_of(msg.id), ...out });
   }
 
   export function fail(err: unknown): Answer {
@@ -1239,7 +1213,7 @@ export namespace Chat {
       return {};
     }
     Chat.mark(chat, id, {});
-    Chat.interrupt(chat, "Stopped by the user: " + TURN + ".");
+    Chat.interrupt(chat, "Stopped by the user.");
     return {};
   }
 
@@ -1275,7 +1249,7 @@ export namespace Chat {
         chat.pick = chat.mem.pick = pick;
         chat.main.fell = null;
         Memory.save(chat.mem);
-        Chat.keep_pick(pick);
+        Main.keep_picks();
         Chat.change(chat);
         Chat.talked(chat, TALK_SMALL);
         return {};
@@ -1289,7 +1263,7 @@ export namespace Chat {
       }
       case "unschedule": {
         const id = String(msg.id);
-        if (Tools.unschedule(chat.tools, id)) {
+        if (Tools.unschedule({ mem: chat.mem, timed: () => Chat.timed(chat) }, id)) {
           Chat.note(chat, "Schedule " + id + " cancelled by the user.");
         }
         return {};
@@ -1384,9 +1358,6 @@ export namespace Chat {
   }
 
   export function show(chat: Chat, sock: Sock): void {
-    if (sock.data.host !== null) {
-      return;
-    }
     const [from, count] = [chat.eye.from, chat.mem.count];
     const cover = Chat.import_cover(chat, count);
     const eye = chat.eye.parts.filter(([id, n]) => id + n <= cover[0] || id >= cover[1]);
@@ -1431,8 +1402,96 @@ export namespace Chat {
 
 export namespace Main {
 
-  export let chat: Chat;
+  export const chats = new Map<string, Chat>();
+  export const socks = new Set<Sock>();
+  export let tools: Tools;
   export let server: Bun.Server<Sock["data"]>;
+
+  export function unii(): Chat {
+    return Main.chats.get(UNII) as Chat;
+  }
+
+  export function chat_of(id: string | null): Chat {
+    return (id === null ? undefined : Main.chats.get(id)) ?? Main.unii();
+  }
+
+  export function keep_picks(): void {
+    const vendors = [...Main.chats.values()].flatMap((chat) => {
+      const vendor = chat.mem.pick === null ? undefined : (chat.mem.pick as Partial<Pick>).vendor;
+      return typeof vendor === "string" ? [vendor] : [];
+    });
+    config.config_keep([...new Set(vendors)]);
+  }
+
+  export function offer(): void {
+    Main.chats.forEach((chat) => Chat.offer(chat));
+  }
+
+  export function attach(sock: Sock): void {
+    const { tab, host, work, scratch, shell } = sock.data;
+    if (host === null) {
+      return;
+    }
+    const link = { send: (msg: object) => Chat.send(sock, msg), live: () => Main.socks.has(sock), work, scratch, shell };
+    sock.data.device = Tools.attach(Main.tools, tab, host, sock.data.who, link, Owner.kept());
+    if (sock.data.device !== host) {
+      Chat.send(sock, { $: "note", text: host + " was taken: Unii calls this computer " + sock.data.device + "." });
+    }
+  }
+
+  export function leave(sock: Sock, quit: boolean): void {
+    Main.socks.delete(sock);
+    Main.chats.get(sock.data.agent)?.socks.delete(sock);
+    if (quit && sock.data.device !== null) {
+      Tools.detach(Main.tools, sock.data.tab, sock.data.device);
+    } else if (sock.data.device !== null) {
+      Tools.lost(Main.tools, sock.data.tab, sock.data.device);
+    }
+  }
+
+  // a device's acts go to Unii's chat, a job's report to the chat of the
+  // agent that ran it; a browser's to the chat it shows, or open another
+  export function heard(sock: Sock, text: string): void {
+    let msg: Record<string, unknown> = {};
+    try {
+      const got: unknown = JSON.parse(text);
+      msg = rec(got) ? got : {};
+    } catch (err) {
+      return Chat.send(sock, { $: "ack", id: "", ...Chat.fail(err) });
+    }
+    if (sock.data.device !== null) {
+      const who = msg.$ === "done" ? text_of(msg.agent) : "main";
+      const chat = [...Main.chats.values()].find((c) => c.who === who) ?? Main.unii();
+      return void Chat.answer(chat, sock, msg);
+    }
+    const chat = Main.chats.get(sock.data.agent);
+    if (msg.$ === "open") {
+      chat?.socks.delete(sock);
+      Chat.join(Main.chat_of(text_of(msg.agent)), sock);
+      return Chat.send(sock, { $: "ack", id: text_of(msg.id) });
+    }
+    if (chat !== undefined) {
+      void Chat.answer(chat, sock, msg);
+    }
+  }
+
+  export function made(x: unknown): Answer & { agent?: Agent } {
+    const fields = Team.fields(x, null);
+    if (typeof fields === "string") {
+      return { error: fields };
+    }
+    const agent = Team.add(fields);
+    Chat.open(agent.id, Main.tools);
+    return { agent };
+  }
+
+  export async function team(req: Request): Promise<Response> {
+    if (req.method === "POST") {
+      const out = Main.made(await req.json().catch(() => null));
+      return Response.json(out, { status: out.error === undefined ? 200 : 400 });
+    }
+    return Response.json(Team.all());
+  }
 
   export async function lock(): Promise<void> {
     fs.mkdirSync(config.DIR, { recursive: true });
@@ -1533,7 +1592,8 @@ export namespace Main {
     });
   }
 
-  export async function page(chat: Chat, p: string, req: Request): Promise<Response> {
+  export async function page(p: string, req: Request): Promise<Response> {
+    const chat = Main.chat_of(new URL(req.url).searchParams.get("agent"));
     const mem = chat.mem;
     switch (p) {
       case "/api/tree": {
@@ -1555,11 +1615,14 @@ export namespace Main {
           return refused;
         }
         const msg = { ...Object.fromEntries(new URL(req.url).searchParams), req };
-        const out = await Chat.apply(chat, msg, "");
+        const out = await Chat.apply(msg.req.url.includes("$=import") ? Main.unii() : chat, msg, "");
         return Response.json(out, { status: out.status ?? (out.error === undefined ? 200 : 400) });
       }
       case "/api/imported": {
-        return Response.json(Chat.done(chat));
+        return Response.json(Chat.done(Main.unii()));
+      }
+      case "/api/agents": {
+        return await Main.team(req);
       }
       case "/api/prompts": {
         return await Main.prompts(req);
@@ -1695,10 +1758,10 @@ export namespace Main {
       if (p === "/ws") {
         const q    = new URL(req.url).searchParams;
         const who  = Owner.hash(Owner.token(req));
-        const data = { who, tab: q.get("tab") ?? "", wire: q.get("wire"), host: q.get("device"), work: q.get("work") ?? "~/.unii/work", scratch: q.get("scratch"), shell: q.get("shell") === "PowerShell" ? "PowerShell" : null, device: null, seen: new Set<string>(), active: 0 };
+        const data = { who, tab: q.get("tab") ?? "", wire: q.get("wire"), host: q.get("device"), work: q.get("work") ?? "~/.unii/work", scratch: q.get("scratch"), shell: q.get("shell") === "PowerShell" ? "PowerShell" : null, device: null, seen: new Set<string>(), active: 0, agent: Main.chat_of(q.get("agent")).id };
         return server.upgrade(req, { data }) ? undefined : new Response("upgrade failed", { status: 400 });
       }
-      return await Main.page(Main.chat, p, req);
+      return await Main.page(p, req);
     } catch (err) {
       return Response.json({ error: err_why(err) }, { status: 500 });
     }
@@ -1720,14 +1783,22 @@ export namespace Main {
   export async function start(port: number): Promise<void> {
     Reap.start();
     await Main.lock();
-    if ((fs.existsSync(config.DIR + "/users") && !fs.existsSync(CHAT)) || fs.existsSync(config.DIR + "/.migrating")) {
+    if ((fs.existsSync(config.DIR + "/users") && !fs.existsSync(config.DIR + "/chat") && !fs.existsSync(AGENTS)) || fs.existsSync(config.DIR + "/.migrating")) {
       const installer = update_cmd(WIN);
       throw new Error(config.DIR + " holds an older unii's data, not yet (or not all) moved to this version's layout: run the installer (" + installer + ") with no unii server running, then start again");
     }
     fs.writeFileSync(PID, String(process.pid));
     Owner.open();
     Push.keys();
-    Main.chat = Chat.open();
+    Main.tools = Tools.serve({
+      note   : (text) => Chat.note(Main.unii(), text),
+      change : () => Main.chats.forEach((chat) => Chat.change(chat)),
+      off    : () => Main.unii().mem.off,
+      docs   : AGENTS + "/" + UNII,
+    });
+    Team.open();
+    Limit.answering(() => ({ queued: [...Main.chats.values()].some((c) => Run.waiting(c.main)), busy: [...Main.chats.values()].some((c) => c.main.busy) }));
+    Team.all().forEach((agent) => Chat.open(agent.id, Main.tools));
     Main.watch();
     process.on("unhandledRejection", Main.unowned);
     Main.server = Bun.serve<Sock["data"]>({
@@ -1747,33 +1818,38 @@ export namespace Main {
               ws.send(JSON.stringify({ $: "error", text: "This page or unii is older than the server: reload or reopen it (`unii update` for the latest).", build: BUILD, wire: WIRE }));
               return;
             }
-            Chat.join(Main.chat, ws);
+            Main.socks.add(ws);
+            if (ws.data.host === null) {
+              Chat.join(Main.chat_of(ws.data.agent), ws);
+            } else {
+              Main.attach(ws);
+            }
           }, () => ws.close(1011));
         },
         message(ws: Sock, data) {
           const text = String(data);
           if (text === ACTIVE || text === IDLE) {
             ws.data.active = text === ACTIVE ? Date.now() : 0;
-          } else if (Main.chat.socks.has(ws)) {
-            void Chat.answer(Main.chat, ws, text);
+          } else if (Main.socks.has(ws)) {
+            Main.heard(ws, text);
           }
         },
         close(ws: Sock, code) {
-          Main.event("a socket", () => Chat.leave(Main.chat, ws, code === QUIT));
+          Main.event("a socket", () => Main.leave(ws, code === QUIT));
         },
       },
     });
     setInterval(() => {
       const kept = Owner.kept();
-      Main.chat.socks.forEach((sock) => {
+      Main.socks.forEach((sock) => {
         if (kept.has(sock.data.who)) {
           sock.send(TICK);
           return;
         }
-        Chat.leave(Main.chat, sock, true);
+        Main.leave(sock, true);
         sock.close(QUIT, "signed out");
       });
-      Tools.prune(Main.chat.tools, kept);
+      Tools.prune(Main.tools, kept);
       Main.follow();
     }, PING / 2);
     for (const sig of ["SIGTERM", "SIGINT", "SIGHUP"]) {
@@ -1781,8 +1857,10 @@ export namespace Main {
     }
     process.on("exit", () => {
       fs.rmSync(PID, { force: true });
-      Chat.stop(Main.chat, null);
-      Memory.stop(Main.chat.mem);
+      Main.chats.forEach((chat) => {
+        Chat.stop(chat, null);
+        Memory.stop(chat.mem);
+      });
     });
     console.log("unii: " + config.SITE + ", data in " + config.DIR + ", on 127.0.0.1:" + port);
     Service.ready("serve");
@@ -1807,7 +1885,7 @@ export namespace Main {
       console.log("unii: settings saved: " + out.saved.join(", "));
     }
     if (out.wrote) {
-      Chat.offer(Main.chat);
+      Main.offer();
     }
     return Response.json(out.body, { status: out.status, headers: fresh });
   }
@@ -1821,7 +1899,7 @@ export namespace Main {
     const reload = () => {
       try {
         config.config_reload();
-        Chat.offer(Main.chat);
+        Main.offer();
       } catch (err) {
         console.error("unii: the settings changed on disk, but " + err_why(err) + "; the ones before stay");
       }
@@ -1840,7 +1918,7 @@ export namespace Main {
 
   export function follow(): void {
     if (config.config_follow()) {
-      Chat.offer(Main.chat);
+      Main.offer();
     }
   }
 

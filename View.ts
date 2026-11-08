@@ -60,6 +60,7 @@ type ChatSet = {
 };
 
 type ServerSays = {
+  agent?    : string;
   build?    : string;
   site?     : string;
 };
