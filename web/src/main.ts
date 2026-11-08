@@ -194,6 +194,7 @@ function chat(): void {
   $("#pick").addEventListener("focusout", left);
   $("header .who").onclick = () => go("/a/" + v.agent + "/edit");
   $("header .brain").onclick = () => go("/tree?a=" + v.agent);
+  $("header .back").onclick = () => up(up_to());
   WIDE.onchange = () => route();
   $(".mic").onclick = mic;
   file.onchange = () => {
@@ -1037,11 +1038,28 @@ function mine_above(el: HTMLElement): boolean {
   return el.getBoundingClientRect().top < $("header").getBoundingClientRect().bottom;
 }
 
+// each page records the one it was opened from, so a way up to that one is
+// the browser's back
 function go(path: string): void {
-  if (location.pathname + location.search + location.hash !== path) {
-    history.pushState(null, "", path);
+  const here = location.pathname + location.search + location.hash;
+  if (here !== path) {
+    history.pushState({ from: here }, "", path);
   }
   route();
+}
+
+function up(path: string): void {
+  if (get(history.state, "from") === path) {
+    history.back();
+    return;
+  }
+  history.replaceState(null, "", path);
+  route();
+}
+
+// the header's back: from the memory to the agent's chat, from a chat to the list
+function up_to(): string {
+  return location.pathname === TREE ? "/a/" + v.agent : "/";
 }
 
 // to another agent's chat: the server sends it, the box holds its draft
@@ -1069,8 +1087,11 @@ function route(): void {
   chat_to(AGENT.exec(p)?.[1] ?? (tree ? new URLSearchParams(location.search).get("a") ?? UNII : p === "/" ? UNII : v.agent));
   document.body.classList.toggle("wide", WIDE.matches);
   document.body.classList.toggle("list", list);
-  $("#tree .back").dataset.go = "/a/" + v.agent;
-  $("#tree .back").setAttribute("href", "/a/" + v.agent);
+  document.querySelectorAll<HTMLAnchorElement>("#tree .tab").forEach((a) => {
+    const to = TREE + "?a=" + v.agent + (a.dataset.tab === "VIEW" ? "#view" : "");
+    a.dataset.go = to;
+    a.href = to;
+  });
   if (!chat && !$("#log").hidden && SCROLL.away === null) {
     SCROLL.away = { y: scrollY, end: SCROLL.end };
   }

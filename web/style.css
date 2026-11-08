@@ -79,7 +79,8 @@ header svg { width: 20px; height: 20px; }
 header > .who { margin-right: auto; display: flex; align-items: center; gap: 10px; min-width: 0; height: auto; padding: 4px 8px 4px 4px; background: none; font: 600 17px/1.2 var(--sans); }
 header > .who .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 header .pic { width: 34px; height: 34px; }
-body.wide header > .back { display: none; }
+body.wide:not(.tree) header > .back { display: none; }
+body.tree header > .brain { display: none; }
 
 .pic { flex: none; display: block; width: 46px; height: 46px; border-radius: 50%; object-fit: cover; background: var(--block); }
 .pic.logo { display: grid; place-items: center; background: var(--ink); }
