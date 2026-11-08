@@ -174,7 +174,7 @@ export type Choice = { text: string; to: string; move: Move; here: boolean; vend
 
 export const TURN = "Unii's turn";
 
-export const WIRE = 4;
+export const WIRE = 5;
 
 export const PING  = 10000;
 export const RETRY = 1000;
