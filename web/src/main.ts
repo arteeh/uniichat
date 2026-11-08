@@ -622,6 +622,7 @@ async function lost(up: boolean): Promise<boolean> {
 
 function hear(msg: View.Server): void {
   if (msg.$ === "error" && msg.build !== undefined) {
+    unsent_back();
     v.build = msg.build;
     renew_due(msg.build);
     if (!RENEW.due || !renew_free()) {
@@ -651,6 +652,16 @@ function hear(msg: View.Server): void {
   }
   void import_welcome();
   draw(true);
+}
+
+// the link is shut for good: messages it holds go back to the box, before
+// what was typed since, for the user to send again after the reload
+function unsent_back(): void {
+  const says = UPS.size === 0 ? v.out.filter((p) => p.msg.$ === "say") : [];
+  v.out = v.out.filter((p) => p.msg.$ === "voice" || p.msg.$ === "import" || (p.msg.$ === "say" && !says.includes(p)));
+  if (says.length > 0) {
+    Box.box_set([...says.map((p) => p.said), Box.box_text()].filter((t) => t.trim() !== "").join("\n\n"));
+  }
 }
 
 function importer(): void {
