@@ -7,6 +7,7 @@ import { Mcp, type Servers } from "./Mcp.ts";
 import { Memory } from "./Memory.ts";
 import PROMPT from "./prompt.txt" with { type: "text" };
 import COMPACT_PROMPT from "./compact.txt" with { type: "text" };
+import { Team, UNII } from "./Team.ts";
 import * as Timer from "./Timer.ts";
 import { PING } from "./View.ts";
 import { err_why } from "./Err.ts";
@@ -83,8 +84,10 @@ const SKILLS = "Skills on the devices open now, by device: when a task matches o
 
 const LOOK = 3000;
 
+const ZOOM = "Open the line id+n of the view into the two lines of n/2 under it; n = 1 gives the message whole. A long text comes in pages from character at, saying where to go on.";
+const ZOOM_TEAM: Spec = spec("zoom", ZOOM + " With agent, a line of that agent's memory, from the team view.", { id: INT, n: INT, at: INT, agent: STR }, ["id"]);
 const OWN: Spec[] = [
-  spec("zoom", "Open the line id+n of the view into the two lines of n/2 under it; n = 1 gives the message whole. A long text comes in pages from character at, saying where to go on.", { id: INT, n: INT, at: INT }, ["id"]),
+  spec("zoom", ZOOM, { id: INT, n: INT, at: INT }, ["id"]),
   spec("date", "The date and time of message id.", { id: INT }, ["id"]),
 ];
 const BOSS: Spec[] = [
@@ -253,7 +256,7 @@ export namespace Tools {
   }
 
   export function list(who: string): Spec[] {
-    return [...OWN, ...BOSS, ...kit(who), SKILL];
+    return [...(who === "main" ? [ZOOM_TEAM, ...OWN.slice(1)] : OWN), ...BOSS, ...kit(who), SKILL];
   }
 
   export function off(tools: Tools): string[] {
@@ -275,6 +278,14 @@ export namespace Tools {
     const mem = seat.mem;
     switch (name) {
       case "zoom": {
+        if (args.agent !== undefined && who === "main") {
+          const them = Team.by_name(text_of(args.agent));
+          const there = them === null || them.archived !== 0 ? undefined : tools.seats.get(them.id === UNII ? "main" : them.id);
+          if (there === undefined) {
+            return { text: "No agent " + text_of(args.agent) + " in the team.", fail: true };
+          }
+          return { text: Memory.zoom(there.mem, Number(args.id), Number(args.n ?? 1), Number(args.at ?? 0)), fail: false };
+        }
         const id = Number(args.id);
         const n = Number(args.n ?? 1);
         const at = Number(args.at ?? 0);

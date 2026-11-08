@@ -5,7 +5,7 @@ import * as net from "node:net";
 import * as path from "node:path";
 import type { ServerWebSocket } from "bun";
 import type { Out as Done } from "./Agent.ts";
-import { AskAI, GO_ON, type Ask, type Call, type End, type Event, type Kind, type Parked, type Said, type Vendor } from "./AskAI.ts";
+import { AskAI, GO_ON, type Ask, type Block, type Call, type End, type Event, type Kind, type Parked, type Said, type Vendor } from "./AskAI.ts";
 import { clip_pages } from "./Clip.ts";
 import { Disk } from "./Disk.ts";
 import { Mcp } from "./Mcp.ts";
@@ -118,6 +118,20 @@ const TALK_OFF_AT = 0.9;
 const FULL       = "UniiChat's disk is full; try again soon.";
 const BATCH      = "/import.json";
 const SPARE      = 2 ** 30;
+
+const TEAM_VIEW  = 16000;
+const TEAM_DOC   = `# The team view
+
+You see what the other agents do and what the user tells them: just before the
+new messages, <team> holds one timeline over the team's other agents, oldest
+first, from their memories. Each line is
+
+  Name id+n|text   that agent's n messages from id on, summarized
+
+The newest lines are one message each: the user's messages to that agent, its
+replies to the user, and messages between agents. Older lines are summaries of
+everything, coarser further back. zoom(id, n, agent: "Name") opens a line of that
+agent's memory, as zoom does yours.`;
 
 const TIMER_TEXT = 200;
 const RING       = 60000;
@@ -275,8 +289,62 @@ export namespace Chat {
       Tools.prompt("prompt", name),
       ...(told === "" ? [] : ["# The user's instructions\n\n" + told]),
       "# The team\n\nThe agents the user works with, each in its own chat with them:\n" + team.join("\n"),
+      ...(chat.id === UNII ? [TEAM_DOC] : []),
       "# You\n\n" + (agent === null ? "" : Team.prompt(agent)),
     ].join("\n\n");
+  }
+
+  // the team view: the other agents' memories as one timeline, each one's
+  // own view coarsened, its oldest pairs first, till the whole fits
+  export function team(chat: Chat): Block {
+    type Seen = { name: string; mem: Memory; parts: Part2[] };
+    type Part2 = { l: number; i: number; at: string; text: string };
+    const dates = new Map<string, string>();
+    const at = (mem: Memory, i: number) => {
+      const key = mem.dir + i;
+      const date = dates.get(key) ?? Memory.at(mem, i).date;
+      dates.set(key, date);
+      return date;
+    };
+    const line = (mem: Memory, l: number, i: number): Part2 => {
+      const end = Memory.span({ l, i })[1];
+      if (l > 0) {
+        return { l, i, at: at(mem, end), text: Memory.node(mem, { l, i }) ?? "" };
+      }
+      const m = Memory.at(mem, i);
+      const said = m.kind === "user" || m.kind === "unii" || (m.kind === "work" && m.from !== undefined) || (m.kind === "tool" && /^(mcp__unii__)?message /.test(m.text));
+      return { l, i, at: m.date, text: said ? Memory.node(mem, { l, i }) ?? Memory.cut(Memory.flat(m.kind + ": " + m.text)) : "" };
+    };
+    const seen: Seen[] = Team.active().filter((a) => a.id !== chat.id).flatMap((a) => {
+      const mem = Main.chats.get(a.id)?.mem;
+      return mem === undefined ? [] : [{ name: a.name, mem, parts: mem.view.parts.map((p) => line(mem, p.l, p.i)) }];
+    });
+    const size = (p: Part2, name: string) => (p.text === "" ? 0 : name.length + p.text.length + 20);
+    let total = seen.reduce((n, s) => n + s.parts.reduce((k, p) => k + size(p, s.name), 0), 0);
+    while (total > TEAM_VIEW) {
+      let best: { s: Seen; k: number } | null = null;
+      for (const s of seen) {
+        for (let k = 0; k + 1 < s.parts.length; k++) {
+          const [a, b] = [s.parts[k], s.parts[k + 1]];
+          const pair = a.l === b.l && a.i % 2 === 0 && b.i === a.i + 1 && Memory.node(s.mem, { l: a.l + 1, i: a.i / 2 }) !== null;
+          if (pair && (best === null || b.at < best.s.parts[best.k + 1].at)) {
+            best = { s, k };
+          }
+        }
+      }
+      if (best === null) {
+        const old = seen.filter((s) => s.parts.length > 0).reduce((x, y) => (y.parts[0].at < x.parts[0].at ? y : x));
+        total -= size(old.parts.shift() as Part2, old.name);
+        continue;
+      }
+      const { s, k } = best;
+      const up = line(s.mem, s.parts[k].l + 1, s.parts[k].i / 2);
+      total += size(up, s.name) - size(s.parts[k], s.name) - size(s.parts[k + 1], s.name);
+      s.parts.splice(k, 2, up);
+    }
+    const lines = seen.flatMap((s) => s.parts.filter((p) => p.text !== "").map((p) => ({ at: p.at, text: s.name + " " + Memory.line(p, p.text) })));
+    lines.sort((x, y) => (x.at < y.at ? -1 : x.at > y.at ? 1 : 0));
+    return { text: "<team>\n" + lines.map((l) => l.text + "\n").join("") + "</team>\n\n", mark: false };
   }
 
   export function share(chat: Chat, system: string): Share {
@@ -462,7 +530,8 @@ export namespace Chat {
     const server = Tools.at(chat.tools, chat.who);
     chat.eye = Chat.eye(mem, from);
     chat.socks.forEach((sock) => Chat.show(chat, sock));
-    const blocks = [...view, Tools.devices(chat.tools), Tools.skills(chat.tools), Tools.at_work(chat.tools, chat.who), { text: HEAD + text, mark: true }];
+    const team = chat.id === UNII ? [Chat.team(chat)] : [];
+    const blocks = [...view, Tools.devices(chat.tools), Tools.skills(chat.tools), Tools.at_work(chat.tools, chat.who), ...team, { text: HEAD + text, mark: true }];
     const model = chat.pick.model;
     const used = (tokens: number) => {
       if (chat.pick.model === model) {
