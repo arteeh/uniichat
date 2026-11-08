@@ -32,6 +32,7 @@ fake error usage-limit --reset 5m                     # when the limit ends (def
 fake stall 60s                                        # the stream starts, then hangs
 fake cut                                              # the stream drops halfway
 fake reply --match "PEARS" "There are 3 pears."       # only for the call whose latest message has "PEARS"
+fake reply --think "Let me count." "3 pears."         # thinks for 5 s first (Claude vendors)
 fake log                                              # every call: vendor, model, latest message, the answer
 fake last                                             # the last call: system prompt, tools, sender labels, cache marks
 fake last --json                                      # its headers and whole body

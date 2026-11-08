@@ -21,6 +21,8 @@ type Made = {
   after     : string;
   instructions : string;
   hops      : number;
+  thinking  : boolean;
+  verbose   : boolean;
 };
 
 export type McpServer = {
@@ -51,6 +53,8 @@ export const SETTINGS: Setting[] = [
   { key: "compactor_context", def: "4",                         apply: "now",     server_only: null },
   { key: "instructions", def: "",                               apply: "now",     server_only: null },
   { key: "hops",      def: "4",                                 apply: "now",     server_only: null },
+  { key: "thinking",  def: "off",                               apply: "now",     server_only: null },
+  { key: "verbose",   def: "on",                                apply: "now",     server_only: null },
   { key: "site",      def: "http://127.0.0.1:8788",             apply: "restart", server_only: null },
   { key: "apple",     def: "",                                  apply: "restart", server_only: null },
   { key: "apns",      def: "",                                  apply: "restart", server_only: null },
@@ -105,6 +109,8 @@ export const OFFER: Offer = MADE.offer;
 export let   AFTER      = MADE.after;
 export let   INSTRUCTIONS = MADE.instructions;
 export let   HOPS       = MADE.hops;
+export let   THINKING   = MADE.thinking;
+export let   VERBOSE    = MADE.verbose;
 export let   PICK       = MADE.pick;
 
 export let   COMPACTOR  = MADE.compactor;
@@ -300,6 +306,8 @@ export function config_make(file: Record<string, unknown>): Made {
     after     : config_value(file, "after"),
     instructions : config_value(file, "instructions"),
     hops      : config_hops(config_value(file, "hops")),
+    thinking  : config_value(file, "thinking") === "on",
+    verbose   : config_value(file, "verbose") !== "off",
   };
 }
 
@@ -468,6 +476,8 @@ export function config_reload(): void {
   AFTER = made.after;
   INSTRUCTIONS = made.instructions;
   HOPS = made.hops;
+  THINKING = made.thinking;
+  VERBOSE = made.verbose;
   Object.assign(KEYS, keys);
   RELOADED.forEach((f) => f());
 }

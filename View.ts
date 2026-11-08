@@ -65,6 +65,8 @@ type ChatSet = {
 
 type ServerSays = {
   agent?    : string;
+  thinking? : boolean;
+  verbose?  : boolean;
   build?    : string;
   site?     : string;
 };
@@ -162,8 +164,9 @@ export type Act =
 export type Row =
   | { $: "Sum"; id: number; n: number; text: string; call: Call.Call | null }
   | { $: "Box"; id: number; n: number; text: string; rows: Row[] }
-  | { $: "Msg"; id: number | null; kind: Kind; who: string; text: string; body: Md.Block[]; call: Call.Call | null; images: string[]; queued?: boolean; from?: string }
-  | { $: "Cap"; text: string }
+  | { $: "Msg"; id: number | null; kind: Kind; who: string; text: string; body: Md.Block[]; call: Call.Call | null; images: string[]; queued?: boolean; from?: string; of?: string }
+  | { $: "Line"; id: number | null; call: Call.Call; echo: string | null; rows: Row[] }
+  | { $: "Cap"; text: string; think?: true }
 
 export type Knob = { text: string; move: Move; hint: string; choices: Choice[] };
 
@@ -462,7 +465,30 @@ export function view_body(v: View): Row[] {
     const tops = v.fold.flatMap(([id, n]) => part_rows(v, id, n, Infinity, false));
     return [Cap(FOLD), ...tops];
   }
-  return view_rows(v, v.parts).flat();
+  return view_terse(v, view_rows(v, v.parts).flat());
+}
+
+// with verbose tool calls off, each call and its result fold into a line
+function view_terse(v: View, rows: Row[]): Row[] {
+  if (v.verbose !== false) {
+    return rows;
+  }
+  const paired = new Set<string>();
+  const out: Row[] = [];
+  for (const [k, r] of rows.entries()) {
+    if (r.$ === "Box") {
+      out.push({ ...r, rows: view_terse(v, r.rows) });
+    } else if (r.$ === "Msg" && r.kind === "tool" && r.call !== null) {
+      const echo = r.of === undefined ? undefined : rows.slice(k + 1).find((x) => x.$ === "Msg" && x.kind === "echo" && x.of === r.of);
+      if (echo !== undefined && r.of !== undefined) {
+        paired.add(r.of);
+      }
+      out.push({ $: "Line", id: r.id, call: r.call, echo: echo?.$ === "Msg" ? echo.text : null, rows: echo === undefined ? [r] : [r, echo] });
+    } else if (!(r.$ === "Msg" && r.kind === "echo" && r.of !== undefined && paired.has(r.of))) {
+      out.push(r);
+    }
+  }
+  return out;
 }
 
 function view_rows(v: View, parts: Part[]): Row[][] {
@@ -473,7 +499,8 @@ export function view_tail(v: View): Row[] {
   if (v.fold !== null) {
     return [];
   }
-  const rows = v.live.flatMap((l) => entry_rows(null, l.kind, l.text));
+  const thought = v.thinking === false && v.live.some((l) => l.kind === "mind") ? [{ $: "Cap" as const, text: "Thinking", think: true as const }] : [];
+  const rows = [...thought, ...view_terse(v, v.live.filter((l) => v.thinking !== false || l.kind !== "mind").flatMap((l) => entry_rows(null, l.kind, l.text)))];
   const load = v.importing !== null ? [Cap(progress_show(v.importing))] : [];
   const said = !v.up ? v.out.flatMap((p) => entry_rows(null, "user", p.said)) : [];
   const kept = said.length > 0 ? [...said, Cap(UNSENT)] : [];
@@ -698,7 +725,7 @@ function part_rows(v: View, id: number, n: number, t: number, talk: boolean): Ro
   const entry = v.whole.get(id);
   const half  = n / 2;
   if (n === 1 && id >= t && entry !== undefined) {
-    const minds = v.minds.get(id) ?? [];
+    const minds = v.thinking === false ? [] : v.minds.get(id) ?? [];
     const after = minds.flatMap((x) => entry_rows(null, "mind", x));
     return [...sent_rows(v.sent.includes(id), whole_rows(id, entry, v.whole.get(id - 1))), ...after];
   }
@@ -721,7 +748,7 @@ const APART = new WeakMap<Entry, Row[]>();
 function whole_rows(id: number | null, entry: Entry, before: Entry | undefined): Row[] {
   const of = entry_of(entry, before);
   const made = of.apart ? APART : ROWS;
-  const rows = made.get(entry) ?? entry_rows(id, entry.kind, entry.text, entry.images, of, entry.from);
+  const rows = made.get(entry) ?? entry_rows(id, entry.kind, entry.text, entry.images, of, entry.from, entry.of);
   made.set(entry, rows);
   return rows;
 }
@@ -766,7 +793,7 @@ function entry_of(entry: Entry, before: Entry | undefined): Of {
   return { tool: entry.tool ?? "", apart: entry.kind === "echo" && entry.of !== undefined && before?.of !== entry.of };
 }
 
-function entry_rows(id: number | null, kind: Kind, text: string, images: string[] = [], of: Of = { tool: "", apart: false }, from?: string): Row[] {
+function entry_rows(id: number | null, kind: Kind, text: string, images: string[] = [], of: Of = { tool: "", apart: false }, from?: string, pair?: string): Row[] {
   const call = kind === "tool" ? Call.call_parse(text) : null;
   const report = kind === "work" ? Call.report_read(text) : null;
   const label = of.apart ? "↳ " + (of.tool === "" ? "" : Call.tool_name(of.tool) + " ") + "result" : "result";
@@ -774,7 +801,7 @@ function entry_rows(id: number | null, kind: Kind, text: string, images: string[
   const named = body.some((b) => b.$ === "File" && b.k.startsWith(label));
   const who = report?.name ?? WHO[kind] ?? (kind === "echo" && of.apart && !named ? label : "");
   const pics = images.filter((name) => !text.includes("/media/" + name));
-  const sent = from === undefined ? {} : { from };
+  const sent = { ...(from === undefined ? {} : { from }), ...(pair === undefined ? {} : { of: pair }) };
   return call === null && body.length === 0 && pics.length === 0 ? [] : [{ $: "Msg", id, kind, who, text, body, call, images: pics, ...sent }];
 }
 

@@ -1517,7 +1517,8 @@ async function settings_save(form: HTMLFormElement, page: Page, unset: Set<strin
       continue;
     }
     const field = form.querySelector<HTMLInputElement | HTMLTextAreaElement>(`:is(input, textarea)[name="${r.key}"]`);
-    const now = r.key === "vendors" || r.key === "models" ? Html.list_changed(Html.list(r.value), listed(r.key))?.join(",") ?? r.value : field?.value.trim() ?? r.value;
+    const flag = field instanceof HTMLInputElement && field.type === "checkbox" ? (field.checked ? "on" : "off") : null;
+    const now = r.key === "vendors" || r.key === "models" ? Html.list_changed(Html.list(r.value), listed(r.key))?.join(",") ?? r.value : flag ?? field?.value.trim() ?? r.value;
     if (unset.has(r.key)) {
       set[r.key] = null;
     } else if (now !== r.value) {

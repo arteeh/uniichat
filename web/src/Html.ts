@@ -105,9 +105,27 @@ function row_make(row: View.Row): string {
       return `<div class="msg ${row.kind}${queued}${long}"${at}${who}>${copy}${fold}${pics}</div>`;
     }
     case "Cap": {
-      return `<p class="cap">${esc(row.text)}</p>`;
+      return `<p class="cap${row.think === true ? " think" : ""}">${esc(row.text)}</p>`;
+    }
+    case "Line": {
+      return line_html(row);
     }
   }
+}
+
+// a tool call as one line: shell's command, write's or edit's path (cut
+// on the left) with +N −M, else the tool and its main argument
+function line_html(row: Extract<View.Row, { $: "Line" }>): string {
+  const c = row.call;
+  const at = row.id === null ? "" : ` data-a="${row.id}"`;
+  const fail = row.echo?.startsWith("error") === true ? `<span class="bad" title="Failed">✕</span>` : "";
+  const files = c.name === "write" || c.name === "edit";
+  const lines = (row.echo ?? "").split("\n");
+  const [adds, dels] = [lines.filter((l) => /^\+(?!\+\+)/.test(l)).length, lines.filter((l) => /^-(?!--)/.test(l)).length];
+  const diff = files && row.echo !== null && fail === "" ? ` <b class="add">+${adds}</b> <b class="del">−${dels}</b>` : "";
+  const what = files ? `<span class="arg path"><bdi>${esc(c.head)}</bdi></span>` : `<span class="arg">${esc(c.head.split("\n")[0])}</span>`;
+  const head = `<summary><span class="ic">${Theme.tool_glyph(c.name)}</span><b>${esc(c.name)}</b>${what}${diff}${fail}</summary>`;
+  return `<details class="msg tool line"${at}>${head}${row.rows.map(row_html).join("")}</details>`;
 }
 
 function call_html(c: Call.Call): string {
@@ -233,6 +251,8 @@ const SETTING: Record<string, [string, string]> = {
   models    : ["Models", "The models offered, of those vendors."],
   pick      : ["Default model", "What a chat runs on until it picks another."],
   compactor : ["Compactor model", "What writes the memory's summaries. Sonnet medium summarizes more faithfully than Haiku, using more of a plan's limits."],
+  thinking  : ["Show thinking", "The agents' reasoning as it comes; off, a Thinking line instead."],
+  verbose   : ["Show verbose tool calls", "Each tool call with its result; off, one line you tap to open."],
   hops      : ["Hop limit", "How many messages in a row agents may send each other before they wait for you; 0: none."],
   instructions : ["Instructions", "Every agent's prompt has these: who you are, how your files are organised, how you want work done."],
   compactor_context : ["Compactor context", "How much of the chat each summary sees, in KB (1 to 128). More context lets it copy more into a summary that its message doesn't say. New summaries only."],
@@ -253,6 +273,7 @@ export const PICKS = ["pick", "compactor"];
 
 const GROUPS: Array<[string, string[]]> = [
   ["Instructions", ["instructions"]],
+  ["Chat", ["thinking", "verbose"]],
   ["Agents", ["hops"]],
   ["Models", ["vendors", "models", "pick", "compactor", "compactor_context"]],
   ["Server", ["site", "apple", "apns"]],
@@ -271,7 +292,7 @@ export function settings_html(page: Page): string {
   const save = `<div class="save"><p class="why"></p><button class="chip go"${page.error === null ? "" : " disabled"}>Save</button></div>`;
   const head = `<p class="sub">The server's settings, in config.json in its folder.</p>`;
   const profiles = page.profiles === null ? "" : section_html("Profiles", `<p class="sub">Ranked models: a chat on a profile runs on the first and falls back to the next when one is out.</p><div class="set profiles" data-key="profiles"><div class="field"></div><p class="err"></p></div>`);
-  return head + error + none + `<form class="settings" autocomplete="off">` + group(GROUPS[0]) + group(GROUPS[1]) + group(GROUPS[2]) + profiles + keys + group(GROUPS[3]) + save + `</form>`;
+  return head + error + none + `<form class="settings" autocomplete="off">` + group(GROUPS[0]) + group(GROUPS[1]) + group(GROUPS[2]) + group(GROUPS[3]) + profiles + keys + group(GROUPS[4]) + save + `</form>`;
 }
 
 export function offered(vendors: string[], models: string[]): string[] {
@@ -315,6 +336,10 @@ function control_html(r: Row): string {
     }
     case "instructions": {
       return `<textarea id="set-${r.key}" name="${r.key}" rows="8" spellcheck="true">${esc(r.value)}</textarea>`;
+    }
+    case "thinking":
+    case "verbose": {
+      return `<label class="opt"><input id="set-${r.key}" type="checkbox" name="${r.key}" value="on"${r.value === "on" ? " checked" : ""}> On</label>`;
     }
     case "hops": {
       return `<input id="set-${r.key}" name="${r.key}" type="number" min="0" max="100" step="1" inputmode="numeric" value="${esc(r.value)}" placeholder="${esc(r.def)}">`;

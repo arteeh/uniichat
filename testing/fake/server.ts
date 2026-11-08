@@ -3,7 +3,7 @@ import { get, list, str } from "../../Json.ts";
 import { CASES, type Kind, type Vendor } from "./cases.ts";
 
 export type Order =
-  | { what: "reply"; text: string }
+  | { what: "reply"; text: string; think?: string }
   | { what: "tool"; calls: Array<[string, unknown]> }
   | { what: "error"; kind: Kind; reset: number }
   | { what: "stall"; ms: number }
@@ -15,7 +15,7 @@ type Seen = { n: number; at: string; vendor: string; path: string; model: string
 
 type Used = { input: number; read: number; write: number };
 
-type Sent = { blocks: Array<{ text: string } | { id: string; name: string; json: string }>; stall: number; cut: boolean };
+type Sent = { blocks: Array<{ text: string } | { id: string; name: string; json: string } | { think: string }>; stall: number; cut: boolean };
 
 export const CONTROL = 9999;
 
@@ -122,6 +122,10 @@ function sse(events: Array<[string, object]>, stall: number, cut: boolean, heade
   const stream = new ReadableStream<string>({
     async pull(c) {
       for (const [k, [name, data]] of events.slice(0, keep).entries()) {
+        if (name === "pause") {
+          await Bun.sleep(Number(get(data, "ms")));
+          continue;
+        }
         c.enqueue("event: " + name + "\ndata: " + JSON.stringify(data) + "\n\n");
         await Bun.sleep(k === 1 && stall > 0 ? stall : 15);
       }
@@ -171,7 +175,12 @@ function anthropic(vendor: Vendor, model: string, sent: Sent, used: Used): Respo
   events.push(["message_start", { type: "message_start", message: { model, id: id("msg_01"), type: "message", role: "assistant", content: [], stop_reason: null, stop_sequence: null, usage } }]);
   let out = 0;
   sent.blocks.forEach((b, index) => {
-    if ("text" in b) {
+    if ("think" in b) {
+      events.push(["content_block_start", { type: "content_block_start", index, content_block: { type: "thinking", thinking: "", signature: "" } }]);
+      chunks(b.think).forEach((thinking) => events.push(["content_block_delta", { type: "content_block_delta", index, delta: { type: "thinking_delta", thinking } }]));
+      events.push(["pause", { ms: 5000 }]);
+      events.push(["content_block_delta", { type: "content_block_delta", index, delta: { type: "signature_delta", signature: "fake-signature" } }]);
+    } else if ("text" in b) {
       events.push(["content_block_start", { type: "content_block_start", index, content_block: { type: "text", text: "" } }]);
       events.push(["ping", { type: "ping" }]);
       chunks(b.text).forEach((text) => events.push(["content_block_delta", { type: "content_block_delta", index, delta: { type: "text_delta", text } }]));
@@ -218,6 +227,9 @@ function openai(vendor: Vendor, model: string, sent: Sent, used: Used): Response
   const done: object[] = [];
   let out = 0;
   sent.blocks.forEach((b, output_index) => {
+    if ("think" in b) {
+      return;
+    }
     if ("text" in b) {
       const item_id = hex("msg_");
       const part = { type: "output_text", annotations: [], logprobs: [], text: "" };
@@ -339,7 +351,7 @@ async function model(req: Request, vendor: Vendor, url: URL): Promise<Response> 
   const named = (n: string) => tools.find((t) => t === n || t.endsWith("__" + n)) ?? n;
   const blocks: Sent["blocks"] = order.what === "tool"
     ? order.calls.map(([n, input]) => ({ id: claude ? id("toolu_01") : id("call_"), name: named(n), json: JSON.stringify(input) }))
-    : [{ text: order.what === "reply" ? order.text : "ok" }];
+    : [...(order.what === "reply" && order.think !== undefined && claude ? [{ think: order.think }] : []), { text: order.what === "reply" ? order.text : "ok" }];
   const sent: Sent = { blocks, stall: order.what === "stall" ? order.ms : 0, cut: order.what === "cut" };
   const used = cache(got.segs, got.marks);
   return claude ? anthropic(vendor, name, sent, used) : openai(vendor, name, sent, used);

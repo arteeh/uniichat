@@ -117,6 +117,18 @@ body.list footer > :not(#toast) { display: none; }
 .faces .pic { width: 46px; height: 46px; }
 #account .archived .item .pic { width: 36px; height: 36px; }
 #account .archived .item p { flex: 1; }
+.cap.think::after { content: ""; animation: dots 4s steps(1) infinite; }
+@keyframes dots { 0% { content: ""; } 25% { content: "."; } 50% { content: ".."; } 75% { content: "..."; } }
+.msg.tool.line { padding: 0; background: none; }
+.msg.tool.line > summary { display: flex; align-items: baseline; gap: 6px; padding: 7px 12px; border-radius: 10px; background: var(--block); cursor: pointer; list-style: none; white-space: nowrap; }
+.msg.tool.line > summary::-webkit-details-marker { display: none; }
+.msg.tool.line > summary:hover { background: var(--hover); }
+.msg.tool.line .arg { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.msg.tool.line .path { direction: rtl; text-align: left; }
+.msg.tool.line .add { color: var(--add); }
+.msg.tool.line .del { color: var(--del); }
+.msg.tool.line .bad { margin-left: auto; color: var(--red); font-weight: 700; }
+.msg.tool.line[open] > .msg { margin-top: 8px; }
 .pill { flex: none; min-width: 22px; height: 22px; padding: 0 7px; border-radius: 11px; background: var(--ink); color: var(--paper); font: 600 12px/22px var(--sans); text-align: center; }
 @media (min-width: 900px) {
   body.wide { padding-left: 33.333vw; }

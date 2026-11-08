@@ -1236,7 +1236,7 @@ export namespace Chat {
     const run = chat.main;
     const queue: Queued[] = run.queue.map(({ q }) => ({ kind: q.kind, text: shown(q.text) }));
     const sent = run.sent.flatMap(({ m }) => Array.from({ length: m.end - m.id }, (_, k) => m.id + k));
-    return { $: "state", agent: chat.id, busy: run.busy, wait: Chat.waits(chat), pick: chat.pick, ...config.OFFER, importing, limit: run.limit, queue, sent, sums: Chat.sums(chat), again: chat.mem.again, timers, mcp, talk, build: BUILD, site: config.SITE };
+    return { $: "state", agent: chat.id, busy: run.busy, wait: Chat.waits(chat), pick: chat.pick, ...config.OFFER, importing, limit: run.limit, queue, sent, sums: Chat.sums(chat), again: chat.mem.again, timers, mcp, talk, build: BUILD, site: config.SITE, thinking: config.THINKING, verbose: config.VERBOSE };
   }
 
   export function sums(chat: Chat): Sums | null {
@@ -2140,6 +2140,7 @@ export namespace Main {
     }
     if (out.wrote) {
       Main.offer();
+      Main.chats.forEach((chat) => Chat.change(chat));
     }
     return Response.json(out.body, { status: out.status, headers: fresh });
   }
