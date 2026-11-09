@@ -1251,7 +1251,8 @@ export namespace Chat {
     const why = chat.mem.hold[1];
     const importing = batch && { done: batch.all - Chat.time(batch), total: batch.all, why, msgs: batch.b - batch.a, open: batch.open };
     const timers = chat.mem.timers.map((t) => ({ ...t, text: t.text.length > TIMER_TEXT ? t.text.slice(0, TIMER_TEXT) + "…" : t.text }));
-    const mcp = [...chat.tools.mcp.all.keys()].map((name) => ({ name, on: !chat.mem.off.includes(name) }));
+    const off = Tools.off(chat.tools);
+    const mcp = [...chat.tools.mcp.all.keys()].map((name) => ({ name, on: !off.includes(name) }));
     const talk = Chat.meter(chat);
     const shown = (text: string): string => (text.length > QUEUED_TEXT ? text.slice(0, QUEUED_TEXT) + "…" : text);
     const run = chat.main;
@@ -1474,16 +1475,18 @@ export namespace Chat {
         if (!chat.tools.mcp.all.has(name)) {
           return { error: "No MCP server " + name + "." };
         }
-        if (chat.mem.off.includes(name) !== on) {
+        // one list for every agent, kept in Unii's memory
+        const mem = Main.unii().mem;
+        if (mem.off.includes(name) !== on) {
           return {};
         }
-        chat.mem.off = on ? chat.mem.off.filter((n) => n !== name) : [...chat.mem.off, name];
-        Memory.save(chat.mem);
+        mem.off = on ? mem.off.filter((n) => n !== name) : [...mem.off, name];
+        Memory.save(mem);
         if (!on) {
           Tools.unplug(chat.tools, name);
         }
-        Chat.note(chat, "MCP server " + name + " turned " + (on ? "on" : "off") + " by the user.");
-        Chat.change(chat);
+        Chat.note(Main.unii(), "MCP server " + name + " turned " + (on ? "on" : "off") + " for every agent by the user.");
+        Main.chats.forEach((c) => Chat.change(c));
         return {};
       }
     }
