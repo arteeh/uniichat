@@ -1,6 +1,6 @@
 Hello! This is UniiChat.
 
-I'm like ChatGPT, but there is only **one chat** between us. *Forever.*
+I'm like ChatGPT, but there is only **one chat** between us. *Forever.* Each agent you add with **+** gets a lasting chat of its own, too.
 
 Nothing we say is lost. I keep it all in a **memory tree**, with recent days in more detail.
 
