@@ -518,7 +518,7 @@ header > .imping { display: flex; flex-direction: column; justify-content: cente
 
 body.tree { height: 100dvh; }
 #tree { flex: 1; min-height: 0; display: flex; flex-direction: column; }
-#tree .top { display: flex; align-items: center; gap: 6px; padding: 10px 20px 0; } #tree .back { padding: 8px 0; margin-right: 6px; font-size: 14px; color: var(--mid); text-decoration: none; } #tree .back:hover { color: var(--ink); }
+#tree .top { display: flex; align-items: center; gap: 6px; padding: 22px 20px 0; } #tree .back { padding: 8px 0; margin-right: 6px; font-size: 14px; color: var(--mid); text-decoration: none; } #tree .back:hover { color: var(--ink); }
 #tree .top small { flex: 1; min-width: 0; margin-left: 10px; font: 12px/1.35 var(--sans); color: var(--mid); } #tree .top small b { font-weight: 600; letter-spacing: .06em; font-size: 11px; padding-left: 5px; box-shadow: inset 3px 0 var(--mid); }
 #tree .top :is(button, .tab) { height: 32px; min-width: 36px; padding: 0 12px; border-radius: 8px; background: var(--block); font-size: 13.5px; font-weight: 500; } #tree .top :is(button, .tab):hover { background: var(--hover); } #tree .top button:disabled { opacity: .4; cursor: default; }
 #tree .tab { display: grid; place-items: center; text-decoration: none; } #tree .tab.here, #tree .tab.here:hover { background: var(--ink); color: var(--paper); }
@@ -542,5 +542,5 @@ body.tree { height: 100dvh; }
 #tree .s.one pre { -webkit-mask-image: linear-gradient(#000 calc(100% - 2.4em), transparent 90%); mask-image: linear-gradient(#000 calc(100% - 2.4em), transparent 90%); }
 #tree .bracket.drag { scroll-snap-type: none; user-select: none; cursor: grabbing; }
 @media (prefers-reduced-motion: reduce) { #tree .s.ease { transition: none; } }
-@media (max-width: 600px) { #tree section { padding: 0 14px 14px; } #tree .bracket { scroll-padding: 0 14px; } #tree .top { padding: 4px 14px 0; } #tree .top .tab { height: 30px; padding: 0 10px; font-size: 13px; } }
+@media (max-width: 600px) { #tree section { padding: 0 14px 14px; } #tree .bracket { scroll-padding: 0 14px; } #tree .top { padding: 16px 14px 0; } #tree .top .tab { height: 30px; padding: 0 10px; font-size: 13px; } }
 body.account > header { display: none; }

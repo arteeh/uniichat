@@ -1117,7 +1117,7 @@ function route(): void {
     void account();
   }
   if (tree) {
-    Tree.tree_show(tree_view() ? "VIEW" : "TREE", v.agent, v.team.find((m) => m.id === v.agent)?.name ?? "");
+    Tree.tree_show(tree_view() ? "VIEW" : "TREE", v.agent);
   } else {
     Tree.tree_hide();
   }

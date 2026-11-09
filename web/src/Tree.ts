@@ -19,21 +19,18 @@ type Old = Map<string, number[]> & { total?: number };
 
 type Which = "TREE" | "VIEW";
 
-const LEGEND: Record<Which, string> = { VIEW: "What {Name}'s prompt holds now, in order: old messages as summaries, recent ones whole.", TREE: "" };
-
 const S = {
   agent : "",
-  name  : "",
   want  : null as Which | null,
   asked : 0,
   run   : null as { show: (which: Which) => void; stop: () => void } | null,
 };
 
-export function tree_show(which: Which, agent: string, name: string): void {
+export function tree_show(which: Which, agent: string): void {
   if (agent !== S.agent) {
     tree_hide();
   }
-  [S.agent, S.name] = [agent, name];
+  S.agent = agent;
   const was = S.want;
   S.want = which;
   tabs(which);
@@ -85,7 +82,7 @@ function focus(which: Which): void {
 
 function tabs(which: Which): void {
   $(".prev").hidden = $(".next").hidden = which !== "TREE";
-  $(".legend").textContent = LEGEND[which].replace("{Name}", S.name);
+  $(".legend").textContent = "";
   document.querySelectorAll<HTMLElement>("#tree .tab").forEach((a) => a.classList.toggle("here", a.dataset.tab === which));
   $(".view").classList.toggle("on", which === "VIEW");
   $(".bracket").classList.toggle("on", which === "TREE");
