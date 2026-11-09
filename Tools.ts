@@ -258,19 +258,17 @@ export namespace Tools {
     const mem = seat.mem;
     switch (name) {
       case "zoom": {
-        if (args.agent !== undefined && who === "main") {
-          const them = Team.by_name(text_of(args.agent));
-          const there = them === null || them.archived !== 0 ? undefined : tools.seats.get(them.id === UNII ? "main" : them.id);
-          if (there === undefined) {
-            return { text: "No agent " + text_of(args.agent) + " in the team.", fail: true };
-          }
-          return { text: Memory.zoom(there.mem, Number(args.id), Number(args.n ?? 1), Number(args.at ?? 0)), fail: false };
+        const other = args.agent !== undefined && who === "main";
+        const them = other ? Team.by_name(text_of(args.agent)) : null;
+        const there = !other ? seat : them === null || them.archived !== 0 ? undefined : tools.seats.get(them.id === UNII ? "main" : them.id);
+        if (there === undefined) {
+          return { text: "No agent " + text_of(args.agent) + " in the team.", fail: true };
         }
         const id = Number(args.id);
         const n = Number(args.n ?? 1);
         const at = Number(args.at ?? 0);
-        const imgs = n === 1 && at === 0 ? Memory.images(mem, id) : [];
-        return { text: Memory.zoom(mem, id, n, at), fail: false, imgs };
+        const imgs = n === 1 && at === 0 ? Memory.images(there.mem, id) : [];
+        return { text: Memory.zoom(there.mem, id, n, at), fail: false, imgs };
       }
       case "date": {
         return { text: Memory.date(mem, Number(args.id)), fail: false };
