@@ -35,7 +35,9 @@ type Kept = { parts: Array<[number, number]>; batch: boolean };
 
 type Saved = Kept & { seen?: Kept; main: End; tree: End; pick: object | null; goal?: string | null; work?: string[]; timers?: Timer[]; off?: string[]; talk?: number | null; used?: number | null; used_at?: number };
 
-type Queues = { main: Pending[] };
+// main: the run's inbox, as it was last; held: what came for an archived
+// agent, delivered on its restore
+type Queues = { main: Pending[]; held: Pending[] };
 
 type Rec = { i?: number; l?: number; act?: string; ans?: object };
 
@@ -65,6 +67,7 @@ type Chosen = {
 
 type Unlogged = {
   queue  : Pending[];
+  held   : Pending[];
 };
 
 type Tree = {
@@ -143,7 +146,7 @@ export namespace Memory {
   export function load(dir: string, share: Memory["share"], acted: Memory["acted"] = () => {}, docs = dir): Memory {
     fs.mkdirSync(dir, { recursive: true });
     const mem: Memory = {
-      dir, docs, fds: new Map(), count: 0, open: 0, pick: null, goal: null, off: [], talk: null, talked: new Map(), used: null, used_at: 0, work: [], timers: [], queue: [], nodes: new Map(), ready: [[], []], ends: { main: [0, 0], tree: [0, 0] },
+      dir, docs, fds: new Map(), count: 0, open: 0, pick: null, goal: null, off: [], talk: null, talked: new Map(), used: null, used_at: 0, work: [], timers: [], queue: [], held: [], nodes: new Map(), ready: [[], []], ends: { main: [0, 0], tree: [0, 0] },
       view: { parts: [], size: 0, batch: false, high: VIEW_HIGH }, seen: { parts: [], size: 0, batch: false, high: config.COMPACTOR_CONTEXT },
       busy: new Map(), sides: new Map(), calls: new Map(), hold: [null, "paused"], done: false, wait: new Set(), share, acted, again: null,
     };
@@ -155,7 +158,9 @@ export namespace Memory {
     mem.used = saved?.used ?? null;
     mem.work = saved?.work ?? [];
     mem.timers = saved?.timers ?? [];
-    mem.queue = Memory.queues(dir).main;
+    const queues = Memory.queues(dir);
+    mem.queue = queues.main;
+    mem.held = queues.held;
     mem.ends.main = Memory.index(mem, "main", saved?.main ?? [0, 0]);
     mem.ends.tree = Memory.index(mem, "tree", saved?.tree ?? [0, 0]);
     mem.count = fs.statSync(dir + "/main.index").size / SLOT;
@@ -197,15 +202,15 @@ export namespace Memory {
   export function queues(dir: string): Queues {
     try {
       const got = JSON.parse(fs.readFileSync(dir + "/queue.json", "utf8")) as Partial<Queues>;
-      return { main: got.main ?? [] };
+      return { main: got.main ?? [], held: got.held ?? [] };
     } catch {
-      return { main: [] };
+      return { main: [], held: [] };
     }
   }
 
   export function save_queue(mem: Memory): void {
     const file = mem.dir + "/queue.json";
-    fs.writeFileSync(file + ".new", JSON.stringify({ main: mem.queue }));
+    fs.writeFileSync(file + ".new", JSON.stringify({ main: mem.queue, held: mem.held }));
     move_over(file + ".new", file);
     void Disk.wrote(file);
   }

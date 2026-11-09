@@ -900,7 +900,7 @@ export namespace Chat {
 
   // what comes for an archived agent waits for its restore
   export function held(chat: Chat, post: Pending): void {
-    chat.mem.queue.push(post);
+    chat.mem.held.push(post);
     Memory.save_queue(chat.mem);
   }
 
@@ -921,7 +921,7 @@ export namespace Chat {
   // a device's job report, acked once it's queued, and taken once: a device
   // sends it again until acked
   export async function job_done(chat: Chat, id: string, text: string): Promise<Answer> {
-    if (chat.main.queue.some((x) => x.q.act === id) || chat.mem.queue.some((q) => q.act === id)) {
+    if (chat.main.queue.some((x) => x.q.act === id) || chat.mem.held.some((q) => q.act === id)) {
       return {};
     }
     if (Chat.archived(chat)) {
@@ -1147,13 +1147,18 @@ export namespace Chat {
     return {};
   }
 
+  // an archived agent's cut turn and inbox wait with what it holds, for
+  // its restore
   export function resume(chat: Chat, work: string[]): void {
-    if (Chat.archived(chat)) {
-      return;
-    }
     const text = "The server restarted, cutting your turn; nothing was lost: go on.";
     const queued = chat.mem.queue.filter((post) => post.act === undefined || Owner.act_get(post.act) === null);
     const posts: Pending[] = [...(work.length > 0 ? [{ kind: "note" as const, text, images: [] }] : []), ...queued];
+    if (Chat.archived(chat)) {
+      chat.mem.held = [...posts, ...chat.mem.held];
+      chat.mem.queue = [];
+      Memory.save_queue(chat.mem);
+      return;
+    }
     posts.forEach((post) => void Run.take(chat.main, post));
   }
 
@@ -1726,7 +1731,8 @@ export namespace Main {
   export function shelve(chat: Chat, on: boolean): Answer {
     Team.archive(chat.id, on);
     if (!on) {
-      const held = chat.mem.queue.splice(0);
+      const held = chat.mem.held.splice(0);
+      chat.mem.queue = [...chat.main.queue.map((x) => x.q), ...held];
       Memory.save_queue(chat.mem);
       held.forEach((post) => void Run.take(chat.main, post));
       Chat.timed(chat);
