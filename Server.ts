@@ -1672,7 +1672,7 @@ export namespace Main {
     if (msg.$ === "open") {
       chat?.socks.delete(sock);
       Chat.join(Main.chat_of(text_of(msg.agent)), sock);
-      Chat.opened(Main.chat_of(text_of(msg.agent)));
+      sock.data.active = 0;
       return Chat.send(sock, { $: "ack", id: text_of(msg.id) });
     }
     if (chat !== undefined) {

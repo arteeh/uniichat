@@ -50,12 +50,13 @@ self.addEventListener("push", (ev) => {
   ev.waitUntil(notify(msg));
 });
 
+// none while a focused window shows that agent's chat
 async function notify(msg) {
   const tabs = await self.clients.matchAll({ type: "window" });
-  if (QUIET && tabs.some((tab) => tab.focused)) {
+  const url = typeof msg.url === "string" ? msg.url : "/";
+  if (QUIET && tabs.some((tab) => tab.focused && new URL(tab.url).pathname === url)) {
     return;
   }
-  const url = typeof msg.url === "string" ? msg.url : "/";
   await self.registration.showNotification(String(msg.title ?? "UniiChat"), { body: String(msg.text ?? ""), icon: String(msg.icon ?? "/icon-192.png"), tag: String(msg.tag ?? "unii"), renotify: true, data: { url } });
 }
 

@@ -45,7 +45,7 @@ const P = {
   rows  : true,
   toast : 0,
   push  : null as { reg: ServiceWorkerRegistration; key: string } | null,
-  used  : { ws: null as WebSocket | null, on: false, at: 0 },
+  used  : { ws: null as WebSocket | null, on: false, at: 0, agent: "" },
   after : false,
   at    : "",
 };
@@ -571,22 +571,31 @@ function connect(): void {
   });
 }
 
-// only while the app is still in view once they are found
+// the agent whose chat is on screen, if one is: not the list, Settings or
+// a memory page
+function on_screen(): string | null {
+  return document.visibilityState === "visible" && !$("#log").hidden ? v.agent : null;
+}
+
+// that agent's notifications, only while its chat is still in view once
+// they are found
 function notes_close(): void {
-  const seen = () => document.visibilityState === "visible";
-  if (seen()) {
-    navigator.serviceWorker?.ready.then((reg) => reg.getNotifications()).then((notes) => notes.forEach((n) => seen() && n.close())).catch(() => {});
+  const agent = on_screen();
+  if (agent !== null) {
+    navigator.serviceWorker?.ready.then((reg) => reg.getNotifications({ tag: "unii-" + agent })).then((notes) => notes.forEach((n) => on_screen() === agent && n.close())).catch(() => {});
   }
 }
 
+// the server counts a chat read, and pushes none for it, while it's on
+// screen in a focused window
 function in_use(off = false): void {
-  const on = !off && document.visibilityState === "visible" && document.hasFocus();
+  const on = !off && on_screen() !== null && document.hasFocus();
   const ws = v.ws;
-  if (ws === null || !v.up || ws.readyState !== WebSocket.OPEN || (ws === P.used.ws && on === P.used.on && (!on || Date.now() - P.used.at < View.USE_PING))) {
+  if (ws === null || !v.up || ws.readyState !== WebSocket.OPEN || (ws === P.used.ws && on === P.used.on && v.agent === P.used.agent && (!on || Date.now() - P.used.at < View.USE_PING))) {
     return;
   }
   ws.send(on ? View.ACTIVE : View.IDLE);
-  P.used = { ws, on, at: Date.now() };
+  P.used = { ws, on, at: Date.now(), agent: v.agent };
 }
 
 // after a sleep a request can hang on a dead connection: one that takes
@@ -1112,6 +1121,8 @@ function route(): void {
   } else {
     Tree.tree_hide();
   }
+  in_use();
+  notes_close();
   draw(chat && SCROLL.end);
 }
 
