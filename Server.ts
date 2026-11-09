@@ -94,7 +94,7 @@ type Turn = {
   sums  : { from: number; total: number } | null;
   resume: { wake: AbortController; goal: string | null } | null;
   limits: { vendor: Vendor; n: number } | null;
-  hop   : number;
+  fresh : boolean;
   told  : boolean;
 };
 
@@ -237,7 +237,7 @@ export namespace Chat {
     const who = id === UNII ? "main" : id;
     const chat: Chat = {
       id, who, mem, tools, pick, socks: new Set(), acts: new Map(), main, model: "", check: null, asked: false, open: 0,
-      eye: { parts: [], from: 0 }, after: Promise.resolve(), batch: null, writes: Promise.resolve(), held: null, back: -1, sums: null, resume: null, limits: null, bell: undefined, hop: 0, told: false,
+      eye: { parts: [], from: 0 }, after: Promise.resolve(), batch: null, writes: Promise.resolve(), held: null, back: -1, sums: null, resume: null, limits: null, bell: undefined, fresh: true, told: false,
     };
     const seat: Seat = { mem, note: (text) => Chat.note(chat, text), report: (text) => Chat.report(chat, text, true), timed: () => Chat.timed(chat), message: (to, text) => Chat.message(chat, to, text) };
     tools.seats.set(who, seat);
@@ -375,12 +375,19 @@ export namespace Chat {
     return buf.subarray(0, got.bytesRead);
   }
 
-  // the turn's hop: the user's message sets it to 0, another agent's raises
-  // it to that one's
+  // the turn's hop, kept with the memory, so a turn cut and continued
+  // (a restart, a usage limit, the goal) keeps it: the message that starts
+  // a turn sets it, another agent's to its hop, a timer's or job's to 0,
+  // UniiChat's own note leaves it; mid-turn only the user's sets it, to 0
   export function posted(chat: Chat, post: Pending): Msg {
     const pages = post.kind === "user" ? clip_pages(post.text) : [post.text];
     let id = -1;
-    chat.hop = post.kind === "user" ? 0 : Math.max(chat.hop, post.hop ?? 0);
+    const hop = post.kind === "user" ? 0 : !chat.fresh || post.kind === "note" ? chat.mem.hop : post.hop ?? 0;
+    chat.fresh = false;
+    if (hop !== chat.mem.hop) {
+      chat.mem.hop = hop;
+      Memory.save(chat.mem);
+    }
     pages.forEach((page, k) => {
       const last = k === pages.length - 1;
       const msg = Chat.push(chat, chat.main, post.kind, page, last ? post.images : [], !last, last ? post.act : undefined, post.from === undefined ? {} : { from: post.from }, true);
@@ -471,7 +478,7 @@ export namespace Chat {
   }
 
   export function finish(chat: Chat): void {
-    chat.hop = 0;
+    chat.fresh = true;
     Chat.live(chat, chat.main, []);
     Chat.phone(chat);
     Chat.after(chat);
@@ -618,7 +625,7 @@ export namespace Chat {
   export async function message(chat: Chat, to: string, text: string): Promise<Done> {
     const name = Chat.name(chat);
     const them = Team.by_name(to);
-    const hop = chat.hop + 1;
+    const hop = chat.mem.hop + 1;
     if (them === null || them.id === chat.id) {
       const others = Team.active().filter((a) => a.id !== chat.id).map((a) => a.name);
       return { text: (them === null ? "No agent " + to + "." : "That's you.") + " The others: " + (others.join(", ") || "none") + ".", fail: true };
@@ -702,7 +709,7 @@ export namespace Chat {
   export function put(chat: Chat, msg: Log, sent = false): Msg {
     const queued = sent ? { sent } : {};
     const roots = Memory.push(chat.mem, [msg]);
-    if (msg.kind === "unii" && chat.hop === 0 && msg.imported !== true && !Chat.seen(chat)) {
+    if (msg.kind === "unii" && chat.mem.hop === 0 && msg.imported !== true && !Chat.seen(chat)) {
       Team.unread(chat.id, null);
       chat.told = true;
     }
