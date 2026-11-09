@@ -2036,7 +2036,8 @@ export namespace Main {
   export async function start(port: number): Promise<void> {
     Reap.start();
     await Main.lock();
-    if ((fs.existsSync(config.DIR + "/users") && !fs.existsSync(config.DIR + "/chat") && !fs.existsSync(AGENTS)) || fs.existsSync(config.DIR + "/.migrating")) {
+    const old = fs.existsSync(config.DIR + "/users") || fs.existsSync(config.DIR + "/chat");
+    if ((old && !fs.existsSync(AGENTS)) || fs.existsSync(config.DIR + "/.migrating")) {
       const installer = update_cmd(WIN);
       throw new Error(config.DIR + " holds an older unii's data, not yet (or not all) moved to this version's layout: run the installer (" + installer + ") with no unii server running, then start again");
     }
