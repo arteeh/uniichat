@@ -1109,12 +1109,16 @@ ${Memory.cut(line)}| ← LIMIT`;
     }
   }
 
+  // the images: all of the store for the agent it is kept with (Unii), only
+  // its own messages' for another
   export function* dump(mem: Memory): Generator<string> {
     const ls = (sub: string) => (fs.existsSync(mem.docs + sub) ? fs.readdirSync(mem.docs + sub).sort() : []);
+    const own = new Set<string>();
     let sep = "\n";
     yield '{"messages": [';
     for (let i = 0; i < mem.count; i++) {
       const { kind, text, date, images, more, of, tool } = Memory.at(mem, i);
+      images?.forEach((name) => own.add(name));
       yield (i === 0 ? "\n" : ",\n") + JSON.stringify({ id: i, kind, text, date, images, more, of, tool });
     }
     yield '],\n"summaries": [';
@@ -1126,7 +1130,7 @@ ${Memory.cut(line)}| ← LIMIT`;
     }
     yield '],\n"images": {';
     sep = "\n";
-    for (const name of ls(IMAGES)) {
+    for (const name of ls(IMAGES).filter((name) => mem.docs === mem.dir || own.has(name))) {
       const file = Memory.image_file(mem, name);
       if (file === null) {
         continue;

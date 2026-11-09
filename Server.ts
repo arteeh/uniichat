@@ -1890,7 +1890,7 @@ export namespace Main {
         return Response.json(get.map((key) => Memory.card(mem, ...(key.split(".").map(Number) as [number, number]))));
       }
       case "/export": {
-        const name = "unii-memory-" + new Date().toISOString().slice(0, 10) + ".json";
+        const name = (Chat.name(chat).replace(/[^A-Za-z0-9_-]+/g, "-") || "unii") + "-memory-" + new Date().toISOString().slice(0, 10) + ".json";
         const json = { "content-type": "application/json", "content-disposition": 'attachment; filename="' + name + '"' };
         return new Response(Main.stream(Memory.dump(mem)), { headers: json });
       }
