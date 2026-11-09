@@ -5,6 +5,7 @@ import { Limit } from "./Limit.ts";
 import { INT, JOB, STR, TOOLS, spec, type Bg, type Job, type Skill, type Spec } from "./Machine.ts";
 import { Mcp, type Servers } from "./Mcp.ts";
 import { Memory } from "./Memory.ts";
+import * as Prompts from "./Prompts.ts";
 import { Team, UNII } from "./Team.ts";
 import * as Timer from "./Timer.ts";
 import { PING } from "./View.ts";
@@ -65,10 +66,7 @@ let HTTP: ReturnType<typeof Bun.serve> | null = null;
 const RUNNING = new Map<string, Set<AbortController>>();
 const SESSION = "mcp-session-id";
 
-const DEVICES_NONE = "(None is open now.)";
-const MEDIA_AT = "Media and files in the chat, /media/<name>, are the files {dir}<name> on the server's computer.";
 
-const SKILLS = "Skills on the devices open now, by device: when a task matches one's description, load it with the skill tool first, then follow it.";
 
 const LOOK = 3000;
 
@@ -125,14 +123,14 @@ export namespace Tools {
     const work  = (d: Device) => [...d.terms.values()][0]?.work;
     const temp  = (d: Device) => [...d.terms.values()][0]?.scratch ?? work(d);
     const shell = (d: Device) => [...d.terms.values()][0]?.shell;
-    const line  = ([name, d]: [string, Device]) => "- " + name + ", work dir " + work(d) + " (the user's projects), scratch dir " + temp(d) + (shell(d) ? ", shell " + shell(d) + " (stopping the device does not kill a process a call left running after its shell ended)" : "");
+    const line  = ([name, d]: [string, Device]) => Prompts.prompt("device", { name, work: work(d) ?? "", scratch: temp(d) ?? "" }) + (shell(d) ? Prompts.prompt("device-shell", { shell: shell(d) ?? "" }) : "");
     const lines = Tools.opened(tools).map(line);
-    return { text: "Devices open now:\n" + (lines.length === 0 ? DEVICES_NONE : lines.join("\n")) + "\n" + MEDIA_AT.replace("{dir}", tools.hub.docs + "/docs/media/") + "\n\n", mark: false };
+    return { text: Prompts.prompt("devices", { devices: lines.length === 0 ? Prompts.prompt("devices-none") : lines.join("\n"), media: tools.hub.docs + "/docs/media/" }) + "\n\n", mark: false };
   }
 
   export function skills(tools: Tools): Block {
     const lines = Tools.opened(tools).flatMap(([name, d]) => d.skills.toSorted((a, b) => Mcp.by_name(a.name, b.name)).map((s) => "- " + name + ": " + s.name + ": " + s.description.replace(/\s+/g, " ")));
-    return { text: lines.length === 0 ? "" : SKILLS + "\n" + lines.join("\n") + "\n\n", mark: false };
+    return { text: lines.length === 0 ? "" : Prompts.prompt("skills") + "\n" + lines.join("\n") + "\n\n", mark: false };
   }
 
   export async function look(tools: Tools, only: string | null = null): Promise<void> {
@@ -161,7 +159,7 @@ export namespace Tools {
 
   export function at_work(tools: Tools, who: string): Block {
     const jobs = [...tools.devices].flatMap(([device, d]) => d.bg.jobs.filter((j) => j.agent === who).map((j) => j.id + " (" + [device, j.command.replace(/\s+/g, " ").trim().slice(0, 60), Math.round((Date.now() - j.since) / 60e3) + " min"].join(", ") + ")"));
-    return { text: jobs.length === 0 ? "" : "Jobs running: " + jobs.join(", ") + ".\n\n", mark: false };
+    return { text: jobs.length === 0 ? "" : Prompts.prompt("jobs", { jobs: jobs.join(", ") }) + "\n\n", mark: false };
   }
 
   export async function fetch(req: Request): Promise<Response> {

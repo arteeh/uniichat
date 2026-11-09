@@ -1,0 +1,1 @@
+- {name}, work dir {work} (the user's projects), scratch dir {scratch}

@@ -5,6 +5,7 @@ import * as config from "./Config.ts";
 import { Disk } from "./Disk.ts";
 import { err_why } from "./Err.ts";
 import { Pick } from "./Pick.ts";
+import * as Prompts from "./Prompts.ts";
 import type { Timer } from "./Timer.ts";
 import { FIT, HEAD, IMAGE, image_kind, MEDIA, media_ext, PIXELS, STORED, TOKEN, type Pending } from "./View.ts";
 import { move_over } from "./Write.ts";
@@ -119,9 +120,6 @@ const PIECE = 2 ** 20;
 
 const NODE_RULER = "-".repeat(NODE);
 
-const WAIT = "(not summarized yet: zoom it)";
-
-const TALKING = "Conversation mode is on from message {id}: from there on, the user's and {Name}'s messages are whole, word for word (zoom on one only to see an image it names); tool calls, their output, notes and reports stay summary lines.";
 
 const IMAGES = "/docs/images/";
 
@@ -129,19 +127,6 @@ const MEDIA_DIR = "/docs/media/";
 
 const PAGE_MAX = 4 * 2 ** 20;
 
-const LEAF = `Compaction: compress message {id} into one line of at most ${NODE} bytes
-(about 70 words), the length of this ruler:
-${NODE_RULER}
-<input>
-`;
-
-const MERGE = `Compaction: merge lines {a} and {b}, adjacent, into one line of at most
-${NODE} bytes (about 70 words), the length of this ruler:
-${NODE_RULER}
-<chat> may hold their messages, {id} to {end}, in more detail: take details
-of them from there too.
-<input>
-`;
 
 export namespace Memory {
 
@@ -783,8 +768,8 @@ export namespace Memory {
   export function task(l: number, i: number): string {
     const [a, z] = Memory.span({ l, i });
     const n = 2 ** l / 2;
-    const fill: Array<[string, string]> = [["{a}", a + "+" + n], ["{b}", a + n + "+" + n], ["{id}", String(a)], ["{end}", String(z)]];
-    return fill.reduce((t, [k, v]) => t.replace(k, v), l === 0 ? LEAF : MERGE);
+    const vars = { a: a + "+" + n, b: a + n + "+" + n, id: String(a), end: String(z), limit: String(NODE), ruler: NODE_RULER };
+    return Prompts.prompt(l === 0 ? "leaf" : "merge", vars) + "\n";
   }
 
   export function cut(text: string): string {
@@ -792,14 +777,11 @@ export namespace Memory {
   }
 
   export function over(line: string): string {
-    return `Too long: your last line for this <input> was ${Memory.bytes(line)} bytes,
-over the ${NODE}-byte limit. Write the whole line again, cutting just
-enough of the least valuable items to fit before this cut:
-${Memory.cut(line)}| ← LIMIT`;
+    return Prompts.prompt("over", { bytes: String(Memory.bytes(line)), limit: String(NODE), cut: Memory.cut(line) });
   }
 
   export function text(mem: Memory, part: Part): string {
-    return mem.nodes.get(Memory.slot(part.l, part.i)) ?? WAIT;
+    return mem.nodes.get(Memory.slot(part.l, part.i)) ?? Prompts.prompt("not-summarized");
   }
 
   export function size(mem: Memory, part: Part): number {
@@ -1004,7 +986,7 @@ ${Memory.cut(line)}| ← LIMIT`;
       return text === null ? [] : [Memory.line(part, text) + "\n"];
     });
     const said = Array.from({ length: Math.max(0, end - talk) }, (_, k) => Memory.talk_line(mem, talk + k) + "\n");
-    return [...lines, TALKING.replace("{id}", String(talk)).replace("{Name}", mem.name?.() ?? "") + "\n", ...said];
+    return [...lines, Prompts.prompt("talking", { id: String(talk), Name: mem.name?.() ?? "" }) + "\n", ...said];
   }
 
   export function upto(mem: Memory, part: Part, end: number): Part[] {
@@ -1025,7 +1007,7 @@ ${Memory.cut(line)}| ← LIMIT`;
   export function talk_line(mem: Memory, i: number): string {
     const root = Memory.at(mem, i);
     const part = { l: 0, i };
-    return Memory.said(root) ? Memory.ref(part) + "|" + Memory.show(root).replace(/<\/chat>/gi, "<\\/chat>") : Memory.line(part, Memory.node(mem, part) ?? WAIT);
+    return Memory.said(root) ? Memory.ref(part) + "|" + Memory.show(root).replace(/<\/chat>/gi, "<\\/chat>") : Memory.line(part, Memory.node(mem, part) ?? Prompts.prompt("not-summarized"));
   }
 
   export function cache_marks(k: number, whole: number, back: number): { mark: boolean; back?: true } {
@@ -1083,7 +1065,7 @@ ${Memory.cut(line)}| ← LIMIT`;
       const images = at === 0 ? root.images : undefined;
       return id + "+0|" + Memory.show({ ...root, text: clip_page(root.text, at), images });
     }
-    return Memory.halves(part).map((half) => Memory.line(half, Memory.node(mem, half) ?? WAIT)).join("\n");
+    return Memory.halves(part).map((half) => Memory.line(half, Memory.node(mem, half) ?? Prompts.prompt("not-summarized"))).join("\n");
   }
 
   export function date(mem: Memory, id: number): string {
@@ -1150,7 +1132,7 @@ ${Memory.cut(line)}| ← LIMIT`;
     const index = Memory.pread(Memory.fd(mem, mem.dir + "/tree.index"), 0, 2 * mem.count * SLOT);
     const built = (at: number) => at + SLOT <= index.length && index.readUInt32LE(at + 8) !== 0;
     const has = Memory.levels(mem).map((l) => Array.from({ length: Math.floor(mem.count / 2 ** l) }, (_, i) => (built(Memory.slot(l, i) * SLOT) ? 1 : 0)).join(""));
-    const view = mem.view.parts.map((part) => Memory.card(mem, part.l, part.i) ?? { h: "LVL" + part.l + " #" + part.i, t: WAIT });
+    const view = mem.view.parts.map((part) => Memory.card(mem, part.l, part.i) ?? { h: "LVL" + part.l + " #" + part.i, t: Prompts.prompt("not-summarized") });
     return { count: mem.count, has, parts: mem.view.parts.map((part) => [part.l, part.i]), view };
   }
 

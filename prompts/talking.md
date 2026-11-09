@@ -1,0 +1,1 @@
+Conversation mode is on from message {id}: from there on, the user's and {Name}'s messages are whole, word for word (zoom on one only to see an image it names); tool calls, their output, notes and reports stay summary lines.

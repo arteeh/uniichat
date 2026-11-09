@@ -5,6 +5,7 @@ import { Limit } from "./Limit.ts";
 import { Machine } from "./Machine.ts";
 import { OpenAI } from "./OpenAI.ts";
 import { Pick } from "./Pick.ts";
+import * as Prompts from "./Prompts.ts";
 import * as config from "./Config.ts";
 import { err_why } from "./Err.ts";
 import { get, text_of } from "./Json.ts";
@@ -87,7 +88,6 @@ export type Call = Try;
 
 export const AGAIN = 60e3;
 
-export const GO_ON = "The AI service's usage limit cut your last turn short. It has reset: go on.";
 
 // the longest a patient call waits for a refusal to lift (a ChatGPT
 // plan's limits last a week at most)
@@ -201,7 +201,7 @@ export namespace AskAI {
   }
 
   export function labeled(said: Said, working = false): string {
-    return "A new message from " + said.from + (working ? " came in while you were working:\n" : ":\n\n") + said.text;
+    return Prompts.prompt(working ? "message-working" : "message", { from: said.from }) + (working ? "\n" : "\n\n") + said.text;
   }
 
   export async function steered(ask: Ask): Promise<Say | null> {
@@ -209,7 +209,7 @@ export namespace AskAI {
     if (says.length === 0) {
       return null;
     }
-    const say = { text: says.map((s) => AskAI.labeled(s, true) + "\n\nAddress the message above as you continue this turn.").join("\n\n"), imgs: says.flatMap((s) => s.imgs) };
+    const say = { text: says.map((s) => AskAI.labeled(s, true) + "\n\n" + Prompts.prompt("steer")).join("\n\n"), imgs: says.flatMap((s) => s.imgs) };
     ask.steer?.taken.push(say);
     return say;
   }

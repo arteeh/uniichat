@@ -2,7 +2,8 @@ import * as child from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import type { Options, Query, SDKMessage, SDKRateLimitInfo, SDKUserMessage, SpawnOptions, SyncHookJSONOutput } from "@anthropic-ai/claude-agent-sdk";
-import { AskAI, GO_ON, type Ask, type End, type Event, type Img, type Try } from "./AskAI.ts";
+import * as Prompts from "./Prompts.ts";
+import { AskAI, type Ask, type End, type Event, type Img, type Try } from "./AskAI.ts";
 import { Agent, BUSY, TOO_LONG, type Emit } from "./Agent.ts";
 import { Anthropic } from "./Anthropic.ts";
 import { LIMIT, Limit, type Off } from "./Limit.ts";
@@ -64,7 +65,6 @@ const OVERAGE = "usage limit: extra usage";
 
 const STEERING = "new messages came in; they follow, each saying who sent it";
 
-const CONTINUE = "Go on.";
 
 
 type Sdk = typeof import("@anthropic-ai/claude-agent-sdk");
@@ -437,7 +437,7 @@ export namespace ClaudeSub {
         if (got === null || got.limit === undefined) {
           return got === null ? {} : { ...got, acted: acted.v };
         }
-        lead = [GO_ON];
+        lead = [Prompts.prompt("go-on")];
         limit.n += 1;
         const keep_code_across_limit = acted.v;
         if (!keep_code_across_limit) {
@@ -482,8 +482,8 @@ export namespace ClaudeSub {
   // the messages steered in since, in one message: two would start two turns
   export async function go_on(code: Code, ask: Ask, lead: string[]): Promise<void> {
     const say = await AskAI.steered(ask);
-    const texts = [...lead.map((text) => AskAI.labeled({ text, imgs: [], from: "UniiChat" })), ...(say === null ? [] : [say.text])];
-    code.box.put(texts.length === 0 ? [AskAI.labeled({ text: CONTINUE, imgs: [], from: "UniiChat" })] : texts, say?.imgs ?? []);
+    const texts = [...lead.map((text) => AskAI.labeled({ text, imgs: [], from: Prompts.sender("uniichat") })), ...(say === null ? [] : [say.text])];
+    code.box.put(texts.length === 0 ? [AskAI.labeled({ text: Prompts.prompt("continue"), imgs: [], from: Prompts.sender("uniichat") })] : texts, say?.imgs ?? []);
   }
 
   export function died_before_saying(err: unknown, said: boolean, signal: AbortSignal): boolean {

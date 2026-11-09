@@ -5,7 +5,7 @@ import * as net from "node:net";
 import * as path from "node:path";
 import type { ServerWebSocket } from "bun";
 import type { Out as Done } from "./Agent.ts";
-import { AskAI, GO_ON, type Ask, type Block, type Call, type End, type Event, type Kind, type Parked, type Said, type Vendor } from "./AskAI.ts";
+import { AskAI, type Ask, type Block, type Call, type End, type Event, type Kind, type Parked, type Said, type Vendor } from "./AskAI.ts";
 import { clip_pages } from "./Clip.ts";
 import { Disk } from "./Disk.ts";
 import { Mcp } from "./Mcp.ts";
@@ -108,9 +108,6 @@ const WIN        = process.platform === "win32";
 const PID        = config.DIR + "/server.pid";
 const SETTLE     = 200;
 const AGENTS     = config.DIR + "/agents";
-const HEAD       = "Turn:\n\n";
-const GOAL_ASK   = "\nThe goal:\n\n";
-const GOAL_NO    = "The goal isn't satisfied yet: keep working.";
 const TALK_FULL  = "Conversation mode switched itself off: it was full.";
 const TALK_SMALL = "Conversation mode switched itself off: too long for {model}.";
 const TALK_LONG  = "Conversation mode switched itself off: {model} refused the turn as too long.";
@@ -537,7 +534,7 @@ export namespace Chat {
     chat.eye = Chat.eye(mem, from);
     chat.socks.forEach((sock) => Chat.show(chat, sock));
     const team = chat.id === UNII ? [Chat.team(chat)] : [];
-    const blocks = [...view, Tools.devices(chat.tools), Tools.skills(chat.tools), Tools.at_work(chat.tools, chat.who), ...team, { text: HEAD + text, mark: true }];
+    const blocks = [...view, Tools.devices(chat.tools), Tools.skills(chat.tools), Tools.at_work(chat.tools, chat.who), ...team, { text: Prompts.prompt("turn") + "\n\n" + text, mark: true }];
     const model = chat.pick.model;
     const used = (tokens: number) => {
       if (chat.pick.model === model) {
@@ -584,7 +581,7 @@ export namespace Chat {
       const msg = Memory.at(mem, i);
       return Memory.line({ l: 0, i }, msg.kind + ": " + msg.text) + "\n";
     });
-    const blocks = [...Memory.view(mem, at, Memory.fitted(mem)), { text: tail.join("") + GOAL_ASK + goal, mark: true }];
+    const blocks = [...Memory.view(mem, at, Memory.fitted(mem)), { text: tail.join("") + "\n" + Prompts.prompt("goal-ask") + "\n\n" + goal, mark: true }];
     return { call: AskAI.ask({ ...Chat.share(chat, Prompts.prompt("goal", { Name: Chat.name(chat) })), blocks, no_wait: true, limits: Chat.limits(chat), who: "goal" }, () => {}), goal };
   }
 
@@ -607,7 +604,7 @@ export namespace Chat {
       Memory.save(mem);
       Chat.note(chat, "Goal met.");
     } else if (on) {
-      void Run.take(chat.main, { kind: "note", text: GOAL_NO, images: [] });
+      void Run.take(chat.main, { kind: "note", text: Prompts.prompt("goal-no"), images: [] });
     }
     return !halt.signal.aborted;
   }
@@ -617,7 +614,7 @@ export namespace Chat {
   export function said(mem: Memory, a: number, b: number): Said {
     const { kind, text } = Memory.at(mem, a);
     const sender = Memory.at(mem, a).from;
-    const from = kind === "user" ? "the user" : kind !== "work" ? "UniiChat" : sender !== undefined ? Team.get(sender)?.name ?? "an agent" : text.startsWith(JOB) ? "a job" : "the timer";
+    const from = kind === "user" ? Prompts.sender("user") : kind !== "work" ? Prompts.sender("uniichat") : sender !== undefined ? Team.get(sender)?.name ?? Prompts.sender("agent") : text.startsWith(JOB) ? Prompts.sender("job") : Prompts.sender("timer");
     return { ...Memory.say(mem, a, b), from };
   }
 
@@ -672,7 +669,7 @@ export namespace Chat {
     if (goal === null || chat.mem.goal !== goal) {
       Chat.unpark(chat);
       if (goal === null) {
-        void Run.take(chat.main, { kind: "note", text: GO_ON, images: [] });
+        void Run.take(chat.main, { kind: "note", text: Prompts.prompt("go-on"), images: [] });
       }
       return Chat.change(chat);
     }
@@ -1158,7 +1155,7 @@ export namespace Chat {
   // an archived agent's cut turn and inbox wait with what it holds, for
   // its restore
   export function resume(chat: Chat, work: string[]): void {
-    const text = "The server restarted, cutting your turn; nothing was lost: go on.";
+    const text = Prompts.prompt("restarted");
     const queued = chat.mem.queue.filter((post) => post.act === undefined || Owner.act_get(post.act) === null);
     const posts: Pending[] = [...(work.length > 0 ? [{ kind: "note" as const, text, images: [] }] : []), ...queued];
     if (Chat.archived(chat)) {
