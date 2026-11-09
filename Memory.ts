@@ -88,6 +88,7 @@ type Tree = {
 type Hooks = {
   share  : () => Omit<Share, keyof Pick>;
   made?  : (l: number, i: number) => void;
+  name?  : () => string;
   acted  : (id: string, ans: object) => void;
 };
 
@@ -120,7 +121,7 @@ const NODE_RULER = "-".repeat(NODE);
 
 const WAIT = "(not summarized yet: zoom it)";
 
-const TALKING = "Conversation mode is on from message {id}: from there on, the user's and Unii's messages are whole, word for word (zoom on one only to see an image it names); tool calls, their output, notes and reports stay summary lines.";
+const TALKING = "Conversation mode is on from message {id}: from there on, the user's and {Name}'s messages are whole, word for word (zoom on one only to see an image it names); tool calls, their output, notes and reports stay summary lines.";
 
 const IMAGES = "/docs/images/";
 
@@ -1003,7 +1004,7 @@ ${Memory.cut(line)}| ← LIMIT`;
       return text === null ? [] : [Memory.line(part, text) + "\n"];
     });
     const said = Array.from({ length: Math.max(0, end - talk) }, (_, k) => Memory.talk_line(mem, talk + k) + "\n");
-    return [...lines, TALKING.replace("{id}", String(talk)) + "\n", ...said];
+    return [...lines, TALKING.replace("{id}", String(talk)).replace("{Name}", mem.name?.() ?? "") + "\n", ...said];
   }
 
   export function upto(mem: Memory, part: Part, end: number): Part[] {

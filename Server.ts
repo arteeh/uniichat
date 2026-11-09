@@ -256,6 +256,7 @@ export namespace Chat {
     }
     chat.eye = Chat.eye(mem, Memory.turn(mem));
     mem.made = (l, i) => Chat.made(chat, l, i);
+    mem.name = () => Chat.name(chat);
     mem.wait.add(() => Chat.progress(chat));
     chat.batch = Chat.resumed(chat);
     Chat.timed(chat);
