@@ -22,7 +22,7 @@ What this fork adds:
 - **Skills** read from the ~/.agents/skills folder.
 - **Scheduling tools** to give your agent future or repeating tasks.
 - **Image and video viewing tools** to let it see images and video files.
-- **Settings page** where you can customize the system prompt and compaction prompt.
+- **Settings page** where you set the instructions every agent gets.
 - **Improved memory tree viewer** to browse what your agent knows.
 - **Full markdown** as GitHub draws it.
 - **Images, video, audio and HTML pages inline** for the agent to show you things, or for you to show the agent.
@@ -36,21 +36,23 @@ What this fork adds:
 Install
 -------
 
+This branch is the agent-team beta. Each beta is a pre-release, `beta-1`, `beta-2`, …, on the [releases page](https://github.com/arteeh/uniichat/releases), with its own install line (put its number in place of `N`):
+
 Linux, macOS or WSL:
 
-`curl -fsSL https://github.com/arteeh/uniichat/releases/latest/download/install.sh | sh`
+`curl -fsSL https://github.com/arteeh/uniichat/releases/download/beta-N/install.sh | sh`
 
 Windows (PowerShell, no admin needed):
 
-`irm https://github.com/arteeh/uniichat/releases/latest/download/install.ps1 | iex`
+`irm https://github.com/arteeh/uniichat/releases/download/beta-N/install.ps1 | iex`
 
-Either way you get one `unii` program (in `~/.local/bin`, or `%LOCALAPPDATA%\Programs\unii` on Windows). `unii update` installs the newest release and restarts the background services on it.
+Either way you get one `unii` program (in `~/.local/bin`, or `%LOCALAPPDATA%\Programs\unii` on Windows). `unii update` installs the newest beta and restarts the background services on it.
 
 Set up
 ------
 
 1. **Start the server** on the computer that keeps your chat: `unii serve -d`. It runs in the background from then on, at http://127.0.0.1:8788, with its data in `~/.unii` (or `$UNII_DIR`). To use it from other devices, put it behind HTTPS (see Q&A) and set `site` in Settings to that address.
-2. **Sign in.** `unii serve link` on that computer prints a link that signs your browser in. Terminals and devices sign in with a link and a code you confirm in that browser.
+2. **Sign in.** `unii serve link` on that computer prints a link that signs your browser in. Devices sign in with a link and a code you confirm in that browser.
 3. **Pick a model.** In the web app, Settings (the cogwheel): add API keys. To use your Claude or ChatGPT plan instead, run `unii serve claude login` or `unii serve chatgpt login` on the server's computer, then pick `claude-sub` or `openai-sub`.
 4. **Add your computers.** On each one Unii may work on: `unii device -d https://your-server`. Unii works in `~/.unii/work` there. Want it working on the server's computer too? Run a device there as well.
 
@@ -71,7 +73,7 @@ Unii sees them from its next turn, no restart. Switch them on or off in Settings
 
 **In the background**, `-d` runs the server or a device as a service of your user (systemd on Linux, a Scheduled Task on Windows, a LaunchAgent on macOS): it starts at login and restarts if it crashes. `unii serve stop` / `unii device stop` removes it, `logs -f` follows its output. On Linux, `loginctl enable-linger` keeps it running while you're logged out. On Windows, `sudo unii device -d` offers to run it as administrator, so Unii can control apps that run as admin; then `sudo unii device stop` removes it.
 
-**Settings** are mostly on the Settings page, including Unii's system prompt and compaction prompt. They're kept in `~/.unii/config.json`, where `UNII_<KEY>` environment variables override them. One lives only there: `after`, a shell command to run after each turn.
+**Settings** are mostly on the Settings page. They're kept in `~/.unii/config.json`, where `UNII_<KEY>` environment variables override them. One lives only there: `after`, a shell command to run after each turn.
 
 Use
 ---
@@ -121,7 +123,7 @@ No: a server has one owner. Anthropic and OpenAI don't allow sharing a plan, eit
 
 **Upgrading from arteeh.16 or older?**
 
-Stop the server first (`systemctl --user stop unii-serve`), run the installer, then start it again: it moves your data to the new layout. The terminal no longer works on files itself: run `unii device` on each computer Unii should work on.
+Stop the server first (`systemctl --user stop unii-serve`), run the installer, then start it again: it moves your data to the new layout. Run `unii device` on each computer Unii should work on.
 
 License
 -------
