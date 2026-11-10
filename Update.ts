@@ -1,4 +1,4 @@
-export const VERSION = "40.rc2";
+export const VERSION = "40.rc3";
 
 // a release candidate (N.rcM, a pre-release on the rc branch) is only ever
 // installed by hand, with its own release's install line: `unii update`
