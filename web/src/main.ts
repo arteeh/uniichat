@@ -26,6 +26,13 @@ const SCENES = `
 
 const WIDE = matchMedia("(min-width: 900px)");
 
+const TOUCH = matchMedia("(pointer: coarse)");
+
+const STILL = matchMedia("(prefers-reduced-motion: reduce)");
+
+// the screens a history.go is taking the stack back to, laid on its popstate
+let LAY: string[] | null = null;
+
 const UNII = "unii";
 
 const AGENT = /^\/a\/([a-z0-9]{1,16})(\/edit)?$/;
@@ -95,9 +102,12 @@ async function boot(): Promise<void> {
   const own = AGENT.test(location.pathname) || location.pathname === "/new" ? location.pathname : null;
   const state: unknown = history.state;
   const pic = get(state, "pic") != null;
-  history.replaceState(null, "", PAGES.includes(location.pathname) ? "/settings" : tree ?? own ?? "/");
+  const path = PAGES.includes(location.pathname) ? "/settings" : tree ?? own ?? "/";
   if (pic) {
+    history.replaceState(null, "", path);
     history.back();
+  } else if (String(get(state, "chain")) !== String(depth(path))) {
+    lay(depth(path), 0, true);
   }
   if (await boot_me() === null) {
     solo("Sign in", "This UniiChat server is private. On the computer it runs on, run <code>unii serve link</code> and open the link it prints here.");
@@ -186,7 +196,7 @@ function chat(): void {
   $("#pick").addEventListener("focusout", left);
   $("header .who").onclick = () => go("/a/" + v.agent + "/edit");
   $("header .brain").onclick = () => go("/tree?a=" + v.agent);
-  $("header .back").onclick = () => up(up_to());
+  $("header .back").onclick = () => go(up_to());
   WIDE.onchange = () => route();
   $(".mic").onclick = mic;
   file.onchange = () => {
@@ -194,6 +204,11 @@ function chat(): void {
     file.value = "";
   };
   onpopstate = popped;
+  document.addEventListener("contextmenu", (ev) => {
+    if (TOUCH.matches && ev.target instanceof Element && ev.target.closest("[data-go]") !== null) {
+      ev.preventDefault();
+    }
+  });
   Viewer.viewer_new();
   importer();
   document.ondragover = (ev) => ev.preventDefault();
@@ -645,8 +660,8 @@ function hear(msg: View.Server): void {
       archived_draw();
     }
   }
-  if (AGENT.test(location.pathname) && AGENT.exec(location.pathname)?.[1] !== v.agent) {
-    history.replaceState(null, "", "/a/" + v.agent);
+  if (AGENT.test(location.pathname) && !FORM.test(location.pathname) && AGENT.exec(location.pathname)?.[1] !== v.agent) {
+    history.replaceState({ chain: depth("/a/" + v.agent) }, "", "/a/" + v.agent);
   }
   const now = View.view_pick(v).filter((k) => was.length > 0 && !was.some((w) => w.text === k.text));
   if (now.length > 0) {
@@ -1039,30 +1054,82 @@ function mine_above(el: HTMLElement): boolean {
   return el.getBoundingClientRect().top < $("header").getBoundingClientRect().bottom;
 }
 
-// each page records the one it was opened from, so a way up to that one is
-// the browser's back
+// the history holds the screens above this one, the list first, so the
+// phone's back and the header's < both go up a level (up_to): to a
+// screen, the history goes back to where the two part, then on to it
 function go(path: string): void {
+  const now = stack();
+  const want = depth(path);
+  let k = 0;
+  while (k < now.length && k < want.length && now[k] === want[k]) {
+    k++;
+  }
+  const back = now.length - k;
+  if (back === 0 && k === want.length) {
+    route();
+  } else if (k === want.length) {
+    history.go(-back);
+  } else if (back > 1) {
+    LAY = want;
+    history.go(1 - back);
+  } else {
+    moved(want.length - now.length, () => {
+      lay(want, k, back === 1);
+      route();
+    });
+  }
+}
+
+// want's screens from k on, after the entries before: the first in this
+// entry (over) or pushed after it
+function lay(want: string[], k: number, over: boolean): void {
+  for (let j = k; j < want.length; j++) {
+    const state = { chain: want.slice(0, j + 1) };
+    if (j === k && over) {
+      history.replaceState(state, "", want[j]);
+    } else {
+      history.pushState(state, "", want[j]);
+    }
+  }
+}
+
+// the history the app laid, the list first: this entry's chain
+function stack(): string[] {
+  const chain = get(history.state, "chain");
   const here = location.pathname + location.search + location.hash;
-  if (here !== path) {
-    history.pushState({ from: here }, "", path);
-  }
-  route();
+  return Array.isArray(chain) && chain.at(-1) === here ? chain.map(String) : depth(here);
 }
 
-function up(path: string): void {
-  if (get(history.state, "from") === path) {
-    history.back();
-    return;
-  }
-  history.replaceState(null, "", path);
-  route();
+// a screen and the ones above it, the list first
+function depth(path: string): string[] {
+  const up = up_from(path);
+  return up === null ? [path] : [...depth(up), path];
 }
 
-// the header's back: from the memory or an agent's settings to its chat,
-// from a chat, Settings or a new agent to the list
+// the header's <; from the no-such-agent page, the list
 function up_to(): string {
   const edit = FORM.exec(location.pathname)?.[2];
-  return location.pathname === TREE ? "/a/" + v.agent : edit !== undefined ? "/a/" + edit : "/";
+  return edit !== undefined && v.team.length > 0 && !v.team.some((m) => m.id === edit) ? "/" : up_from(location.pathname + location.search) ?? "/";
+}
+
+// the screen above: from the memory or an agent's settings to its chat,
+// from a chat, Settings or a new agent to the list
+function up_from(path: string): string | null {
+  const url = new URL(path, location.origin);
+  const edit = FORM.exec(url.pathname)?.[2];
+  return url.pathname === TREE ? "/a/" + (url.searchParams.get("a") ?? UNII) : edit !== undefined ? "/a/" + edit : url.pathname === "/" ? null : "/";
+}
+
+// a change of screen, in a short slide on a phone (in going down a level,
+// out going up) or a fade when wide, where the browser has view
+// transitions and motion isn't reduced
+function moved(levels: number, change: () => void): void {
+  if (document.startViewTransition === undefined || STILL.matches) {
+    change();
+    return;
+  }
+  document.documentElement.dataset.move = WIDE.matches || levels === 0 ? "fade" : levels > 0 ? "in" : "out";
+  document.startViewTransition(change);
 }
 
 // to another agent's chat: the server sends it, the box holds its draft
@@ -1130,9 +1197,22 @@ function route(): void {
   draw(chat && SCROLL.end);
 }
 
-function popped(): void {
-  if (location.pathname + location.search + location.hash !== P.at) {
-    route();
+function popped(ev: PopStateEvent): void {
+  const want = LAY;
+  LAY = null;
+  if (want !== null) {
+    const k = stack().length - 1;
+    moved(want.length - depth(P.at).length, () => {
+      lay(want, k, true);
+      route();
+    });
+  } else if (location.pathname + location.search + location.hash !== P.at) {
+    const levels = stack().length - depth(P.at).length;
+    if (get(ev, "hasUAVisualTransition") === true) {
+      route();
+    } else {
+      moved(levels, route);
+    }
   }
   Viewer.viewer_sync();
   draw(true);
