@@ -17,6 +17,7 @@ type Back = { at: { a: number; top: number } | null; y: number | null; away: { y
 const DESK = matchMedia("(hover: hover)");
 
 const ME_WAIT = 4000;
+const TRAVEL = 1000;
 
 const NONE   = "No Claude or ChatGPT chats in that folder. Choose ~/.claude or ~/.codex.";
 
@@ -32,6 +33,7 @@ const STILL = matchMedia("(prefers-reduced-motion: reduce)");
 
 // the screens a history.go is taking the stack back to, laid on its popstate
 let LAY: string[] | null = null;
+let TRIP = 0;
 
 const UNII = "unii";
 
@@ -97,6 +99,13 @@ function kept(fact: string): string {
 async function boot(): Promise<void> {
   document.head.insertAdjacentHTML("beforeend", `<style>${theme_css()}</style>`);
   navigator.serviceWorker?.register("/sw.js").catch(() => {});
+  navigator.serviceWorker?.addEventListener("message", (ev: MessageEvent) => {
+    const url: unknown = get(ev.data, "go");
+    if (typeof url === "string" && url.startsWith("/")) {
+      go(url);
+    }
+  });
+  navigator.serviceWorker?.startMessages();
   notes_close();
   const tree = location.pathname === TREE ? TREE + location.search + (tree_view() ? "#view" : "") : null;
   const own = AGENT.test(location.pathname) || location.pathname === "/new" ? location.pathname : null;
@@ -104,7 +113,6 @@ async function boot(): Promise<void> {
   const pic = get(state, "pic") != null;
   const path = PAGES.includes(location.pathname) ? "/settings" : tree ?? own ?? "/";
   if (pic) {
-    history.replaceState(null, "", path);
     history.back();
   } else if (String(get(state, "chain")) !== String(depth(path))) {
     lay(depth(path), 0, true);
@@ -1056,28 +1064,51 @@ function mine_above(el: HTMLElement): boolean {
 
 // the history holds the screens above this one, the list first, so the
 // phone's back and the header's < both go up a level (up_to): to a
-// screen, the history goes back to where the two part, then on to it
+// screen, the history goes back to where the two part (popped), then
+// pushes the rest, which drops the screens forward of there; the history
+// changes at once, only the drawing waits for the slide
 function go(path: string): void {
-  const now = stack();
   const want = depth(path);
+  if (LAY !== null) {
+    LAY = want;
+    return;
+  }
+  const now = stack();
+  const k = shared(now, want);
+  if (now.length > k) {
+    LAY = want;
+    travel(k - now.length);
+  } else if (k < want.length) {
+    lay(want, k, false);
+    moved(want.length - now.length, route);
+  } else {
+    route();
+  }
+}
+
+// back n entries, on to LAY (popped); a history shorter than its chain
+// says (one from before this version) never answers: then LAY is laid
+// over this entry
+function travel(n: number): void {
+  const trip = ++TRIP;
+  history.go(n);
+  setTimeout(() => {
+    const want = LAY;
+    if (want !== null && trip === TRIP) {
+      LAY = null;
+      lay(want, 0, true);
+      route();
+    }
+  }, TRAVEL);
+}
+
+// how many screens two chains start with alike
+function shared(a: string[], b: string[]): number {
   let k = 0;
-  while (k < now.length && k < want.length && now[k] === want[k]) {
+  while (k < a.length && k < b.length && a[k] === b[k]) {
     k++;
   }
-  const back = now.length - k;
-  if (back === 0 && k === want.length) {
-    route();
-  } else if (k === want.length) {
-    history.go(-back);
-  } else if (back > 1) {
-    LAY = want;
-    history.go(1 - back);
-  } else {
-    moved(want.length - now.length, () => {
-      lay(want, k, back === 1);
-      route();
-    });
-  }
+  return k;
 }
 
 // want's screens from k on, after the entries before: the first in this
@@ -1106,10 +1137,10 @@ function depth(path: string): string[] {
   return up === null ? [path] : [...depth(up), path];
 }
 
-// the header's <; from the no-such-agent page, the list
+// the header's <: the screen before this one in the history, as the
+// phone's back
 function up_to(): string {
-  const edit = FORM.exec(location.pathname)?.[2];
-  return edit !== undefined && v.team.length > 0 && !v.team.some((m) => m.id === edit) ? "/" : up_from(location.pathname + location.search) ?? "/";
+  return stack().at(-2) ?? "/";
 }
 
 // the screen above: from the memory or an agent's settings to its chat,
@@ -1129,7 +1160,10 @@ function moved(levels: number, change: () => void): void {
     return;
   }
   document.documentElement.dataset.move = WIDE.matches || levels === 0 ? "fade" : levels > 0 ? "in" : "out";
-  document.startViewTransition(change);
+  const move = document.startViewTransition(change);
+  // a transition another one skips rejects these
+  move.ready.catch(() => {});
+  move.finished.catch(() => {});
 }
 
 // to another agent's chat: the server sends it, the box holds its draft
@@ -1199,13 +1233,16 @@ function route(): void {
 
 function popped(ev: PopStateEvent): void {
   const want = LAY;
+  const now = stack();
+  const k = want === null ? 0 : shared(now, want);
+  if (want !== null && now.length > k) {
+    travel(k - now.length);
+    return;
+  }
   LAY = null;
   if (want !== null) {
-    const k = stack().length - 1;
-    moved(want.length - depth(P.at).length, () => {
-      lay(want, k, true);
-      route();
-    });
+    lay(want, k, false);
+    moved(want.length - depth(P.at).length, route);
   } else if (location.pathname + location.search + location.hash !== P.at) {
     const levels = stack().length - depth(P.at).length;
     if (get(ev, "hasUAVisualTransition") === true) {
@@ -1232,6 +1269,11 @@ async function agent_page(id: string | null): Promise<void> {
   if (all === null || (id !== null && a === null)) {
     $("header .title").textContent = "";
     el.innerHTML = `<p class="sub">${all === null ? "Could not read the agents. Try again in a moment." : "No such agent."}</p>`;
+    if (all !== null && LAY === null && FORM.exec(location.pathname)?.[2] === id && stack().includes("/a/" + id)) {
+      // no chat above: the list is, for < and the phone's back alike
+      LAY = ["/", location.pathname];
+      travel(1 - stack().length);
+    }
     return;
   }
   $("header .title").textContent = a?.name ?? "New agent";

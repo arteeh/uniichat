@@ -74,7 +74,7 @@ export function viewer_pic(el: Element): Pic | null {
 
 export function viewer_open(pic: Pic, push = true, el: Element | null = null): void {
   if (push) {
-    history.pushState({ pic }, "", location.href);
+    history.pushState({ chain: get(history.state, "chain"), pic }, "", location.href);
   }
   if (V.pic?.src !== pic.src) {
     const img = el?.closest("a")?.querySelector("img");
@@ -171,7 +171,7 @@ function step(d: number): boolean {
   if (to === undefined) {
     return false;
   }
-  history.replaceState({ pic: to }, "", location.href);
+  history.replaceState({ chain: get(history.state, "chain"), pic: to }, "", location.href);
   V.n = k + d;
   show(to);
   return true;

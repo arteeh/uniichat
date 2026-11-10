@@ -72,5 +72,9 @@ async function open_chat(url) {
     return self.clients.openWindow(url);
   }
   await tab.focus();
+  // an open app goes there itself, so its history stays one stack
+  if ((await self.clients.matchAll({ type: "window" })).some((t) => t.id === tab.id)) {
+    return tab.postMessage({ go: url });
+  }
   return tab.navigate(url).catch(() => null);
 }

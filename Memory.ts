@@ -393,7 +393,9 @@ export namespace Memory {
     return roots;
   }
 
+  // a message's pages, all of its date
   export function pages(msg: Msg): Msg[] {
+    const date = msg.date ?? new Date().toISOString();
     const texts = clip_pages(msg.text);
     const pics = msg.images ?? [];
     const n = Math.max(texts.length, Math.ceil(pics.length / PICS));
@@ -402,7 +404,7 @@ export namespace Memory {
       const images = pics.slice(Math.max(0, end - PICS), end);
       const more = k < n - 1 || msg.more === true ? true : undefined;
       const act = k === n - 1 ? msg.act : undefined;
-      return { ...msg, text: texts[k - n + texts.length] ?? "", images, line: k === 0 ? msg.line : undefined, more, act };
+      return { ...msg, date, text: texts[k - n + texts.length] ?? "", images, line: k === 0 ? msg.line : undefined, more, act };
     });
   }
 
@@ -552,10 +554,11 @@ export namespace Memory {
     return part.l === 0 ? [] : [{ l: part.l - 1, i: 2 * part.i }, { l: part.l - 1, i: 2 * part.i + 1 }];
   }
 
+  // a team message waits for its line from the agent's memory (fill)
   export function source(mem: Memory, l: number, i: number): string | null {
     if (l === 0) {
       const root = Memory.message(mem, i);
-      return root === null ? null : root.line ?? Memory.show(root);
+      return root === null ? null : root.line ?? (root.kind === "team" ? null : Memory.show(root));
     }
     const [a, b] = Memory.halves({ l, i }).map((half) => Memory.node(mem, half));
     return a === null || b === null ? null : Memory.flat(a) + "\n" + Memory.flat(b);
@@ -663,6 +666,16 @@ export namespace Memory {
     }).catch((err: unknown) => {
       console.error("compactor: node " + l + "/" + i + ": " + err_why(err));
     });
+  }
+
+  // a message's line, made in another memory (a tag on it may go over NODE)
+  export function fill(mem: Memory, i: number, text: string): void {
+    if (mem.done || Memory.built(mem, 0, i) || Memory.message(mem, i) === null) {
+      return;
+    }
+    Memory.store(mem, [{ l: 0, i, text }]);
+    Memory.pump(mem);
+    Memory.fit(mem);
   }
 
   export function stop(mem: Memory): void {

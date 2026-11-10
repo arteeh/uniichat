@@ -595,7 +595,7 @@ function view_entry(v: View, msg: Server & { $: "entry" }): void {
   if (sent === true && id !== undefined) {
     v.sent = [...v.sent, id];
   }
-  const last = v.parts[v.parts.length - 1];
+  const last = v.parts.findLast(([at]) => v.whole.get(at)?.kind !== "team");
   if (id !== undefined) {
     v.whole.set(id, entry);
     v.parts.push([id, 1]);
@@ -724,8 +724,11 @@ function part_rows(v: View, id: number, n: number, t: number, talk: boolean): Ro
   const key   = id + "+" + n;
   const entry = v.whole.get(id);
   const half  = n / 2;
-  if (n === 1 && entry?.kind === "team") {
+  if (n === 1 && entry?.kind === "team" && id >= t) {
     return [];
+  }
+  if (n === 1 && entry?.kind === "team") {
+    return sum_rows(id, n, v.nodes.get(key));
   }
   if (n === 1 && id >= t && entry !== undefined) {
     const minds = v.thinking === false ? [] : v.minds.get(id) ?? [];

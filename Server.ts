@@ -119,6 +119,9 @@ const FULL       = "UniiChat's disk is full; try again soon.";
 const BATCH      = "/import.json";
 const SPARE      = 2 ** 30;
 
+// another agent's message (agent id/message id): its place in Unii's memory
+const COPIES = new Map<string, number>();
+
 const TIMER_TEXT = 200;
 const LAST       = 120;
 const RING       = 60000;
@@ -212,7 +215,7 @@ function file_path(x: unknown): string {
 export namespace Chat {
 
   export function open(id: string, tools: Tools): Chat {
-    const mem = Memory.load(AGENTS + "/" + id, () => ({ system: Prompts.prompt("compact"), own: Prompts.prompt("compact-agent", { Name: Team.get(id)?.name ?? "" }), searches: 0, server: "" }), Owner.act_put, AGENTS + "/" + UNII);
+    const mem = Memory.load(AGENTS + "/" + id, () => ({ system: Prompts.prompt("compact", { Name: Team.get(id)?.name ?? "" }), own: Prompts.prompt("compact-agent", { Name: Team.get(id)?.name ?? "" }), searches: 0, server: "" }), Owner.act_put, AGENTS + "/" + UNII);
     const cut = mem.work;
     const main = Run.make<Pending, Msg>(id, {
       pick   : () => chat.pick,
@@ -275,18 +278,25 @@ export namespace Chat {
 
   // what every agent shares: the fixed base, the user's instructions, the
   // team; then its own: the team view's key (Unii), who it is, its prompt
+  // the agent's own part: its name, unless its prompt starts with it
+  export function you(chat: Chat, name: string, prompt: string): string {
+    const named = prompt.startsWith("You are " + name + ".") || prompt.startsWith("You are " + name + ",");
+    return Prompts.prompt("you", { intro: named ? "" : "You are " + name + ". ", who: chat.who, prompt });
+  }
+
   export function system(chat: Chat): { system: string; own: string } {
     const agent = Team.get(chat.id);
     const told = config.INSTRUCTIONS.trim();
-    const team = Prompts.prompt("team").split("\n").flatMap((line) => (line.includes("{name}") ? Team.active().map((a) => Prompts.fill(line, { name: a.name, about: a.about })) : [line]));
+    const name = agent?.name ?? "";
+    const team = Prompts.prompt("team", { Name: name }).split("\n").flatMap((line) => (line.includes("{name}") ? Team.active().map((a) => Prompts.fill(line, { name: a.name, about: a.about })) : [line]));
     const shared = [
-      Prompts.prompt("prompt"),
+      Prompts.prompt("prompt", { Name: name }),
       ...(told === "" ? [] : [Prompts.prompt("instructions", { instructions: told })]),
       team.join("\n"),
     ];
     const own = [
       ...(chat.id === UNII && config.TEAM_VIEW > 0 ? [Prompts.prompt("team-view")] : []),
-      Prompts.prompt("you", { Name: agent?.name ?? "", who: chat.who, prompt: agent === null ? "" : Team.prompt(agent) }),
+      Chat.you(chat, name, agent === null ? "" : Team.prompt(agent)),
     ];
     return { system: shared.join("\n\n"), own: own.join("\n\n") };
   }
@@ -712,6 +722,9 @@ export namespace Chat {
     const queued = sent ? { sent } : {};
     const first = chat.mem.open === 0;
     const roots = Memory.push(chat.mem, [msg]);
+    if (chat.id !== UNII && msg.imported !== true) {
+      Chat.reserve(chat, roots.map(({ i, date }) => ({ i, date })));
+    }
     if (msg.kind === "unii" && chat.mem.hop === 0 && msg.imported !== true && !Chat.seen(chat)) {
       Team.unread(chat.id, null);
       chat.told = true;
@@ -1126,18 +1139,60 @@ export namespace Chat {
     }
   }
 
-  // another agent's message line, copied into Unii's memory as it's made:
-  // Unii's tree holds the whole team's work, and its view only grows at
-  // the end; an imported chat's lines stay out
-  export function copy(chat: Chat, i: number): void {
+  // another agent's messages, each given a place in Unii's memory as it's
+  // logged, so they keep time order with Unii's own: Unii's tree holds the
+  // whole team's work, and its view only grows at the end; the line fills
+  // the place once made (copy); an imported chat's messages stay out
+  export function reserve(chat: Chat, roots: Array<{ i: number; date: string }>): void {
     const unii = Main.chats.get(UNII);
-    const m = Memory.message(chat.mem, i);
-    const line = Memory.node(chat.mem, { l: 0, i });
-    if (unii === undefined || m === null || m.imported === true || line === null) {
+    if (unii === undefined) {
       return;
     }
-    const text = Memory.cut("[" + Chat.name(chat) + "] " + Memory.flat(line));
-    Chat.hold(unii, () => Chat.put(unii, { kind: "team", text, line: text, date: m.date, from: chat.id, copy: i }));
+    Chat.hold(unii, () => {
+      for (const { i, date } of roots) {
+        COPIES.set(chat.id + "/" + i, Chat.put(unii, { kind: "team", text: "[" + Chat.name(chat) + "]", date, from: chat.id, copy: i }).id);
+        Chat.copy(chat, i);
+      }
+    });
+  }
+
+  // an agent's message line, made: into its place in Unii's memory
+  export function copy(chat: Chat, i: number): void {
+    const key = chat.id + "/" + i;
+    const at = COPIES.get(key);
+    const line = Memory.node(chat.mem, { l: 0, i });
+    if (at === undefined || line === null) {
+      return;
+    }
+    COPIES.delete(key);
+    Memory.fill(Main.unii().mem, at, "[" + Chat.name(chat) + "] " + Memory.flat(line));
+  }
+
+  // the places still waiting, after a restart: each line made meanwhile
+  // fills its own; a deleted agent's are filled as it's deleted (gone)
+  export function copies(): void {
+    const unii = Main.unii();
+    for (const at of unii.mem.ready.flatMap((side) => side[0] ?? [])) {
+      const m = Memory.message(unii.mem, at);
+      const chat = m?.from === undefined ? undefined : Main.chats.get(m.from);
+      if (m?.kind === "team" && m.copy !== undefined && chat !== undefined) {
+        COPIES.set(chat.id + "/" + m.copy, at);
+        Chat.copy(chat, m.copy);
+      } else if (m?.kind === "team") {
+        Memory.fill(unii.mem, at, m.text);
+      }
+    }
+  }
+
+  // a deleted agent's places still waiting: its message's start instead
+  export function gone(chat: Chat): void {
+    for (const [key, at] of COPIES) {
+      const [id, i] = key.split("/");
+      if (id === chat.id) {
+        COPIES.delete(key);
+        Memory.fill(Main.unii().mem, at, "[" + Chat.name(chat) + "] " + Memory.cut(Memory.flat(Memory.message(chat.mem, Number(i))?.text ?? "")));
+      }
+    }
   }
 
   export function progress(chat: Chat): void {
@@ -1341,21 +1396,26 @@ export namespace Chat {
   }
 
   export function real(m: Log): boolean {
-    return m.kind === "user" || m.kind === "unii" || (m.kind === "work" && m.from !== undefined);
+    return (m.kind === "user" || m.kind === "unii" || (m.kind === "work" && m.from !== undefined)) && m.imported !== true;
   }
 
-  // the first page of the last real message
+  // the first page of the last real message, imports aside: a page before
+  // is "more", of the same kind and date (Memory.pages)
   export function gist(chat: Chat): number {
     for (let i = chat.mem.count - 1; i >= 0; i--) {
       const m = Memory.at(chat.mem, i);
       if (Chat.real(m)) {
-        while (i > 0 && Memory.at(chat.mem, i - 1).more === true) {
+        while (i > 0 && Chat.page_of(Memory.at(chat.mem, i - 1), m)) {
           i--;
         }
         return i;
       }
     }
     return -1;
+  }
+
+  export function page_of(up: Log, m: Log): boolean {
+    return up.more === true && up.kind === m.kind && up.date === m.date;
   }
 
   export function join(chat: Chat, sock: Sock): void {
@@ -1809,6 +1869,7 @@ export namespace Main {
     }
     Chat.stop(chat, null);
     clearTimeout(chat.bell);
+    Chat.gone(chat);
     Memory.stop(chat.mem);
     Main.chats.delete(chat.id);
     Main.tools.seats.delete(chat.who);
@@ -2113,6 +2174,7 @@ export namespace Main {
     Team.open();
     Limit.answering(() => ({ queued: [...Main.chats.values()].some((c) => Run.waiting(c.main)), busy: [...Main.chats.values()].some((c) => c.main.busy) }));
     Team.all().forEach((agent) => Chat.open(agent.id, Main.tools));
+    Chat.copies();
     Main.watch();
     process.on("unhandledRejection", Main.unowned);
     Main.server = Bun.serve<Sock["data"]>({

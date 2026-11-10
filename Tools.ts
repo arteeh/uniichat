@@ -268,6 +268,11 @@ export namespace Tools {
           const imgs = at === 0 ? Memory.images(from.mem, copy.copy) : [];
           return { text: (Team.get(copy.from ?? "")?.name ?? "") + "'s message " + copy.copy + ":\n" + Memory.zoom(from.mem, copy.copy, 1, at), fail: false, imgs };
         }
+        const line = copy?.kind === "team" ? Memory.node(there.mem, { l: 0, i: id }) : null;
+        if (line !== null) {
+          // a deleted agent's message: its line is all that's left
+          return { text: id + "+1|" + line, fail: false };
+        }
         const imgs = n === 1 && at === 0 ? Memory.images(there.mem, id) : [];
         return { text: Memory.zoom(there.mem, id, n, at), fail: false, imgs };
       }
