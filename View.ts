@@ -76,10 +76,12 @@ export type Talk = { from: number; used: number; tokens: number; window: number;
 
 export type Plug = { name: string; on: boolean };
 
-// agent: the agent whose chat is wanted; on: whose chat the server sends
+// agent: the agent whose chat is wanted; on: whose chat the server sends;
+// held: whose chat the view holds, kept over a reconnect (#114)
 export type View = State & {
   agent : string;
   on    : string;
+  held  : string;
   team  : Mate[];
   parts : Part[];
   turn  : number;
@@ -94,6 +96,9 @@ export type View = State & {
   out   : Post[];
   ws    : WebSocket | null;
   up    : boolean;
+  down  : number;
+  tries : number;
+  retry : ReturnType<typeof setTimeout> | null;
   flush : () => void;
   wake  : () => void;
 };
@@ -272,6 +277,7 @@ export function view_new(agent: string): View {
     timers    : [],
     mcp       : [],
     talk      : null,
+    held      : "",
     parts     : [],
     turn      : Infinity,
     nodes     : new Map(),
@@ -285,6 +291,9 @@ export function view_new(agent: string): View {
     out       : [],
     ws        : null,
     up        : false,
+    down      : Date.now(),
+    tries     : 0,
+    retry     : null,
     flush     : () => {},
     wake      : () => {},
   };
@@ -314,8 +323,11 @@ export function view_hear(v: View, msg: Server): Client[] {
     v.agent = msg.agent;
   }
   if (msg.$ === "state" && msg.agent !== undefined && msg.agent !== v.on && msg.agent === v.agent) {
-    view_chat(v);
+    if (msg.agent !== v.held) {
+      view_chat(v);
+    }
     v.on = msg.agent;
+    v.held = msg.agent;
   }
   if (!OWN.includes(msg.$) && v.on !== v.agent) {
     return [];
@@ -578,7 +590,17 @@ function view_entry(v: View, msg: Server & { $: "entry" }): void {
   }
 }
 
+// offline shows only once a reconnect has failed or this long has gone
+export const GRACE = 3000;
+const BACKOFF = 30000;
+
+export function view_offline(v: View, now = Date.now()): boolean {
+  return !v.up && (v.tries > 1 || now - v.down >= GRACE);
+}
+
+// a link that drops is opened again at once, then after 1, 2, 4… s
 export function link_open(v: View, link: Link): void {
+  v.retry = null;
   const ws   = link.open("?tab=" + v.tab + "&wire=" + WIRE + "&agent=" + v.agent);
   v.on = "";
   let heard  = Date.now();
@@ -597,8 +619,13 @@ export function link_open(v: View, link: Link): void {
   async function drop(): Promise<void> {
     const up = v.up;
     shut();
+    if (up) {
+      v.down = Date.now();
+    }
+    const wait = v.tries === 0 ? 0 : Math.min(BACKOFF, RETRY * 2 ** (v.tries - 1));
+    v.tries++;
     if (await link.lost(up)) {
-      setTimeout(() => link_open(v, link), RETRY);
+      v.retry = setTimeout(() => link_open(v, link), wait);
     }
   }
   function flush(): void {
@@ -623,10 +650,18 @@ export function link_open(v: View, link: Link): void {
     }
   }
   // back in view: a link not heard from since the server's last tick (or
-  // since it opened) is dead
+  // since it opened) is dead, and one waiting to open again opens now
   function wake(): void {
+    if (!v.up) {
+      v.down = Date.now();
+    }
     if (v.ws === ws && Date.now() - heard > PING / 2 + RETRY) {
+      v.tries = 0;
       void drop();
+    } else if (v.ws === null && v.retry !== null) {
+      clearTimeout(v.retry);
+      v.tries = 0;
+      link_open(v, link);
     }
   }
   // the server took no part in this link: its wire is not ours. An older
@@ -657,6 +692,7 @@ export function link_open(v: View, link: Link): void {
     const join = msg.$ === "view" && !v.up;
     if (join) {
       v.up = true;
+      v.tries = 0;
     }
     link.hear(msg);
     if (join) {
