@@ -83,7 +83,7 @@ const BOSS: Spec[] = [
   }, ["message", "zone"]),
   spec("schedules", "List the chat's schedules: id, when each comes next, its message.", {}, []),
   spec("unschedule", "Cancel a schedule, by its id.", { id: STR }, ["id"]),
-  spec("message", "Send a message to another agent of the team, by name. It lands in their chat as a new message from you, starting \"[your name]\", and starts a turn there; one at work gets it right after its current tool calls. No one answers by itself: the only way to answer an agent is to call message to it, and your plain reply stays in your own chat, for the user.", { agent: STR, text: STR }, ["agent", "text"]),
+  spec("message", "Message another agent of the team, by name. Only send useful messages: no thanks, confirmations, acknowledgements. A message that needs no answer gets none. It lands in their chat as a new message from you, starting \"[your name]\", and starts a turn there; one at work gets it right after its current tool calls. No one answers by itself: the only way to answer an agent is to call message to it, and your plain reply stays in your own chat, for the user. A chain of messages between agents is cut after a few in a row (\"hop limit reached, wait for the user\"): then tell the user.", { agent: STR, text: STR }, ["agent", "text"]),
   spec("resume", "Wake every call on this server waiting for an AI service's usage limit (other turns, summaries), when the user says a limit was reset early. Each asks again once; one still limited waits again.", {}, []),
 ];
 const DEVICE = { device: { type: "string", description: "The name of the device to run on, one listed under Devices." } };

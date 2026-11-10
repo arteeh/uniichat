@@ -22,7 +22,7 @@ What this fork adds:
 - **Skills** read from the ~/.agents/skills folder.
 - **Scheduling tools** to give your agent future or repeating tasks.
 - **Image and video viewing tools** to let it see images and video files.
-- **Settings page** where you set the instructions every agent gets.
+- **Settings page** for the server's models, keys and profiles.
 - **Improved memory tree viewer** to browse what your agent knows.
 - **Full markdown** as GitHub draws it.
 - **Images, video, audio and HTML pages inline** for the agent to show you things, or for you to show the agent.
@@ -79,7 +79,7 @@ Use
 ---
 
 - **Web:** open the server's address. Install it as an app from your browser to get notifications when Unii replies.
-- **Agents** (release candidate): **+** in the chat list makes another agent, with its own chat, memory and prompt; agents can message each other, and Unii sees what all of them do. Settings holds the instructions every agent gets.
+- **Agents** (release candidate): **+** in the chat list makes another agent, with its own chat, memory and prompt; agents can message each other, and Unii sees what all of them do.
 - **Conversation mode:** the switch next to "fold all". From then on, your and Unii's messages stay word for word in Unii's memory, for a real discussion. It costs more per turn and turns itself off when the model's context window fills up.
 - `unii help` lists every command.
 

@@ -19,9 +19,7 @@ type Made = {
   compactor : Pick;
   context   : number;
   after     : string;
-  instructions : string;
   hops      : number;
-  team_view : number;
   thinking  : boolean;
   verbose   : boolean;
 };
@@ -52,9 +50,7 @@ export const SETTINGS: Setting[] = [
   { key: "pick",      def: "claude-api:sonnet-5.5:medium:slow", apply: "now",     server_only: null },
   { key: "compactor", def: "claude-api:sonnet-5.5:medium:slow", apply: "now",     server_only: null },
   { key: "compactor_context", def: "4",                         apply: "now",     server_only: null },
-  { key: "instructions", def: "",                               apply: "now",     server_only: null },
   { key: "hops",      def: "4",                                 apply: "now",     server_only: null },
-  { key: "team_view", def: "0",                                 apply: "now",     server_only: null },
   { key: "thinking",  def: "off",                               apply: "now",     server_only: null },
   { key: "verbose",   def: "on",                                apply: "now",     server_only: null },
   { key: "site",      def: "http://127.0.0.1:8788",             apply: "restart", server_only: null },
@@ -73,8 +69,6 @@ const DEFAULT_MODEL: Record<Vendor, string> = {
   "claude-api" : "sonnet-5.5",
   "openai-api" : "gpt-6.1-sol",
 };
-
-const TEAM_VIEW_MOST = 64000;
 
 const NONE     = "Not signed in and no API key: sign in with `unii serve claude login` (or `unii serve chatgpt login`) on the server, or set a key in Settings";
 const NONE_WHY = "not signed in, no key";
@@ -108,9 +102,7 @@ export const SITE    = config_value(FILE, "site").replace(/\/$/, "");
 export const OFFER: Offer = MADE.offer;
 
 export let   AFTER      = MADE.after;
-export let   INSTRUCTIONS = MADE.instructions;
 export let   HOPS       = MADE.hops;
-export let   TEAM_VIEW  = MADE.team_view;
 export let   THINKING   = MADE.thinking;
 export let   VERBOSE    = MADE.verbose;
 export let   PICK       = MADE.pick;
@@ -304,9 +296,7 @@ export function config_make(file: Record<string, unknown>): Made {
     compactor : config_run("compactor", config_value(file, "compactor"), offer),
     context   : config_context(config_value(file, "compactor_context")),
     after     : config_value(file, "after"),
-    instructions : config_value(file, "instructions"),
     hops      : config_hops(config_value(file, "hops")),
-    team_view : config_team_view(config_value(file, "team_view")),
     thinking  : config_value(file, "thinking") === "on",
     verbose   : config_value(file, "verbose") !== "off",
   };
@@ -316,14 +306,6 @@ function config_hops(text: string): number {
   const n = Number(text.trim());
   if (!Number.isInteger(n) || n < 0 || n > 100) {
     throw new Error("config: hops is a whole number from 0 to 100, not " + text);
-  }
-  return n;
-}
-
-function config_team_view(text: string): number {
-  const n = Number(text.trim());
-  if (!/^\d+$/.test(text.trim()) || n > TEAM_VIEW_MOST) {
-    throw new Error("config: team_view is a whole number of characters from 0 to " + TEAM_VIEW_MOST + ", not " + text);
   }
   return n;
 }
@@ -475,9 +457,7 @@ export function config_reload(): void {
   COMPACTOR = made.compactor;
   COMPACTOR_CONTEXT = made.context;
   AFTER = made.after;
-  INSTRUCTIONS = made.instructions;
   HOPS = made.hops;
-  TEAM_VIEW = made.team_view;
   THINKING = made.thinking;
   VERBOSE = made.verbose;
   Object.assign(KEYS, keys);

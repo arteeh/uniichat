@@ -12,7 +12,6 @@ import GO_ON from "./prompts/go-on.md" with { type: "text" };
 import GOAL from "./prompts/goal.md" with { type: "text" };
 import GOAL_ASK from "./prompts/goal-ask.md" with { type: "text" };
 import GOAL_NO from "./prompts/goal-no.md" with { type: "text" };
-import INSTRUCTIONS from "./prompts/instructions.md" with { type: "text" };
 import JOBS from "./prompts/jobs.md" with { type: "text" };
 import LEAF from "./prompts/leaf.md" with { type: "text" };
 import MERGE from "./prompts/merge.md" with { type: "text" };
@@ -27,7 +26,6 @@ import SKILLS from "./prompts/skills.md" with { type: "text" };
 import STEER from "./prompts/steer.md" with { type: "text" };
 import TALKING from "./prompts/talking.md" with { type: "text" };
 import TEAM from "./prompts/team.md" with { type: "text" };
-import TEAM_VIEW from "./prompts/team-view.md" with { type: "text" };
 import TURN from "./prompts/turn.md" with { type: "text" };
 import UNII from "./prompts/unii.md" with { type: "text" };
 import YOU from "./prompts/you.md" with { type: "text" };
@@ -40,7 +38,7 @@ import YOU from "./prompts/you.md" with { type: "text" };
 // the system prompt is laid out with, Unii's and other agents' default
 // prompts, the goal check's, and the fixed text of each turn's and each
 // compaction's request
-const BUILT = { agent: AGENT, compact: COMPACT, "compact-agent": COMPACT_AGENT, continue: CONTINUE, device: DEVICE, "device-shell": DEVICE_SHELL, devices: DEVICES, "devices-none": DEVICES_NONE, "go-on": GO_ON, goal: GOAL, "goal-ask": GOAL_ASK, "goal-no": GOAL_NO, instructions: INSTRUCTIONS, jobs: JOBS, leaf: LEAF, merge: MERGE, message: MESSAGE, "message-working": MESSAGE_WORKING, "not-summarized": NOT_SUMMARIZED, over: OVER, prompt: PROMPT, restarted: RESTARTED, senders: SENDERS, skills: SKILLS, steer: STEER, talking: TALKING, team: TEAM, "team-view": TEAM_VIEW, turn: TURN, unii: UNII, you: YOU };
+const BUILT = { agent: AGENT, compact: COMPACT, "compact-agent": COMPACT_AGENT, continue: CONTINUE, device: DEVICE, "device-shell": DEVICE_SHELL, devices: DEVICES, "devices-none": DEVICES_NONE, "go-on": GO_ON, goal: GOAL, "goal-ask": GOAL_ASK, "goal-no": GOAL_NO, jobs: JOBS, leaf: LEAF, merge: MERGE, message: MESSAGE, "message-working": MESSAGE_WORKING, "not-summarized": NOT_SUMMARIZED, over: OVER, prompt: PROMPT, restarted: RESTARTED, senders: SENDERS, skills: SKILLS, steer: STEER, talking: TALKING, team: TEAM, turn: TURN, unii: UNII, you: YOU };
 
 export type Which = keyof typeof BUILT;
 

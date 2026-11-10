@@ -5,7 +5,7 @@ import * as net from "node:net";
 import * as path from "node:path";
 import type { ServerWebSocket } from "bun";
 import type { Out as Done } from "./Agent.ts";
-import { AskAI, type Ask, type Block, type Call, type End, type Event, type Kind, type Parked, type Said, type Vendor } from "./AskAI.ts";
+import { AskAI, type Ask, type Call, type End, type Event, type Kind, type Parked, type Said, type Vendor } from "./AskAI.ts";
 import { clip_pages } from "./Clip.ts";
 import { Disk } from "./Disk.ts";
 import { Mcp } from "./Mcp.ts";
@@ -97,6 +97,7 @@ type Turn = {
   fresh : boolean;
   told  : boolean;
   gist  : number;
+  stopped: boolean;
 };
 
 type Chat = Parts & Doing & Turn;
@@ -115,6 +116,9 @@ const TALK_LONG  = "Conversation mode switched itself off: {model} refused the t
 const TALK_BIG   = "Conversation mode can't start: the messages since message {id} already fill its space in Unii's view.";
 const TALK_IMP   = "Conversation mode switched itself off: the import filled it.";
 const TALK_OFF_AT = 0.9;
+// the user's Stop: no note in the chat; the next turn starts with it
+const STOPPED    = "Stopped by the user.";
+const STOPPED_TOLD = "(Your last turn was stopped by the user.)";
 const FULL       = "UniiChat's disk is full; try again soon.";
 const BATCH      = "/import.json";
 const SPARE      = 2 ** 30;
@@ -237,7 +241,7 @@ export namespace Chat {
     const who = id === UNII ? "main" : id;
     const chat: Chat = {
       id, who, mem, tools, pick, socks: new Set(), acts: new Map(), main, model: "", check: null, asked: false, open: 0,
-      eye: { parts: [], from: 0 }, after: Promise.resolve(), batch: null, writes: Promise.resolve(), held: null, back: -1, sums: null, resume: null, limits: null, bell: undefined, fresh: true, told: false, gist: -1,
+      eye: { parts: [], from: 0 }, after: Promise.resolve(), batch: null, writes: Promise.resolve(), held: null, back: -1, sums: null, resume: null, limits: null, bell: undefined, fresh: true, told: false, gist: -1, stopped: false,
     };
     const seat: Seat = { mem, note: (text) => Chat.note(chat, text), report: (text) => Chat.report(chat, text, true), timed: () => Chat.timed(chat), message: (to, text) => Chat.message(chat, to, text) };
     tools.seats.set(who, seat);
@@ -276,8 +280,8 @@ export namespace Chat {
     return Team.get(chat.id)?.name ?? "";
   }
 
-  // what every agent shares: the fixed base, the user's instructions, the
-  // team; then its own: the team view's key (Unii), who it is, its prompt
+  // what every agent shares: the fixed base and the team; then its own:
+  // who it is, its prompt
   // the agent's own part: its name, unless its prompt starts with it
   export function you(chat: Chat, name: string, prompt: string): string {
     const named = prompt.startsWith("You are " + name + ".") || prompt.startsWith("You are " + name + ",");
@@ -286,72 +290,16 @@ export namespace Chat {
 
   export function system(chat: Chat): { system: string; own: string } {
     const agent = Team.get(chat.id);
-    const told = config.INSTRUCTIONS.trim();
     const name = agent?.name ?? "";
     const team = Prompts.prompt("team", { Name: name }).split("\n").flatMap((line) => (line.includes("{name}") ? Team.active().map((a) => Prompts.fill(line, { name: a.name, about: a.about })) : [line]));
     const shared = [
       Prompts.prompt("prompt", { Name: name }),
-      ...(told === "" ? [] : [Prompts.prompt("instructions", { instructions: told })]),
       team.join("\n"),
     ];
     const own = [
-      ...(chat.id === UNII && config.TEAM_VIEW > 0 ? [Prompts.prompt("team-view")] : []),
       Chat.you(chat, name, agent === null ? "" : Team.prompt(agent)),
     ];
     return { system: shared.join("\n\n"), own: own.join("\n\n") };
-  }
-
-  // the team view: the other agents' memories as one timeline, each one's
-  // own view coarsened, its oldest pairs first, till the whole fits
-  export function team(chat: Chat): Block {
-    type Seen = { name: string; mem: Memory; parts: Part2[] };
-    type Part2 = { l: number; i: number; at: string; text: string };
-    const dates = new Map<string, string>();
-    const at = (mem: Memory, i: number) => {
-      const key = mem.dir + i;
-      const date = dates.get(key) ?? Memory.at(mem, i).date;
-      dates.set(key, date);
-      return date;
-    };
-    const line = (mem: Memory, l: number, i: number): Part2 => {
-      const end = Memory.span({ l, i })[1];
-      if (l > 0) {
-        return { l, i, at: at(mem, end), text: Memory.node(mem, { l, i }) ?? "" };
-      }
-      const m = Memory.at(mem, i);
-      const said = m.kind === "user" || m.kind === "unii" || (m.kind === "work" && m.from !== undefined) || (m.kind === "tool" && /^(mcp__unii__)?message /.test(m.text));
-      return { l, i, at: m.date, text: said ? Memory.node(mem, { l, i }) ?? Memory.cut(Memory.flat(m.kind + ": " + m.text)) : "" };
-    };
-    const seen: Seen[] = Team.active().filter((a) => a.id !== chat.id).flatMap((a) => {
-      const mem = Main.chats.get(a.id)?.mem;
-      return mem === undefined ? [] : [{ name: a.name, mem, parts: mem.view.parts.map((p) => line(mem, p.l, p.i)) }];
-    });
-    const size = (p: Part2, name: string) => (p.text === "" ? 0 : name.length + p.text.length + 20);
-    let total = seen.reduce((n, s) => n + s.parts.reduce((k, p) => k + size(p, s.name), 0), 0);
-    while (total > config.TEAM_VIEW) {
-      let best: { s: Seen; k: number } | null = null;
-      for (const s of seen) {
-        for (let k = 0; k + 1 < s.parts.length; k++) {
-          const [a, b] = [s.parts[k], s.parts[k + 1]];
-          const pair = a.l === b.l && a.i % 2 === 0 && b.i === a.i + 1 && Memory.node(s.mem, { l: a.l + 1, i: a.i / 2 }) !== null;
-          if (pair && (best === null || b.at < best.s.parts[best.k + 1].at)) {
-            best = { s, k };
-          }
-        }
-      }
-      if (best === null) {
-        const old = seen.filter((s) => s.parts.length > 0).reduce((x, y) => (y.parts[0].at < x.parts[0].at ? y : x));
-        total -= size(old.parts.shift() as Part2, old.name);
-        continue;
-      }
-      const { s, k } = best;
-      const up = line(s.mem, s.parts[k].l + 1, s.parts[k].i / 2);
-      total += size(up, s.name) - size(s.parts[k], s.name) - size(s.parts[k + 1], s.name);
-      s.parts.splice(k, 2, up);
-    }
-    const lines = seen.flatMap((s) => s.parts.filter((p) => p.text !== "").map((p) => ({ at: p.at, text: s.name + " " + Memory.line(p, p.text) })));
-    lines.sort((x, y) => (x.at < y.at ? -1 : x.at > y.at ? 1 : 0));
-    return { text: "<team>\n" + lines.map((l) => l.text + "\n").join("") + "</team>\n\n", mark: false };
   }
 
   export function share(chat: Chat, system: { system: string; own?: string }): Share {
@@ -483,9 +431,7 @@ export namespace Chat {
     const halt = chat.main.halt.signal;
     const reason: unknown = halt.reason;
     const why = halt.aborted && typeof reason === "string" ? reason : null;
-    if (why !== null) {
-      Chat.note(chat, why);
-    }
+    Chat.halted(chat, why);
     chat.sums = null;
   }
 
@@ -542,13 +488,13 @@ export namespace Chat {
     const view = Memory.view(mem, from, mem.view.parts, mem.talk, mem.talk === null ? -1 : chat.back);
     chat.back = mem.talk === null ? -1 : view.length - 3;
     Mcp.heard(chat.tools.mcp, Tools.off(chat.tools), chat.who, true);
-    const text = says.map((say) => AskAI.labeled(say)).join("\n\n");
+    const text = (chat.stopped ? STOPPED_TOLD + "\n\n" : "") + says.map((say) => AskAI.labeled(say)).join("\n\n");
+    chat.stopped = false;
     const imgs = says.flatMap((say) => say.imgs);
     const server = Tools.at(chat.tools, chat.who);
     chat.eye = Chat.eye(mem, from);
     chat.socks.forEach((sock) => Chat.show(chat, sock));
-    const team = chat.id === UNII && config.TEAM_VIEW > 0 ? [Chat.team(chat)] : [];
-    const blocks = [...view, Tools.devices(chat.tools), Tools.skills(chat.tools), Tools.at_work(chat.tools, chat.who), ...team, { text: Prompts.prompt("turn") + "\n\n" + text, mark: true }];
+    const blocks = [...view, Tools.devices(chat.tools), Tools.skills(chat.tools), Tools.at_work(chat.tools, chat.who), { text: Prompts.prompt("turn") + "\n\n" + text, mark: true }];
     const model = chat.pick.model;
     const used = (tokens: number) => {
       if (chat.pick.model === model) {
@@ -616,7 +562,6 @@ export namespace Chat {
     } else if (on && /^\W*yes\b/i.test(end.text)) {
       mem.goal = null;
       Memory.save(mem);
-      Chat.note(chat, "Goal met.");
     } else if (on) {
       void Run.take(chat.main, { kind: "note", text: Prompts.prompt("goal-no"), images: [] });
     }
@@ -646,7 +591,6 @@ export namespace Chat {
       return { text: them.name + " is archived.", fail: true };
     }
     if (hop > config.HOPS) {
-      Chat.note(chat, config.HOPS === 0 ? name + " can't message " + them.name + ": messages between agents are off (Settings, Hop limit)." : name + "'s message to " + them.name + " waits for you: the agents reached the hop limit, " + config.HOPS + " in a row (Settings).");
       return { text: "hop limit reached, wait for the user", fail: true };
     }
     const there = Main.chats.get(them.id);
@@ -1305,9 +1249,7 @@ export namespace Chat {
       Run.stop(chat.main, why);
     } else if (parked) {
       Run.drop(chat.main);
-      if (why !== null) {
-        Chat.note(chat, why);
-      }
+      Chat.halted(chat, why);
       Chat.change(chat);
     }
   }
@@ -1315,7 +1257,17 @@ export namespace Chat {
   export function stop(chat: Chat, why: string | null): void {
     const turn = chat.main.busy && !chat.main.halt.signal.aborted;
     Run.stop(chat.main, turn ? why : null);
-    if (!turn && why !== null) {
+    if (!turn) {
+      Chat.halted(chat, why);
+    }
+  }
+
+  // why a turn ended early: the user's Stop is for the agent's next turn,
+  // anything else a note
+  export function halted(chat: Chat, why: string | null): void {
+    if (why === STOPPED) {
+      chat.stopped = true;
+    } else if (why !== null) {
       Chat.note(chat, why);
     }
   }
@@ -1502,7 +1454,7 @@ export namespace Chat {
       return {};
     }
     Chat.mark(chat, id, {});
-    Chat.interrupt(chat, "Stopped by the user.");
+    Chat.interrupt(chat, STOPPED);
     return {};
   }
 
@@ -1518,9 +1470,6 @@ export namespace Chat {
         chat.check?.call.stop();
         if (chat.resume !== null && chat.resume.goal !== null && Chat.unpark(chat)) {
           Chat.change(chat);
-        }
-        if (goal === null) {
-          Chat.note(chat, "Goal halted by the user.");
         }
         return {};
       }
@@ -1553,7 +1502,6 @@ export namespace Chat {
       case "unschedule": {
         const id = String(msg.id);
         if (Tools.unschedule({ mem: chat.mem, timed: () => Chat.timed(chat) }, id)) {
-          Chat.note(chat, "Schedule " + id + " cancelled by the user.");
         }
         return {};
       }
@@ -1589,7 +1537,6 @@ export namespace Chat {
         if (!on) {
           Tools.unplug(chat.tools, name);
         }
-        Chat.note(Main.unii(), "MCP server " + name + " turned " + (on ? "on" : "off") + " for every agent by the user.");
         Main.chats.forEach((c) => Chat.change(c));
         return {};
       }

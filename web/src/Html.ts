@@ -256,8 +256,6 @@ const SETTING: Record<string, [string, string]> = {
   thinking  : ["Show thinking", "The agents' reasoning as it comes; off, a Thinking line instead."],
   verbose   : ["Show verbose tool calls", "Each tool call with its result; off, one line you tap to open."],
   hops      : ["Hop limit", "How many messages in a row agents may send each other before they wait for you; 0: none."],
-  team_view : ["Team view", "How many characters of the other agents' memories Unii reads before each turn; 0: none. Unii's own memory gets every other agent's lines anyway."],
-  instructions : ["Instructions", "Every agent's prompt has these: who you are, how your files are organised, how you want work done."],
   compactor_context : ["Compactor context", "How much of the chat each summary sees, in KB (1 to 128). More context lets it copy more into a summary that its message doesn't say. New summaries only."],
   site      : ["Site", "The server's address, for sign-in links and the installer."],
 };
@@ -272,9 +270,8 @@ export const VENDOR_KEY: Record<string, string> = { "claude-api": "anthropic", "
 export const PICKS = ["pick", "compactor"];
 
 const GROUPS: Array<[string, string[]]> = [
-  ["Instructions", ["instructions"]],
   ["Chat", ["thinking", "verbose"]],
-  ["Agents", ["hops", "team_view"]],
+  ["Agents", ["hops"]],
   ["Models", ["vendors", "models", "pick", "compactor", "compactor_context"]],
   ["Server", ["site"]],
 ];
@@ -292,7 +289,7 @@ export function settings_html(page: Page): string {
   const save = `<div class="save"><p class="why"></p><button class="chip go"${page.error === null ? "" : " disabled"}>Save</button></div>`;
   const head = `<p class="sub">The server's settings, in config.json in its folder.</p>`;
   const profiles = page.profiles === null ? "" : section_html("Profiles", `<p class="sub">Ranked models: a chat on a profile runs on the first and falls back to the next when one is out.</p><div class="set profiles" data-key="profiles"><div class="field"></div><p class="err"></p></div>`);
-  return head + error + none + `<form class="settings" autocomplete="off">` + group(GROUPS[0]) + group(GROUPS[1]) + group(GROUPS[2]) + group(GROUPS[3]) + profiles + keys + group(GROUPS[4]) + save + `</form>`;
+  return head + error + none + `<form class="settings" autocomplete="off">` + group(GROUPS[0]) + group(GROUPS[1]) + group(GROUPS[2]) + profiles + keys + group(GROUPS[3]) + save + `</form>`;
 }
 
 export function offered(vendors: string[], models: string[]): string[] {
@@ -334,18 +331,12 @@ function control_html(r: Row): string {
     case "compactor": {
       return `<input type="hidden" name="${r.key}" value="${esc(r.value)}"><div class="four"></div>`;
     }
-    case "instructions": {
-      return `<textarea id="set-${r.key}" name="${r.key}" rows="8" spellcheck="true">${esc(r.value)}</textarea>`;
-    }
     case "thinking":
     case "verbose": {
       return `<label class="opt"><input id="set-${r.key}" type="checkbox" name="${r.key}" value="on"${r.value === "on" ? " checked" : ""}> On</label>`;
     }
     case "hops": {
       return `<input id="set-${r.key}" name="${r.key}" type="number" min="0" max="100" step="1" inputmode="numeric" value="${esc(r.value)}" placeholder="${esc(r.def)}">`;
-    }
-    case "team_view": {
-      return `<input id="set-${r.key}" name="${r.key}" type="number" min="0" max="64000" step="1" inputmode="numeric" value="${esc(r.value)}" placeholder="${esc(r.def)}">`;
     }
     case "compactor_context": {
       return `<input id="set-${r.key}" name="${r.key}" type="number" min="1" max="128" step="1" inputmode="numeric" value="${esc(r.value)}" placeholder="${esc(r.def)}">`;

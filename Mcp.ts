@@ -182,12 +182,7 @@ export namespace Mcp {
     }
     s.fail = null;
     s.kept = { specs: got, at: Date.now() };
-    if (s.said !== null) {
-      s.said = null;
-      if (s.shown) {
-        Mcp.say(servers, s, "MCP server " + s.conf.name + " works again.");
-      }
-    }
+    s.said = null;
     return got;
   }
 

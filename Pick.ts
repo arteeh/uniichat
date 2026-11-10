@@ -24,23 +24,26 @@ export const VENDORS: Vendor[] = ["claude-api", "openai-api", "openai-sub", "cla
 // plan alike; OpenAI's as Codex's models cache has them for a ChatGPT
 // plan (context_window; a request can't ask for more), the API's taken
 // as the same
+// each vendor's models from large to small, as the picker shows them
+const FABLE : Model = { label: "fable-5.2",  id: "claude-fable-5-2",  speeds: ["slow"], window: 1e6 };
 const OPUS  : Model = { label: "opus-5.5",   id: "claude-opus-5-5",   speeds: ["slow", "fast"], window: 1e6 };
 const SONNET: Model = { label: "sonnet-5.5", id: "claude-sonnet-5-5", speeds: ["slow"], window: 1e6 };
 const HAIKU : Model = { label: "haiku-5.5",  id: "claude-haiku-5-5",  speeds: ["slow"], window: 1e6 };
 const OPENAI: Model[] = [
-  { label: "gpt-6-luna",  id: "gpt-6-luna",  speeds: ["slow", "fast"], window: 272e3 },
-  { label: "gpt-6.1-sol", id: "gpt-6.1-sol", speeds: ["slow", "fast"], window: 500e3 },
-  { label: "gpt-6-astra", id: "gpt-6-astra", speeds: ["slow", "fast", "ultrafast"], window: 272e3 },
+  { label: "gpt-6-astra",   id: "gpt-6-astra",   speeds: ["slow", "fast", "ultrafast"], window: 272e3 },
+  { label: "gpt-6.1-sol",   id: "gpt-6.1-sol",   speeds: ["slow", "fast"], window: 500e3 },
+  { label: "gpt-6.1-terra", id: "gpt-6.1-terra", speeds: ["slow", "fast"], window: 500e3 },
+  { label: "gpt-6-luna",    id: "gpt-6-luna",    speeds: ["slow", "fast"], window: 272e3 },
 ];
 
 // a ChatGPT plan's (ChatGPT.ts): fast is its priority tier, no ultrafast
 const PLAN: Model[] = OPENAI.map((m) => ({ ...m, speeds: m.speeds.filter((s) => s !== "ultrafast") }));
 
 const MODELS: Record<Vendor, Model[]> = {
-  "claude-api": [OPUS, SONNET, HAIKU],
+  "claude-api": [FABLE, OPUS, SONNET, HAIKU],
   "openai-api": OPENAI,
   "openai-sub": PLAN,
-  "claude-sub": [{ ...OPUS, speeds: ["slow"] }, SONNET, HAIKU],
+  "claude-sub": [FABLE, { ...OPUS, speeds: ["slow"] }, SONNET, HAIKU],
 };
 
 export const EFFORTS = ["low", "medium", "high", "xhigh", "max"];

@@ -25,7 +25,6 @@ type Out = { status: number; body: object; saved: string[]; wrote: boolean };
 
 const BODY  = 2 ** 16;
 const VALUE = 4096;
-const TEXT  = 16000;
 const KEY   = 16384;
 
 const PROFILES = 50;
@@ -136,8 +135,8 @@ export namespace Settings {
         delete next[key];
         continue;
       }
-      if (typeof value !== "string" || (key === "instructions" ? value.length > TEXT || /[\x00-\x08\x0b-\x1f\x7f]/.test(value) : value.length > VALUE || /[\x00-\x1f\x7f]/.test(value))) {
-        return refuse(400, key === "instructions" ? "Instructions are text of at most " + TEXT + " characters." : "That " + key + " isn't one line of text.", key);
+      if (typeof value !== "string" || value.length > VALUE || /[\x00-\x1f\x7f]/.test(value)) {
+        return refuse(400, "That " + key + " isn't one line of text.", key);
       }
       next[key] = value.trim();
     }
