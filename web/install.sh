@@ -1,5 +1,5 @@
 #!/bin/sh
 set -eu
-u=$(curl -fsSL 'https://api.github.com/repos/arteeh/uniichat/releases?per_page=30' | grep -o '"browser_download_url": *"https://github.com/arteeh/uniichat/releases/download/beta-[0-9]*/install.sh"' | head -1 | grep -o 'https://[^"]*')
-[ -n "$u" ] || { echo "unii: no beta release found" >&2; exit 1; }
-curl -fsSL "$u" | UNII_BIN="${UNII_BIN:-$HOME/.local/bin/unii}" sh
+# a release candidate's devices install that same candidate (cut.sh checks
+# this names Update.ts's VERSION)
+curl -fsSL https://github.com/arteeh/uniichat/releases/download/40.rc1/install.sh | UNII_BIN="${UNII_BIN:-$HOME/.local/bin/unii}" sh

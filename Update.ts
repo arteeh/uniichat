@@ -1,13 +1,13 @@
-export const VERSION = "39";
+export const VERSION = "40.rc1";
 
-const REPO        = "https://github.com/arteeh/uniichat";
-const API         = "https://api.github.com/repos/arteeh/uniichat/releases?per_page=30";
+// a release candidate (N.rcM, a pre-release on the rc branch) is only ever
+// installed by hand, with its own release's install line: `unii update`
+// never moves to or from one
+export const RC = /\.rc[0-9]+$/.test(VERSION);
 
-// the agent-team beta's own: its pre-releases are tagged beta-<n>, and its
-// `unii update` runs the newest one's installer (newest first, as GitHub
-// lists them)
-export function update_cmd(win: boolean): string {
-  return win
-    ? "irm ((irm '" + API + "' | Where-Object { $_.tag_name -like 'beta-*' } | Select-Object -First 1).assets | Where-Object { $_.name -eq 'install.ps1' }).browser_download_url | iex"
-    : "u=$(curl -fsSL '" + API + "' | grep -o '\"browser_download_url\": *\"" + REPO + "/releases/download/beta-[0-9]*/install.sh\"' | head -1 | grep -o 'https://[^\"]*'); [ -n \"$u\" ] || { echo 'unii: no beta release found' >&2; exit 1; }; curl -fsSL \"$u\" | sh";
+const BASE = "https://github.com/arteeh/uniichat/releases/" + (RC ? "download/" + VERSION : "latest/download");
+
+// a release candidate's own install line, else the latest release's
+export function install_cmd(win: boolean): string {
+  return win ? "irm " + BASE + "/install.ps1 | iex" : "curl -fsSL " + BASE + "/install.sh | sh";
 }

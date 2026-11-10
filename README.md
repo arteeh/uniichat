@@ -36,17 +36,17 @@ What this fork adds:
 Install
 -------
 
-This branch is the agent-team beta. Each beta is a pre-release, `beta-1`, `beta-2`, …, on the [releases page](https://github.com/arteeh/uniichat/releases), with its own install line (put its number in place of `N`):
+This is the `rc` branch: the agent team, as release candidates. Each is a pre-release, `40.rc1`, `40.rc2`, …, on the [releases page](https://github.com/arteeh/uniichat/releases), installed only by hand, with its own install line (put its tag in place of `TAG`):
 
 Linux, macOS or WSL:
 
-`curl -fsSL https://github.com/arteeh/uniichat/releases/download/beta-N/install.sh | sh`
+`curl -fsSL https://github.com/arteeh/uniichat/releases/download/TAG/install.sh | sh`
 
 Windows (PowerShell, no admin needed):
 
-`irm https://github.com/arteeh/uniichat/releases/download/beta-N/install.ps1 | iex`
+`irm https://github.com/arteeh/uniichat/releases/download/TAG/install.ps1 | iex`
 
-Either way you get one `unii` program (in `~/.local/bin`, or `%LOCALAPPDATA%\Programs\unii` on Windows). `unii update` installs the newest beta and restarts the background services on it.
+Either way you get one `unii` program (in `~/.local/bin`, or `%LOCALAPPDATA%\Programs\unii` on Windows). `unii update` never moves to or from a release candidate: install the next one by its own line, which restarts the background services on it.
 
 Set up
 ------
@@ -79,7 +79,7 @@ Use
 ---
 
 - **Web:** open the server's address. Install it as an app from your browser to get notifications when Unii replies.
-- **Agents** (beta): **+** in the chat list makes another agent, with its own chat, memory and prompt; agents can message each other, and Unii sees what all of them do. Settings holds the instructions every agent gets.
+- **Agents** (release candidate): **+** in the chat list makes another agent, with its own chat, memory and prompt; agents can message each other, and Unii sees what all of them do. Settings holds the instructions every agent gets.
 - **Conversation mode:** the switch next to "fold all". From then on, your and Unii's messages stay word for word in Unii's memory, for a real discussion. It costs more per turn and turns itself off when the model's context window fills up.
 - `unii help` lists every command.
 

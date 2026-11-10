@@ -63,7 +63,10 @@ function update(): void {
   if (BUN) {
     fail("this unii runs from source (bun): update it with git.");
   }
-  const cmd = Update.update_cmd(WIN);
+  if (Update.RC) {
+    fail("unii " + Update.VERSION + " is a release candidate: `unii update` doesn't move from it. Install another release by its own install line (https://github.com/arteeh/uniichat/releases).");
+  }
+  const cmd = Update.install_cmd(WIN);
   console.error(cmd);
   const run = WIN ? powershell_exiting_as_installer(cmd) : ["sh", "-c", cmd];
   process.exitCode = child.spawnSync(run[0], run.slice(1), { stdio: "inherit", env: updater_env() }).status ?? 1;
