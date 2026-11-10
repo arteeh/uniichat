@@ -34,7 +34,7 @@ export namespace OpenAI {
     if (ask.searches > 0) {
       defs.push({ type: "web_search" });
     }
-    const system = { role: "developer", content: [{ type: "input_text", text: ask.system }] };
+    const system = { role: "developer", content: [{ type: "input_text", text: OpenAI.system(ask) }] };
     const cache = ask.blocks[ask.blocks.length - 1]?.mark ? undefined : { mode: "explicit" };
     return {
       model                : ask.model,
@@ -51,8 +51,13 @@ export namespace OpenAI {
     };
   }
 
+  // one block: OpenAI caches prefixes on its own
+  export function system(ask: Ask): string {
+    return [ask.system, ask.own ?? ""].filter((part) => part !== "").join("\n\n");
+  }
+
   export function session(ask: Ask): string {
-    return "unii-" + Bun.hash(JSON.stringify([OpenAI.sharer(ask), ask.model, ask.system])).toString(36);
+    return "unii-" + Bun.hash(JSON.stringify([OpenAI.sharer(ask), ask.model, OpenAI.system(ask)])).toString(36);
   }
 
   export function sharer(ask: Ask): string {

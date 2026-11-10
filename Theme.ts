@@ -12,6 +12,7 @@ const KIND: Record<Kind, Look> = {
   echo : { dim: true, it: false },
   note : { dim: true, it: true },
   mind : { dim: true, it: true },
+  team : { dim: true, it: false },
 };
 
 const TOOL: Record<string, string> = {

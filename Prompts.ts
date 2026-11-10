@@ -2,6 +2,7 @@ import * as fs from "node:fs";
 import * as config from "./Config.ts";
 import AGENT from "./prompts/agent.md" with { type: "text" };
 import COMPACT from "./prompts/compact.md" with { type: "text" };
+import COMPACT_AGENT from "./prompts/compact-agent.md" with { type: "text" };
 import CONTINUE from "./prompts/continue.md" with { type: "text" };
 import DEVICE from "./prompts/device.md" with { type: "text" };
 import DEVICE_SHELL from "./prompts/device-shell.md" with { type: "text" };
@@ -39,7 +40,7 @@ import YOU from "./prompts/you.md" with { type: "text" };
 // the system prompt is laid out with, Unii's and other agents' default
 // prompts, the goal check's, and the fixed text of each turn's and each
 // compaction's request
-const BUILT = { agent: AGENT, compact: COMPACT, continue: CONTINUE, device: DEVICE, "device-shell": DEVICE_SHELL, devices: DEVICES, "devices-none": DEVICES_NONE, "go-on": GO_ON, goal: GOAL, "goal-ask": GOAL_ASK, "goal-no": GOAL_NO, instructions: INSTRUCTIONS, jobs: JOBS, leaf: LEAF, merge: MERGE, message: MESSAGE, "message-working": MESSAGE_WORKING, "not-summarized": NOT_SUMMARIZED, over: OVER, prompt: PROMPT, restarted: RESTARTED, senders: SENDERS, skills: SKILLS, steer: STEER, talking: TALKING, team: TEAM, "team-view": TEAM_VIEW, turn: TURN, unii: UNII, you: YOU };
+const BUILT = { agent: AGENT, compact: COMPACT, "compact-agent": COMPACT_AGENT, continue: CONTINUE, device: DEVICE, "device-shell": DEVICE_SHELL, devices: DEVICES, "devices-none": DEVICES_NONE, "go-on": GO_ON, goal: GOAL, "goal-ask": GOAL_ASK, "goal-no": GOAL_NO, instructions: INSTRUCTIONS, jobs: JOBS, leaf: LEAF, merge: MERGE, message: MESSAGE, "message-working": MESSAGE_WORKING, "not-summarized": NOT_SUMMARIZED, over: OVER, prompt: PROMPT, restarted: RESTARTED, senders: SENDERS, skills: SKILLS, steer: STEER, talking: TALKING, team: TEAM, "team-view": TEAM_VIEW, turn: TURN, unii: UNII, you: YOU };
 
 export type Which = keyof typeof BUILT;
 

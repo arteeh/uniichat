@@ -10,7 +10,7 @@ import * as config from "./Config.ts";
 import { err_why } from "./Err.ts";
 import { get, text_of } from "./Json.ts";
 
-export type Kind = "user" | "work" | "mind" | "unii" | "tool" | "echo" | "note";
+export type Kind = "user" | "work" | "mind" | "unii" | "tool" | "echo" | "note" | "team";
 
 export type Vendor = "claude-api" | "openai-api" | "openai-sub" | "claude-sub";
 
@@ -23,8 +23,11 @@ export type Said = Say & { from: string };
 
 export type Block = { text: string; mark: boolean; back?: boolean };
 
+// system: the part every agent shares, which ends a cache entry; own:
+// the agent's own part after it
 export type Ask = Pick & {
   system    : string;
+  own?      : string;
   blocks    : Block[];
   imgs?     : Img[];
   searches  : number;
@@ -290,7 +293,7 @@ export namespace AskAI {
   export function prefix_keys(ask: Ask): string[] {
     const last = ask.blocks.slice(0, -1).findLastIndex((b) => b.mark);
     // OpenAI caches per session (OpenAI.session)
-    const head = [ask.vendor, ask.model, ask.effort, ask.speed, ask.system, ask.searches > 0, ask.vendor.startsWith("openai") ? OpenAI.sharer(ask) : null];
+    const head = [ask.vendor, ask.model, ask.effort, ask.speed, OpenAI.system(ask), ask.searches > 0, ask.vendor.startsWith("openai") ? OpenAI.sharer(ask) : null];
     let key = Bun.hash(JSON.stringify(head));
     return ask.blocks.slice(0, last + 1).map((b) => String((key = Bun.hash(b.text, key))));
   }

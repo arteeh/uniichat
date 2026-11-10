@@ -12,8 +12,9 @@ import { move_over } from "./Write.ts";
 
 type Root = Msg & { i: number; size: number; date: string };
 
-// from: the agent whose message it is, by id
-export type Msg = { kind: Kind; text: string; date?: string; images?: string[]; imported?: boolean; line?: string; more?: boolean; act?: string; from?: string } & Pair;
+// from: the agent whose message it is, by id; copy: a team line's
+// message there
+export type Msg = { kind: Kind; text: string; date?: string; images?: string[]; imported?: boolean; line?: string; more?: boolean; act?: string; from?: string; copy?: number } & Pair;
 
 export type Pair = { of?: string; tool?: string };
 

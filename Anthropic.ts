@@ -79,7 +79,7 @@ export namespace Anthropic {
       model         : ask.model,
       max_tokens    : max,
       stream        : true,
-      system        : [{ type: "text", text: ask.system, cache_control: HOUR }],
+      system        : [{ type: "text", text: ask.system, cache_control: HOUR }, ...(ask.own === undefined || ask.own === "" ? [] : [{ type: "text", text: ask.own }])],
       thinking      : { type: "adaptive", display: "summarized" },
       output_config : { effort: ask.effort },
       cache_control : cache,

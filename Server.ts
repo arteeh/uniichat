@@ -118,7 +118,6 @@ const FULL       = "UniiChat's disk is full; try again soon.";
 const BATCH      = "/import.json";
 const SPARE      = 2 ** 30;
 
-const TEAM_VIEW  = 16000;
 const TIMER_TEXT = 200;
 const LAST       = 120;
 const RING       = 60000;
@@ -212,7 +211,7 @@ function file_path(x: unknown): string {
 export namespace Chat {
 
   export function open(id: string, tools: Tools): Chat {
-    const mem = Memory.load(AGENTS + "/" + id, () => ({ system: Prompts.prompt("compact", { Name: Team.get(id)?.name ?? "" }), searches: 0, server: "" }), Owner.act_put, AGENTS + "/" + UNII);
+    const mem = Memory.load(AGENTS + "/" + id, () => ({ system: Prompts.prompt("compact"), own: Prompts.prompt("compact-agent", { Name: Team.get(id)?.name ?? "" }), searches: 0, server: "" }), Owner.act_put, AGENTS + "/" + UNII);
     const cut = mem.work;
     const main = Run.make<Pending, Msg>(id, {
       pick   : () => chat.pick,
@@ -272,19 +271,22 @@ export namespace Chat {
     return Team.get(chat.id)?.name ?? "";
   }
 
-  // the fixed base, the user's instructions, the team, the agent's own prompt
-  export function system(chat: Chat): string {
+  // what every agent shares: the fixed base, the user's instructions, the
+  // team; then its own: the team view's key (Unii), who it is, its prompt
+  export function system(chat: Chat): { system: string; own: string } {
     const agent = Team.get(chat.id);
-    const name = agent?.name ?? "";
     const told = config.INSTRUCTIONS.trim();
-    const team = Prompts.prompt("team", { Name: name }).split("\n").flatMap((line) => (line.includes("{name}") ? Team.active().map((a) => Prompts.fill(line, { name: a.name, about: a.about })) : [line]));
-    return [
-      Prompts.prompt("prompt", { Name: name }),
+    const team = Prompts.prompt("team").split("\n").flatMap((line) => (line.includes("{name}") ? Team.active().map((a) => Prompts.fill(line, { name: a.name, about: a.about })) : [line]));
+    const shared = [
+      Prompts.prompt("prompt"),
       ...(told === "" ? [] : [Prompts.prompt("instructions", { instructions: told })]),
       team.join("\n"),
-      ...(chat.id === UNII ? [Prompts.prompt("team-view")] : []),
-      Prompts.prompt("you", { prompt: agent === null ? "" : Team.prompt(agent) }),
-    ].join("\n\n");
+    ];
+    const own = [
+      ...(chat.id === UNII && config.TEAM_VIEW > 0 ? [Prompts.prompt("team-view")] : []),
+      Prompts.prompt("you", { Name: agent?.name ?? "", who: chat.who, prompt: agent === null ? "" : Team.prompt(agent) }),
+    ];
+    return { system: shared.join("\n\n"), own: own.join("\n\n") };
   }
 
   // the team view: the other agents' memories as one timeline, each one's
@@ -314,7 +316,7 @@ export namespace Chat {
     });
     const size = (p: Part2, name: string) => (p.text === "" ? 0 : name.length + p.text.length + 20);
     let total = seen.reduce((n, s) => n + s.parts.reduce((k, p) => k + size(p, s.name), 0), 0);
-    while (total > TEAM_VIEW) {
+    while (total > config.TEAM_VIEW) {
       let best: { s: Seen; k: number } | null = null;
       for (const s of seen) {
         for (let k = 0; k + 1 < s.parts.length; k++) {
@@ -340,8 +342,8 @@ export namespace Chat {
     return { text: "<team>\n" + lines.map((l) => l.text + "\n").join("") + "</team>\n\n", mark: false };
   }
 
-  export function share(chat: Chat, system: string): Share {
-    return { ...Pick.ask(chat.pick), system, searches: 0, server: "" };
+  export function share(chat: Chat, system: { system: string; own?: string }): Share {
+    return { ...Pick.ask(chat.pick), ...system, searches: 0, server: "" };
   }
 
   export async function say(chat: Chat, id: string, sizes: number[], body: Body): Promise<Answer> {
@@ -533,7 +535,7 @@ export namespace Chat {
     const server = Tools.at(chat.tools, chat.who);
     chat.eye = Chat.eye(mem, from);
     chat.socks.forEach((sock) => Chat.show(chat, sock));
-    const team = chat.id === UNII ? [Chat.team(chat)] : [];
+    const team = chat.id === UNII && config.TEAM_VIEW > 0 ? [Chat.team(chat)] : [];
     const blocks = [...view, Tools.devices(chat.tools), Tools.skills(chat.tools), Tools.at_work(chat.tools, chat.who), ...team, { text: Prompts.prompt("turn") + "\n\n" + text, mark: true }];
     const model = chat.pick.model;
     const used = (tokens: number) => {
@@ -582,7 +584,7 @@ export namespace Chat {
       return Memory.line({ l: 0, i }, msg.kind + ": " + msg.text) + "\n";
     });
     const blocks = [...Memory.view(mem, at, Memory.fitted(mem)), { text: tail.join("") + "\n" + Prompts.prompt("goal-ask") + "\n\n" + goal, mark: true }];
-    return { call: AskAI.ask({ ...Chat.share(chat, Prompts.prompt("goal", { Name: Chat.name(chat) })), blocks, no_wait: true, limits: Chat.limits(chat), who: "goal" }, () => {}), goal };
+    return { call: AskAI.ask({ ...Chat.share(chat, { system: Prompts.prompt("goal", { Name: Chat.name(chat) }) }), blocks, no_wait: true, limits: Chat.limits(chat), who: "goal" }, () => {}), goal };
   }
 
   export async function checked(chat: Chat, check: Check, halt: AbortController): Promise<boolean> {
@@ -781,7 +783,7 @@ export namespace Chat {
   export function guess(chat: Chat): number {
     const mem = chat.mem;
     const blocks = [...Memory.view(mem, mem.count, mem.view.parts, mem.talk), Tools.devices(chat.tools), Tools.skills(chat.tools), Tools.at_work(chat.tools, chat.who)];
-    const texts = [Chat.system(chat), JSON.stringify(Tools.list(chat.who)), ...blocks.map((b) => b.text)];
+    const texts = [...Object.values(Chat.system(chat)), JSON.stringify(Tools.list()), ...blocks.map((b) => b.text)];
     return Math.ceil(texts.reduce((n, text) => n + Memory.bytes(text), 0) / TOKEN);
   }
 
@@ -955,7 +957,11 @@ export namespace Chat {
   export function phone(chat: Chat): void {
     const told = chat.told;
     chat.told = false;
-    const last = Memory.message(chat.mem, chat.mem.count - 1);
+    let k = chat.mem.count - 1;
+    while (Memory.message(chat.mem, k)?.kind === "team") {
+      k--;
+    }
+    const last = Memory.message(chat.mem, k);
     const agent = Team.get(chat.id);
     if (told && agent !== null && !Chat.seen(chat) && last !== null && last.kind === "unii") {
       const icon = agent.picture === UNII ? "/icon-192.png" : agent.picture.startsWith("/") ? agent.picture : "/heads/" + agent.picture + ".svg";
@@ -1100,6 +1106,9 @@ export namespace Chat {
   }
 
   export function made(chat: Chat, l: number, i: number): void {
+    if (l === 0 && chat.id !== UNII) {
+      Chat.copy(chat, i);
+    }
     if (chat.batch !== null) {
       Chat.built(chat.batch, l, i - Math.floor(chat.batch.a / 2 ** l));
     }
@@ -1109,6 +1118,20 @@ export namespace Chat {
         Chat.know(chat, sock, a, 2 ** l);
       }
     }
+  }
+
+  // another agent's message line, copied into Unii's memory as it's made:
+  // Unii's tree holds the whole team's work, and its view only grows at
+  // the end; an imported chat's lines stay out
+  export function copy(chat: Chat, i: number): void {
+    const unii = Main.chats.get(UNII);
+    const m = Memory.message(chat.mem, i);
+    const line = Memory.node(chat.mem, { l: 0, i });
+    if (unii === undefined || m === null || m.imported === true || line === null) {
+      return;
+    }
+    const text = Memory.cut("[" + Chat.name(chat) + "] " + Memory.flat(line));
+    Chat.hold(unii, () => Chat.put(unii, { kind: "team", text, line: text, date: m.date, from: chat.id, copy: i }));
   }
 
   export function progress(chat: Chat): void {

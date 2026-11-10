@@ -259,6 +259,7 @@ const SETTING: Record<string, [string, string]> = {
   thinking  : ["Show thinking", "The agents' reasoning as it comes; off, a Thinking line instead."],
   verbose   : ["Show verbose tool calls", "Each tool call with its result; off, one line you tap to open."],
   hops      : ["Hop limit", "How many messages in a row agents may send each other before they wait for you; 0: none."],
+  team_view : ["Team view", "How many characters of the other agents' memories Unii reads before each turn; 0: none. Unii's own memory gets every other agent's lines anyway."],
   instructions : ["Instructions", "Every agent's prompt has these: who you are, how your files are organised, how you want work done."],
   compactor_context : ["Compactor context", "How much of the chat each summary sees, in KB (1 to 128). More context lets it copy more into a summary that its message doesn't say. New summaries only."],
   site      : ["Site", "The server's address, for sign-in links and the installer."],
@@ -276,7 +277,7 @@ export const PICKS = ["pick", "compactor"];
 const GROUPS: Array<[string, string[]]> = [
   ["Instructions", ["instructions"]],
   ["Chat", ["thinking", "verbose"]],
-  ["Agents", ["hops"]],
+  ["Agents", ["hops", "team_view"]],
   ["Models", ["vendors", "models", "pick", "compactor", "compactor_context"]],
   ["Server", ["site"]],
 ];
@@ -345,6 +346,9 @@ function control_html(r: Row): string {
     }
     case "hops": {
       return `<input id="set-${r.key}" name="${r.key}" type="number" min="0" max="100" step="1" inputmode="numeric" value="${esc(r.value)}" placeholder="${esc(r.def)}">`;
+    }
+    case "team_view": {
+      return `<input id="set-${r.key}" name="${r.key}" type="number" min="0" max="64000" step="1" inputmode="numeric" value="${esc(r.value)}" placeholder="${esc(r.def)}">`;
     }
     case "compactor_context": {
       return `<input id="set-${r.key}" name="${r.key}" type="number" min="1" max="128" step="1" inputmode="numeric" value="${esc(r.value)}" placeholder="${esc(r.def)}">`;

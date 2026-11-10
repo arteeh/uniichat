@@ -238,7 +238,7 @@ export namespace ClaudeSub {
       model                  : ask.model,
       effort                 : ask.effort as Options["effort"],
       thinking               : { type: "adaptive", display: "summarized" },
-      systemPrompt           : [boundary, ask.system],
+      systemPrompt           : [ask.system, boundary, ...(ask.own === undefined || ask.own === "" ? [] : [ask.own])],
       tools,
       allowedTools           : [...tools, "mcp__unii"],
       disallowedTools        : deny,
@@ -583,8 +583,8 @@ export namespace ClaudeSub {
   // text `mark` (-1: none) ends a cache entry, an hour's (ENV): the view's
   // last whole block (Memory.view), so a turn reads the view the turn
   // before cached. One only: a request takes four, and Claude Code marks
-  // two of its own (our system prompt, its last message), three if its
-  // system prompt isn't split at the boundary (ClaudeSub.options)
+  // three of its own: our system prompt's shared part, before the
+  // boundary, its own part (ClaudeSub.options), and its last message
   export function inbox() {
     const queue: SDKUserMessage[] = [];
     let wake = () => {};

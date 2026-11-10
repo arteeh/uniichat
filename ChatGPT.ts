@@ -259,7 +259,7 @@ export namespace ChatGPT {
     const api = OpenAI.body({ ...ask, speed: "slow" }, items, tools, max);
     return {
       model               : api.model,
-      instructions        : ask.system,
+      instructions        : OpenAI.system(ask),
       input               : api.input.slice(1).map(ChatGPT.unmark),
       tools               : api.tools,
       tool_choice         : "auto",

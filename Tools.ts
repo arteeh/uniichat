@@ -70,10 +70,8 @@ const SESSION = "mcp-session-id";
 
 const LOOK = 3000;
 
-const ZOOM = "Open the line id+n of the view into the two lines of n/2 under it; n = 1 gives the message whole. A long text comes in pages from character at, saying where to go on.";
-const ZOOM_TEAM: Spec = spec("zoom", ZOOM + " With agent, a line of that agent's memory, from the team view.", { id: INT, n: INT, at: INT, agent: STR }, ["id"]);
 const OWN: Spec[] = [
-  spec("zoom", ZOOM, { id: INT, n: INT, at: INT }, ["id"]),
+  spec("zoom", "Open the line id+n of the view into the two lines of n/2 under it; n = 1 gives the message whole. A long text comes in pages from character at, saying where to go on. With agent, a line of that agent's memory, by its name.", { id: INT, n: INT, at: INT, agent: STR }, ["id"]),
   spec("date", "The date and time of message id.", { id: INT }, ["id"]),
 ];
 const BOSS: Spec[] = [
@@ -89,13 +87,11 @@ const BOSS: Spec[] = [
   spec("resume", "Wake every call on this server waiting for an AI service's usage limit (other turns, summaries), when the user says a limit was reset early. Each asks again once; one still limited waits again.", {}, []),
 ];
 const DEVICE = { device: { type: "string", description: "The name of the device to run on, one listed under Devices." } };
-function kit(who: string): Spec[] {
-  return TOOLS.map((t) => {
-    const schema = t.schema as { properties: object; required: string[] };
-    const info = t.info + " It runs on the device named; a relative path is in <scratch>/" + who + ", your scratch folder there, <scratch> being the scratch dir Devices lists for it.";
-    return spec(t.name, info, { ...DEVICE, ...schema.properties }, ["device", ...schema.required]);
-  });
-}
+const KIT: Spec[] = TOOLS.map((t) => {
+  const schema = t.schema as { properties: object; required: string[] };
+  const info = t.info + " It runs on the device named; a relative path is in your scratch folder there.";
+  return spec(t.name, info, { ...DEVICE, ...schema.properties }, ["device", ...schema.required]);
+});
 const SKILL: Spec = spec("skill", "Load a skill listed under Skills: its SKILL.md, with the folder its other files are in on that device (read or run them there with your other tools).", { ...DEVICE, name: STR }, ["device", "name"]);
 
 export namespace Tools {
@@ -213,12 +209,12 @@ export namespace Tools {
       case "tools/list": {
         const theirs = await Mcp.list(tools.mcp, () => Tools.off(tools));
         const notes = Mcp.heard(tools.mcp, Tools.off(tools), who);
-        return { tools: [...Tools.list(who), ...theirs].map((t) => ({ name: t.name, description: t.info, inputSchema: t.schema })), notes };
+        return { tools: [...Tools.list(), ...theirs].map((t) => ({ name: t.name, description: t.info, inputSchema: t.schema })), notes };
       }
       case "tools/call": {
         const name = String(params.name);
         const args = rec(params.arguments) ? params.arguments : {};
-        const has = Tools.list(who).some((t) => t.name === name);
+        const has = Tools.list().some((t) => t.name === name);
         const mcp = has ? null : Mcp.find(tools.mcp, Tools.off(tools), name);
         Mcp.used(tools.mcp);
         const no: Out = { text: "No tool " + name + ".", fail: true };
@@ -233,8 +229,9 @@ export namespace Tools {
     return null;
   }
 
-  export function list(who: string): Spec[] {
-    return [...(who === "main" ? [ZOOM_TEAM, ...OWN.slice(1)] : OWN), ...BOSS, ...kit(who), SKILL];
+  // the same for every agent, so one cached copy serves them all
+  export function list(): Spec[] {
+    return [...OWN, ...BOSS, ...KIT, SKILL];
   }
 
   export function off(tools: Tools): string[] {
@@ -256,15 +253,21 @@ export namespace Tools {
     const mem = seat.mem;
     switch (name) {
       case "zoom": {
-        const other = args.agent !== undefined && who === "main";
+        const other = args.agent !== undefined;
         const them = other ? Team.by_name(text_of(args.agent)) : null;
-        const there = !other ? seat : them === null || them.archived !== 0 ? undefined : tools.seats.get(them.id === UNII ? "main" : them.id);
+        const there = !other ? seat : them === null || them.archived !== 0 ? undefined : Tools.seat(tools, them.id);
         if (there === undefined) {
           return { text: "No agent " + text_of(args.agent) + " in the team.", fail: true };
         }
         const id = Number(args.id);
         const n = Number(args.n ?? 1);
         const at = Number(args.at ?? 0);
+        const copy = n === 1 ? Memory.message(there.mem, id) : null;
+        const from = copy?.kind === "team" && copy.from !== undefined && copy.copy !== undefined ? Tools.seat(tools, copy.from) : undefined;
+        if (copy !== null && from !== undefined && copy.copy !== undefined) {
+          const imgs = at === 0 ? Memory.images(from.mem, copy.copy) : [];
+          return { text: (Team.get(copy.from ?? "")?.name ?? "") + "'s message " + copy.copy + ":\n" + Memory.zoom(from.mem, copy.copy, 1, at), fail: false, imgs };
+        }
         const imgs = n === 1 && at === 0 ? Memory.images(there.mem, id) : [];
         return { text: Memory.zoom(there.mem, id, n, at), fail: false, imgs };
       }
@@ -297,6 +300,10 @@ export namespace Tools {
         return Tools.job(tools, String(device), { name, input, cwd: who }, signal, id);
       }
     }
+  }
+
+  export function seat(tools: Tools, id: string): Seat | undefined {
+    return tools.seats.get(id === UNII ? "main" : id);
   }
 
   export function schedule(seat: Seat, timer: Timer.Timer | string): Out {

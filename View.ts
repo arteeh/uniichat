@@ -724,6 +724,9 @@ function part_rows(v: View, id: number, n: number, t: number, talk: boolean): Ro
   const key   = id + "+" + n;
   const entry = v.whole.get(id);
   const half  = n / 2;
+  if (n === 1 && entry?.kind === "team") {
+    return [];
+  }
   if (n === 1 && id >= t && entry !== undefined) {
     const minds = v.thinking === false ? [] : v.minds.get(id) ?? [];
     const after = minds.flatMap((x) => entry_rows(null, "mind", x));
