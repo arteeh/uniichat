@@ -78,6 +78,8 @@ header > .back { margin-left: -10px; }
 header svg { width: 20px; height: 20px; }
 header > .who { margin-right: auto; display: flex; align-items: center; gap: 10px; min-width: 0; height: auto; padding: 4px 8px 4px 4px; background: none; font: 600 17px/1.2 var(--sans); }
 header > .who .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+header > .title { display: none; margin: 0 auto 0 0; min-width: 0; padding-left: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 600 17px/1.2 var(--sans); }
+body.account header > .title { display: block; }
 header .pic { width: 34px; height: 34px; }
 body.wide:not(.tree) header > .back { display: none; }
 body.tree header > .brain { display: none; }
@@ -424,10 +426,8 @@ header > .imping { display: flex; flex-direction: column; justify-content: cente
 }
 
 #account { width: min(var(--col), 100% - 40px); margin: 0 auto; padding: 18px 0 64px; font-size: 15px; }
-#account .back { display: inline-block; padding: 8px 0; font-size: 14px; color: var(--mid); text-decoration: none; }
-#account .back:hover { color: var(--ink); }
-#account h1 { margin: 6px 0 22px; font: 600 30px/1.2 var(--brand); letter-spacing: -.015em; }
 #account section { padding: 22px 0; border-top: 1px solid var(--hair); }
+#account > section:first-child, #account > form:first-child > section:first-child { border-top: 0; padding-top: 4px; }
 #account h2 { margin: 0 0 14px; font: 600 12px var(--sans); letter-spacing: .06em; text-transform: uppercase; color: var(--mid); }
 #account section > p { margin: 0 0 10px; }
 #account section > p:last-child { margin-bottom: 0; }
@@ -518,7 +518,7 @@ header > .imping { display: flex; flex-direction: column; justify-content: cente
 
 body.tree { height: 100dvh; }
 #tree { flex: 1; min-height: 0; display: flex; flex-direction: column; }
-#tree .top { display: flex; align-items: center; gap: 6px; padding: 22px 20px 0; } #tree .back { padding: 8px 0; margin-right: 6px; font-size: 14px; color: var(--mid); text-decoration: none; } #tree .back:hover { color: var(--ink); }
+#tree .top { display: flex; align-items: center; gap: 6px; padding: 22px 20px 0; }
 #tree .top small { flex: 1; min-width: 0; margin-left: 10px; font: 12px/1.35 var(--sans); color: var(--mid); } #tree .top small b { font-weight: 600; letter-spacing: .06em; font-size: 11px; padding-left: 5px; box-shadow: inset 3px 0 var(--mid); }
 #tree .top :is(button, .tab) { height: 32px; min-width: 36px; padding: 0 12px; border-radius: 8px; background: var(--block); font-size: 13.5px; font-weight: 500; } #tree .top :is(button, .tab):hover { background: var(--hover); } #tree .top button:disabled { opacity: .4; cursor: default; }
 #tree .tab { display: grid; place-items: center; text-decoration: none; } #tree .tab.here, #tree .tab.here:hover { background: var(--ink); color: var(--paper); }
@@ -543,4 +543,4 @@ body.tree { height: 100dvh; }
 #tree .bracket.drag { scroll-snap-type: none; user-select: none; cursor: grabbing; }
 @media (prefers-reduced-motion: reduce) { #tree .s.ease { transition: none; } }
 @media (max-width: 600px) { #tree section { padding: 0 14px 14px; } #tree .bracket { scroll-padding: 0 14px; } #tree .top { padding: 16px 14px 0; } #tree .top .tab { height: 30px; padding: 0 10px; font-size: 13px; } }
-body.account > header { display: none; }
+body.account header > :is(.who, .brain, .timers, .imping) { display: none !important; }

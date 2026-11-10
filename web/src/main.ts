@@ -1058,9 +1058,11 @@ function up(path: string): void {
   route();
 }
 
-// the header's back: from the memory to the agent's chat, from a chat to the list
+// the header's back: from the memory or an agent's settings to its chat,
+// from a chat, Settings or a new agent to the list
 function up_to(): string {
-  return location.pathname === TREE ? "/a/" + v.agent : "/";
+  const edit = FORM.exec(location.pathname)?.[2];
+  return location.pathname === TREE ? "/a/" + v.agent : edit !== undefined ? "/a/" + edit : "/";
 }
 
 // to another agent's chat: the server sends it, the box holds its draft
@@ -1111,8 +1113,10 @@ function route(): void {
     SCROLL.y = scrollY;
     SCROLL.away = null;
   }
+  const edit = FORM.exec(p)?.[2];
+  $("header .title").textContent = !page ? "" : !form ? "Settings" : edit === undefined ? "New agent" : v.team.find((m) => m.id === edit)?.name ?? "";
   if (page && form) {
-    void agent_page(FORM.exec(p)?.[2] ?? null);
+    void agent_page(edit ?? null);
   } else if (page) {
     void account();
   }
@@ -1146,9 +1150,11 @@ async function agent_page(id: string | null): Promise<void> {
   const all = await agents();
   const a = id === null ? null : all?.agents.find((x) => x.id === id) ?? null;
   if (all === null || (id !== null && a === null)) {
-    el.innerHTML = `<a class="back" href="/" data-go="/">← Chats</a><p class="sub">${all === null ? "Could not read the agents. Try again in a moment." : "No such agent."}</p>`;
+    $("header .title").textContent = "";
+    el.innerHTML = `<p class="sub">${all === null ? "Could not read the agents. Try again in a moment." : "No such agent."}</p>`;
     return;
   }
+  $("header .title").textContent = a?.name ?? "New agent";
   el.innerHTML = Html.agent_html(a, id === UNII);
   const form = find(el, "form", HTMLFormElement);
   const [name, prompt] = [find(form, "[name=name]", HTMLInputElement), find(form, "[name=prompt]", HTMLTextAreaElement)];
