@@ -66,6 +66,8 @@ const SCROLL = {
   open  : new Set<string>(),
   still : false,
   away  : null as { y: number; end: boolean } | null,
+  at    : null as Spot | null,
+  wide  : innerWidth,
 };
 
 const RENEW = {
@@ -240,6 +242,7 @@ function chat(): void {
       SCROLL.end = false;
     }
     SCROLL.y = scrollY;
+    SCROLL.at = SCROLL.end || $("#log").hidden ? null : spot();
     mine_show();
   };
   $(".mine").onclick = mine;
@@ -253,7 +256,7 @@ function chat(): void {
   });
   keep.observe($("#log"));
   keep.observe($("footer"));
-  addEventListener("resize", () => frames(true));
+  addEventListener("resize", resized);
   draw(true);
 }
 
@@ -500,6 +503,50 @@ function frames(all = false): void {
       fit();
     }
   }
+}
+
+// where the reader is: the innermost block under the header's bottom
+// edge, and how far down it that edge falls, a share of its height
+type Spot = { el: Element; share: number };
+
+function spot(): Spot | null {
+  const line = $("header").getBoundingClientRect().bottom;
+  const under = (el: Element): boolean => {
+    const box = el.getBoundingClientRect();
+    return box.height > 0 && box.bottom > line;
+  };
+  let el = [...$("#log").querySelectorAll(".rows > *, .tail > *")].find(under);
+  if (el === undefined) {
+    return null;
+  }
+  for (;;) {
+    const kid: Element | undefined = [...el.children].find((k) => getComputedStyle(k).display !== "inline" && under(k));
+    if (kid === undefined) {
+      break;
+    }
+    el = kid;
+  }
+  const box = el.getBoundingClientRect();
+  return { el, share: Math.max(0, line - box.top) / box.height };
+}
+
+// a narrower window wraps the text above into more lines, and the page
+// keeps scrollY (html has overflow-anchor: none), so the reader's spot
+// goes back under the header (#127); at the end, keep sticks to it
+function resized(): void {
+  frames(true);
+  const at = SCROLL.at;
+  const turned = innerWidth !== SCROLL.wide;
+  SCROLL.wide = innerWidth;
+  if (!turned || at === null || !at.el.isConnected || SCROLL.end || $("#log").hidden) {
+    return;
+  }
+  // route() sets body.wide only on WIDE.onchange, after this; until then
+  // a .wide body that isn't wide has the list in the flow above the chat
+  document.body.classList.toggle("wide", WIDE.matches);
+  const line = $("header").getBoundingClientRect().bottom;
+  const box = at.el.getBoundingClientRect();
+  scrollBy(0, box.top + at.share * box.height - line);
 }
 
 function copied(button: HTMLElement): void {
@@ -1205,7 +1252,13 @@ function route(): void {
   $("#account").hidden = !page;
   $("#tree").hidden = !tree;
   P.at = location.pathname + location.search + location.hash;
-  P.shown = chat && SCROLL.away !== null ? shown_key() : location.pathname;
+  // a chat already in view stays where it is: crossing the 900px line
+  // (WIDE.onchange) routes again and used to jump it to the end (#127)
+  if (!chat) {
+    P.shown = location.pathname;
+  } else if (SCROLL.away !== null) {
+    P.shown = shown_key();
+  }
   if (chat && SCROLL.away !== null) {
     SCROLL.end = SCROLL.away.end;
     P.rows = true;
