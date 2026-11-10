@@ -96,6 +96,7 @@ type Turn = {
   limits: { vendor: Vendor; n: number } | null;
   fresh : boolean;
   told  : boolean;
+  gist  : number;
 };
 
 type Chat = Parts & Doing & Turn;
@@ -233,7 +234,7 @@ export namespace Chat {
     const who = id === UNII ? "main" : id;
     const chat: Chat = {
       id, who, mem, tools, pick, socks: new Set(), acts: new Map(), main, model: "", check: null, asked: false, open: 0,
-      eye: { parts: [], from: 0 }, after: Promise.resolve(), batch: null, writes: Promise.resolve(), held: null, back: -1, sums: null, resume: null, limits: null, bell: undefined, fresh: true, told: false,
+      eye: { parts: [], from: 0 }, after: Promise.resolve(), batch: null, writes: Promise.resolve(), held: null, back: -1, sums: null, resume: null, limits: null, bell: undefined, fresh: true, told: false, gist: -1,
     };
     const seat: Seat = { mem, note: (text) => Chat.note(chat, text), report: (text) => Chat.report(chat, text, true), timed: () => Chat.timed(chat), message: (to, text) => Chat.message(chat, to, text) };
     tools.seats.set(who, seat);
@@ -251,6 +252,7 @@ export namespace Chat {
       Memory.push(mem, [{ kind: "unii", text: HELLO, line: HELLO_LINE }]);
     }
     chat.eye = Chat.eye(mem, Memory.turn(mem));
+    chat.gist = Chat.gist(chat);
     mem.made = (l, i) => Chat.made(chat, l, i);
     mem.name = () => Chat.name(chat);
     mem.wait.add(() => Chat.progress(chat));
@@ -708,6 +710,7 @@ export namespace Chat {
 
   export function put(chat: Chat, msg: Log, sent = false): Msg {
     const queued = sent ? { sent } : {};
+    const first = chat.mem.open === 0;
     const roots = Memory.push(chat.mem, [msg]);
     if (msg.kind === "unii" && chat.mem.hop === 0 && msg.imported !== true && !Chat.seen(chat)) {
       Team.unread(chat.id, null);
@@ -715,6 +718,9 @@ export namespace Chat {
     }
     for (const { i, kind, text, date, images, of, tool, from } of roots) {
       Chat.all(chat, { $: "entry", id: i, kind, text, date, images, of, tool, from, ...queued });
+    }
+    if (first && Chat.real(roots[0])) {
+      chat.gist = roots[0].i;
     }
     Chat.talked(chat);
     Main.team_soon();
@@ -1323,16 +1329,33 @@ export namespace Chat {
     Main.team_soon();
   }
 
-  // a message's gist for the chat list: the last the user or agent said
+  // the chat list's preview: the start of the last message the user, the
+  // agent or another agent sent, never its tool calls, reports or notes
   export function last(chat: Chat): string {
-    for (let i = chat.mem.count - 1; i >= Math.max(0, chat.mem.count - 40); i--) {
+    const m = Memory.message(chat.mem, chat.gist);
+    if (m === null) {
+      return "";
+    }
+    const text = Memory.flat(m.text).replace(/[*_`#>]+/g, "").trim();
+    return (m.kind === "user" ? "You: " : "") + (text.length > LAST ? text.slice(0, LAST) + "…" : text);
+  }
+
+  export function real(m: Log): boolean {
+    return m.kind === "user" || m.kind === "unii" || (m.kind === "work" && m.from !== undefined);
+  }
+
+  // the first page of the last real message
+  export function gist(chat: Chat): number {
+    for (let i = chat.mem.count - 1; i >= 0; i--) {
       const m = Memory.at(chat.mem, i);
-      if (m.kind === "user" || m.kind === "unii" || m.kind === "work") {
-        const text = Memory.flat(m.text).replace(/[*_`#>]+/g, "").trim();
-        return (m.kind === "user" ? "You: " : "") + (text.length > LAST ? text.slice(0, LAST) + "…" : text);
+      if (Chat.real(m)) {
+        while (i > 0 && Memory.at(chat.mem, i - 1).more === true) {
+          i--;
+        }
+        return i;
       }
     }
-    return "";
+    return -1;
   }
 
   export function join(chat: Chat, sock: Sock): void {

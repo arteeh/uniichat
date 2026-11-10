@@ -58,7 +58,7 @@ export function list_html(team: View.Mate[], here: string | null): string[] {
   return team.filter((m) => m.archived === 0).map((m) => {
     const pill = m.unread > 0 ? `<span class="pill">${m.unread}</span>` : "";
     const on = m.id === here ? ` aria-current="page"` : "";
-    return `<a class="mate" href="/a/${esc(m.id)}" data-go="/a/${esc(m.id)}"${on}>${face_html(m.picture)}<span class="text"><b>${esc(m.name)}</b><small>${esc(m.last || m.about)}</small></span>${pill}</a>`;
+    return `<a class="mate" href="/a/${esc(m.id)}" data-go="/a/${esc(m.id)}"${on}>${face_html(m.picture)}<span class="text"><b>${esc(m.name)}</b><small>${esc(m.last)}</small></span>${pill}</a>`;
   });
 }
 
