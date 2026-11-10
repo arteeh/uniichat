@@ -184,7 +184,7 @@ export function mcp_html(plugs: View.Plug[]): string[] {
   const one = (p: View.Plug) => {
     const act = act_html({ $: "Plug", name: p.name });
     const button = `<button class="chip" role="switch" aria-checked="${p.on}" aria-label="${esc(p.name)}"${act}>${p.on ? "Turn off" : "Turn on"}</button>`;
-    return `<div class="item"><p>${esc(p.name)}<small>Its tools are ${p.on ? "on" : "off"} for every agent.</small></p>${button}</div>`;
+    return `<div class="item"><p>${esc(p.name)}</p>${button}</div>`;
   };
   const none = `<p class="sub">None set up. Add them as <code>mcp</code> in a device's own config.json: they run on that device.</p>`;
   return plugs.length === 0 ? [none] : plugs.map(one);
@@ -205,15 +205,17 @@ export function agent_html(a: Agent | null, unii: boolean): string {
   const own = a !== null && a.picture.startsWith("/media/") ? [a.picture] : [];
   const faces = (unii ? ["unii"] : []).concat(own, heads).map((f) => face_pick_html(f, f === a?.picture));
   const upload = `<button type="button" class="chip upload">Upload a picture</button><input type="file" class="upfile" accept="image/png,image/jpeg,image/webp,image/gif" hidden>`;
-  const set = (key: string, name: string, about: string, control: string) => `<div class="set" data-key="${key}"><label for="ag-${key}">${esc(name)}<small>${esc(about)}</small></label><div class="field">${control}</div></div>`;
-  const archive = a === null || unii ? "" : section_html("Archive", `<div class="item"><p>Archive ${esc(a.name)}<small>It leaves the chat list and the team. A running turn and its jobs finish; its timers pause. Restore it in Settings.</small></p><button type="button" class="chip red archive">Archive</button></div>`);
+  const set = (key: string, name: string, about: string, control: string) => `<div class="set" data-key="${key}"><label for="ag-${key}">${esc(name)}${about === "" ? "" : `<small>${esc(about)}</small>`}</label><div class="field">${control}</div><p class="err"></p></div>`;
+  const archive = a === null || unii ? "" : section_html("Archive", `<div class="item"><p>Archive ${esc(a.name)}<small>Settings can restore it.</small></p><button type="button" class="chip red archive">Archive</button></div>`);
+  // an agent saves as it's edited (#125); a new one is made with Create
+  const create = a === null ? `<div class="save"><p class="why"></p><button class="chip go">Create</button></div>` : "";
   return `<form class="settings agent" autocomplete="off">`
     + section_html("Picture", `<div class="faces">${faces.join("")}</div><p class="up">${upload}<span class="why"></span></p>`)
     + section_html("Agent",
-      set("name", "Name", "1 to 24 characters, no @.", `<input id="ag-name" name="name" maxlength="24" value="${esc(a?.name ?? "")}" spellcheck="false">`)
-      + set("about", "Description", "One line, for the chat list and the other agents.", `<input id="ag-about" name="about" maxlength="120" value="${esc(a?.about ?? "")}">`)
-      + set("prompt", "System prompt", "Who this agent is and what it does. It follows the name until you edit it.", `<textarea id="ag-prompt" name="prompt" rows="6" spellcheck="true">${esc(a?.prompt ?? "")}</textarea>`))
-    + `<div class="save"><p class="why"></p><button class="chip go">${a === null ? "Create" : "Save"}</button></div></form>` + archive;
+      set("name", "Name", "", `<input id="ag-name" name="name" maxlength="24" value="${esc(a?.name ?? "")}" spellcheck="false">`)
+      + set("about", "Description", "For the chat list and the other agents.", `<input id="ag-about" name="about" maxlength="120" value="${esc(a?.about ?? "")}">`)
+      + set("prompt", "System prompt", "Who it is and what it does.", `<textarea id="ag-prompt" name="prompt" rows="6" spellcheck="true">${esc(a?.prompt ?? "")}</textarea>`))
+    + create + `</form>` + archive;
 }
 
 export function face_pick_html(picture: string, on: boolean): string {
@@ -250,19 +252,18 @@ function notify_html(notify: Notify): string {
 }
 
 const SETTING: Record<string, [string, string]> = {
-  vendors   : ["Vendors", "Whose models the server offers."],
-  models    : ["Models", "The models offered, of those vendors."],
-  pick      : ["Default model", "What a chat runs on until it picks another."],
-  compactor : ["Compactor model", "What writes the memory's summaries. Sonnet medium summarizes more faithfully than Haiku, using more of a plan's limits."],
-  thinking  : ["Show thinking", "The agents' reasoning as it comes; off, a Thinking line instead."],
-  hops      : ["Hop limit", "How many messages in a row agents may send each other before they wait for you; 0: none."],
-  compactor_context : ["Compactor context", "How much of the chat each summary sees, in KB (1 to 128). More context lets it copy more into a summary that its message doesn't say. New summaries only."],
-  site      : ["Site", "The server's address, for sign-in links and the installer."],
+  vendors   : ["Models", ""],
+  pick      : ["Default model", "For chats that haven't picked one."],
+  compactor : ["Compactor model", "Writes the memory's summaries."],
+  thinking  : ["Show thinking", ""],
+  hops      : ["Hop limit", "Agent-to-agent messages in a row; 0: none."],
+  compactor_context : ["Compactor context", "KB of chat each summary sees (1–128)."],
+  site      : ["Site", "For sign-in links."],
 };
 
 const KEY: Record<string, [string, string]> = {
-  anthropic : ["Anthropic key", "For claude-api's models."],
-  openai    : ["OpenAI key", "For openai-api's models and dictation."],
+  anthropic : ["Anthropic key", "For claude-api."],
+  openai    : ["OpenAI key", "For openai-api and dictation."],
 };
 
 export const VENDOR_KEY: Record<string, string> = { "claude-api": "anthropic", "openai-api": "openai" };
@@ -272,24 +273,23 @@ export const PICKS = ["pick", "compactor"];
 const GROUPS: Array<[string, string[]]> = [
   ["Chat", ["thinking"]],
   ["Agents", ["hops"]],
-  ["Models", ["vendors", "models", "pick", "compactor", "compactor_context"]],
+  ["Models", ["vendors", "pick", "compactor", "compactor_context"]],
   ["Server", ["site"]],
 ];
 
+// the server's settings, each saved as it's changed (#125)
 export function settings_html(page: Page): string {
   const rows = new Map(page.settings.filter((r) => r.web && r.from !== "env").map((r) => [r.key, r]));
   const group = ([title, keys]: [string, string[]]) => {
     const shown = keys.flatMap((k) => rows.get(k) ?? []);
-    return shown.length === 0 ? "" : section_html(title, shown.map(setting_html).join(""));
+    return shown.length === 0 ? "" : section_html(title, shown.map((r) => setting_html(r, rows.get("models") ?? null)).join(""));
   };
   const shown = page.keys.filter((k) => k.from !== "env");
-  const keys = shown.length === 0 ? "" : section_html("Keys", `<p class="sub">Kept in keys.json in the server's folder, readable by the server's user only, and never shown again, only their last characters.</p>` + shown.map(key_html).join(""));
+  const keys = shown.length === 0 ? "" : section_html("Keys", shown.map(key_html).join(""));
   const error = page.error === null ? "" : `<p class="why bad">${esc(page.error)}</p>`;
   const none = page.none === null ? "" : `<p class="why bad">${esc(page.none).replace(/`([^`]+)`/g, "<code>$1</code>")}.</p>`;
-  const save = `<div class="save"><p class="why"></p><button class="chip go"${page.error === null ? "" : " disabled"}>Save</button></div>`;
-  const head = `<p class="sub">The server's settings, in config.json in its folder.</p>`;
-  const profiles = page.profiles === null ? "" : section_html("Profiles", `<p class="sub">Ranked models: a chat on a profile runs on the first and falls back to the next when one is out.</p><div class="set profiles" data-key="profiles"><div class="field"></div><p class="err"></p></div>`);
-  return head + error + none + `<form class="settings" autocomplete="off">` + group(GROUPS[0]) + group(GROUPS[1]) + group(GROUPS[2]) + profiles + keys + group(GROUPS[3]) + save + `</form>`;
+  const profiles = page.profiles === null ? "" : section_html("Profiles", `<p class="sub">Falls back to the next model when one is out.</p><div class="set profiles" data-key="profiles"><div class="field"></div><p class="err"></p></div>`);
+  return error + none + `<form class="settings" autocomplete="off">` + group(GROUPS[0]) + group(GROUPS[1]) + group(GROUPS[2]) + profiles + keys + group(GROUPS[3]) + `</form>`;
 }
 
 export function offered(vendors: string[], models: string[]): string[] {
@@ -312,21 +312,44 @@ export function profiles_html(profiles: Array<[string, string[]]>, offered: stri
   return profiles.map(one).join("") + `<button type="button" class="chip pnew">Add profile</button>`;
 }
 
-function setting_html(r: Row): string {
+// vendors and models are one table, keyed as both
+function setting_html(r: Row, models: Row | null): string {
   const [name, about] = SETTING[r.key] ?? [r.key, ""];
+  const both = r.key === "vendors" && models !== null;
+  const key = both ? "vendors models" : r.key;
   const id = "set-" + r.key + (PICKS.includes(r.key) ? "-vendor" : "");
-  const label = `<label for="${id}">${esc(name)}<small>${esc(about)} <code>${esc(r.key)}</code></small></label>`;
-  return `<div class="set" data-key="${esc(r.key)}">${label}<div class="field">${control_html(r)}</div>${from_html(r)}<p class="err"></p></div>`;
+  const label = both ? `<p class="label">${esc(name)}</p>` : `<label for="${id}">${esc(name)}${about === "" ? "" : `<small>${esc(about)}</small>`}</label>`;
+  const control = both ? models_html(list(r.value), list(models.value)) + `<p class="warn"></p>` : control_html(r);
+  const from = both && models.from === "file" ? { ...r, from: models.from } : r;
+  return `<div class="set" data-key="${esc(key)}">${label}<div class="field">${control}</div>${from_html(from)}<p class="err"></p></div>`;
+}
+
+// one column per family of models, its vendors' boxes in the head and
+// its models under it, large to small (#123); a model none of whose
+// vendors is on is grey, and keeps its own box
+function models_html(vendors: string[], models: string[]): string {
+  const fams: Array<{ vendors: Vendor[]; labels: string[] }> = [];
+  for (const v of VENDORS) {
+    const labels = Pick.models([v], LABELS).map(([, m]) => m.label);
+    const fam = fams.find((f) => f.labels.some((l) => labels.includes(l)));
+    if (fam === undefined) {
+      fams.push({ vendors: [v], labels });
+    } else {
+      fam.vendors.push(v);
+      fam.labels.push(...labels.filter((l) => !fam.labels.includes(l)));
+    }
+  }
+  const box = (name: string, x: string, on: boolean, of: string) => `<label class="opt"${of === "" ? "" : ` data-vendor="${esc(of)}"`}><input type="checkbox" name="${name}" value="${esc(x)}"${on ? " checked" : ""}> ${esc(x)}</label>`;
+  const model = (l: string | undefined) => (l === undefined ? "<td></td>" : `<td>${box("models", l, models.includes(l), Pick.models(VENDORS, [l]).map(([v]) => v).join(" "))}</td>`);
+  const head = `<tr>${fams.map((f) => `<th>${f.vendors.map((v) => box("vendors", v, vendors.includes(v), "")).join("")}</th>`).join("")}</tr>`;
+  const n = Math.max(...fams.map((f) => f.labels.length));
+  const body = Array.from({ length: n }, (_, k) => `<tr>${fams.map((f) => model(f.labels[k])).join("")}</tr>`).join("");
+  const odd = models.filter((x) => !LABELS.includes(x));
+  return `<table class="models"><thead>${head}</thead><tbody>${body}</tbody></table>` + (odd.length === 0 ? "" : `<div class="opts">${odd.map((x) => box("models", x, true, "")).join("")}</div>`);
 }
 
 function control_html(r: Row): string {
   switch (r.key) {
-    case "vendors": {
-      return checks_html("vendors", VENDORS, list(r.value), () => "") + `<p class="warn"></p>`;
-    }
-    case "models": {
-      return checks_html("models", LABELS, list(r.value), (x) => Pick.models(VENDORS, [x]).map(([vendor]) => vendor).join(" "));
-    }
     case "pick":
     case "compactor": {
       return `<input type="hidden" name="${r.key}" value="${esc(r.value)}"><div class="four"></div>`;
@@ -353,18 +376,11 @@ export function list_changed(was: string[], now: string[]): string[] | null {
   return same ? null : [...was.filter((x) => now.includes(x)), ...now.filter((x) => !was.includes(x))];
 }
 
-function checks_html(name: string, all: string[], on: string[], vendor: (x: string) => string): string {
-  const box = (x: string) => `<label class="opt" data-vendor="${esc(vendor(x))}"><input type="checkbox" name="${name}" value="${esc(x)}"${on.includes(x) ? " checked" : ""}> ${esc(x)}</label>`;
-  const odd = on.filter((x) => !all.includes(x));
-  return `<div class="opts">${all.map(box).join("")}${odd.map(box).join("")}</div>`;
-}
-
+// a Reset when it isn't the default; a restart's need, once changed
 function from_html(r: Row): string {
-  const from = r.from === "file" ? "From config.json" : "Default" + (r.why === "" ? "" : ": " + esc(r.why));
-  const apply = r.apply === "now" ? "applies at once" : "applies on a restart";
-  const running = r.running === null ? "" : ` · running on <code>${esc(r.running === "" ? "(none)" : r.running)}</code> till then`;
-  const reset = r.from === "file" ? ` <button type="button" class="reset">Use the default</button>` : "";
-  return `<p class="from">${from} · ${apply}${running}${reset}</p>`;
+  const running = r.running === null ? "" : "Restart the server to use it. ";
+  const reset = r.from === "file" ? `<button type="button" class="reset">Reset</button>` : "";
+  return running === "" && reset === "" ? "" : `<p class="from">${running}${reset}</p>`;
 }
 
 function key_html(k: Key): string {
@@ -372,9 +388,9 @@ function key_html(k: Key): string {
   const id = "set-key-" + k.name;
   const field = `<input id="${id}" type="password" name="key.${k.name}" autocomplete="new-password" placeholder="Paste a new key to set it" spellcheck="false" autocapitalize="off">`;
   const tail = k.tail === "" ? "" : `, ending in <code>${esc(k.tail)}</code>`;
-  const from = k.from === "file" ? `Set${tail}, in keys.json` : "Not set";
+  const from = k.from === "file" ? `Set${tail}` : "Not set";
   const reset = k.from === "file" ? ` <button type="button" class="reset">Remove</button>` : "";
-  const label = `<label for="${id}">${esc(name)}<small>${esc(about)} <code>${esc(k.env)}</code></small></label>`;
+  const label = `<label for="${id}">${esc(name)}<small>${esc(about)}</small></label>`;
   return `<div class="set key" data-key="key.${esc(k.name)}">${label}<div class="field">${field}</div><p class="from">${from}${reset}</p><p class="err"></p></div>`;
 }
 

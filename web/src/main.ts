@@ -73,7 +73,6 @@ const RENEW = {
   build : document.documentElement.dataset.build ?? "",
   due   : false,
   going : false,
-  since : false,
   dirty : new Set<HTMLFormElement>(),
   saving: 0,
   gave  : null as WebSocket | null,
@@ -1329,8 +1328,12 @@ async function agent_page(id: string | null): Promise<void> {
   };
   form.onsubmit = (ev) => {
     ev.preventDefault();
-    void agent_save(form, a);
+    void agent_save(form, a, ev.target as Element);
   };
+  // an agent's settings save as they change; a new one waits for Create
+  if (a !== null) {
+    form.onchange = (ev) => void agent_save(form, a, ev.target as Element);
+  }
   const file = find(form, ".upfile", HTMLInputElement);
   find(form, ".upload", HTMLButtonElement).onclick = () => file.click();
   file.onchange = () => {
@@ -1368,26 +1371,46 @@ async function picture_up(form: HTMLFormElement, file: File): Promise<void> {
     faces.insertAdjacentHTML("afterbegin", Html.face_pick_html("/media/" + out.name, true));
     RENEW.dirty.add(form);
     why.textContent = "";
+    form.dispatchEvent(new Event("change"));
   } catch (err) {
     why.textContent = "Could not upload it: " + err_why(err);
   }
 }
 
-async function agent_save(form: HTMLFormElement, a: Html.Agent | null): Promise<void> {
+// one save at a time, each of the whole form as it is then; an error
+// shows under the field that was changed, the form left as typed
+let AGENT_SAVES = Promise.resolve();
+
+function agent_save(form: HTMLFormElement, a: Html.Agent | null, at: Element): Promise<void> {
+  AGENT_SAVES = AGENT_SAVES.then(() => agent_save_now(form, a, at));
+  return AGENT_SAVES;
+}
+
+async function agent_save_now(form: HTMLFormElement, a: Html.Agent | null, at: Element): Promise<void> {
+  if (!form.isConnected) {
+    return;
+  }
   const data = new FormData(form);
   const body = Object.fromEntries(["name", "about", "picture", "prompt"].map((k) => [k, text_of(data.get(k))]));
-  const why = must(form.querySelector(".save .why"), "the save's why");
+  const why = at.closest(".set")?.querySelector(".err") ?? form.querySelector(".save .why") ?? form.querySelector(".up .why");
+  form.querySelectorAll(".err").forEach((e) => (e.textContent = ""));
   RENEW.saving++;
   const out = await View.post("/api/agents" + (a === null ? "" : "/" + a.id), body);
   RENEW.saving--;
   if (out.error !== undefined) {
-    why.textContent = text_of(out.error);
+    if (why === null) {
+      toast(text_of(out.error));
+    } else {
+      why.textContent = text_of(out.error);
+    }
     return;
   }
   RENEW.dirty.delete(form);
-  RENEW.since = true;
-  const id = a?.id ?? text_of(get(out.agent, "id"));
-  go("/a/" + id);
+  if (a === null) {
+    go("/a/" + text_of(get(out.agent, "id")));
+    return;
+  }
+  $("header .title").textContent = body.name;
 }
 
 function archived_draw(): void {
@@ -1542,7 +1565,45 @@ async function notify_off(reg: ServiceWorkerRegistration): Promise<Record<string
   return {};
 }
 
+// the settings save as they're changed, one save at a time, each from
+// the form as it is then (#125)
+const SET = { page: null as Page | null, queued: 0, chain: Promise.resolve(), run: null as (() => Promise<void>) | null };
+
+function settings_soon(): void {
+  SET.queued++;
+  SET.chain = SET.chain.then(async () => {
+    SET.queued--;
+    await SET.run?.();
+  });
+}
+
+// drawn again after a save, the field being typed in kept as it is
+function settings_redraw(page: Page): void {
+  const a = document.activeElement;
+  const field = a instanceof HTMLInputElement || a instanceof HTMLTextAreaElement || a instanceof HTMLSelectElement ? a : null;
+  const sel = field === null || !$("#account").contains(field) ? null : field.name !== "" ? `[name="${CSS.escape(field.name)}"]` + (field instanceof HTMLInputElement && ["checkbox", "radio"].includes(field.type) ? `[value="${CSS.escape(field.value)}"]` : "") : field.dataset.i !== undefined ? `.${field.classList[0]}[data-i="${field.dataset.i}"]` : null;
+  const was = field === null ? null : { value: field.value, at: field instanceof HTMLSelectElement ? null : [field.selectionStart, field.selectionEnd] };
+  settings_draw(page);
+  const now = sel === null ? null : document.querySelector<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>("#account form.settings " + sel);
+  if (now === null || was === null) {
+    return;
+  }
+  if (!(now instanceof HTMLInputElement && ["checkbox", "radio", "password"].includes(now.type)) && now.value !== was.value) {
+    now.value = was.value;
+    now.dispatchEvent(new Event("input", { bubbles: true }));
+  }
+  now.focus({ preventScroll: true });
+  if (was.at !== null && !(now instanceof HTMLSelectElement)) {
+    try {
+      now.setSelectionRange(was.at[0], was.at[1]);
+    } catch {
+      // a number field has no selection
+    }
+  }
+}
+
 function settings_draw(page: Page): void {
+  SET.page = page;
   $("#account .owned").innerHTML = Html.settings_html(page);
   const form = $("#account form.settings", HTMLFormElement);
   const rows = new Map<string, Row>(page.settings.map((r) => [r.key, r]));
@@ -1556,7 +1617,7 @@ function settings_draw(page: Page): void {
   };
   const picks = () => {
     const vendors = listed("vendors");
-    form.querySelectorAll<HTMLElement>(".opt[data-vendor]:not([data-vendor=''])").forEach((o) => (o.hidden = !(o.dataset.vendor ?? "").split(" ").some((v) => vendors.includes(v))));
+    form.querySelectorAll<HTMLElement>(".opt[data-vendor]").forEach((o) => o.classList.toggle("off", !(o.dataset.vendor ?? "").split(" ").some((v) => vendors.includes(v))));
     for (const key of Html.PICKS) {
       const value = form.querySelector<HTMLInputElement>(`input[name="${key}"]`);
       const four = value?.parentElement?.querySelector<HTMLElement>(".four");
@@ -1582,38 +1643,41 @@ function settings_draw(page: Page): void {
     if (el === null) {
       return;
     }
-    unset.delete(el.dataset.key ?? "");
-    el.classList.remove("unset");
+    RENEW.dirty.add(form);
+    const keys = (el.dataset.key ?? "").split(" ");
+    keys.forEach((k) => unset.delete(k));
     must(el.querySelector(".err"), "the setting's err").textContent = "";
     const value = el.querySelector<HTMLInputElement>("input[type=hidden]");
     if (value !== null) {
       value.value = Html.pick_mend([...el.querySelectorAll("select")].map((s) => s.value), listed("models"), names());
     }
     picks();
-    if (el.dataset.key === "vendors" || el.dataset.key === "models") {
+    if (keys.includes("vendors") || keys.includes("models")) {
       profs_draw();
     }
   };
+  form.onchange = () => settings_soon();
   form.onclick = (ev) => {
     const btn = (ev.target as HTMLElement).closest<HTMLButtonElement>(".reset");
     if (btn === null) {
       return;
     }
     const el = must(btn.closest<HTMLElement>(".set"), "the reset's setting");
-    const key = el.dataset.key ?? "";
-    const r = rows.get(key);
-    el.querySelectorAll<HTMLInputElement>("input[type=checkbox]").forEach((b) => (b.checked = Html.list(r?.def ?? "").includes(b.value)));
-    el.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>("input:not([type=checkbox]), textarea").forEach((i) => (i.value = r?.def ?? ""));
+    for (const key of (el.dataset.key ?? "").split(" ")) {
+      const def = rows.get(key)?.def ?? "";
+      el.querySelectorAll<HTMLInputElement>(`input[type=checkbox][name="${key}"]`).forEach((b) => (b.checked = Html.list(def).includes(b.value)));
+      el.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>(`:is(input:not([type=checkbox]), textarea)[name="${key}"]`).forEach((i) => (i.value = def));
+      unset.add(key);
+    }
     picks();
-    unset.add(key);
-    el.classList.add("unset");
     btn.hidden = true;
-    must(el.querySelector(".from"), "the setting's from").insertAdjacentText("beforeend", key.startsWith("key.") ? " · removed once saved" : " · the default once saved");
+    settings_soon();
   };
   form.onsubmit = (ev) => {
     ev.preventDefault();
-    void settings_save(form, page, unset, listed, profs);
+    settings_soon();
   };
+  SET.run = () => settings_save(form, unset, listed, profs);
   const profs_draw = (focus?: string) => {
     if (box !== null) {
       box.innerHTML = Html.profiles_html(profs, Html.offered(listed("vendors"), listed("models")));
@@ -1624,6 +1688,8 @@ function settings_draw(page: Page): void {
     profs_draw(focus);
     must(box?.closest(".set")?.querySelector(".err"), "the profiles' err").textContent = "";
     picks();
+    RENEW.dirty.add(form);
+    settings_soon();
   };
   const renamed = (was: string, now: string) => {
     for (const key of Html.PICKS) {
@@ -1710,11 +1776,15 @@ function settings_draw(page: Page): void {
   picks();
 }
 
-async function settings_save(form: HTMLFormElement, page: Page, unset: Set<string>, listed: (key: string) => string[], profs: Array<[string, string[]]>): Promise<void> {
+async function settings_save(form: HTMLFormElement, unset: Set<string>, listed: (key: string) => string[], profs: Array<[string, string[]]>): Promise<void> {
+  const page = SET.page;
+  if (page === null || !form.isConnected) {
+    return;
+  }
   const set: Record<string, string | null> = {};
   const keys: Record<string, string | null> = {};
   for (const r of page.settings) {
-    if (form.querySelector(`.set[data-key="${r.key}"]`) === null) {
+    if (form.querySelector(`[name="${r.key}"]`) === null) {
       continue;
     }
     const field = form.querySelector<HTMLInputElement | HTMLTextAreaElement>(`:is(input, textarea)[name="${r.key}"]`);
@@ -1734,46 +1804,48 @@ async function settings_save(form: HTMLFormElement, page: Page, unset: Set<strin
       keys[k.name] = typed;
     }
   }
-  const why = must(form.querySelector(".save .why"), "the save's why");
   form.querySelectorAll(".err").forEach((e) => (e.textContent = ""));
+  // a profile still being made (no name or no model yet) waits
   let profiles: Record<string, string[]> | undefined;
   if (page.profiles != null) {
     const now = profs.map(([name, list]): [string, string[]] => [name.trim(), list]);
     const all = now.map(([name]) => name);
-    const bad = all.includes("") ? "Name each profile." : all.some((name, k) => all.indexOf(name) !== k) ? "Two profiles have the same name." : now.some(([, list]) => list.length === 0) ? "Add a model to each profile." : null;
-    if (bad !== null) {
-      const at = find(form, ".profiles", HTMLElement);
-      must(at.querySelector(".err"), "the profiles' err").textContent = bad;
-      at.scrollIntoView({ block: "center" });
-      return;
+    const making = all.includes("") || now.some(([, list]) => list.length === 0);
+    const twice = all.some((name, k) => name !== "" && all.indexOf(name) !== k);
+    if (twice) {
+      must(find(form, ".profiles", HTMLElement).querySelector(".err"), "the profiles' err").textContent = "Two profiles have the same name.";
     }
     const was = JSON.stringify(page.profiles);
-    profiles = JSON.stringify(Object.fromEntries(now)) === was ? undefined : Object.fromEntries(now);
+    profiles = making || twice || JSON.stringify(Object.fromEntries(now)) === was ? undefined : Object.fromEntries(now);
   }
   if (Object.keys(set).length === 0 && Object.keys(keys).length === 0 && profiles === undefined) {
-    why.textContent = "Nothing changed.";
     return;
   }
-  const go = find(form, ".go", HTMLButtonElement);
-  go.disabled = true;
-  why.textContent = "";
   RENEW.saving++;
   const out = await View.post("/api/settings", { version: page.version, set, keys, ...(profiles === undefined ? {} : { profiles }) });
   RENEW.saving--;
-  go.disabled = false;
   if (!out.ok) {
-    const at = out.key === undefined ? null : form.querySelector<HTMLElement>(`.set[data-key="${text_of(out.key, "null")}"]`);
-    (at?.querySelector(".err") ?? why).textContent = text_of(out.error, "Could not save.");
-    (at ?? why).scrollIntoView({ block: "center" });
+    const key = out.key === undefined ? null : text_of(out.key, "null");
+    const at = key === null ? null : form.querySelector<HTMLElement>(`.set[data-key~="${key}"]`);
+    if (at === null) {
+      toast(text_of(out.error, "Could not save."));
+      return;
+    }
+    must(at.querySelector(".err"), "the setting's err").textContent = text_of(out.error, "Could not save.");
     return;
   }
   const done = out as Page & { saved: string[] };
   const later = done.saved.filter((key) => page.settings.find((r) => r.key === key)?.apply === "restart");
-  settings_draw(done);
-  RENEW.dirty.delete(form);
-  RENEW.since = true;
+  SET.page = done;
+  unset.clear();
+  if (SET.queued === 0) {
+    RENEW.dirty.delete(form);
+    settings_redraw(done);
+  }
   draw(false);
-  toast(later.length === 0 ? "Saved." : "Saved. " + later.join(", ") + " " + (later.length === 1 ? "applies" : "apply") + " once the server restarts.");
+  if (later.length > 0) {
+    toast(later.join(", ") + " " + (later.length === 1 ? "applies" : "apply") + " once the server restarts.");
+  }
 }
 
 function renew_due(build: string | undefined): void {
@@ -1786,7 +1858,6 @@ function renew_due(build: string | undefined): void {
     RENEW.gave = v.ws;
     return;
   }
-  RENEW.since = RENEW.due && RENEW.since;
   RENEW.due = true;
   draw(false);
 }
@@ -1804,7 +1875,8 @@ function renew_free(hidden = false): boolean {
   const page = location.pathname !== "/" && location.pathname !== TREE;
   const quiet = P.rec === null && UPS.size === 0 && v.out.length === 0 && !$("#import").matches(":popover-open") && !Viewer.viewer_on();
   const typing = !DESK.matches && Box.box_focused() && !hidden;
-  return quiet && !typing && (!page || (RENEW.since && RENEW.dirty.size === 0 && RENEW.saving === 0));
+  const editing = page && document.activeElement !== null && $("#account").contains(document.activeElement) && document.activeElement.matches("input, textarea, select");
+  return quiet && !typing && (!page || (!editing && RENEW.dirty.size === 0 && RENEW.saving === 0));
 }
 
 async function renew(hidden = false): Promise<void> {
