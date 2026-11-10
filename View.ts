@@ -5,6 +5,7 @@ import { LABELS, type Fall, type Move, Pick } from "./Pick.ts";
 import { GLYPH, WHO } from "./Theme.ts";
 import type { Timer } from "./Timer.ts";
 import type { Bg, Job } from "./Machine.ts";
+import type { Row as SubRow } from "./Sub.ts";
 import { rec } from "./Json.ts";
 
 export type Part = [number, number];
@@ -23,7 +24,13 @@ type Node = { text: string; to: string };
 export type Live = { kind: Kind; text: string };
 
 // an agent as the chat list shows it: last, its last message's gist
-export type Mate = { id: string; name: string; about: string; picture: string; unread: number; last: string; busy: boolean; archived: number };
+export type Mate = { id: string; name: string; about: string; picture: string; unread: number; last: string; busy: boolean; archived: number; subs?: SubRow[] };
+
+// a subagent's page: its log as loaded (from: how many of its first
+// entries aren't yet), what it says now, whether it is done (#116)
+type Logged = Entry & { id?: number };
+
+type Page = { name: string; log: Logged[] | null; live: Live[]; from: number; loading: boolean; done: boolean };
 
 export type Progress = { done: number; total: number; why: string | null; msgs: number; open: number[] };
 
@@ -82,6 +89,8 @@ export type View = State & {
   agent : string;
   on    : string;
   held  : string;
+  pages : Map<string, Page>;
+  page  : Page | null;
   team  : Mate[];
   parts : Part[];
   turn  : number;
@@ -109,9 +118,10 @@ export type Server =
   | ({ $: "know" } & Pack)
   | { $: "view"; parts: Part[]; turn: number }
   | { $: "zoom"; id: number; n: number; parts: Part[] }
-  | ({ $: "entry"; id?: number; sent?: boolean } & Entry)
-  | { $: "delta"; kind: Kind; text: string; fresh?: boolean }
-  | { $: "live"; live: Live[] }
+  | ({ $: "entry"; agent?: string; id?: number; sent?: boolean } & Entry)
+  | { $: "delta"; agent?: string; kind: Kind; text: string; fresh?: boolean }
+  | { $: "live"; agent?: string; live: Live[] }
+  | { $: "agent"; name: string; found: boolean; from: number; before?: number; entries: Logged[]; done: boolean; end?: boolean }
   | ({ $: "state" } & State)
   | { $: "note"; text: string }
   | { $: "team"; agents: Mate[] }
@@ -141,6 +151,7 @@ export type Client =
   | { $: "running"; jobs: Bg[] }
   | { $: "unschedule"; id: string }
   | { $: "zoom"; part: Part }
+  | { $: "agent"; name: string; before?: number }
   | { $: "open"; agent: string };
 
 type Post = { msg: Client & { id: string }; ws: WebSocket | null; done: (a: Answer) => void; said: string };
@@ -160,13 +171,15 @@ export type Act =
   | { $: "Unschedule"; id: string }
   | { $: "Plug"; name: string }
   | { $: "Talk"; on: boolean }
+  | { $: "Goto"; name: string | null }
+  | { $: "Earlier" }
 
 export type Row =
   | { $: "Sum"; id: number; n: number; text: string }
   | { $: "Box"; id: number; n: number; text: string; rows: Row[] }
   | { $: "Msg"; id: number | null; kind: Kind; who: string; text: string; body: Md.Block[]; call: Call.Call | null; images: string[]; queued?: boolean; from?: string; of?: string }
   | { $: "Line"; id: number | null; call: Call.Call; echo: string | null; rows: Row[] }
-  | { $: "Cap"; text: string; think?: true }
+  | { $: "Cap"; text: string; think?: true; earlier?: true }
 
 export type Knob = { text: string; move: Move; hint: string; choices: Choice[] };
 
@@ -278,6 +291,8 @@ export function view_new(agent: string): View {
     mcp       : [],
     talk      : null,
     held      : "",
+    pages     : new Map(),
+    page      : null,
     parts     : [],
     turn      : Infinity,
     nodes     : new Map(),
@@ -306,6 +321,8 @@ export function view_switch(v: View, agent: string): Client[] {
     return [];
   }
   v.agent = agent;
+  v.pages.clear();
+  v.page = null;
   return v.up ? [{ $: "open", agent }] : [];
 }
 
@@ -328,6 +345,12 @@ export function view_hear(v: View, msg: Server): Client[] {
     }
     v.on = msg.agent;
     v.held = msg.agent;
+    // a new link sends a subagent's page again
+    if (v.page !== null) {
+      v.pages.clear();
+      v.pages.set(v.page.name, v.page);
+      return [{ $: "agent", name: v.page.name }];
+    }
   }
   if (!OWN.includes(msg.$) && v.on !== v.agent) {
     return [];
@@ -346,21 +369,55 @@ export function view_hear(v: View, msg: Server): Client[] {
       v.turn  = msg.turn;
       return [];
     }
+    case "agent": {
+      const page = v.pages.get(msg.name);
+      if (page === undefined) {
+        return [];
+      }
+      page.done = msg.done;
+      if (msg.end === true) {
+        page.live = [];
+        return [];
+      }
+      if (msg.found && (msg.before === undefined || msg.before === page.from)) {
+        page.log = [...msg.entries, ...(msg.before === undefined ? [] : page.log ?? [])];
+        [page.from, page.loading] = [msg.from, false];
+        return [];
+      }
+      if (!msg.found) {
+        v.pages.delete(msg.name);
+        v.page = v.page === page ? null : v.page;
+        v.notes.push("No subagent " + msg.name + ".");
+      }
+      return [];
+    }
     case "zoom":
     case "jobs":
     case "job": {
       return [];
     }
     case "entry": {
+      if (msg.agent !== undefined) {
+        const { $, agent, id, sent, ...entry } = msg;
+        const log = v.pages.get(agent)?.log;
+        log?.push(id === undefined ? entry : { ...entry, id });
+        return [];
+      }
       view_entry(v, msg);
       return [];
     }
     case "delta": {
-      live_push(v.live, msg.kind, msg.text, msg.fresh);
+      const live = msg.agent === undefined ? v.live : v.pages.get(msg.agent)?.live;
+      if (live !== undefined) {
+        live_push(live, msg.kind, msg.text, msg.fresh);
+      }
       return [];
     }
     case "live": {
-      live_set(v.live, msg.live);
+      const live = msg.agent === undefined ? v.live : v.pages.get(msg.agent)?.live;
+      if (live !== undefined) {
+        live_set(live, msg.live);
+      }
       return [];
     }
     case "state": {
@@ -441,6 +498,24 @@ export function view_act(v: View, act: Act): Client[] {
     case "Talk": {
       return [{ $: "talk", on: act.on }];
     }
+    case "Goto": {
+      if (act.name === null) {
+        v.page = null;
+        return [];
+      }
+      const known = v.pages.get(act.name);
+      v.page = known ?? { name: act.name, log: null, live: [], from: 0, loading: false, done: false };
+      v.pages.set(act.name, v.page);
+      return known === undefined ? [{ $: "agent", name: act.name }] : [];
+    }
+    case "Earlier": {
+      const page = v.page;
+      if (page === null || page.log === null || page.from === 0 || page.loading) {
+        return [];
+      }
+      page.loading = true;
+      return [{ $: "agent", name: page.name, before: page.from }];
+    }
     case "Plug": {
       const asked = v.out.flatMap((p) => (p.msg.$ === "mcp" && p.msg.name === act.name ? [p.msg.on] : [])).at(-1);
       const on = asked ?? v.mcp.find((p) => p.name === act.name)?.on;
@@ -455,7 +530,18 @@ export function view_act(v: View, act: Act): Client[] {
 }
 
 export function view_body(v: View): Row[] {
+  if (v.page !== null) {
+    return page_rows(v.page);
+  }
   return view_lines(view_rows(v, v.parts).flat());
+}
+
+// a subagent's page: its log, earlier entries on a tap
+function page_rows(page: Page): Row[] {
+  const log = page.log ?? [];
+  const earlier: Row[] = page.from > 0 ? [{ $: "Cap", text: page.loading ? "Loading…" : "Earlier messages", earlier: true }] : [];
+  const rows = log.flatMap((e, k) => (e.id === 0 && e.kind === "note" ? [] : whole_rows(e.id ?? null, e, log[k - 1])));
+  return [...earlier, ...view_lines(rows), ...(page.done && page.log !== null ? [Cap("Done: its report is in the chat that spawned it.")] : [])];
 }
 
 // each tool call and its result are one line that opens in place (#121);
@@ -488,6 +574,9 @@ function view_rows(v: View, parts: Part[]): Row[][] {
 }
 
 export function view_tail(v: View): Row[] {
+  if (v.page !== null) {
+    return view_lines(v.page.live.flatMap((l) => entry_rows(null, l.kind, l.text)));
+  }
   const thought = v.thinking === false && v.live.some((l) => l.kind === "mind") ? [{ $: "Cap" as const, text: "Thinking", think: true as const }] : [];
   const rows = [...thought, ...view_lines(v.live.filter((l) => v.thinking !== false || l.kind !== "mind").flatMap((l) => entry_rows(null, l.kind, l.text)))];
   const load = v.importing !== null ? [Cap(progress_show(v.importing))] : [];

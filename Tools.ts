@@ -3,12 +3,15 @@ import type { Out } from "./Agent.ts";
 import * as config from "./Config.ts";
 import { Limit } from "./Limit.ts";
 import { INT, JOB, STR, TOOLS, spec, type Bg, type Job, type Skill, type Spec } from "./Machine.ts";
+import { clip_page } from "./Clip.ts";
 import { Mcp, type Servers } from "./Mcp.ts";
 import { Memory } from "./Memory.ts";
 import * as Prompts from "./Prompts.ts";
 import { Team, UNII } from "./Team.ts";
 import * as Timer from "./Timer.ts";
 import { PING } from "./View.ts";
+import { Sub, type Spawn } from "./Sub.ts";
+import { EFFORTS } from "./Pick.ts";
 import { err_why } from "./Err.ts";
 import { get, list as items, rec, text_of } from "./Json.ts";
 
@@ -28,13 +31,24 @@ type Running = { term: string; job: Job; out: Promise<Out>; end: (out: Out) => v
 
 type Link = { send: (msg: object) => void; live: () => boolean; work: string; scratch: string | null; shell: string | null };
 
-// an agent's place at the tools: its memory, and its chat's hooks
+// an agent's place at the tools: its memory, and its chat's hooks; a
+// subagent's has no subs: it spawns none, messages no one (#116)
 export type Seat = {
   mem    : Memory;
   note   : (text: string) => void;
   report : (text: string) => void;
   timed  : () => void;
   message: (to: string, text: string) => Promise<Out>;
+  subs   : Subs | null;
+};
+
+// an agent's subagents
+export type Subs = {
+  spawn   : (tasks: Spawn[]) => Promise<string>;
+  tell    : (name: string, text: string) => Promise<Out>;
+  stop    : (name: string, why: string) => Promise<Out>;
+  working : () => string[];
+  show    : (name: string) => string | null;
 };
 
 // what the agents share: their notes on devices and MCP servers go to Unii
@@ -71,7 +85,7 @@ const SESSION = "mcp-session-id";
 const LOOK = 3000;
 
 const OWN: Spec[] = [
-  spec("zoom", "Open the line id+n of the view into the two lines of n/2 under it; n = 1 gives the message whole. A long text comes in pages from character at, saying where to go on. With agent, a line of that agent's memory, by its name.", { id: INT, n: INT, at: INT, agent: STR }, ["id"]),
+  spec("zoom", "Open the line id+n of the view into the two lines of n/2 under it; n = 1 gives the message whole. A long text comes in pages from character at, saying where to go on. With agent, a line of that agent's memory, by its name; a subagent's name gives its whole chat (id: 0).", { id: INT, n: INT, at: INT, agent: STR }, ["id"]),
   spec("date", "The date and time of message id.", { id: INT }, ["id"]),
 ];
 const BOSS: Spec[] = [
@@ -84,6 +98,14 @@ const BOSS: Spec[] = [
   spec("schedules", "List the chat's schedules: id, when each comes next, its message.", {}, []),
   spec("unschedule", "Cancel a schedule, by its id.", { id: STR }, ["id"]),
   spec("message", "Message another agent of the team, by name. Only send useful messages: no thanks, confirmations, acknowledgements. A message that needs no answer gets none. It lands in their chat as a new message from you, starting \"[your name]\", and starts a turn there; one at work gets it right after its current tool calls. No one answers by itself: the only way to answer an agent is to call message to it, and your plain reply stays in your own chat, for the user. A chain of messages between agents is cut after a few in a row (\"hop limit reached, wait for the user\"): then tell the user.", { agent: STR, text: STR }, ["agent", "text"]),
+  spec("spawn", "Start one subagent per task, in parallel, and return their names at once. Each one's report reaches you when it finishes, as a new message from it, starting \"[Name]\"; then it is done, and zoom with its name as agent reads its whole chat. One that hits an AI service's usage limit waits for the reset and goes on. A subagent starts with your view (memory: false: with only its task) and knows what you want only from its task. Each task names its own model and effort, if any.", { tasks: { type: "array", items: { type: "object", properties: {
+    task   : STR,
+    model  : { type: "string", description: "Its model, one offered here; by default, yours. Set it only when the user asks for that model or vendor, since another vendor may cost more." },
+    effort : { type: "string", enum: EFFORTS, description: "How hard it thinks; by default, as hard as you." },
+    memory : { type: "boolean", description: "Whether it starts with your view; default true." },
+  }, required: ["task"] } } }, ["tasks"]),
+  spec("tell", "Send a message to a running subagent, by name: it gets it right after its current tool calls, and its report answers it. A subagent that has reported or was stopped is done: spawn a new one.", { name: STR, message: STR }, ["name", "message"]),
+  spec("stop", "Stop a running subagent at once, by name, whatever it is doing. It is done then: its report says it was stopped. Its background jobs keep running, and their reports reach you.", { name: STR, why: { type: "string", description: "Why, for its report." } }, ["name"]),
   spec("resume", "Wake every call on this server waiting for an AI service's usage limit (other turns, summaries), when the user says a limit was reset early. Each asks again once; one still limited waits again.", {}, []),
 ];
 const DEVICE = { device: { type: "string", description: "The name of the device to run on, one listed under Devices." } };
@@ -154,8 +176,11 @@ export namespace Tools {
   }
 
   export function at_work(tools: Tools, who: string): Block {
-    const jobs = [...tools.devices].flatMap(([device, d]) => d.bg.jobs.filter((j) => j.agent === who).map((j) => j.id + " (" + [device, j.command.replace(/\s+/g, " ").trim().slice(0, 60), Math.round((Date.now() - j.since) / 60e3) + " min"].join(", ") + ")"));
-    return { text: jobs.length === 0 ? "" : Prompts.prompt("jobs", { jobs: jobs.join(", ") }) + "\n\n", mark: false };
+    const subs = tools.seats.get(who)?.subs?.working() ?? [];
+    const mine = (agent: string) => agent === who || subs.some((s) => s.startsWith(agent + " "));
+    const jobs = [...tools.devices].flatMap(([device, d]) => d.bg.jobs.filter((j) => mine(j.agent)).map((j) => j.id + " (" + [device, ...(j.agent === who ? [] : [j.agent]), j.command.replace(/\s+/g, " ").trim().slice(0, 60), Math.round((Date.now() - j.since) / 60e3) + " min"].join(", ") + ")"));
+    const text = (subs.length === 0 ? "" : "Subagents at work now: " + subs.join(", ") + ".\n") + (jobs.length === 0 ? "" : Prompts.prompt("jobs", { jobs: jobs.join(", ") }) + "\n");
+    return { text: text === "" ? "" : text + "\n", mark: false };
   }
 
   export async function fetch(req: Request): Promise<Response> {
@@ -209,12 +234,12 @@ export namespace Tools {
       case "tools/list": {
         const theirs = await Mcp.list(tools.mcp, () => Tools.off(tools));
         const notes = Mcp.heard(tools.mcp, Tools.off(tools), who);
-        return { tools: [...Tools.list(), ...theirs].map((t) => ({ name: t.name, description: t.info, inputSchema: t.schema })), notes };
+        return { tools: [...Tools.list(tools.seats.get(who)?.subs === null), ...theirs].map((t) => ({ name: t.name, description: t.info, inputSchema: t.schema })), notes };
       }
       case "tools/call": {
         const name = String(params.name);
         const args = rec(params.arguments) ? params.arguments : {};
-        const has = Tools.list().some((t) => t.name === name);
+        const has = Tools.list(tools.seats.get(who)?.subs === null).some((t) => t.name === name);
         const mcp = has ? null : Mcp.find(tools.mcp, Tools.off(tools), name);
         Mcp.used(tools.mcp);
         const no: Out = { text: "No tool " + name + ".", fail: true };
@@ -229,9 +254,10 @@ export namespace Tools {
     return null;
   }
 
-  // the same for every agent, so one cached copy serves them all
-  export function list(): Spec[] {
-    return [...OWN, ...BOSS, ...KIT, SKILL];
+  // the same for every agent, so one cached copy serves them all, and the
+  // same for every subagent
+  export function list(sub = false): Spec[] {
+    return sub ? [...OWN, ...KIT, SKILL] : [...OWN, ...BOSS, ...KIT, SKILL];
   }
 
   export function off(tools: Tools): string[] {
@@ -253,6 +279,10 @@ export namespace Tools {
     const mem = seat.mem;
     switch (name) {
       case "zoom": {
+        const log = args.agent === undefined ? null : seat.subs?.show(text_of(args.agent)) ?? null;
+        if (log !== null) {
+          return { text: clip_page(log, Number(args.at ?? 0)), fail: false };
+        }
         const other = args.agent !== undefined;
         const them = other ? Team.by_name(text_of(args.agent)) : null;
         const there = !other ? seat : them === null || them.archived !== 0 ? undefined : Tools.seat(tools, them.id);
@@ -292,6 +322,16 @@ export namespace Tools {
       }
       case "message": {
         return await seat.message(text_of(args.agent), text_of(args.text));
+      }
+      case "spawn": {
+        const tasks = Sub.spawns(args);
+        return typeof tasks === "string" ? { text: tasks, fail: true } : seat.subs === null ? { text: "A subagent spawns none.", fail: true } : { text: await seat.subs.spawn(tasks), fail: false };
+      }
+      case "tell": {
+        return seat.subs === null ? { text: "A subagent tells none.", fail: true } : await seat.subs.tell(text_of(args.name), text_of(args.message));
+      }
+      case "stop": {
+        return seat.subs === null ? { text: "A subagent stops none.", fail: true } : await seat.subs.stop(text_of(args.name), args.why === undefined ? "" : text_of(args.why, "null"));
       }
       case "resume": {
         const n = Limit.resume();

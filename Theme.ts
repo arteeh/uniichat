@@ -26,6 +26,9 @@ const TOOL: Record<string, string> = {
   schedule   : "⏰",
   schedules  : "⏰",
   unschedule : "⏰",
+  spawn      : "🐣",
+  tell       : "💬",
+  stop       : "✋",
 };
 const TOOL_ANY = "🔧";
 

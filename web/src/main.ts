@@ -39,6 +39,9 @@ const UNII = "unii";
 
 const AGENT = /^\/a\/([a-z0-9]{1,16})(\/edit)?$/;
 
+// a subagent's page, under its spawner's chat (#116)
+const SUB = /^\/a\/([a-z0-9]{1,16})\/s\/([A-Za-z]{2,40})$/;
+
 const v = View.view_new(AGENT.exec(location.pathname)?.[1] ?? UNII);
 
 const BOX = $(".composer .field", HTMLElement);
@@ -268,6 +271,8 @@ function chat(): void {
     }
   }, true);
   addEventListener("resize", resized);
+  // a subagent's row says how long it has been at its tool
+  setInterval(() => v.team.some((m) => (m.subs ?? []).length > 0) && draw(false), 30e3);
   draw(true);
 }
 
@@ -384,6 +389,11 @@ function act(a: View.Act): void {
 
 function click(ev: MouseEvent): void {
   const target = ev.target as HTMLElement;
+  const open = target.closest<HTMLElement>(".subopen")?.dataset.sub;
+  if (open !== undefined) {
+    go("/a/" + v.agent + "/s/" + open);
+    return;
+  }
   const el = target.closest<HTMLElement>("[data-act], [data-copy], [data-go], [data-knob], .choices > button, .imp");
   const sel = getSelection();
   const pic = Viewer.viewer_pic(target);
@@ -1006,7 +1016,7 @@ function paint(): void {
 }
 
 function shown_key(): string {
-  return v.agent;
+  return v.agent + (v.page === null ? "" : "/s/" + v.page.name);
 }
 
 function at_end(): boolean {
@@ -1023,7 +1033,7 @@ function bars(): void {
   }
   const mate = v.team.find((m) => m.id === v.agent);
   BOX.dataset.placeholder = "Message " + (mate?.name ?? "");
-  markup($("#list .rows"), Html.list_html(v.team, WIDE.matches || location.pathname !== "/" ? v.agent : null));
+  markup($("#list .rows"), Html.list_html(v.team, WIDE.matches || location.pathname !== "/" ? v.agent : null, v.page?.name ?? null));
   $("header .who .name").textContent = mate?.name ?? "";
   markup($("header .who .face"), [Html.face_html(mate?.picture ?? "")]);
   const stop = View.view_stoppable(v) && Box.box_blank();
@@ -1170,7 +1180,8 @@ function up_to(): string {
 function up_from(path: string): string | null {
   const url = new URL(path, location.origin);
   const edit = FORM.exec(url.pathname)?.[2];
-  return url.pathname === TREE ? "/a/" + (url.searchParams.get("a") ?? UNII) : edit !== undefined ? "/a/" + edit : url.pathname === "/" ? null : "/";
+  const sub = SUB.exec(url.pathname)?.[1];
+  return url.pathname === TREE ? "/a/" + (url.searchParams.get("a") ?? UNII) : edit !== undefined ? "/a/" + edit : sub !== undefined ? "/a/" + sub : url.pathname === "/" ? null : "/";
 }
 
 // a change of screen, in a short slide on a phone (in going down a level,
@@ -1209,7 +1220,14 @@ function route(): void {
   const tree = p === TREE;
   const list = p === "/" && !WIDE.matches;
   const chat = !page && !tree && !list;
-  chat_to(AGENT.exec(p)?.[1] ?? (tree ? new URLSearchParams(location.search).get("a") ?? UNII : p === "/" ? UNII : v.agent));
+  const sub = SUB.exec(p);
+  const left = !$("#log").hidden && v.page === null;
+  chat_to(AGENT.exec(p)?.[1] ?? sub?.[1] ?? (tree ? new URLSearchParams(location.search).get("a") ?? UNII : p === "/" ? UNII : v.agent));
+  for (const out of View.view_act(v, { $: "Goto", name: sub?.[2] ?? null })) {
+    View.link_send(v, out);
+  }
+  P.rows = true;
+  document.body.classList.toggle("subpage", sub !== null);
   document.body.classList.toggle("wide", WIDE.matches);
   document.body.classList.toggle("list", list);
   document.querySelectorAll<HTMLAnchorElement>("#tree .tab").forEach((a) => {
@@ -1217,7 +1235,7 @@ function route(): void {
     a.dataset.go = to;
     a.href = to;
   });
-  if (!chat && !$("#log").hidden && SCROLL.away === null) {
+  if ((!chat || sub !== null) && left && SCROLL.away === null) {
     SCROLL.away = { y: scrollY, end: SCROLL.end };
   }
   $("#log").hidden = !chat;
@@ -1232,12 +1250,12 @@ function route(): void {
   P.at = at;
   // a chat already in view stays where it is: crossing the 900px line
   // (WIDE.onchange) routes again and used to jump it to the end (#127)
-  if (!chat) {
+  if (!chat || sub !== null) {
     P.shown = location.pathname;
   } else if (SCROLL.away !== null) {
     P.shown = shown_key();
   }
-  if (chat && SCROLL.away !== null) {
+  if (chat && sub === null && SCROLL.away !== null) {
     SCROLL.end = SCROLL.away.end;
     P.rows = true;
     paint();
@@ -1246,7 +1264,8 @@ function route(): void {
     SCROLL.away = null;
   }
   const edit = FORM.exec(p)?.[2];
-  $("header .title").textContent = !page ? "" : !form ? "Settings" : edit === undefined ? "New agent" : v.team.find((m) => m.id === edit)?.name ?? "";
+  const face = sub === null ? "" : v.team.find((m) => m.id === v.agent)?.subs?.find((s) => s.name === sub[2])?.face ?? "";
+  $("header .title").textContent = sub !== null ? (face + " " + sub[2]).trim() : !page ? "" : !form ? "Settings" : edit === undefined ? "New agent" : v.team.find((m) => m.id === edit)?.name ?? "";
   if (page && form) {
     void agent_page(edit ?? null);
   } else if (page) {

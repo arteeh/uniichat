@@ -49,11 +49,20 @@ export function team_set(team: View.Mate[]): void {
   team.forEach((m) => TEAM.set(m.id, m));
 }
 
-export function list_html(team: View.Mate[], here: string | null): string[] {
-  return team.filter((m) => m.archived === 0).map((m) => {
+// each agent, its subagents under it (#116): their face, name and the start
+// of their task, their model and what they do now, and how long
+export function list_html(team: View.Mate[], here: string | null, sub: string | null = null, now = Date.now()): string[] {
+  return team.filter((m) => m.archived === 0).flatMap((m) => {
     const pill = m.unread > 0 ? `<span class="pill">${m.unread}</span>` : "";
-    const on = m.id === here ? ` aria-current="page"` : "";
-    return `<a class="mate" href="/a/${esc(m.id)}" data-go="/a/${esc(m.id)}"${on}>${face_html(m.picture)}<span class="text"><b>${esc(m.name)}</b><small>${esc(m.last)}</small></span>${pill}</a>`;
+    const on = m.id === here && sub === null ? ` aria-current="page"` : "";
+    const subs = (m.subs ?? []).map((s) => {
+      const to = "/a/" + esc(m.id) + "/s/" + esc(s.name);
+      const mins = Math.round((now - s.at) / 60e3);
+      const what = [s.model, s.effort, s.doing + (mins > 0 ? ", " + mins + " min" : "")].filter((x) => x !== "").join(" · ");
+      const at = m.id === here && s.name === sub ? ` aria-current="page"` : "";
+      return `<a class="mate sub" href="${to}" data-go="${to}"${at}><span class="face">${esc(s.face)}</span><span class="text"><span class="line"><b>${esc(s.name)}</b><small>${esc(s.task)}</small></span><small>${esc(what)}</small></span></a>`;
+    });
+    return [`<a class="mate" href="/a/${esc(m.id)}" data-go="/a/${esc(m.id)}"${on}>${face_html(m.picture)}<span class="text"><b>${esc(m.name)}</b><small>${esc(m.last)}</small></span>${pill}</a>`, ...subs];
   });
 }
 
@@ -95,10 +104,12 @@ function row_make(row: View.Row): string {
         const head = `<summary>${face_html(mate?.picture ?? "")}<b>${esc(mate?.name ?? row.who)}</b><span>${esc(gist)}</span></summary>`;
         return `<div class="msg ${row.kind} said${queued}"${at}><details>${head}${copy}${body}${pics}</details></div>`;
       }
-      return `<div class="msg ${row.kind}${queued}"${at}${who}>${copy}${fold}${pics}</div>`;
+      // a subagent's report opens its chat
+      const sub = row.kind === "work" && /^[A-Z][a-z]+[A-Z][a-z]+$/.test(row.who) ? `<button class="subopen" data-sub="${esc(row.who)}">${esc(row.who)}'s chat</button>` : "";
+      return `<div class="msg ${row.kind}${queued}"${at}${who}>${copy}${fold}${pics}${sub}</div>`;
     }
     case "Cap": {
-      return `<p class="cap${row.think === true ? " think" : ""}">${esc(row.text)}</p>`;
+      return row.earlier === true ? `<button class="cap earlier"${act_html({ $: "Earlier" })}>${esc(row.text)}</button>` : `<p class="cap${row.think === true ? " think" : ""}">${esc(row.text)}</p>`;
     }
     case "Line": {
       return line_html(row);

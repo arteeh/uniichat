@@ -1,4 +1,4 @@
-import { get, rec, text_of } from "./Json.ts";
+import { get, list, rec, text_of } from "./Json.ts";
 import type * as Md from "./Md.ts";
 
 export type Call = { name: string; head: string; device: string; blocks: Md.Code[] };
@@ -24,6 +24,9 @@ const READS = new Map<string, (x: Input) => Shown>([
   ["zoom",     (x) => ({ head: (x.agent === undefined ? "" : text_of(x.agent, "null") + " ") + msg_show(x.id, x.n) + (x.at === undefined ? "" : " from char " + text_of(x.at, "null")), blocks: [] })],
   ["date",     (x) => ({ head: msg_show(x.id, 1), blocks: [] })],
   ["computer", (x) => ({ head: "", blocks: text_block(x.task) })],
+  ["spawn",    (x) => ({ head: tasks_show(x.tasks), blocks: list(x.tasks).flatMap(task_block) })],
+  ["tell",     (x) => ({ head: text_of(x.name), blocks: text_block(x.message) })],
+  ["stop",     (x) => ({ head: text_of(x.name), blocks: text_block(x.why) })],
   ["schedule", (x) => ({ head: (x.cron === undefined ? text_of(x.at) : "cron " + text_of(x.cron, "null")) + " " + text_of(x.zone), blocks: text_block(x.message) })],
 ]);
 
@@ -81,6 +84,20 @@ function input_shown(input: Input): Shown {
 
 function text_block(x: unknown): Md.Code[] {
   return typeof x === "string" && x !== "" ? [{ $: "Code", k: "", x: x.replace(/\n$/, "") }] : [];
+}
+
+function tasks_show(tasks: unknown): string {
+  const all = list(tasks);
+  const knobs = [...new Set(all.map((t) => knobs_show(get(t, "model"), get(t, "effort"))))].filter((k) => k !== "").map((k) => " · " + k).join("");
+  return all.length + (all.length === 1 ? " subagent" : " subagents") + knobs;
+}
+
+function knobs_show(model: unknown, effort: unknown): string {
+  return [model, effort].filter((k) => typeof k === "string").join(" ");
+}
+
+function task_block(t: unknown): Md.Code[] {
+  return typeof t === "string" ? text_block(t) : text_block(get(t, "task")).map((b) => ({ ...b, k: knobs_show(get(t, "model"), get(t, "effort")) }));
 }
 
 function msg_show(id: unknown, n: unknown): string {

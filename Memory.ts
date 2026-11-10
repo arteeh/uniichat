@@ -3,7 +3,8 @@ import { AskAI, type Again, type Ask, type Block, type Call, type End as Answere
 import { clip_page, clip_pages } from "./Clip.ts";
 import * as config from "./Config.ts";
 import { Disk } from "./Disk.ts";
-import { err_why } from "./Err.ts";
+import { err_code, err_why } from "./Err.ts";
+import * as Names from "./Names.ts";
 import { Pick } from "./Pick.ts";
 import * as Prompts from "./Prompts.ts";
 import type { Timer } from "./Timer.ts";
@@ -125,6 +126,10 @@ const NODE_RULER = "-".repeat(NODE);
 const IMAGES = "/docs/images/";
 
 const MEDIA_DIR = "/docs/media/";
+
+// a subagent's log, in its spawner's folder (#116)
+const AGENTS = "/docs/agent/";
+const AGENT_LOGS = new Map<string, number>();
 
 const PAGE_MAX = 4 * 2 ** 20;
 
@@ -1125,7 +1130,16 @@ export namespace Memory {
         sep = ",\n";
       }
     }
-    yield '],\n"images": {';
+    yield '],\n"agents": {';
+    sep = "\n";
+    for (const name of (fs.existsSync(mem.dir + AGENTS) ? fs.readdirSync(mem.dir + AGENTS).sort() : []).map((file) => file.replace(/\.jsonl$/, ""))) {
+      const log = Memory.agent(mem, name);
+      if (log !== null) {
+        yield sep + JSON.stringify(name) + ": " + JSON.stringify(log.map(({ i, kind, text, date, of, tool }) => ({ id: i, kind, text, date, of, tool })));
+        sep = ",\n";
+      }
+    }
+    yield '},\n"images": {';
     sep = "\n";
     for (const name of ls(IMAGES).filter((name) => mem.docs === mem.dir || own.has(name))) {
       const file = Memory.image_file(mem, name);
@@ -1161,6 +1175,38 @@ export namespace Memory {
     const when = Memory.date(mem, a) + (a === b ? "" : " – " + Memory.date(mem, b));
     const head = root === null ? ["LVL" + l + " #" + a + (a === b ? "" : "-" + b), when, Memory.bytes(text) + " B"] : ["ROOT #" + i, when, root.kind, root.size + " B"];
     return { h: head.join(" · "), t: text, k: root?.kind };
+  }
+
+  export function agent(mem: Memory, name: string): Root[] | null {
+    const file = mem.dir + AGENTS + name + ".jsonl";
+    return /^[A-Za-z]+$/.test(name) && fs.existsSync(file) ? Memory.file(file) : null;
+  }
+
+  export function agent_new(mem: Memory): string {
+    const name = Names.name_random();
+    fs.mkdirSync(mem.dir + AGENTS, { recursive: true });
+    try {
+      fs.writeFileSync(mem.dir + AGENTS + name + ".jsonl", "", { flag: "wx" });
+    } catch (err) {
+      if (err_code(err) === "EEXIST") {
+        return Memory.agent_new(mem);
+      }
+      throw err;
+    }
+    AGENT_LOGS.set(mem.dir + name, 0);
+    return name;
+  }
+
+  export function agent_push(mem: Memory, name: string, kind: Kind, text: string, pair: Pair = {}): Root {
+    const n = AGENT_LOGS.get(mem.dir + name) ?? Memory.agent(mem, name)?.length ?? 0;
+    const root = Memory.root(n, { kind, text, ...pair });
+    Memory.append(mem.dir + AGENTS + name + ".jsonl", [JSON.stringify(root)]);
+    AGENT_LOGS.set(mem.dir + name, n + 1);
+    return root;
+  }
+
+  export function agent_show(mem: Memory, name: string): string {
+    return Memory.agent(mem, name)?.map((root) => root.i + "|" + Memory.show(root)).join("\n\n") ?? "No agent " + name + ".";
   }
 
 }

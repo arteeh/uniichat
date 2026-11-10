@@ -79,7 +79,7 @@ Use
 ---
 
 - **Web:** open the server's address. Install it as an app from your browser to get notifications when Unii replies.
-- **Agents** (release candidate): **+** in the chat list makes another agent, with its own chat, memory and prompt; agents can message each other, and Unii sees what all of them do.
+- **Agents** (release candidate): **+** in the chat list makes another agent, with its own chat, memory and prompt; agents can message each other, and Unii sees what all of them do. Each agent can spawn subagents for one-off tasks (a review, a search): they show under it in the chat list, report back once, and are done.
 - **Conversation mode:** the mode menu left of the model picker. From then on, your and Unii's messages stay word for word in Unii's memory, for a real discussion. It costs more per turn and turns itself off when the model's context window fills up.
 - `unii help` lists every command.
 

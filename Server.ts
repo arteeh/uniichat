@@ -5,7 +5,9 @@ import * as net from "node:net";
 import * as path from "node:path";
 import type { ServerWebSocket } from "bun";
 import type { Out as Done } from "./Agent.ts";
-import { AskAI, type Ask, type Call, type End, type Event, type Kind, type Parked, type Said, type Vendor } from "./AskAI.ts";
+import { AskAI, type Ask, type Block, type Call, type End, type Event, type Kind, type Parked, type Said, type Say, type Vendor } from "./AskAI.ts";
+import { report_read, tool_name } from "./Call.ts";
+import { Sub, type Role, type Spawn } from "./Sub.ts";
 import { clip_pages } from "./Clip.ts";
 import { Disk } from "./Disk.ts";
 import { Mcp } from "./Mcp.ts";
@@ -26,7 +28,7 @@ import { LIMIT, Limit } from "./Limit.ts";
 import { Run, type Heard } from "./Run.ts";
 import * as Service from "./Service.ts";
 import * as Timer from "./Timer.ts";
-import { SEARCHES, Tools, type Seat } from "./Tools.ts";
+import { SEARCHES, Tools, type Seat, type Subs } from "./Tools.ts";
 import { JOB } from "./Machine.ts";
 import { HEADS } from "./Heads.ts";
 import { ACTIVE, FRAME, IDLE, IMAGES, live_push, MEDIA, PING, QUIT, SUMMARIES, TICK, TURN, WIRE, type Answer, type Live, type Part, type Pending, type Queued, type Server as Out, type Sums, type Talk as Meter, TOKEN, type Wait, type Mate } from "./View.ts";
@@ -54,7 +56,7 @@ type Body = { fh: fs.promises.FileHandle; size: number };
 
 export type Msg = { id: number; end: number };
 
-type Talk = Run<Pending, Msg>;
+type Talk = Run<Pending, Msg> | Run<Say, Msg>;
 
 type Eye = { parts: Part[]; from: number };
 
@@ -98,6 +100,8 @@ type Turn = {
   told  : boolean;
   gist  : number;
   stopped: boolean;
+  subs  : Map<string, Sub<Msg>>;
+  gone  : Map<string, string>;
 };
 
 type Chat = Parts & Doing & Turn;
@@ -109,6 +113,9 @@ const LOCK_DEAD  = 30000;
 const WIN        = process.platform === "win32";
 const PID        = config.DIR + "/server.pid";
 const SETTLE     = 200;
+// a subagent page's entries at a time; how long a stop waits for one to end
+const SHOWN      = 100;
+const HALT       = 5000;
 const AGENTS     = config.DIR + "/agents";
 const TALK_FULL  = "Conversation mode switched itself off: it was full.";
 const TALK_SMALL = "Conversation mode switched itself off: too long for {model}.";
@@ -241,9 +248,9 @@ export namespace Chat {
     const who = id === UNII ? "main" : id;
     const chat: Chat = {
       id, who, mem, tools, pick, socks: new Set(), acts: new Map(), main, model: "", check: null, asked: false, open: 0,
-      eye: { parts: [], from: 0 }, after: Promise.resolve(), batch: null, writes: Promise.resolve(), held: null, back: -1, sums: null, resume: null, limits: null, bell: undefined, fresh: true, told: false, gist: -1, stopped: false,
+      eye: { parts: [], from: 0 }, after: Promise.resolve(), batch: null, writes: Promise.resolve(), held: null, back: -1, sums: null, resume: null, limits: null, bell: undefined, fresh: true, told: false, gist: -1, stopped: false, subs: new Map(), gone: new Map(),
     };
-    const seat: Seat = { mem, note: (text) => Chat.note(chat, text), report: (text) => Chat.report(chat, text, true), timed: () => Chat.timed(chat), message: (to, text) => Chat.message(chat, to, text) };
+    const seat: Seat = { mem, note: (text) => Chat.note(chat, text), report: (text) => Chat.report(chat, text, true), timed: () => Chat.timed(chat), message: (to, text) => Chat.message(chat, to, text), subs: Chat.subs_of(chat) };
     tools.seats.set(who, seat);
     Main.chats.set(id, chat);
     Main.keep_picks();
@@ -573,7 +580,7 @@ export namespace Chat {
   export function said(mem: Memory, a: number, b: number): Said {
     const { kind, text } = Memory.at(mem, a);
     const sender = Memory.at(mem, a).from;
-    const from = kind === "user" ? Prompts.sender("user") : kind !== "work" ? Prompts.sender("uniichat") : sender !== undefined ? Team.get(sender)?.name ?? Prompts.sender("agent") : text.startsWith(JOB) ? Prompts.sender("job") : Prompts.sender("timer");
+    const from = kind === "user" ? Prompts.sender("user") : kind !== "work" ? Prompts.sender("uniichat") : sender !== undefined ? Team.get(sender)?.name ?? Prompts.sender("agent") : text.startsWith(JOB) ? Prompts.sender("job") : text.startsWith("[Timer ") ? Prompts.sender("timer") : report_read(text)?.name ?? Prompts.sender("timer");
     return { ...Memory.say(mem, a, b), from };
   }
 
@@ -659,6 +666,9 @@ export namespace Chat {
   // sent: a message the run takes from its queue, shown queued till answered (Run.sent)
   export function push(chat: Chat, run: Talk, kind: Kind, text: string, images: string[] = [], more = false, act?: string, pair: Pair & { from?: string } = {}, sent = false): Msg {
     Chat.flush(chat, run, kind === "echo" ? pair.of : undefined);
+    if (run !== chat.main) {
+      return Chat.sub_put(chat, run, { kind, text, of: pair.of, tool: pair.tool }, sent);
+    }
     return Chat.put(chat, { kind, text, images, more, act, ...pair }, sent);
   }
 
@@ -701,7 +711,11 @@ export namespace Chat {
     }
     for (const [of, call] of left) {
       call.logged = true;
-      Chat.put(chat, { kind: "tool", text: call.text, of });
+      if (run === chat.main) {
+        Chat.put(chat, { kind: "tool", text: call.text, of });
+      } else {
+        Chat.sub_put(chat, run, { kind: "tool", text: call.text, of }, false);
+      }
     }
     Chat.live(chat, run, Chat.waiting(run));
   }
@@ -766,6 +780,7 @@ export namespace Chat {
   }
 
   export function on(chat: Chat, run: Talk, ev: Heard): void {
+    const agent = run === chat.main ? undefined : run.name;
     if (ev.$ === "Ended") {
       run.limit = null;
       Chat.unanswered(chat, run);
@@ -787,7 +802,7 @@ export namespace Chat {
     }
     if (ev.$ === "Delta") {
       live_push(run.live, ev.kind, ev.text, ev.fresh);
-      Chat.all(chat, { $: "delta", kind: ev.kind, text: ev.text, fresh: ev.fresh });
+      Chat.all(chat, { $: "delta", agent, kind: ev.kind, text: ev.text, fresh: ev.fresh });
       return;
     }
     if (ev.$ === "Start") {
@@ -800,7 +815,7 @@ export namespace Chat {
     if (ev.kind === "tool" && ev.of !== undefined) {
       run.calls.set(ev.of, { text: ev.text, tool: ev.text.split(" ", 1)[0], logged: false, started: ev.queued !== true });
     } else if (ev.kind === "mind") {
-      Chat.all(chat, { $: "entry", kind: ev.kind, text: ev.text });
+      Chat.all(chat, { $: "entry", agent, kind: ev.kind, text: ev.text });
     } else if (ev.kind !== "user") {
       const { kind, text, of } = ev;
       const call = of === undefined ? undefined : run.calls.get(of);
@@ -861,7 +876,195 @@ export namespace Chat {
 
   export function live(chat: Chat, run: Talk, live: Live[]): void {
     run.live = live;
-    Chat.all(chat, { $: "live", live });
+    Chat.all(chat, { $: "live", agent: run === chat.main ? undefined : run.name, live });
+  }
+
+  // subagents (#116): their runs log to their spawner's folder, their
+  // seats at the tools carry no subs, a finished or stopped one is done
+  export function subs_of(chat: Chat): Subs {
+    return {
+      spawn   : (tasks) => Chat.spawn(chat, tasks),
+      tell    : (name, text) => Promise.resolve(Chat.tell(chat, name, text)),
+      stop    : (name, why) => Chat.sub_stop(chat, name, Chat.name(chat) || "Unii", why),
+      working : () => [...chat.subs.values()].filter((s) => s.run.busy).map((s) => s.name + " (" + s.doing + ", " + Math.round((Date.now() - s.at) / 60e3) + " min)"),
+      show    : (name) => (chat.subs.has(name) || Memory.agent(chat.mem, name) !== null ? Memory.agent_show(chat.mem, name) : null),
+    };
+  }
+
+  export async function sub_view(chat: Chat): Promise<Block[] | string> {
+    const mem = chat.mem;
+    const why = await Memory.settle(mem, mem.count, chat.main.halt.signal);
+    return why ?? Memory.view(mem, mem.count, Memory.fitted(mem));
+  }
+
+  export async function spawn(chat: Chat, tasks: Spawn[]): Promise<string> {
+    const view = tasks.some((t) => t.memory) ? await Chat.sub_view(chat) : [];
+    if (typeof view === "string") {
+      return view;
+    }
+    const names = tasks.map((t) => {
+      const sub = Chat.sub_start(chat, t.role, t.task, t.memory ? view : [], null);
+      void Run.take(sub.run, { text: t.task, imgs: [] });
+      const knobs = [t.role.model, t.role.effort === null ? null : "effort " + t.role.effort, t.memory ? null : "no view"].filter((k) => k !== null);
+      return sub.name + (knobs.length === 0 ? "" : " (" + knobs.join(", ") + ")");
+    });
+    return "Started " + names.join(", ") + ". Each one's report will reach you as a message when it finishes.";
+  }
+
+  // name: one going on after the server's restart, else a new one
+  export function sub_start(chat: Chat, role: Role, task: string, view: Block[], name: string | null): Sub<Msg> {
+    const it = name ?? Memory.agent_new(chat.mem);
+    const sub: Sub<Msg> = { name: it, role, task, view, replies: [], why: null, run: Run.make<Say, Msg>(it, Chat.sub_kind(chat, () => sub)), doing: "starting", at: Date.now() };
+    chat.subs.set(it, sub);
+    const seat: Seat = { mem: chat.mem, note: (text) => Chat.push(chat, sub.run, "note", text), report: () => {}, timed: () => {}, message: () => Promise.resolve({ text: "A subagent messages no one.", fail: true }), subs: null };
+    chat.tools.seats.set(it, seat);
+    if (name === null) {
+      Chat.push(chat, sub.run, "note", Sub.note(role));
+    }
+    Main.team_soon();
+    return sub;
+  }
+
+  export async function sub_restart(chat: Chat, name: string, text: string): Promise<void> {
+    const log = Memory.agent(chat.mem, name) ?? [];
+    const role = log[0]?.kind === "note" ? Sub.role(log[0].text) : null;
+    const task = log.find((r) => r.kind === "user")?.text ?? "";
+    const view = role === null ? "" : await Chat.sub_view(chat);
+    if (role === null || typeof view === "string" || chat.subs.has(name)) {
+      return;
+    }
+    const sub = Chat.sub_start(chat, role, task, view, name);
+    void Run.take(sub.run, { text, imgs: [] });
+  }
+
+  export function sub_kind(chat: Chat, sub: () => Sub<Msg>): Run<Say, Msg>["kind"] {
+    return {
+      pick   : () => Chat.sub_pick(chat, sub()),
+      begin  : () => {},
+      log    : (run, say) => Chat.push(chat, run, "user", say.text, [], false, undefined, {}, true),
+      say    : (say) => ({ ...say, from: say.text.startsWith(JOB) ? Prompts.sender("job") : Chat.name(chat) || "Unii" }),
+      queued : () => Chat.change(chat),
+      again  : () => false,
+      ask    : (_, take) => {
+        take();
+        return Chat.sub_ask(chat, sub());
+      },
+      ended  : (_, end) => {
+        Sub.ended(sub(), end);
+        return end.ok;
+      },
+      failed : (_, why) => {
+        sub().replies.push("failed: " + why);
+      },
+      ending : () => {},
+      finish : (run) => Chat.sub_done(chat, sub(), !run.halt.signal.aborted),
+      parked : () => false,
+      on     : (_, ev) => Chat.sub_on(chat, sub(), ev),
+      change : () => Chat.change(chat),
+    };
+  }
+
+  export function sub_pick(chat: Chat, sub: Sub<Msg>): Pick {
+    return Sub.pick(chat.pick, sub.role, sub.name);
+  }
+
+  export function sub_shown(chat: Chat, sub: Sub<Msg>): Pick | null {
+    try {
+      return Chat.sub_pick(chat, sub);
+    } catch {
+      return null;
+    }
+  }
+
+  // every subagent shares one prompt and one cache ("sub"), its name after
+  export function sub_ask(chat: Chat, sub: Sub<Msg>): Ask {
+    const log = { text: Memory.agent_show(chat.mem, sub.name) + "\n\n", mark: true };
+    const own = Prompts.prompt("you", { intro: "You are " + sub.name + ". ", who: sub.name, prompt: "" });
+    const blocks = [...sub.view, Tools.devices(chat.tools), Tools.skills(chat.tools), Tools.at_work(chat.tools, sub.name), log];
+    return { ...Pick.ask(Chat.sub_pick(chat, sub)), system: Prompts.prompt("sub"), own, blocks, searches: SEARCHES, server: Tools.at(chat.tools, sub.name), agent: true, who: sub.name };
+  }
+
+  export function sub_put(chat: Chat, run: Talk, msg: Log, sent: boolean): Msg {
+    const { kind, text, of, tool } = msg;
+    const root = Memory.agent_push(chat.mem, run.name, kind, text, { of, tool });
+    Chat.all(chat, { $: "entry", agent: run.name, id: root.i, kind, text, date: root.date, of, tool, ...(sent ? { sent } : {}) });
+    return { id: root.i, end: root.i + 1 };
+  }
+
+  // what it does now, for its row: a tool, a usage limit, thinking
+  export function sub_on(chat: Chat, sub: Sub<Msg>, ev: Heard): void {
+    const run = sub.run;
+    Chat.on(chat, run, ev);
+    const call = [...run.calls.values()].at(-1);
+    const doing = run.limit !== null ? "usage limit" : call !== undefined ? tool_name(call.tool) : run.live.at(-1)?.kind === "unii" ? "writing" : "thinking";
+    if (doing !== sub.doing) {
+      sub.doing = doing;
+      sub.at = Date.now();
+      Main.team_soon();
+    }
+  }
+
+  // it reported: done, never woken again
+  export function sub_done(chat: Chat, sub: Sub<Msg>, take: boolean): void {
+    if (chat.subs.get(sub.name) !== sub) {
+      return;
+    }
+    chat.subs.delete(sub.name);
+    chat.tools.seats.delete(sub.name);
+    chat.gone.set(sub.name, sub.why === null ? "finished" : "stopped");
+    Chat.all(chat, { $: "agent", name: sub.name, found: true, from: 0, entries: [], done: true, end: true });
+    Chat.report(chat, Sub.report(sub), take);
+    Chat.change(chat);
+  }
+
+  export function tell(chat: Chat, name: string, text: string): Done {
+    const sub = chat.subs.get(name);
+    if (sub === undefined || !sub.run.busy || sub.why !== null) {
+      return { text: Chat.sub_gone(chat, name, "; spawn a new one."), fail: true };
+    }
+    void Run.take(sub.run, { text, imgs: [] });
+    return { text: "Sent. It reaches " + name + " right after its current tool calls, and its report answers it.", fail: false };
+  }
+
+  export function sub_gone(chat: Chat, name: string, then: string): string {
+    const gone = chat.gone.get(name) ?? (Memory.agent(chat.mem, name) !== null ? "finished" : null);
+    return gone === null ? "No subagent " + name + "." : name + " has " + gone + then;
+  }
+
+  // a stop ends it at once, its device processes too; it is done then
+  export async function sub_stop(chat: Chat, name: string, by: string, why: string): Promise<Done> {
+    const sub = chat.subs.get(name);
+    if (sub === undefined) {
+      return { text: Chat.sub_gone(chat, name, "."), fail: !chat.gone.has(name) && Memory.agent(chat.mem, name) === null };
+    }
+    const run = sub.run;
+    const live = run.live.at(-1);
+    const last = [...run.calls.values()].at(-1)?.text ?? (live && live.kind + ": " + live.text);
+    const doing = last === undefined ? "" : " It was last at " + last.replace(/\s+/g, " ").slice(0, 300);
+    sub.why = (by === "" ? why.trim() || STOPPED : "Stopped by " + by + (why.trim() === "" ? "." : ": " + why.trim().replace(/\.?$/, "."))) + doing;
+    if (!run.busy) {
+      Chat.sub_done(chat, sub, false);
+      return { text: "Stopped " + name + ".", fail: false };
+    }
+    Run.stop(run, null);
+    const ended = await Promise.race([run.going.then(() => true, () => true), Bun.sleep(HALT).then(() => false)]);
+    const left = await Chat.sub_sweep(chat, name);
+    const runs = left.length === 0 ? "" : " Still running: " + left.join("; ") + ".";
+    return { text: (ended ? "Stopped " + name + "." : "Stopping " + name + ": it hasn't ended yet.") + runs, fail: !ended || left.length > 0 };
+  }
+
+  export async function sub_sweep(chat: Chat, name: string): Promise<string[]> {
+    const outs = await Promise.all(Tools.opened(chat.tools).map(async ([device]) => {
+      const job = Tools.start_job(chat.tools, device, { name: "halt", input: { agent: name }, cwd: "main" }, crypto.randomUUID());
+      if (typeof job === "string") {
+        return null;
+      }
+      const timer = setTimeout(() => job.end({ text: "no answer", fail: true }), HALT);
+      const out = await job.out;
+      clearTimeout(timer);
+      return out.fail ? device + ": " + out.text : null;
+    }));
+    return outs.filter((o) => o !== null);
   }
 
   export function archived(chat: Chat): boolean {
@@ -890,10 +1093,18 @@ export namespace Chat {
 
   // a device's job report, acked once it's queued, and taken once: a device
   // sends it again until acked
-  export async function job_done(chat: Chat, id: string, text: string): Promise<Answer> {
-    if (chat.main.queue.some((x) => x.q.act === id) || chat.mem.held.some((q) => q.act === id)) {
+  export async function job_done(chat: Chat, id: string, agent: string, text: string): Promise<Answer> {
+    if (chat.main.queue.some((x) => x.q.act === id) || chat.mem.held.some((q) => q.act === id) || Owner.act_get(id) !== null) {
       return {};
     }
+    // a subagent's job reports to it while it runs, else to its spawner
+    const sub = chat.subs.get(agent);
+    if (sub !== undefined && sub.run.busy && sub.why === null) {
+      Chat.mark(chat, id, {});
+      void Run.take(sub.run, { text, imgs: [] });
+      return {};
+    }
+    text = agent === chat.who ? text : text.replace("] ", "] " + agent + "'s job, ");
     if (Chat.archived(chat)) {
       Chat.held(chat, { kind: "work", text, images: [], act: id });
       return {};
@@ -1193,6 +1404,9 @@ export namespace Chat {
       return;
     }
     posts.forEach((post) => void Run.take(chat.main, post));
+    for (const name of work.filter((w) => w !== TURN)) {
+      void Chat.sub_restart(chat, name, text);
+    }
   }
 
   export function timed(chat: Chat, retry = false): void {
@@ -1240,10 +1454,11 @@ export namespace Chat {
   }
 
   export function running(chat: Chat): string[] {
-    return chat.main.busy || chat.resume !== null ? [TURN] : [];
+    return [...(chat.main.busy || chat.resume !== null ? [TURN] : []), ...[...chat.subs.values()].filter((s) => s.run.busy).map((s) => s.name)];
   }
 
   export function interrupt(chat: Chat, why: string | null): void {
+    chat.subs.forEach((sub) => void Chat.sub_stop(chat, sub.name, "", why ?? ""));
     const parked = Chat.unpark(chat);
     if (chat.main.busy) {
       Run.stop(chat.main, why);
@@ -1255,6 +1470,7 @@ export namespace Chat {
   }
 
   export function stop(chat: Chat, why: string | null): void {
+    chat.subs.forEach((sub) => Run.stop(sub.run, null));
     const turn = chat.main.busy && !chat.main.halt.signal.aborted;
     Run.stop(chat.main, turn ? why : null);
     if (!turn) {
@@ -1402,6 +1618,19 @@ export namespace Chat {
         }
         return {};
       }
+      case "agent": {
+        const name = text_of(msg.name);
+        const log = Memory.agent(chat.mem, name);
+        const asked = typeof msg.before === "number" ? msg.before : undefined;
+        const before = asked ?? log?.length ?? 0;
+        const from = Math.max(0, before - SHOWN);
+        const entries = (log ?? []).slice(from, before).map(({ i, kind, text, date, of, tool }) => ({ id: i, kind, text, date, of, tool }));
+        Chat.send(sock, { $: "agent", name, found: log !== null, from, before: asked, entries, done: !chat.subs.has(name) });
+        if (asked === undefined) {
+          Chat.send(sock, { $: "live", agent: name, live: chat.subs.get(name)?.run.live ?? [] });
+        }
+        return {};
+      }
       case "zoom": {
         if (!Array.isArray(msg.part)) {
           throw new Error("A zoom has no part.");
@@ -1491,7 +1720,7 @@ export namespace Chat {
         return {};
       }
       case "done": {
-        return device === "" ? { error: "Only a device reports jobs." } : Chat.job_done(chat, String(msg.id), String(msg.text));
+        return device === "" ? { error: "Only a device reports jobs." } : Chat.job_done(chat, String(msg.id), typeof msg.agent === "string" ? msg.agent : chat.who, String(msg.text));
       }
       case "unschedule": {
         const id = String(msg.id);
@@ -1664,7 +1893,7 @@ export namespace Main {
   export function mates(): Mate[] {
     return Team.all().map((a) => {
       const chat = Main.chats.get(a.id);
-      return { id: a.id, name: a.name, about: a.about, picture: a.picture, unread: a.unread, last: chat === undefined ? "" : Chat.last(chat), busy: chat?.main.busy === true, archived: a.archived };
+      return { id: a.id, name: a.name, about: a.about, picture: a.picture, unread: a.unread, last: chat === undefined ? "" : Chat.last(chat), busy: chat?.main.busy === true, archived: a.archived, subs: chat === undefined ? [] : [...chat.subs.values()].map((sub) => Sub.row(sub, Chat.sub_shown(chat, sub))) };
     });
   }
 
@@ -1713,7 +1942,7 @@ export namespace Main {
     }
     if (sock.data.device !== null) {
       const who = msg.$ === "done" ? text_of(msg.agent) : "main";
-      const chat = [...Main.chats.values()].find((c) => c.who === who) ?? Main.unii();
+      const chat = [...Main.chats.values()].find((c) => c.who === who || c.subs.has(who) || (who !== "main" && Memory.agent(c.mem, who) !== null)) ?? Main.unii();
       return void Chat.answer(chat, sock, msg);
     }
     const chat = Main.chats.get(sock.data.agent);
