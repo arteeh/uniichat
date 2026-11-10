@@ -66,7 +66,6 @@ type ChatSet = {
 type ServerSays = {
   agent?    : string;
   thinking? : boolean;
-  verbose?  : boolean;
   build?    : string;
   site?     : string;
 };
@@ -84,7 +83,6 @@ export type View = State & {
   team  : Mate[];
   parts : Part[];
   turn  : number;
-  fold  : Part[] | null;
   nodes : Map<string, Node>;
   whole : Map<number, Entry>;
   open  : Map<string, boolean>;
@@ -106,7 +104,6 @@ export type Server =
   | ({ $: "know" } & Pack)
   | { $: "view"; parts: Part[]; turn: number }
   | { $: "zoom"; id: number; n: number; parts: Part[] }
-  | { $: "root"; parts: Part[] }
   | ({ $: "entry"; id?: number; sent?: boolean } & Entry)
   | { $: "delta"; kind: Kind; text: string; fresh?: boolean }
   | { $: "live"; live: Live[] }
@@ -139,7 +136,6 @@ export type Client =
   | { $: "running"; jobs: Bg[] }
   | { $: "unschedule"; id: string }
   | { $: "zoom"; part: Part }
-  | { $: "root" }
   | { $: "open"; agent: string };
 
 type Post = { msg: Client & { id: string }; ws: WebSocket | null; done: (a: Answer) => void; said: string };
@@ -156,13 +152,12 @@ export type Act =
   | { $: "Move"; move: Move; to?: string }
   | { $: "Open"; id: number; n: number }
   | { $: "Shut"; id: number; n: number }
-  | { $: "Fold"; on: boolean }
   | { $: "Unschedule"; id: string }
   | { $: "Plug"; name: string }
   | { $: "Talk"; on: boolean }
 
 export type Row =
-  | { $: "Sum"; id: number; n: number; text: string; call: Call.Call | null }
+  | { $: "Sum"; id: number; n: number; text: string }
   | { $: "Box"; id: number; n: number; text: string; rows: Row[] }
   | { $: "Msg"; id: number | null; kind: Kind; who: string; text: string; body: Md.Block[]; call: Call.Call | null; images: string[]; queued?: boolean; from?: string; of?: string }
   | { $: "Line"; id: number | null; call: Call.Call; echo: string | null; rows: Row[] }
@@ -242,8 +237,6 @@ export const FIT    = 1568;
 export const IMAGE  = 2 ** 20;
 export const PIXELS = 2 ** 28;
 
-const TOOL = "tool: ";
-const FOLD = "The whole chat, folded into the fewest blocks.";
 
 function Cap(text: string): Row {
   return { $: "Cap", text };
@@ -281,7 +274,6 @@ export function view_new(agent: string): View {
     talk      : null,
     parts     : [],
     turn      : Infinity,
-    fold      : null,
     nodes     : new Map(),
     whole     : new Map(),
     open      : new Map(),
@@ -310,7 +302,7 @@ export function view_switch(v: View, agent: string): Client[] {
 
 function view_chat(v: View): void {
   const fresh = view_new(v.agent);
-  for (const k of ["busy", "wait", "importing", "limit", "queue", "sent", "sums", "again", "timers", "talk", "parts", "turn", "fold", "nodes", "whole", "open", "live", "minds"] as const) {
+  for (const k of ["busy", "wait", "importing", "limit", "queue", "sent", "sums", "again", "timers", "talk", "parts", "turn", "nodes", "whole", "open", "live", "minds"] as const) {
     Object.assign(v, { [k]: fresh[k] });
   }
 }
@@ -340,15 +332,11 @@ export function view_hear(v: View, msg: Server): Client[] {
     case "view": {
       v.parts = msg.parts;
       v.turn  = msg.turn;
-      return v.fold === null ? [] : [{ $: "root" }];
+      return [];
     }
     case "zoom":
     case "jobs":
     case "job": {
-      return [];
-    }
-    case "root": {
-      v.fold = v.fold === null ? null : msg.parts;
       return [];
     }
     case "entry": {
@@ -408,7 +396,6 @@ export function view_act(v: View, act: Act): Client[] {
       }
       const blob = new Blob([...images, text]);
       const say: Client = { $: "say", sizes: images.map((b) => b.size), body: () => blob };
-      v.fold = null;
       return goal === null ? [say] : [{ $: "goal", text: goal }, say];
     }
     case "Move": {
@@ -436,11 +423,6 @@ export function view_act(v: View, act: Act): Client[] {
       v.open.set(act.id + "+" + act.n, false);
       return [];
     }
-    case "Fold": {
-      v.open.clear();
-      v.fold = act.on ? [] : null;
-      return act.on ? [{ $: "root" }] : [];
-    }
     case "Unschedule": {
       return [{ $: "unschedule", id: act.id }];
     }
@@ -461,30 +443,28 @@ export function view_act(v: View, act: Act): Client[] {
 }
 
 export function view_body(v: View): Row[] {
-  if (v.fold !== null) {
-    const tops = v.fold.flatMap(([id, n]) => part_rows(v, id, n, Infinity, false));
-    return [Cap(FOLD), ...tops];
-  }
-  return view_terse(v, view_rows(v, v.parts).flat());
+  return view_lines(view_rows(v, v.parts).flat());
 }
 
-// with verbose tool calls off, each call and its result fold into a line
-function view_terse(v: View, rows: Row[]): Row[] {
-  if (v.verbose !== false) {
-    return rows;
-  }
+// each tool call and its result are one line that opens in place (#121);
+// a result whose call is in a fold is one line of its own
+function view_lines(rows: Row[]): Row[] {
   const paired = new Set<string>();
   const out: Row[] = [];
   for (const [k, r] of rows.entries()) {
     if (r.$ === "Box") {
-      out.push({ ...r, rows: view_terse(v, r.rows) });
+      out.push({ ...r, rows: view_lines(r.rows) });
     } else if (r.$ === "Msg" && r.kind === "tool" && r.call !== null) {
       const echo = r.of === undefined ? undefined : rows.slice(k + 1).find((x) => x.$ === "Msg" && x.kind === "echo" && x.of === r.of);
       if (echo !== undefined && r.of !== undefined) {
         paired.add(r.of);
       }
       out.push({ $: "Line", id: r.id, call: r.call, echo: echo?.$ === "Msg" ? echo.text : null, rows: echo === undefined ? [r] : [r, echo] });
-    } else if (!(r.$ === "Msg" && r.kind === "echo" && r.of !== undefined && paired.has(r.of))) {
+    } else if (r.$ === "Msg" && r.kind === "echo" && r.of !== undefined && paired.has(r.of)) {
+      continue;
+    } else if (r.$ === "Msg" && r.kind === "echo") {
+      out.push({ $: "Line", id: r.id, call: { name: "", head: r.who === "" ? "result" : r.who, device: "", blocks: [] }, echo: r.text, rows: [r] });
+    } else {
       out.push(r);
     }
   }
@@ -492,15 +472,12 @@ function view_terse(v: View, rows: Row[]): Row[] {
 }
 
 function view_rows(v: View, parts: Part[]): Row[][] {
-  return parts.map(([id, n]) => part_rows(v, id, n, v.turn, true));
+  return parts.map(([id, n]) => part_rows(v, id, n, v.turn));
 }
 
 export function view_tail(v: View): Row[] {
-  if (v.fold !== null) {
-    return [];
-  }
   const thought = v.thinking === false && v.live.some((l) => l.kind === "mind") ? [{ $: "Cap" as const, text: "Thinking", think: true as const }] : [];
-  const rows = [...thought, ...view_terse(v, v.live.filter((l) => v.thinking !== false || l.kind !== "mind").flatMap((l) => entry_rows(null, l.kind, l.text)))];
+  const rows = [...thought, ...view_lines(v.live.filter((l) => v.thinking !== false || l.kind !== "mind").flatMap((l) => entry_rows(null, l.kind, l.text)))];
   const load = v.importing !== null ? [Cap(progress_show(v.importing))] : [];
   const said = !v.up ? v.out.flatMap((p) => entry_rows(null, "user", p.said)) : [];
   const kept = said.length > 0 ? [...said, Cap(UNSENT)] : [];
@@ -545,10 +522,6 @@ export function progress_show(p: Progress): string {
   const merges = p.open.reduce((x, y) => x + y, 0);
   const phase = p.open[0] > 0 ? "Summarizing messages: " + n(p.msgs - p.open[0]) + " of " + n(p.msgs) : "Merging the top of the tree: " + merges + (merges === 1 ? " merge" : " merges") + " left · about " + Math.ceil((p.total - p.done) * PACE) + " min";
   return phase + (p.why === null ? "" : " · paused");
-}
-
-export function view_fold(v: View): string {
-  return v.fold === null ? "fold all" : "unfold all";
 }
 
 export function view_stoppable(v: View): boolean {
@@ -720,32 +693,26 @@ export async function post(url: string, body: object, auth: Record<string, strin
   return { ...(rec(out) ? out : {}), ok: res?.ok === true, status: res?.status ?? 0 };
 }
 
-function part_rows(v: View, id: number, n: number, t: number, talk: boolean): Row[] {
+// one message is shown as itself, never as a fold of one (#120): a team
+// copy as its line; two and more are a fold till opened, which shows
+// its two halves
+function part_rows(v: View, id: number, n: number, t: number): Row[] {
   const key   = id + "+" + n;
   const entry = v.whole.get(id);
   const half  = n / 2;
-  if (n === 1 && entry?.kind === "team" && id >= t) {
-    return [];
-  }
   if (n === 1 && entry?.kind === "team") {
-    return sum_rows(id, n, v.nodes.get(key));
+    return id >= t ? [] : sum_rows(id, n, v.nodes.get(key));
   }
-  if (n === 1 && id >= t && entry !== undefined) {
-    const minds = v.thinking === false ? [] : v.minds.get(id) ?? [];
+  if (n === 1 && entry !== undefined) {
+    const minds = id < t || v.thinking === false ? [] : v.minds.get(id) ?? [];
     const after = minds.flatMap((x) => entry_rows(null, "mind", x));
     return [...sent_rows(v.sent.includes(id), whole_rows(id, entry, v.whole.get(id - 1))), ...after];
   }
-  const open  = talk && n === 1 && ["user", "unii"].includes(entry?.kind ?? "");
-  if (!(v.open.get(key) ?? open)) {
+  if (n === 1 || v.open.get(key) !== true) {
     return sum_rows(id, n, v.nodes.get(key));
   }
-  const text = n === 1 ? "fold" : GLYPH.open + " " + n + "x · fold";
-  if (n > 1) {
-    const rows = [...part_rows(v, id, half, t, talk), ...part_rows(v, id + half, half, t, talk)];
-    return [{ $: "Box", id, n, text, rows }];
-  }
-  const rows = entry === undefined ? [] : whole_rows(id, entry, v.whole.get(id - 1));
-  return [{ $: "Box", id, n, text, rows }];
+  const rows = [...part_rows(v, id, half, t), ...part_rows(v, id + half, half, t)];
+  return [{ $: "Box", id, n, text: GLYPH.open + " " + n + "x · fold", rows }];
 }
 
 const ROWS  = new WeakMap<Entry | Node, Row[]>();
@@ -760,7 +727,7 @@ function whole_rows(id: number | null, entry: Entry, before: Entry | undefined):
 }
 
 function sum_rows(id: number, n: number, node: Node = { text: WAIT, to: "" }): Row[] {
-  const rows = ROWS.get(node) ?? [{ $: "Sum", id, n, text: Md.md_flat(node.text), call: sum_call(n, node.text) }];
+  const rows = ROWS.get(node) ?? [{ $: "Sum", id, n, text: Md.md_flat(node.text) }];
   ROWS.set(node, rows);
   return rows;
 }
@@ -783,11 +750,6 @@ function live_set(live: Live[], now: Live[]): void {
   const held = goes ? live : [];
   const next = now.map((l, k) => (k < held.length ? Object.assign(held[k], l) : l));
   live.splice(0, live.length, ...next);
-}
-
-function sum_call(n: number, text: string): Call.Call | null {
-  const call = n === 1 && text.startsWith(TOOL) ? Call.call_parse(text.slice(TOOL.length)) : null;
-  return call === null || call.name === "" ? null : call;
 }
 
 export function image_kind(head: Uint8Array): string | null {

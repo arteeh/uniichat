@@ -56,12 +56,6 @@ export function tool_name(logged: string): string {
   return theirs === null ? name : theirs[2] + ": " + theirs[3];
 }
 
-export function call_line(c: Call): string {
-  const blocks = c.blocks.map((b) => (b.k === "" ? "" : b.k + ": ") + b.x);
-  const where  = c.device === "" ? [] : ["· " + c.device];
-  return [c.head, ...blocks, ...where].join(" ").replace(/\s+/g, " ").trim();
-}
-
 export function call_text(c: Call): string {
   const where = c.name.includes(": ") && c.device !== "" ? " · " + c.device : "";
   return [(c.name + " " + c.head).trim() + where, ...c.blocks.map((b) => b.x)].join("\n");

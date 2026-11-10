@@ -62,7 +62,7 @@ body { text-wrap: balance; }
 .msg:not(.note) { text-wrap: pretty; }
 textarea { text-wrap: wrap; }
 
-body.guest :is(.net, .all, .attach, .mic, #pick, #list, header > :not(.net)) { display: none !important; }
+body.guest :is(.net, .attach, .mic, #pick, #list, header > :not(.net)) { display: none !important; }
 body.solo main { width: min(420px, 100% - 48px); margin: 18vh auto; text-align: center; }
 body.solo h1 { margin: 0; font: 400 46px/1.05 var(--serif); letter-spacing: -.015em; }
 .sub { margin: 18px 0 0; color: var(--mid); font-size: 14.5px; }
@@ -83,7 +83,7 @@ header > .who .name { overflow: hidden; text-overflow: ellipsis; white-space: no
 header > .title { display: none; margin: 0 auto 0 0; min-width: 0; padding-left: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 600 17px/1.2 var(--sans); }
 body.account header > .title { display: block; }
 header .pic { width: 34px; height: 34px; }
-body.wide:not(.tree) header > .back { display: none; }
+body.wide:not(.tree):not(.account) header > .back { display: none; }
 body.tree header > .brain { display: none; }
 
 .pic { flex: none; display: block; width: 46px; height: 46px; border-radius: 50%; object-fit: cover; background: var(--block); }
@@ -135,7 +135,14 @@ body.list footer > :not(#toast) { display: none; }
 .msg.tool.line .add { color: var(--add); }
 .msg.tool.line .del { color: var(--del); }
 .msg.tool.line .bad { margin-left: auto; color: var(--red); font-weight: 700; }
-.msg.tool.line[open] > .msg { margin-top: 8px; }
+.msg.tool.line .on { flex: none; margin-left: auto; color: var(--soft); }
+.msg.tool.line .bad + .on { margin-left: 8px; }
+.msg.tool.line[open] { border-radius: 10px; background: var(--block); }
+.msg.tool.line[open] > summary { border-radius: 10px 10px 0 0; }
+.msg.tool.line > .full { padding: 2px 12px 10px; overflow-wrap: anywhere; }
+.msg.tool.line > .full p { white-space: pre-wrap; }
+.msg.tool.line > .full p + p { margin-top: .85em; }
+.msg.tool.line > .full > .call { padding-bottom: 6px; border-bottom: 1px solid var(--hair); margin-bottom: 6px; }
 .pill { flex: none; min-width: 22px; height: 22px; padding: 0 7px; border-radius: 11px; background: var(--ink); color: var(--paper); font: 600 12px/22px var(--sans); text-align: center; }
 @media (min-width: 900px) {
   body.wide { padding-left: 33.333vw; }
@@ -279,25 +286,19 @@ header > .imping { display: flex; flex-direction: column; justify-content: cente
 .block { display: flex; gap: 12px; padding: 10px 14px; background: var(--block); border-radius: 10px; font: 15px/1.55 var(--serif); cursor: pointer; overflow-wrap: anywhere; }
 @media (hover: hover) { .block:hover { background: var(--hover); } } @media (hover: none) { .block:active { background: var(--hover); } }
 .block .lv { flex: none; min-width: 38px; font: 600 11.5px/24px var(--sans); color: var(--mid); }
+.block > div { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.block.one { cursor: default; color: var(--mid); }
+@media (hover: hover) { .block.one:hover { background: var(--block); } } @media (hover: none) { .block.one:active { background: var(--block); } }
 
 .open { border: 1.25px solid var(--frame); border-radius: 12px; padding: 0 10px 10px; }
 .open > * { margin: 10px 0 0; }
 .open > .fold { position: sticky; top: var(--head); z-index: 1; display: block; width: 100%; padding: 6px 0; text-align: left; font: 600 12px var(--sans); color: var(--mid); background: var(--paper); border-bottom: 1px solid var(--hair); }
 @media (hover: hover) { .open > .fold:hover { color: var(--ink); } } @media (hover: none) { .open > .fold:active { color: var(--ink); } }
-.open.one { position: relative; border: 0; border-radius: 0; padding: 0; }
-.open.one > * { margin: 0; }
-.open.one > .fold { position: absolute; inset: auto 36px calc(100% + 4px) auto; z-index: 1; width: auto; height: 26px; padding: 0 8px; border: 0; border-radius: 6px; font: 600 11.5px/26px var(--sans); opacity: 0; }
-@media (hover: hover) { .open.one > .fold:hover { background: var(--hover); } } @media (hover: none) { .open.one > .fold:active { background: var(--hover); } }
-@media (hover: hover) { .open.one:hover > .fold { opacity: 1; } }
 .msg:has(> .more:not([open])) > .clip { max-height: 20em; overflow: hidden; }
 .more > summary { display: block; margin-top: 6px; font: 13px var(--sans); color: var(--mid); cursor: pointer; }
 .more > summary::after { content: "Show all"; }
 .more[open] > summary::after { content: "Fold"; }
 @media (hover: hover) { .more > summary:hover { color: var(--ink); } } @media (hover: none) { .more > summary:active { color: var(--ink); } }
-.msg > .unfold { display: none; }
-.msg.long > .unfold { display: block; margin-top: 4px; font: 13px var(--sans); color: var(--mid); }
-@media (hover: hover) { .msg.long > .unfold:hover { color: var(--ink); } } @media (hover: none) { .msg.long > .unfold:active { color: var(--ink); } }
-.msg.long:not(.shown) > .cut { max-height: 8lh; overflow: hidden; cursor: pointer; -webkit-mask-image: linear-gradient(#000 calc(100% - 3lh), transparent); mask-image: linear-gradient(#000 calc(100% - 3lh), transparent); }
 
 .msg { position: relative; border-width: 0; overflow-wrap: anywhere; font: 17.5px/1.68 var(--serif); color: var(--fg); font-style: var(--it); }
 .msg > :first-child, .msg > .copy + * { margin-top: 0; }
@@ -351,7 +352,7 @@ header > .imping { display: flex; flex-direction: column; justify-content: cente
 .msg pre > .copy { top: 7px; right: 7px; bottom: auto; }
 @media (hover: hover) { .msg:hover > .copy, .msg pre:hover > .copy { opacity: 1; } }
 @media (hover: none) {
-  .copy, .open.one > .fold { opacity: .6; }
+  .copy { opacity: .6; }
   #log .msg:has(> .copy) { margin-top: 34px; }
   .msg pre:has(> .copy) { padding-right: 40px; }
   .msg pre > .copy { top: 9px; right: 9px; }
@@ -362,7 +363,7 @@ header > .imping { display: flex; flex-direction: column; justify-content: cente
 @media (hover: none) { input, select { font-size: 16px; } }
 @media (pointer: coarse) {
   :is(header > :is(button, a), #pick > button, #tree .tab) { position: relative; }
-  :is(header > :is(button, a), #pick > button, #tree .tab, .mine, .down, .copy, .open.one > .fold)::after { content: ""; position: absolute; left: 50%; top: 50%; width: max(100%, 44px); height: max(100%, 44px); transform: translate(-50%, -50%); }
+  :is(header > :is(button, a), #pick > button, #tree .tab, .mine, .down, .copy)::after { content: ""; position: absolute; left: 50%; top: 50%; width: max(100%, 44px); height: max(100%, 44px); transform: translate(-50%, -50%); }
   .foot a { padding: 14px 0; }
   .chip { height: 44px; }
   [popover] > button { min-height: 44px; }

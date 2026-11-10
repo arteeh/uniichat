@@ -15,11 +15,6 @@ const ESC: Record<string, string> = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"
 
 const TALL = 4000;
 
-// a result folds past this many rows, its lines wrapped at the characters a
-// row holds in the widest column (740 px of 12.5 px mono): never more rows
-// than it takes, so a folded one always overflows
-const FOLD = 10;
-const WRAP = 100;
 
 export const SHEETS = `<svg viewBox="0 0 16 16" width="15" height="15"><rect x="5.5" y="5.5" width="8" height="8" rx="1.8"/><path d="M10.5 3.5v-.2A1.8 1.8 0 0 0 8.7 1.5H4.3A1.8 1.8 0 0 0 2.5 3.3v4.4a1.8 1.8 0 0 0 1.8 1.8h.2"/></svg>`;
 export const CHECK  = `<svg viewBox="0 0 16 16" width="15" height="15"><path d="M3 8.5l3.2 3L13 4.5"/></svg>`;
@@ -73,15 +68,16 @@ export function row_html(row: View.Row): string {
 function row_make(row: View.Row): string {
   switch (row.$) {
     case "Sum": {
-      const open = act_html({ $: "Open", id: row.id, n: row.n });
-      const text = row.call === null ? esc(row.text) : head_html(row.call, Call.call_line(row.call), "");
-      return `<div class="block"${open} data-a="${row.id}"><span class="lv">${row.n}x</span><div>${text}</div></div>`;
+      // a fold is one line; one message's line (a team copy) opens nothing
+      const fold = row.n > 1;
+      const open = fold ? act_html({ $: "Open", id: row.id, n: row.n }) : "";
+      const lv = fold ? `<span class="lv">${row.n}x</span>` : "";
+      return `<div class="block${fold ? "" : " one"}"${open} data-a="${row.id}">${lv}<div>${esc(row.text)}</div></div>`;
     }
     case "Box": {
       const shut = act_html({ $: "Shut", id: row.id, n: row.n });
-      const one  = row.n === 1 ? " one" : "";
       const rows = row.rows.map(row_html).join("");
-      return `<div class="open${one}" data-a="${row.id}"><button class="fold"${shut}>${esc(row.text)}</button>${rows}</div>`;
+      return `<div class="open" data-a="${row.id}"><button class="fold"${shut}>${esc(row.text)}</button>${rows}</div>`;
     }
     case "Msg": {
       const at = row.id === null ? "" : ` data-a="${row.id}"`;
@@ -90,19 +86,16 @@ function row_make(row: View.Row): string {
       const body = row.call === null ? row.body.map(block_html).join("") : call_html(row.call);
       const pics = images_html(row.images);
       const tall = ["user", "work"].includes(row.kind) && row.text.length + 80 * row.text.split("\n").length > TALL && !row.text.includes("](/media/");
-      const media = row.body.some((b) => b.$ === "Para" && b.x.some((s) => s.$ === "Pict"));
-      const cut = row.kind === "tool" || (row.kind === "echo" && !media);
-      const fold = tall ? `<div class="clip">${body}</div><details class="more"><summary></summary></details>` : cut ? `<div class="cut">${body}</div><button class="unfold" aria-expanded="false">Show all</button>` : body;
+      const fold = tall ? `<div class="clip">${body}</div><details class="more"><summary></summary></details>` : body;
       const who = row.who === "" ? "" : ` data-who="${esc(row.who)}"`;
       const queued = row.queued === true ? " queued" : "";
-      const long = cut && whole.split("\n").reduce((n, line) => n + Math.max(1, Math.ceil(line.length / WRAP)), 0) > FOLD ? " long" : "";
       if (row.from !== undefined) {
         const mate = TEAM.get(row.from);
         const gist = Md.md_flat(Call.report_read(row.text)?.text ?? row.text);
         const head = `<summary>${face_html(mate?.picture ?? "")}<b>${esc(mate?.name ?? row.who)}</b><span>${esc(gist)}</span></summary>`;
         return `<div class="msg ${row.kind} said${queued}"${at}><details>${head}${copy}${body}${pics}</details></div>`;
       }
-      return `<div class="msg ${row.kind}${queued}${long}"${at}${who}>${copy}${fold}${pics}</div>`;
+      return `<div class="msg ${row.kind}${queued}"${at}${who}>${copy}${fold}${pics}</div>`;
     }
     case "Cap": {
       return `<p class="cap${row.think === true ? " think" : ""}">${esc(row.text)}</p>`;
@@ -114,7 +107,9 @@ function row_make(row: View.Row): string {
 }
 
 // a tool call as one line: shell's command, write's or edit's path (cut
-// on the left) with +N −M, else the tool and its main argument
+// on the left) with +N −M, else the tool and its main argument, and the
+// device on the right; opened, the same row holds the whole input and
+// then the whole result (#121)
 function line_html(row: Extract<View.Row, { $: "Line" }>): string {
   const c = row.call;
   const at = row.id === null ? "" : ` data-a="${row.id}"`;
@@ -124,19 +119,26 @@ function line_html(row: Extract<View.Row, { $: "Line" }>): string {
   const [adds, dels] = [lines.filter((l) => /^\+(?!\+\+)/.test(l)).length, lines.filter((l) => /^-(?!--)/.test(l)).length];
   const diff = files && row.echo !== null && fail === "" ? ` <b class="add">+${adds}</b> <b class="del">−${dels}</b>` : "";
   const what = files ? `<span class="arg path"><bdi>${esc(c.head)}</bdi></span>` : `<span class="arg">${esc(c.head.split("\n")[0])}</span>`;
-  const head = `<summary><span class="ic">${Theme.tool_glyph(c.name)}</span><b>${esc(c.name)}</b>${what}${diff}${fail}</summary>`;
-  return `<details class="msg tool line"${at}>${head}${row.rows.map(row_html).join("")}</details>`;
+  const name = c.name === "" ? "" : `<b>${esc(c.name)}</b>`;
+  const where = c.device === "" ? "" : `<span class="on">· ${esc(c.device)}</span>`;
+  const head = `<summary><span class="ic">${Theme.tool_glyph(c.name)}</span>${name}${what}${diff}${fail}${where}</summary>`;
+  return `<details class="msg tool line"${at}>${head}<div class="full">${row.rows.map(line_part).join("")}</div></details>`;
+}
+
+// an opened line's part: the call's whole input, or the result as it is
+function line_part(row: View.Row): string {
+  if (row.$ !== "Msg") {
+    return row_html(row);
+  }
+  const input = row.call === null ? "" : `<p class="call">${esc(row.call.head)}</p>` + row.call.blocks.map(block_html).join("");
+  const out = row.call === null ? row.body.map(block_html).join("") : "";
+  return input + out + images_html(row.images);
 }
 
 function call_html(c: Call.Call): string {
-  return head_html(c, c.head, c.device) + c.blocks.map(block_html).join("");
-}
-
-function head_html(c: Call.Call, text: string, device: string): string {
-  const icon  = `<span class="ic">${Theme.tool_glyph(c.name)}</span>`;
+  const where = c.device === "" ? "" : `<span class="on">· ${esc(c.device)}</span>`;
   const verb  = c.name === "" ? "" : `<b>${esc(c.name)}</b> `;
-  const where = device === "" ? "" : `<span class="on">· ${esc(device)}</span>`;
-  return `<p class="call">${where}${icon}${verb}${esc(text)}</p>`;
+  return `<p class="call">${where}<span class="ic">${Theme.tool_glyph(c.name)}</span>${verb}${esc(c.head)}</p>` + c.blocks.map(block_html).join("");
 }
 
 function images_html(names: string[]): string {
@@ -152,13 +154,12 @@ const MODES: Array<[string, string]> = [
   ["conversation", "Messages stay word-for-word in Unii's view until you switch back. Use it for discussions. It costs more per turn."],
 ];
 
-export function pick_html(fold: string | null, on: boolean, knobs: View.Knob[], talk?: View.Talk | null): string[] {
+export function pick_html(knobs: View.Knob[], talk?: View.Talk | null): string[] {
   const knob = (move: string, hint: string, text: string, rows: string) => [
     `<button title="${esc(hint)}" data-knob="${move}" popovertarget="pick-${move}" aria-haspopup="menu">${esc(text)}</button>`,
     `<div id="pick-${move}" class="choices" popover role="menu" aria-label="${move[0].toUpperCase() + move.slice(1)}">${rows}</div>`,
   ];
   const parts = knobs.map((k) => k.choices.length === 0 ? [`<span class="knob" title="${esc(k.hint)}">${esc(k.text)}</span>`] : knob(k.move, k.hint, k.text, k.choices.map(choice_html).join("")));
-  const all = fold === null ? [] : [`<button class="all"${act_html({ $: "Fold", on })}>${esc(fold)}</button>`];
   const mode = ([name, hint]: [string, string], k: number) => {
     const here = (talk != null) === (k === 1);
     return `<button role="menuitemradio" aria-checked="${here}" title="${esc(hint)}"${here ? " autofocus" : act_html({ $: "Talk", on: k === 1 })}>${name}</button>`;
@@ -170,7 +171,7 @@ export function pick_html(fold: string | null, on: boolean, knobs: View.Knob[], 
   const rule = talk == null ? `<span class="rule"></span>` : `<span class="rule meter${heat}" style="--used:${used}%" title="Context: ${used}% used (${esc(View.talk_tokens(talk))})" role="meter" aria-valuenow="${used}" aria-valuemin="0" aria-valuemax="100" aria-label="Context used"></span>`;
   const dot = `<span class="dot">·</span>`;
   const join = (groups: string[][]) => groups.filter((g) => g.length > 0).flatMap((g, i) => (i === 0 ? g : [dot, ...g]));
-  return [...join([all, modes]), rule, ...join(parts)];
+  return [...join([modes]), rule, ...join(parts)];
 }
 
 function choice_html(c: View.Choice): string {
@@ -254,7 +255,6 @@ const SETTING: Record<string, [string, string]> = {
   pick      : ["Default model", "What a chat runs on until it picks another."],
   compactor : ["Compactor model", "What writes the memory's summaries. Sonnet medium summarizes more faithfully than Haiku, using more of a plan's limits."],
   thinking  : ["Show thinking", "The agents' reasoning as it comes; off, a Thinking line instead."],
-  verbose   : ["Show verbose tool calls", "Each tool call with its result; off, one line you tap to open."],
   hops      : ["Hop limit", "How many messages in a row agents may send each other before they wait for you; 0: none."],
   compactor_context : ["Compactor context", "How much of the chat each summary sees, in KB (1 to 128). More context lets it copy more into a summary that its message doesn't say. New summaries only."],
   site      : ["Site", "The server's address, for sign-in links and the installer."],
@@ -270,7 +270,7 @@ export const VENDOR_KEY: Record<string, string> = { "claude-api": "anthropic", "
 export const PICKS = ["pick", "compactor"];
 
 const GROUPS: Array<[string, string[]]> = [
-  ["Chat", ["thinking", "verbose"]],
+  ["Chat", ["thinking"]],
   ["Agents", ["hops"]],
   ["Models", ["vendors", "models", "pick", "compactor", "compactor_context"]],
   ["Server", ["site"]],
@@ -331,8 +331,7 @@ function control_html(r: Row): string {
     case "compactor": {
       return `<input type="hidden" name="${r.key}" value="${esc(r.value)}"><div class="four"></div>`;
     }
-    case "thinking":
-    case "verbose": {
+    case "thinking": {
       return `<label class="opt"><input id="set-${r.key}" type="checkbox" name="${r.key}" value="on"${r.value === "on" ? " checked" : ""}> On</label>`;
     }
     case "hops": {

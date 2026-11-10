@@ -1292,7 +1292,7 @@ export namespace Chat {
     const run = chat.main;
     const queue: Queued[] = run.queue.map(({ q }) => ({ kind: q.kind, text: shown(q.text) }));
     const sent = run.sent.flatMap(({ m }) => Array.from({ length: m.end - m.id }, (_, k) => m.id + k));
-    return { $: "state", agent: chat.id, busy: run.busy, wait: Chat.waits(chat), pick: chat.pick, ...config.OFFER, importing, limit: run.limit, queue, sent, sums: Chat.sums(chat), again: chat.mem.again, timers, mcp, talk, build: BUILD, site: config.SITE, thinking: config.THINKING, verbose: config.VERBOSE };
+    return { $: "state", agent: chat.id, busy: run.busy, wait: Chat.waits(chat), pick: chat.pick, ...config.OFFER, importing, limit: run.limit, queue, sent, sums: Chat.sums(chat), again: chat.mem.again, timers, mcp, talk, build: BUILD, site: config.SITE, thinking: config.THINKING };
   }
 
   export function sums(chat: Chat): Sums | null {
@@ -1412,12 +1412,6 @@ export namespace Chat {
           Chat.teach(chat, sock, parts);
           Chat.send(sock, { $: "zoom", id, n, parts });
         }
-        return {};
-      }
-      case "root": {
-        const parts = Memory.roots(chat.mem.count).map(({ l, i }): Part => [i * 2 ** l, 2 ** l]);
-        Chat.teach(chat, sock, parts);
-        Chat.send(sock, { $: "root", parts });
         return {};
       }
     }

@@ -12,7 +12,7 @@ import * as Viewer from "./Viewer.ts";
 
 type Read = { sessions: Import.Session[]; moved: number };
 
-type Back = { at: { a: number; top: number } | null; y: number | null; away: { y: number; end: boolean } | null; caret: [number, number]; focus: boolean; open: string[] };
+type Back = { at: { a: number; top: number } | null; y: number | null; away: { y: number; end: boolean } | null; caret: [number, number]; focus: boolean };
 
 const DESK = matchMedia("(hover: hover)");
 
@@ -63,7 +63,6 @@ const SCROLL = {
   end   : true,
   stick : true,
   y     : 0,
-  open  : new Set<string>(),
   still : false,
   away  : null as { y: number; end: boolean } | null,
   at    : null as Spot | null,
@@ -99,6 +98,9 @@ function kept(fact: string): string {
 }
 
 async function boot(): Promise<void> {
+  // the app keeps every screen's scroll itself: the browser's own restore
+  // on back and forward came after or before route() and fought it (#122)
+  history.scrollRestoration = "manual";
   document.head.insertAdjacentHTML("beforeend", `<style>${theme_css()}</style>`);
   navigator.serviceWorker?.register("/sw.js").catch(() => {});
   navigator.serviceWorker?.addEventListener("message", (ev: MessageEvent) => {
@@ -256,6 +258,12 @@ function chat(): void {
   });
   keep.observe($("#log"));
   keep.observe($("footer"));
+  // a tool line opened at the chat's end grows down, its line staying put
+  $("#log").addEventListener("toggle", (ev) => {
+    if (ev.target instanceof HTMLDetailsElement && ev.target.matches(".line")) {
+      SCROLL.still = true;
+    }
+  }, true);
   addEventListener("resize", resized);
   draw(true);
 }
@@ -384,11 +392,6 @@ function click(ev: MouseEvent): void {
     Viewer.viewer_open(pic, true, target);
     return;
   }
-  const cut = target.closest(".unfold") ?? (el === null && target.closest("a") === null ? target.closest(".msg.long:not(.shown) > .cut") : null);
-  if (cut !== null && (sel === null || sel.isCollapsed)) {
-    unfold(must(cut.parentElement, "the cut's message"));
-    return;
-  }
   if (el === null || (sel !== null && !sel.isCollapsed && el.contains(sel.focusNode))) {
     return;
   }
@@ -454,37 +457,6 @@ function left(ev: FocusEvent): void {
   }
 }
 
-function folds(): void {
-  for (const msg of document.querySelectorAll<HTMLElement>("#log .msg.long")) {
-    const open = SCROLL.open.has(fold_key(msg));
-    if (msg.classList.contains("shown") !== open) {
-      fold_show(msg, open);
-    }
-  }
-}
-
-function fold_key(msg: HTMLElement): string {
-  return "#" + (msg.dataset.a ?? "");
-}
-
-function fold_show(msg: HTMLElement, open: boolean): void {
-  msg.classList.toggle("shown", open);
-  const button = must(msg.querySelector(":scope > .unfold"), "the message's unfold");
-  button.setAttribute("aria-expanded", String(open));
-  button.textContent = open ? "Show less" : "Show all";
-}
-
-function unfold(msg: HTMLElement): void {
-  const open = !msg.classList.contains("shown");
-  const id = fold_key(msg);
-  open ? SCROLL.open.add(id) : SCROLL.open.delete(id);
-  const [top, follow] = [msg.getBoundingClientRect().top, SCROLL.end];
-  SCROLL.end = false;
-  fold_show(msg, open);
-  scrollBy(0, msg.getBoundingClientRect().top - top);
-  SCROLL.end = follow || at_end();
-  SCROLL.still = follow;
-}
 
 const FRAMED = new WeakSet<HTMLIFrameElement>();
 
@@ -999,7 +971,6 @@ function paint(): void {
   }
   markup($("#log .tail"), View.view_tail(v).map(Html.row_html));
   Box.box_sizes($("#log .tail"));
-  folds();
   frames();
   const back = RENEW.back === null ? null : document.querySelector<HTMLElement>(`#log [data-a="${RENEW.back.a}"]`);
   if (back !== null && RENEW.back !== null) {
@@ -1011,8 +982,8 @@ function paint(): void {
   }
   if (shown !== P.shown) {
     P.shown = shown;
-    SCROLL.end = v.fold === null;
-    scrollTo(0, v.fold === null ? doc.scrollHeight : 0);
+    SCROLL.end = true;
+    scrollTo(0, doc.scrollHeight);
     return;
   }
   if (follow) {
@@ -1031,7 +1002,7 @@ function paint(): void {
 }
 
 function shown_key(): string {
-  return v.agent + (v.fold === null ? "" : "/fold");
+  return v.agent;
 }
 
 function at_end(): boolean {
@@ -1065,7 +1036,7 @@ function bars(): void {
   $(".mic").classList.toggle("rec", P.rec !== null);
   $(".composer").classList.toggle("rec", P.rec !== null);
   const knob = (document.activeElement as HTMLElement | null)?.dataset?.knob;
-  markup($("#pick"), Html.pick_html(View.view_fold(v), v.fold === null, View.view_pick(v), v.talk));
+  markup($("#pick"), Html.pick_html(View.view_pick(v), v.talk));
   if (knob !== undefined) {
     $("#pick [data-knob=" + knob + "]").focus();
   }
@@ -1223,7 +1194,6 @@ function chat_to(agent: string): void {
     View.link_send(v, msg);
   }
   Box.box_set(sessionStorage.getItem(kept("draft." + agent)) ?? "");
-  SCROLL.open.clear();
   SCROLL.end = true;
   P.rows = true;
 }
@@ -1251,7 +1221,11 @@ function route(): void {
   document.body.classList.toggle("tree", tree);
   $("#account").hidden = !page;
   $("#tree").hidden = !tree;
-  P.at = location.pathname + location.search + location.hash;
+  const at = location.pathname + location.search + location.hash;
+  if (!chat && at !== P.at) {
+    scrollTo(0, 0);
+  }
+  P.at = at;
   // a chat already in view stays where it is: crossing the 900px line
   // (WIDE.onchange) routes again and used to jump it to the end (#127)
   if (!chat) {
@@ -1847,7 +1821,7 @@ async function renew(hidden = false): Promise<void> {
     return;
   }
   const chat = !$("#log").hidden;
-  const back: Back = { at: chat && !SCROLL.end ? anchor() : null, y: chat ? null : scrollY, away: SCROLL.away, caret: Box.box_caret(), focus: Box.box_focused(), open: [...SCROLL.open] };
+  const back: Back = { at: chat && !SCROLL.end ? anchor() : null, y: chat ? null : scrollY, away: SCROLL.away, caret: Box.box_caret(), focus: Box.box_focused() };
   sessionStorage.setItem(kept("back"), JSON.stringify(back));
   sessionStorage.setItem(kept("build"), (v.build ?? "") + " " + (tries + 1));
   location.reload();
@@ -1864,7 +1838,6 @@ function renewed(): void {
     Box.box_focus();
   }
   Box.box_place(back.caret[0], back.caret[1]);
-  back.open.forEach((id) => SCROLL.open.add(id));
   RENEW.back = back.at;
   SCROLL.away = back.away;
   const end = Date.now() + 3000;
