@@ -298,7 +298,7 @@ export namespace Chat {
   export function system(chat: Chat): { system: string; own: string } {
     const agent = Team.get(chat.id);
     const name = agent?.name ?? "";
-    const team = Prompts.prompt("team", { Name: name }).split("\n").flatMap((line) => (line.includes("{name}") ? Team.active().map((a) => Prompts.fill(line, { name: a.name, about: a.about })) : [line]));
+    const team = Prompts.prompt("team", { Name: name, main: Team.get(UNII)?.name ?? "" }).split("\n").flatMap((line) => (line.includes("{name}") ? Team.active().map((a) => Prompts.fill(line, { name: a.name, about: a.about })) : [line]));
     const shared = [
       Prompts.prompt("prompt", { Name: name }),
       team.join("\n"),

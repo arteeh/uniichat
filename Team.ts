@@ -17,7 +17,7 @@ const OWN   = 64 * 1024;
 
 const HEADS = 24;
 
-const UNII_ABOUT  = "Executive assistant: keeps track of the whole team.";
+const UNII_ABOUT  = "Executive assistant: automatically keeps track of the whole team.";
 
 export namespace Team {
 
