@@ -113,7 +113,7 @@ const BOSS: Spec[] = [
 const DEVICE = { device: { type: "string", description: "The name of the device to run on, one listed under Devices." } };
 const KIT: Spec[] = TOOLS.map((t) => {
   const schema = t.schema as { properties: object; required: string[] };
-  const info = t.info + " It runs on the device named; a relative path is in your scratch folder there.";
+  const info = t.info + " It runs on the device named; a relative path is in your scratch folder there, and ~ is the home folder.";
   return spec(t.name, info, { ...DEVICE, ...schema.properties }, ["device", ...schema.required]);
 });
 const SKILL: Spec = spec("skill", "Load a skill listed under Skills: its SKILL.md, with the folder its other files are in on that device (read or run them there with your other tools).", { ...DEVICE, name: STR }, ["device", "name"]);

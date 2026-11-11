@@ -95,15 +95,23 @@ export function spec(name: string, info: string, fields: object, need: string[])
 
 export namespace Machine {
 
+  // a leading ~ is the home folder, as in a shell; ~user is left alone
+  export function home(p: string): string {
+    return p.replace(/^~(?=[\\/]|$)/, os.homedir());
+  }
+
+  export function at(cwd: string, p: string): string {
+    return path.resolve(cwd, Machine.home(p));
+  }
+
   export function agent_dir(agent: string): string {
-    const root = SCRATCH.replace(/^~(?=[\\/]|$)/, os.homedir());
-    return path.join(root, path.basename(agent));
+    return path.join(Machine.home(SCRATCH), path.basename(agent));
   }
 
   export async function run(job: Job, signal: AbortSignal): Promise<Out> {
     const cwd = Machine.agent_dir(job.cwd);
     const input = job.input;
-    const file = path.resolve(cwd, String(input.path));
+    const file = Machine.at(cwd, String(input.path));
     try {
       fs.mkdirSync(cwd, { recursive: true });
       switch (job.name) {
@@ -594,7 +602,7 @@ export namespace Machine {
   export function edit(cwd: string, edits: unknown): Out {
     const files = new Map<string, { shown: string; was: string; text: string }>();
     for (const [k, e] of listed(edits).entries()) {
-      const file  = path.resolve(cwd, String(get(e, "path")));
+      const file  = Machine.at(cwd, String(get(e, "path")));
       const known = files.get(file);
       const was   = known?.was ?? (fs.existsSync(file) ? fs.readFileSync(file, "utf8") : null);
       const text  = known?.text ?? was ?? "";

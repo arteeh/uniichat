@@ -14,7 +14,7 @@ import { FRAME, media_kind, PING, QUIT, RETRY, SLOW, TICK, WIRE, type Server } f
 const LOCAL = process.platform === "darwin" ? child.spawnSync("scutil", ["--get", "LocalHostName"]).stdout?.toString().trim() : "";
 const HOST  = LOCAL || os.hostname();
 const WORK  = "~/.unii/work";
-const FILE  = (process.env.UNII_DIR ?? "~/.unii").replace(/^~(?=[\\/]|$)/, os.homedir()) + "/config.json";
+const FILE  = Machine.home(process.env.UNII_DIR ?? "~/.unii") + "/config.json";
 
 const LOOK = 2000;
 
@@ -164,7 +164,7 @@ async function host(job: Job, url: string, token: string, signal: AbortSignal): 
   const lines: string[] = [];
   let fail = false;
   for (const p of [job.input.paths ?? []].flat().map(String)) {
-    const out = await host_one(path.resolve(cwd, p), p, url, token, signal);
+    const out = await host_one(Machine.at(cwd, p), p, url, token, signal);
     fail ||= "error" in out;
     const stored = "error" in out ? "" : "/media/" + out.name;
     lines.push("error" in out ? out.error : (media_kind(stored) === null ? "" : "!") + "[" + path.basename(p).replace(/[[\]\\\n]/g, "") + "](" + stored + ")");
@@ -198,7 +198,7 @@ function servers(): string | null {
     const file: unknown = fs.existsSync(FILE) ? JSON.parse(fs.readFileSync(FILE, "utf8")) : {};
     let mcp: unknown = get(file, "mcp") || {};
     if (typeof mcp === "string") {
-      mcp = JSON.parse(mcp.trim().startsWith("{") ? mcp : fs.readFileSync(mcp.trim().replace(/^~(?=[\\/]|$)/, os.homedir()), "utf8"));
+      mcp = JSON.parse(mcp.trim().startsWith("{") ? mcp : fs.readFileSync(Machine.home(mcp.trim()), "utf8"));
     }
     said = "";
     return JSON.stringify(mcp);
