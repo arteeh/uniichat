@@ -13,7 +13,7 @@ import { Disk } from "./Disk.ts";
 import { Mcp } from "./Mcp.ts";
 import * as Import from "./Import.ts";
 import * as Md from "./Md.ts";
-import { JOBS, Memory, type Msg as Log, type Pair, type Room, type Share } from "./Memory.ts";
+import { JOBS, Memory, VIEW_HIGH, type Msg as Log, type Pair, type Room, type Share } from "./Memory.ts";
 import { OpenAI } from "./OpenAI.ts";
 import { Owner } from "./Owner.ts";
 import { Pick } from "./Pick.ts";
@@ -1846,23 +1846,38 @@ export namespace Chat {
     const tree = Memory.roots(count).flatMap((part) => Chat.blocks(part, cover));
     const ids = (a: number, b: number) => Array.from({ length: Math.max(0, b - a) }, (_, k): Part => [a + k, 1]);
     const raw = [...ids(from, cover[0]), ...ids(Math.max(from, cover[1]), count)];
-    const parts = Chat.own([...eye, ...tree, ...raw].sort((x, y) => x[0] - y[0]), chat.mem);
+    const parts = Chat.own(chat, [...eye, ...tree, ...raw].sort((x, y) => x[0] - y[0]));
     Chat.teach(chat, sock, parts);
     Chat.send(sock, { $: "view", parts, turn: from });
   }
 
-  // the chat page shows no team copies (#134): a part of only copies goes,
-  // one with some is shown as its halves
-  export function own(parts: Part[], mem: Memory): Part[] {
+  // Unii's chat page shows no team copies (#134): a part of only copies
+  // goes; one with some is shown as its halves, newest first, while the
+  // messages shown are within a view's worth, and goes when older (the
+  // memory screen has it)
+  export function own(chat: Chat, parts: Part[]): Part[] {
+    if (chat.id !== UNII) {
+      return parts;
+    }
+    const mem = chat.mem;
     const teams = TEAMS.get(mem) ?? [0];
     TEAMS.set(mem, teams);
     for (let i = teams.length - 1; i < mem.count; i++) {
       teams.push(teams[i] + (Memory.message(mem, i)?.kind === "team" ? 1 : 0));
     }
-    return parts.flatMap(([id, n]): Part[] => {
+    const shown: Part[] = [];
+    let left = VIEW_HIGH;
+    for (let part = parts.pop(); part !== undefined; part = parts.pop()) {
+      const [id, n] = part;
       const copies = teams[Math.min(id + n, teams.length - 1)] - teams[Math.min(id, teams.length - 1)];
-      return copies === 0 ? [[id, n]] : copies === n || n === 1 ? [] : Chat.own([[id, n / 2], [id + n / 2, n / 2]], mem);
-    });
+      if (copies === 0) {
+        shown.push(part);
+        left -= n === 1 ? Memory.at(mem, id).size : 0;
+      } else if (copies < n && left > 0) {
+        parts.push([id, n / 2], [id + n / 2, n / 2]);
+      }
+    }
+    return shown.reverse();
   }
 
   export function blocks(part: { l: number; i: number }, [a, b]: [number, number]): Part[] {

@@ -105,7 +105,7 @@ const LOGGED = 60e3;
 
 const FAILED = new Map<string, number>();
 const TRIES = 5;
-const VIEW_HIGH = 128000;
+export const VIEW_HIGH = 128000;
 
 const TALK_SHARE_OF_WINDOW = 3 / 4;
 const BLOCK = 4;
