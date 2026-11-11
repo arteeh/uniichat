@@ -1177,19 +1177,41 @@ export namespace Memory {
     return { h: head.join(" · "), t: text, k: root?.kind };
   }
 
+  // what a subagent was told and hasn't read yet, kept for a restart
+  export function agent_held(mem: Memory, name: string, texts?: string[]): string[] {
+    const file = mem.dir + AGENTS + name + ".held.json";
+    if (texts === undefined) {
+      try {
+        const got: unknown = JSON.parse(fs.readFileSync(file, "utf8"));
+        return Array.isArray(got) ? got.filter((t) => typeof t === "string") : [];
+      } catch {
+        return [];
+      }
+    }
+    if (texts.length === 0) {
+      fs.rmSync(file, { force: true });
+    } else {
+      fs.writeFileSync(file, JSON.stringify(texts));
+    }
+    return texts;
+  }
+
   export function agent(mem: Memory, name: string): Root[] | null {
     const file = mem.dir + AGENTS + name + ".jsonl";
     return /^[A-Za-z]+$/.test(name) && fs.existsSync(file) ? Memory.file(file) : null;
   }
 
-  export function agent_new(mem: Memory): string {
-    const name = Names.name_random();
+  export function agent_new(mem: Memory, taken: (name: string) => boolean): string {
+    let name = Names.name_random();
+    for (let k = 0; k < 50 && taken(name); k++) {
+      name = Names.name_random();
+    }
     fs.mkdirSync(mem.dir + AGENTS, { recursive: true });
     try {
       fs.writeFileSync(mem.dir + AGENTS + name + ".jsonl", "", { flag: "wx" });
     } catch (err) {
       if (err_code(err) === "EEXIST") {
-        return Memory.agent_new(mem);
+        return Memory.agent_new(mem, taken);
       }
       throw err;
     }

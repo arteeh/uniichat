@@ -32,7 +32,8 @@ export type Row = { name: string; face: string; task: string; model: string; eff
 const NOTE = "subagent";
 const ON   = " on ";
 const AT   = " at effort ";
-const ROLE = new RegExp("^" + NOTE + "(?:" + ON + "(\\S+))?(?:" + AT + "(\\S+))?$");
+const BARE = " without view";
+const ROLE = new RegExp("^" + NOTE + "(?:" + ON + "(\\S+))?(?:" + AT + "(\\S+))?(" + BARE + ")?$");
 
 const TASK_SHOWN = 120;
 
@@ -61,13 +62,13 @@ export namespace Sub {
   }
 
   // its log's first line, which says how it runs
-  export function note(role: Role): string {
-    return NOTE + (role.model === null ? "" : ON + role.model) + (role.effort === null ? "" : AT + role.effort);
+  export function note(role: Role, memory: boolean): string {
+    return NOTE + (role.model === null ? "" : ON + role.model) + (role.effort === null ? "" : AT + role.effort) + (memory ? "" : BARE);
   }
 
-  export function role(note: string): Role | null {
+  export function role(note: string): { role: Role; memory: boolean } | null {
     const m = ROLE.exec(note);
-    return m === null ? null : { model: m[1] ?? null, effort: m[2] ?? null };
+    return m === null ? null : { role: { model: m[1] ?? null, effort: m[2] ?? null }, memory: m[3] === undefined };
   }
 
   // the spawner's pick, with the task's model and effort

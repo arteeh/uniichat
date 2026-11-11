@@ -18,9 +18,9 @@ const THEIRS = /^(?:([A-Za-z0-9-]+)_)?([A-Za-z0-9-]+(?:_[A-Za-z0-9-]+)*)__(.+)$/
 const READS = new Map<string, (x: Input) => Shown>([
   ["shell",    (x) => ({ head: text_of(x.command), blocks: [] })],
   ["read",     (x) => ({ head: text_of(x.path) + lines_show(x.offset, x.limit), blocks: [] })],
-  ["write",    (x) => ({ head: text_of(x.path), blocks: [] })],
+  ["write",    (x) => ({ head: text_of(x.path), blocks: text_block(x.content) })],
   ["view_video", (x) => ({ head: text_of(x.path) + range_show(x.start, x.end, x.unit) + (x.step === undefined ? "" : " every " + text_of(x.step, "null")), blocks: [] })],
-  ["edit",     (x) => (Array.isArray(x.edits) ? { head: edits_files(x.edits), blocks: [] } : input_shown(x))],
+  ["edit",     (x) => (Array.isArray(x.edits) ? { head: edits_files(x.edits), blocks: x.edits.flatMap(edit_blocks) } : input_shown(x))],
   ["zoom",     (x) => ({ head: (x.agent === undefined ? "" : text_of(x.agent, "null") + " ") + msg_show(x.id, x.n) + (x.at === undefined ? "" : " from char " + text_of(x.at, "null")), blocks: [] })],
   ["date",     (x) => ({ head: msg_show(x.id, 1), blocks: [] })],
   ["computer", (x) => ({ head: "", blocks: text_block(x.task) })],
@@ -114,6 +114,13 @@ function lines_show(offset: unknown, limit: unknown): string {
 function range_show(start: unknown, end: unknown, unit: unknown): string {
   const s = unit === "second" ? "s" : "";
   return start === undefined && end === undefined ? "" : " " + text_of(start, "0") + s + "-" + text_of(end) + (end === undefined ? "" : s);
+}
+
+// an edit's old and new text, each under the file it's in, for the opened row
+function edit_blocks(e: unknown): Md.Code[] {
+  const path = text_of(get(e, "path"));
+  const all = get(e, "all") === true ? " (every match)" : "";
+  return [...text_block(get(e, "old")).map((b) => ({ ...b, k: path + all + ": old" })), ...text_block(get(e, "new")).map((b) => ({ ...b, k: path + ": new" }))];
 }
 
 function edits_files(edits: unknown[]): string {

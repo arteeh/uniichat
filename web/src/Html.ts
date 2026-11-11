@@ -124,6 +124,8 @@ function row_make(row: View.Row): string {
 function line_html(row: Extract<View.Row, { $: "Line" }>): string {
   const c = row.call;
   const at = row.id === null ? "" : ` data-a="${row.id}"`;
+  const call = row.rows[0];
+  const of = call.$ === "Msg" && call.of !== undefined ? ` data-of="${esc(call.of)}"` : "";
   const fail = row.echo?.startsWith("error") === true ? `<span class="bad" title="Failed">✕</span>` : "";
   const files = c.name === "write" || c.name === "edit";
   const lines = (row.echo ?? "").split("\n");
@@ -133,7 +135,7 @@ function line_html(row: Extract<View.Row, { $: "Line" }>): string {
   const name = c.name === "" ? "" : `<b>${esc(c.name)}</b>`;
   const where = c.device === "" ? "" : `<span class="on">· ${esc(c.device)}</span>`;
   const head = `<summary><span class="ic">${Theme.tool_glyph(c.name)}</span>${name}${what}${diff}${fail}${where}</summary>`;
-  return `<details class="msg tool line"${at}>${head}<div class="full">${row.rows.map(line_part).join("")}</div></details>`;
+  return `<details class="msg tool line"${at}${of}>${head}<div class="full">${row.rows.map(line_part).join("")}</div></details>`;
 }
 
 // an opened line's part: the call's whole input, or the result as it is
@@ -267,7 +269,7 @@ const SETTING: Record<string, [string, string]> = {
   pick      : ["Default model", "For chats that haven't picked one."],
   compactor : ["Compactor model", "Writes the memory's summaries."],
   thinking  : ["Show thinking", ""],
-  hops      : ["Hop limit", "Agent-to-agent messages in a row; 0: none."],
+  hops      : ["Hop limit", "Agent-to-agent messages in a row; 0: off."],
   compactor_context : ["Compactor context", "KB of chat each summary sees (1–128)."],
   site      : ["Site", "For sign-in links."],
 };

@@ -44,7 +44,7 @@ export type Seat = {
 
 // an agent's subagents
 export type Subs = {
-  spawn   : (tasks: Spawn[]) => Promise<string>;
+  spawn   : (tasks: Spawn[]) => Promise<Out>;
   tell    : (name: string, text: string) => Promise<Out>;
   stop    : (name: string, why: string) => Promise<Out>;
   working : () => string[];
@@ -68,6 +68,8 @@ export type Tools = {
   key     : string;
   url     : string;
   hub     : Hub;
+  // the seat of the agent that spawned a subagent, one done now too
+  owner   : (who: string) => Seat | undefined;
 };
 
 export const SEARCHES = 10;
@@ -123,7 +125,7 @@ export namespace Tools {
     const url = Tools.base() + key + "/";
     const run = (device: string, job: Job, signal: AbortSignal) => Tools.job(tools, device, job, signal, crypto.randomUUID());
     const mcp = Mcp.servers((text) => hub.note(text), run, (device) => Tools.live(tools.devices.get(device)));
-    const tools: Tools = { devices: new Map(), seats: new Map(), mcp, next: null, left: false, key, url, hub };
+    const tools: Tools = { devices: new Map(), seats: new Map(), mcp, next: null, left: false, key, url, hub, owner: () => undefined };
     CHATS.set(key, tools);
     return tools;
   }
@@ -325,7 +327,7 @@ export namespace Tools {
       }
       case "spawn": {
         const tasks = Sub.spawns(args);
-        return typeof tasks === "string" ? { text: tasks, fail: true } : seat.subs === null ? { text: "A subagent spawns none.", fail: true } : { text: await seat.subs.spawn(tasks), fail: false };
+        return typeof tasks === "string" ? { text: tasks, fail: true } : seat.subs === null ? { text: "A subagent spawns none.", fail: true } : await seat.subs.spawn(tasks);
       }
       case "tell": {
         return seat.subs === null ? { text: "A subagent tells none.", fail: true } : await seat.subs.tell(text_of(args.name), text_of(args.message));
@@ -614,9 +616,12 @@ export namespace Tools {
     tools.devices.get(device)?.jobs.get(id)?.end(out);
   }
 
-  // a job's report goes to the agent that started it, or to Unii if that one is gone
+  // a job's report goes to the agent that started it, a done subagent's to
+  // its spawner, or to Unii if that one is gone
   export function report(tools: Tools, who: string, text: string): void {
-    (tools.seats.get(who) ?? tools.seats.get("main"))?.report(text);
+    const seat = tools.seats.get(who);
+    const owner = seat === undefined ? tools.owner(who) : undefined;
+    (seat ?? owner ?? tools.seats.get("main"))?.report(owner === undefined ? text : text.replace("] ", "] " + who + "'s job, "));
   }
 
 }

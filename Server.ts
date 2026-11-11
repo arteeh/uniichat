@@ -187,8 +187,8 @@ WEB["/tree"]     = WEB["/"];
 WEB["/new"]      = WEB["/"];
 Object.assign(WEB, HEADS);
 
-// an agent's pages: /a/<id>, /a/<id>/edit
-const AGENT_PAGE = /^\/a\/[a-z0-9]{1,16}(\/edit)?$/;
+// an agent's pages: /a/<id>, /a/<id>/edit, /a/<id>/s/<Name> (a subagent's chat)
+const AGENT_PAGE = /^\/a\/[a-z0-9]{1,16}(\/edit|\/s\/[A-Za-z]{2,40})?$/;
 
 const HASHED_INTO_BUILD = [app_js, style_css, PAGE, sw_js, manifest];
 const BUILD      = Bun.hash(HASHED_INTO_BUILD.map((f) => fs.readFileSync(f, "utf8")).join("\0")).toString(36);
@@ -851,7 +851,7 @@ export namespace Chat {
   }
 
   export function waiting(run: Talk): Live[] {
-    return [...run.calls.values()].filter((call) => !call.logged).map((call) => ({ kind: "tool", text: call.text }));
+    return [...run.calls].filter(([, call]) => !call.logged).map(([of, call]) => ({ kind: "tool", text: call.text, of }));
   }
 
   export function unanswered(chat: Chat, run: Talk): void {
@@ -897,29 +897,33 @@ export namespace Chat {
     return why ?? Memory.view(mem, mem.count, Memory.fitted(mem));
   }
 
-  export async function spawn(chat: Chat, tasks: Spawn[]): Promise<string> {
+  export async function spawn(chat: Chat, tasks: Spawn[]): Promise<Done> {
     const view = tasks.some((t) => t.memory) ? await Chat.sub_view(chat) : [];
     if (typeof view === "string") {
-      return view;
+      return { text: view + " Nothing started.", fail: true };
     }
     const names = tasks.map((t) => {
-      const sub = Chat.sub_start(chat, t.role, t.task, t.memory ? view : [], null);
+      const sub = Chat.sub_start(chat, t.role, t.memory, t.task, t.memory ? view : [], null);
       void Run.take(sub.run, { text: t.task, imgs: [] });
       const knobs = [t.role.model, t.role.effort === null ? null : "effort " + t.role.effort, t.memory ? null : "no view"].filter((k) => k !== null);
       return sub.name + (knobs.length === 0 ? "" : " (" + knobs.join(", ") + ")");
     });
-    return "Started " + names.join(", ") + ". Each one's report will reach you as a message when it finishes.";
+    return { text: "Started " + names.join(", ") + ". Each one's report will reach you as a message when it finishes.", fail: false };
   }
 
   // name: one going on after the server's restart, else a new one
-  export function sub_start(chat: Chat, role: Role, task: string, view: Block[], name: string | null): Sub<Msg> {
-    const it = name ?? Memory.agent_new(chat.mem);
+  export function sub_start(chat: Chat, role: Role, memory: boolean, task: string, view: Block[], name: string | null): Sub<Msg> {
+    // a name no other agent's subagent has, now or before: it keys the
+    // seat at the tools, the jobs' reports and the scratch folder
+    const it = name ?? Memory.agent_new(chat.mem, (n) => [...Main.chats.values()].some((c) => c.subs.has(n) || Memory.agent(c.mem, n) !== null));
     const sub: Sub<Msg> = { name: it, role, task, view, replies: [], why: null, run: Run.make<Say, Msg>(it, Chat.sub_kind(chat, () => sub)), doing: "starting", at: Date.now() };
     chat.subs.set(it, sub);
-    const seat: Seat = { mem: chat.mem, note: (text) => Chat.push(chat, sub.run, "note", text), report: () => {}, timed: () => {}, message: () => Promise.resolve({ text: "A subagent messages no one.", fail: true }), subs: null };
+    // a job's report reaches it while it runs, else its spawner
+    const report = (text: string) => (sub.run.busy && sub.why === null ? void Run.take(sub.run, { text, imgs: [] }) : Chat.report(chat, text.replace("] ", "] " + it + "'s job, "), true));
+    const seat: Seat = { mem: chat.mem, note: (text) => Chat.push(chat, sub.run, "note", text), report, timed: () => {}, message: () => Promise.resolve({ text: "A subagent messages no one.", fail: true }), subs: null };
     chat.tools.seats.set(it, seat);
     if (name === null) {
-      Chat.push(chat, sub.run, "note", Sub.note(role));
+      Chat.push(chat, sub.run, "note", Sub.note(role, memory));
     }
     Main.team_soon();
     return sub;
@@ -927,23 +931,31 @@ export namespace Chat {
 
   export async function sub_restart(chat: Chat, name: string, text: string): Promise<void> {
     const log = Memory.agent(chat.mem, name) ?? [];
-    const role = log[0]?.kind === "note" ? Sub.role(log[0].text) : null;
+    const how = log[0]?.kind === "note" ? Sub.role(log[0].text) : null;
     const task = log.find((r) => r.kind === "user")?.text ?? "";
-    const view = role === null ? "" : await Chat.sub_view(chat);
-    if (role === null || typeof view === "string" || chat.subs.has(name)) {
+    const view = how === null ? "" : how.memory ? await Chat.sub_view(chat) : [];
+    if (how === null || typeof view === "string" || chat.subs.has(name)) {
       return;
     }
-    const sub = Chat.sub_start(chat, role, task, view, name);
-    void Run.take(sub.run, { text, imgs: [] });
+    const sub = Chat.sub_start(chat, how.role, how.memory, task, view, name);
+    const told = Memory.agent_held(chat.mem, name);
+    void Run.takes(sub.run, [text, ...told].map((t) => ({ text: t, imgs: [] })));
   }
 
   export function sub_kind(chat: Chat, sub: () => Sub<Msg>): Run<Say, Msg>["kind"] {
     return {
       pick   : () => Chat.sub_pick(chat, sub()),
       begin  : () => {},
-      log    : (run, say) => Chat.push(chat, run, "user", say.text, [], false, undefined, {}, true),
+      log    : (run, say) => {
+        const msg = Chat.push(chat, run, "user", say.text, [], false, undefined, {}, true);
+        Memory.agent_held(chat.mem, run.name, run.queue.map((x) => x.q.text));
+        return msg;
+      },
       say    : (say) => ({ ...say, from: say.text.startsWith(JOB) ? Prompts.sender("job") : Chat.name(chat) || "Unii" }),
-      queued : () => Chat.change(chat),
+      queued : (run) => {
+        Memory.agent_held(chat.mem, run.name, run.queue.map((x) => x.q.text));
+        Chat.change(chat);
+      },
       again  : () => false,
       ask    : (_, take) => {
         take();
@@ -1396,7 +1408,11 @@ export namespace Chat {
   export function resume(chat: Chat, work: string[]): void {
     const text = Prompts.prompt("restarted");
     const queued = chat.mem.queue.filter((post) => post.act === undefined || Owner.act_get(post.act) === null);
-    const posts: Pending[] = [...(work.length > 0 ? [{ kind: "note" as const, text, images: [] }] : []), ...queued];
+    const posts: Pending[] = [...(work.includes(TURN) ? [{ kind: "note" as const, text, images: [] }] : []), ...queued];
+    // its subagents go on even in an archive: their reports wait there
+    for (const name of work.filter((w) => w !== TURN)) {
+      void Chat.sub_restart(chat, name, text);
+    }
     if (Chat.archived(chat)) {
       chat.mem.held = [...posts, ...chat.mem.held];
       chat.mem.queue = [];
@@ -1404,9 +1420,6 @@ export namespace Chat {
       return;
     }
     posts.forEach((post) => void Run.take(chat.main, post));
-    for (const name of work.filter((w) => w !== TURN)) {
-      void Chat.sub_restart(chat, name, text);
-    }
   }
 
   export function timed(chat: Chat, retry = false): void {
@@ -1723,9 +1736,7 @@ export namespace Chat {
         return device === "" ? { error: "Only a device reports jobs." } : Chat.job_done(chat, String(msg.id), typeof msg.agent === "string" ? msg.agent : chat.who, String(msg.text));
       }
       case "unschedule": {
-        const id = String(msg.id);
-        if (Tools.unschedule({ mem: chat.mem, timed: () => Chat.timed(chat) }, id)) {
-        }
+        Tools.unschedule({ mem: chat.mem, timed: () => Chat.timed(chat) }, String(msg.id));
         return {};
       }
       case "talk": {
@@ -2341,6 +2352,10 @@ export namespace Main {
       off    : () => Main.unii().mem.off,
       docs   : AGENTS + "/" + UNII,
     });
+    Main.tools.owner = (who) => {
+      const chat = [...Main.chats.values()].find((c) => c.subs.has(who) || Memory.agent(c.mem, who) !== null);
+      return chat === undefined ? undefined : Main.tools.seats.get(chat.who);
+    };
     Team.open();
     Limit.answering(() => ({ queued: [...Main.chats.values()].some((c) => Run.waiting(c.main)), busy: [...Main.chats.values()].some((c) => c.main.busy) }));
     Team.all().forEach((agent) => Chat.open(agent.id, Main.tools));

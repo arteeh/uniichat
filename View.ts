@@ -21,7 +21,8 @@ type Of = { tool: string; apart: boolean };
 
 type Node = { text: string; to: string };
 
-export type Live = { kind: Kind; text: string };
+// of: a tool call's id, while it waits for its result
+export type Live = { kind: Kind; text: string; of?: string };
 
 // an agent as the chat list shows it: last, its last message's gist
 export type Mate = { id: string; name: string; about: string; picture: string; unread: number; last: string; busy: boolean; archived: number; subs?: SubRow[] };
@@ -336,6 +337,21 @@ function view_chat(v: View): void {
 const OWN = ["team", "ack", "error", "note", "jobs", "job"];
 
 export function view_hear(v: View, msg: Server): Client[] {
+  // a new link: the subagents' pages seen before may have missed what
+  // came while it was down, so they're asked for again; the open one now
+  const fresh = msg.$ === "state" && msg.agent !== undefined && msg.agent !== v.on && msg.agent === v.agent;
+  if (fresh) {
+    v.pages.clear();
+  }
+  const again: Client[] = fresh && v.page !== null ? [{ $: "agent", name: v.page.name }] : [];
+  if (fresh && v.page !== null) {
+    v.page = { ...v.page, log: null, live: [], from: 0, loading: false, done: false };
+    v.pages.set(v.page.name, v.page);
+  }
+  return [...again, ...view_heard(v, msg)];
+}
+
+function view_heard(v: View, msg: Server): Client[] {
   if (msg.$ === "state" && msg.agent !== undefined && v.on === "" && msg.agent !== v.agent) {
     v.agent = msg.agent;
   }
@@ -345,12 +361,6 @@ export function view_hear(v: View, msg: Server): Client[] {
     }
     v.on = msg.agent;
     v.held = msg.agent;
-    // a new link sends a subagent's page again
-    if (v.page !== null) {
-      v.pages.clear();
-      v.pages.set(v.page.name, v.page);
-      return [{ $: "agent", name: v.page.name }];
-    }
   }
   if (!OWN.includes(msg.$) && v.on !== v.agent) {
     return [];
@@ -531,14 +541,14 @@ export function view_act(v: View, act: Act): Client[] {
 
 export function view_body(v: View): Row[] {
   if (v.page !== null) {
-    return page_rows(v.page);
+    return page_rows(v.page, v.thinking !== false);
   }
   return view_lines(view_rows(v, v.parts).flat());
 }
 
 // a subagent's page: its log, earlier entries on a tap
-function page_rows(page: Page): Row[] {
-  const log = page.log ?? [];
+function page_rows(page: Page, minds: boolean): Row[] {
+  const log = (page.log ?? []).filter((e) => minds || e.kind !== "mind");
   const earlier: Row[] = page.from > 0 ? [{ $: "Cap", text: page.loading ? "Loading…" : "Earlier messages", earlier: true }] : [];
   const rows = log.flatMap((e, k) => (e.id === 0 && e.kind === "note" ? [] : whole_rows(e.id ?? null, e, log[k - 1])));
   return [...earlier, ...view_lines(rows), ...(page.done && page.log !== null ? [Cap("Done: its report is in the chat that spawned it.")] : [])];
@@ -575,10 +585,12 @@ function view_rows(v: View, parts: Part[]): Row[][] {
 
 export function view_tail(v: View): Row[] {
   if (v.page !== null) {
-    return view_lines(v.page.live.flatMap((l) => entry_rows(null, l.kind, l.text)));
+    const page = v.page.live.filter((l) => v.thinking !== false || l.kind !== "mind");
+    const thinks = page.length < v.page.live.length ? [{ $: "Cap" as const, text: "Thinking", think: true as const }] : [];
+    return [...thinks, ...view_lines(page.flatMap((l) => entry_rows(null, l.kind, l.text, [], undefined, undefined, l.of)))];
   }
   const thought = v.thinking === false && v.live.some((l) => l.kind === "mind") ? [{ $: "Cap" as const, text: "Thinking", think: true as const }] : [];
-  const rows = [...thought, ...view_lines(v.live.filter((l) => v.thinking !== false || l.kind !== "mind").flatMap((l) => entry_rows(null, l.kind, l.text)))];
+  const rows = [...thought, ...view_lines(v.live.filter((l) => v.thinking !== false || l.kind !== "mind").flatMap((l) => entry_rows(null, l.kind, l.text, [], undefined, undefined, l.of)))];
   const load = v.importing !== null ? [Cap(progress_show(v.importing))] : [];
   const said = !v.up ? v.out.flatMap((p) => entry_rows(null, "user", p.said)) : [];
   const kept = said.length > 0 ? [...said, Cap(UNSENT)] : [];
@@ -625,8 +637,9 @@ export function progress_show(p: Progress): string {
   return phase + (p.why === null ? "" : " · paused");
 }
 
+// the user's Stop also stops the subagents, so it stays while any run
 export function view_stoppable(v: View): boolean {
-  return v.busy || v.limit !== null;
+  return v.busy || v.limit !== null || (v.team.find((m) => m.id === v.agent)?.subs?.length ?? 0) > 0;
 }
 
 export function view_pick(v: View): Knob[] {
