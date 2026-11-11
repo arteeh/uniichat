@@ -347,11 +347,11 @@ export namespace Machine {
   }
 
   export function sweep(agent: string | null, jobs = false): number | null {
+    if (agent !== null && jobs) {
+      JOBS.running.forEach((job, proc) => job.agent === agent && KILLED.add(proc));
+    }
     for (const [proc, who] of SHELLS) {
       if ((agent === null || (who === agent && (jobs || !JOBS.running.has(proc)))) && Machine.group_may_hold_job(proc)) {
-        if (agent !== null && JOBS.running.has(proc)) {
-          KILLED.add(proc);
-        }
         Machine.kill(-proc.pid);
       }
     }
