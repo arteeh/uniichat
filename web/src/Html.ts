@@ -69,23 +69,29 @@ export function list_html(team: View.Mate[], here: string | null, sub: string | 
 const MADE = new WeakMap<View.Row, { html: string; names: string }>();
 
 // the names that link to their chat (#141): the team's, and the running
-// subagents' of the chat shown, but not its own
+// subagents' of the chat shown, but not its own. Every name is matched, so
+// one inside a longer one ("Unii" in "Unii Dev") stays part of it
 const NAMES: { key: string; re: RegExp | null; to: Map<string, string> } = { key: "", re: null, to: new Map() };
+
+const WORD_END = /[\p{L}\p{N}_]$/u;
+const WORD_START = /^[\p{L}\p{N}_]/u;
 
 export function names_set(team: View.Mate[], here: string, sub: string | null): boolean {
   const to = new Map<string, string>();
   for (const m of team.filter((m) => m.archived === 0)) {
     to.set(m.name, "/a/" + m.id);
   }
-  for (const s of team.find((m) => m.id === here)?.subs ?? []) {
+  const subs = team.find((m) => m.id === here)?.subs ?? [];
+  for (const s of subs) {
     to.set(s.name, "/a/" + here + "/s/" + s.name);
   }
-  to.delete(sub ?? team.find((m) => m.id === here)?.name ?? "");
-  const key = JSON.stringify([...to]);
+  const own = sub ?? team.find((m) => m.id === here)?.name ?? "";
+  to.delete(own);
+  const names = [...new Set([...team.map((m) => m.name), ...subs.map((s) => s.name), own])].filter((n) => n !== "").sort((a, b) => b.length - a.length);
+  const key = JSON.stringify([[...to], names]);
   if (key === NAMES.key) {
     return false;
   }
-  const names = [...to.keys()].filter((n) => n !== "").sort((a, b) => b.length - a.length);
   NAMES.key = key;
   NAMES.to = to;
   NAMES.re = names.length === 0 ? null : new RegExp("(?<![\\p{L}\\p{N}_])(" + names.map((n) => n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|") + ")(?![\\p{L}\\p{N}_])", "u");
@@ -541,35 +547,44 @@ function chip_html(url: string, name: string): string {
   return `<a class="file" href="${esc(url)}" download="${esc(shown)}" title="Download ${esc(shown)}"><span class="ic">📎</span><span class="fname">${esc(shown)}</span><small data-of="${esc(url)}"></small></a>`;
 }
 
-// linked: whether names may become links, not in a link already
-function spans_html(spans: Md.Span[], linked = true): string {
-  return spans.map((s) => span_html(s, linked)).join("");
+// linked: whether names may become links, not in a link already; glued:
+// whether a letter is shown right before and after the spans, so a name
+// in "x**Coder**" or "**Coder**s" is no whole word
+function spans_html(spans: Md.Span[], linked = true, glued: [boolean, boolean] = [false, false]): string {
+  const texts = spans.map((s) => Md.spans_text([s]));
+  const before = [glued[0]];
+  texts.forEach((t, i) => before.push(t === "" ? before[i] : WORD_END.test(t)));
+  const after = [glued[1]];
+  [...texts].reverse().forEach((t, i) => after.push(t === "" ? after[i] : WORD_START.test(t)));
+  return spans.map((s, i) => span_html(s, linked, [before[i], after[spans.length - 1 - i]])).join("");
 }
 
-function text_html(x: string, linked: boolean): string {
+function text_html(x: string, linked: boolean, glued: [boolean, boolean]): string {
   const parts = linked && NAMES.re !== null ? x.split(NAMES.re) : [x];
+  const last = parts.length - 2;
   return parts.map((p, k) => {
-    const to = k % 2 === 1 ? NAMES.to.get(p) : undefined;
+    const cut = (k === 1 && parts[0] === "" && glued[0]) || (k === last && parts[k + 1] === "" && glued[1]);
+    const to = k % 2 === 1 && !cut ? NAMES.to.get(p) : undefined;
     return to === undefined ? esc(p).replaceAll("UniiChat", `<span class="brand">UniiChat</span>`) : `<a class="name" href="${esc(to)}" data-go="${esc(to)}">${esc(p)}</a>`;
   }).join("");
 }
 
-function span_html(s: Md.Span, linked: boolean): string {
+function span_html(s: Md.Span, linked: boolean, glued: [boolean, boolean]): string {
   switch (s.$) {
     case "Text": {
-      return text_html(s.x, linked);
+      return text_html(s.x, linked, glued);
     }
     case "Code": {
       return `<code>${esc(s.x)}</code>`;
     }
     case "Bold": {
-      return `<strong>${spans_html(s.x, linked)}</strong>`;
+      return `<strong>${spans_html(s.x, linked, glued)}</strong>`;
     }
     case "Ital": {
-      return `<em>${spans_html(s.x, linked)}</em>`;
+      return `<em>${spans_html(s.x, linked, glued)}</em>`;
     }
     case "Strk": {
-      return `<del>${spans_html(s.x, linked)}</del>`;
+      return `<del>${spans_html(s.x, linked, glued)}</del>`;
     }
     case "Link": {
       if (View.store_file(s.k)) {
