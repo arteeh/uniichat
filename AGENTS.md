@@ -7,4 +7,26 @@
 
 ## How to test
 
-`testing/README.md` starts the test rig: a container with UniiChat on your checkout, a device, and fake models of all four vendors. Use the web app there with playwright-cli, and steer what the models answer with `fake` (replies, tool calls, errors, stalls), never with test commands in chat messages.
+The test rig is a container with UniiChat on your checkout, a device named `box`, and fake models of all four vendors (claude-api, claude-sub, openai-api, openai-sub) with fake sign-ins: no accounts, no network, no paid calls. From the repository's folder (Podman or Docker):
+
+```sh
+podman build -t uniichat-test -f testing/Containerfile .   # again when bun.lock changes
+podman run -d --name rig --network none -v "$PWD:/src:ro,z" uniichat-test
+podman logs -f rig                                          # until "rig up"
+```
+
+It copies your checkout in at every start, so after a change, `podman restart rig`; `podman rm -f rig` forgets the chat and sign-ins. Work inside it with `podman exec -it rig bash`: `unii serve link` prints a sign-in link for `playwright-cli open`; the logs are in `/rig/logs`.
+
+Steer what the models answer with `fake`, never with test commands in chat messages. Each command applies to the next model call; with nothing queued, a call gets "ok":
+
+```sh
+fake reply "text"                        # or --think "t" "text": thinks 5 s first (Claude)
+fake tool NAME 'JSON' [NAME 'JSON' ...]  # tool calls
+fake error KIND [--reset 5m]             # prompt-too-long, overloaded, rate-limit, usage-limit, auth-expired
+fake stall 60s | fake cut                # the stream hangs, or drops halfway
+fake log | fake last [--json] | fake clear
+```
+
+`--match TEXT` limits a command to the call whose latest message has TEXT. Use it whenever calls run at once: the chat, the compactor (`--match Compaction:`) and subagents.
+
+A real provider answer the fake doesn't know goes in `testing/fake/cases.ts`, every secret stripped (keys, tokens, account, org and user ids, emails, cookies), with where and when it was seen.
