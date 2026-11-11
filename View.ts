@@ -637,9 +637,9 @@ export function progress_show(p: Progress): string {
   return phase + (p.why === null ? "" : " · paused");
 }
 
-// the user's Stop also stops the subagents, so it stays while any run
+// the user's Stop is for the agent's own turn: its subagents go on
 export function view_stoppable(v: View): boolean {
-  return v.busy || v.limit !== null || (v.team.find((m) => m.id === v.agent)?.subs?.length ?? 0) > 0;
+  return v.busy || v.limit !== null;
 }
 
 export function view_pick(v: View): Knob[] {

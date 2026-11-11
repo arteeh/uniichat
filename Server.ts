@@ -1474,7 +1474,6 @@ export namespace Chat {
   }
 
   export function interrupt(chat: Chat, why: string | null): void {
-    chat.subs.forEach((sub) => void Chat.sub_stop(chat, sub.name, "", why ?? ""));
     const parked = Chat.unpark(chat);
     if (chat.main.busy) {
       Run.stop(chat.main, why);
@@ -1689,7 +1688,7 @@ export namespace Chat {
   }
 
   export function stop_recorded(chat: Chat, id: string): Answer {
-    if (Chat.running(chat).length === 0) {
+    if (!Chat.running(chat).includes(TURN)) {
       return {};
     }
     Chat.mark(chat, id, {});
