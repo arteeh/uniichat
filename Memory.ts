@@ -4,6 +4,7 @@ import { clip_page, clip_pages } from "./Clip.ts";
 import * as config from "./Config.ts";
 import { Disk } from "./Disk.ts";
 import { err_code, err_why } from "./Err.ts";
+import { rec } from "./Json.ts";
 import * as Names from "./Names.ts";
 import { Pick } from "./Pick.ts";
 import * as Prompts from "./Prompts.ts";
@@ -129,6 +130,7 @@ const MEDIA_DIR = "/docs/media/";
 
 // a subagent's log, in its spawner's folder (#116)
 const AGENTS = "/docs/agent/";
+const DROPPED = ".dropped.json";
 const AGENT_LOGS = new Map<string, number>();
 
 const PAGE_MAX = 4 * 2 ** 20;
@@ -1225,6 +1227,34 @@ export namespace Memory {
     Memory.append(mem.dir + AGENTS + name + ".jsonl", [JSON.stringify(root)]);
     AGENT_LOGS.set(mem.dir + name, n + 1);
     return root;
+  }
+
+  // the subagents whose log's last line is older than before
+  export function agents_ended(mem: Memory, before: number): string[] {
+    return Memory.agents(mem).filter((name) => {
+      try {
+        return fs.statSync(mem.dir + AGENTS + name + ".jsonl").mtimeMs < before;
+      } catch {
+        return false;
+      }
+    });
+  }
+
+  // the devices a subagent's scratch folder was dropped on; with one, it
+  // was dropped on that one too
+  export function agent_dropped(mem: Memory, name: string, device?: string): string[] {
+    const file = mem.dir + AGENTS + DROPPED;
+    let all: Record<string, string[]> = {};
+    try {
+      const got: unknown = JSON.parse(fs.readFileSync(file, "utf8"));
+      all = rec(got) ? Object.fromEntries(Object.entries(got).map(([k, v]) => [k, Array.isArray(v) ? v.filter((d) => typeof d === "string") : []])) : {};
+    } catch {}
+    const on = all[name] ?? [];
+    if (device !== undefined && !on.includes(device)) {
+      all[name] = [...on, device];
+      fs.writeFileSync(file, JSON.stringify(all));
+    }
+    return all[name] ?? [];
   }
 
   export function agents(mem: Memory): string[] {

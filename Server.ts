@@ -116,6 +116,11 @@ const SETTLE     = 200;
 // a subagent page's entries at a time; how long a stop waits for one to end
 const SHOWN      = 100;
 const HALT       = 5000;
+
+// a finished subagent's scratch folders are kept this long after its log's
+// last line, then dropped on each device, looked for about this often (#147)
+const SCRATCH_KEPT  = 30 * 24 * 3600e3;
+const SCRATCH_SWEEP = 24 * 3600e3;
 const AGENTS     = config.DIR + "/agents";
 const TALK_FULL  = "Conversation mode switched itself off: it was full.";
 const TALK_SMALL = "Conversation mode switched itself off: too long for {model}.";
@@ -1945,6 +1950,7 @@ export namespace Main {
     }
     const link = { send: (msg: object) => Chat.send(sock, msg), live: () => Main.socks.has(sock), work, scratch, shell };
     sock.data.device = Tools.attach(Main.tools, tab, host, sock.data.who, link, Owner.kept());
+    void Main.scratch_sweep(sock.data.device);
     if (sock.data.device !== host) {
       Chat.send(sock, { $: "note", text: host + " was taken: Unii calls this computer " + sock.data.device + "." });
     }
@@ -2389,6 +2395,7 @@ export namespace Main {
     Team.all().forEach((agent) => Chat.open(agent.id, Main.tools));
     Chat.copies();
     Main.watch();
+    setInterval(() => void Main.scratch_sweep(null), SCRATCH_SWEEP).unref();
     process.on("unhandledRejection", Main.unowned);
     Main.server = Bun.serve<Sock["data"]>({
       port               : port,
@@ -2487,6 +2494,25 @@ export namespace Main {
 
   // an editor or Settings saves by moving a new file over the old one,
   // which a watch on the file itself stops seeing
+  // only: the device just opened, else every open one; one at a time on
+  // each, a folder dropped once per device
+  export async function scratch_sweep(only: string | null): Promise<void> {
+    const before = Date.now() - SCRATCH_KEPT;
+    const running = (name: string) => [...Main.chats.values()].some((c) => c.subs.has(name));
+    const devices = Tools.opened(Main.tools).map(([device]) => device).filter((device) => only === null || device === only);
+    await Promise.all(devices.map(async (device) => {
+      for (const chat of [...Main.chats.values()]) {
+        const old = Memory.agents_ended(chat.mem, before).filter((name) => /^[A-Z]/.test(name) && !running(name) && !Memory.agent_dropped(chat.mem, name).includes(device));
+        for (const name of old) {
+          const out = await Tools.job(Main.tools, device, { name: "drop", input: { agent: name }, cwd: "main" }, AbortSignal.timeout(60e3), crypto.randomUUID());
+          if (!out.fail && Main.chats.get(chat.id) === chat) {
+            Memory.agent_dropped(chat.mem, name, device);
+          }
+        }
+      }
+    }));
+  }
+
   export function watch(): void {
     const names = [config.FILE_PATH, config.KEYS_PATH].map((f) => path.basename(f));
     const off = (err: unknown) => console.error("unii: settings saved by hand apply after a restart: " + err_why(err));
