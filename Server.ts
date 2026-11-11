@@ -2026,7 +2026,7 @@ export namespace Main {
       return Response.json({ left: Main.left(chat) });
     }
     if (req.method === "DELETE" && what === "") {
-      return out(Main.forget(chat));
+      return out(await Main.forget(chat));
     }
     if (req.method !== "POST") {
       return new Response("an agent is edited with a POST", { status: 405 });
@@ -2066,35 +2066,39 @@ export namespace Main {
     return [...Main.tools.devices].filter(([, d]) => ![...d.terms.values()].some((t) => t.live())).map(([name, d]) => name + ": " + ([...d.terms.values()][0]?.scratch ?? "~/.unii/scratch") + "/" + chat.who);
   }
 
-  export function forget(chat: Chat): Answer {
+  export async function forget(chat: Chat): Promise<Answer> {
     if (!Chat.archived(chat)) {
       return { error: "Archive " + Chat.name(chat) + " before deleting it." };
     }
     if (chat.main.busy) {
       return { error: Chat.name(chat) + " is still finishing a turn: delete it once that ends." };
     }
-    // its subagents end unreported, and every one's folder goes with its own
+    // its subagents end unreported, their queued tells dropped, and its
+    // memory goes once their runs have ended, every one's folder with its own
     const subs = Memory.agents(chat.mem);
-    chat.subs.forEach((sub) => {
-      chat.subs.delete(sub.name);
-      chat.tools.seats.delete(sub.name);
-      Run.stop(sub.run, null);
+    const runs = [...chat.subs.values()].map((sub) => sub.run);
+    chat.subs.forEach((sub) => chat.tools.seats.delete(sub.name));
+    chat.subs.clear();
+    runs.forEach((run) => {
+      run.queue.splice(0).forEach((x) => x.done(null));
+      Run.stop(run, null);
     });
     Chat.stop(chat, null);
     clearTimeout(chat.bell);
     Chat.gone(chat);
-    Memory.stop(chat.mem);
     Main.chats.delete(chat.id);
     Main.tools.seats.delete(chat.who);
     Team.drop(chat.id);
-    fs.rmSync(chat.mem.dir, { recursive: true, force: true });
+    chat.socks.forEach((sock) => Chat.join(Main.unii(), sock));
+    Main.team_soon();
     for (const [device] of Tools.opened(Main.tools)) {
       for (const agent of [chat.who, ...subs]) {
         void Tools.job(Main.tools, device, { name: "drop", input: { agent }, cwd: "main" }, AbortSignal.timeout(60e3), crypto.randomUUID());
       }
     }
-    chat.socks.forEach((sock) => Chat.join(Main.unii(), sock));
-    Main.team_soon();
+    await Promise.all([...runs.map((run) => run.going), chat.writes]);
+    Memory.stop(chat.mem);
+    fs.rmSync(chat.mem.dir, { recursive: true, force: true });
     return {};
   }
 
