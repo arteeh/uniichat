@@ -34,6 +34,10 @@ const STILL = matchMedia("(prefers-reduced-motion: reduce)");
 
 // the screens a history.go is taking the stack back to, laid on its popstate
 let LAY: string[] | null = null;
+
+// opened at /: with one agent, its chat once the team is known (#130)
+let START = false;
+const START_SHOWN = 2000;
 let TRIP = 0;
 
 const UNII = "unii";
@@ -124,6 +128,9 @@ async function boot(): Promise<void> {
   } else if (String(get(state, "chain")) !== String(depth(path))) {
     lay(depth(path), 0, true);
   }
+  START = path === "/" && !pic;
+  document.body.classList.toggle("start", START);
+  setTimeout(() => document.body.classList.remove("start"), START_SHOWN);
   if (await boot_me() === null) {
     solo("Sign in", "This UniiChat server is private. On the computer it runs on, run <code>unii serve link</code> and open the link it prints here.");
     return;
@@ -704,6 +711,7 @@ function hear(msg: View.Server): void {
   }
   if (msg.$ === "team") {
     Html.team_set(v.team);
+    start(v.team);
     if (location.pathname === "/settings") {
       archived_draw();
     }
@@ -1118,6 +1126,16 @@ function mine_above(el: HTMLElement): boolean {
 // screen, the history goes back to where the two part (popped), then
 // pushes the rest, which drops the screens forward of there; the history
 // changes at once, only the drawing waits for the slide
+function start(team: View.Mate[]): void {
+  const on = team.filter((m) => m.archived === 0);
+  if (START && location.pathname === "/" && on.length === 1) {
+    lay(depth("/a/" + on[0].id), 0, true);
+    route();
+  }
+  START = false;
+  document.body.classList.remove("start");
+}
+
 function go(path: string): void {
   const want = depth(path);
   if (LAY !== null) {

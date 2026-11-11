@@ -92,6 +92,7 @@ body.tree header > .brain { display: none; }
 
 #list { display: none; }
 body:is(.list, .wide) #list { display: block; }
+body.start.list #list { visibility: hidden; }
 body.list > :is(header, #log) { display: none; }
 body.list footer { position: fixed; inset: auto 0 0; background: none; pointer-events: none; }
 body.list footer > :not(#toast) { display: none; }
