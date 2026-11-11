@@ -45,6 +45,9 @@ export namespace Sub {
   }
 
   export function spawns(args: Record<string, unknown>): Spawn[] | string {
+    if (Object.keys(args).some((k) => k !== "tasks")) {
+      return "Give model and effort per task, in each of tasks: { task, model?, effort?, memory? }. Nothing started.";
+    }
     const models = Sub.models();
     const out: Spawn[] = [];
     for (const [k, t] of items(args.tasks).entries()) {

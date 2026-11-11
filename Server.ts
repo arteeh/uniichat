@@ -988,10 +988,12 @@ export namespace Chat {
     }
   }
 
-  // every subagent shares one prompt and one cache ("sub"), its name after
+  // a chat's subagents share one prompt and one cache ("sub"): what is
+  // each one's own, its name and folder, comes after the view
   export function sub_ask(chat: Chat, sub: Sub<Msg>): Ask {
-    const log = { text: Memory.agent_show(chat.mem, sub.name) + "\n\n", mark: true };
-    const own = Prompts.prompt("you", { intro: "You are " + sub.name + ". ", who: sub.name, prompt: "" });
+    const log = { text: Prompts.prompt("sub-folder", { Name: sub.name }) + "\n\n" + Memory.agent_show(chat.mem, sub.name) + "\n\n", mark: true };
+    const agent = Team.get(chat.id);
+    const own = agent === null ? "" : Prompts.prompt("sub-prompt", { prompt: Team.prompt(agent) });
     const blocks = [...sub.view, Tools.devices(chat.tools), Tools.skills(chat.tools), Tools.at_work(chat.tools, sub.name), log];
     return { ...Pick.ask(Chat.sub_pick(chat, sub)), system: Prompts.prompt("sub"), own, blocks, searches: SEARCHES, server: Tools.at(chat.tools, sub.name), agent: true, who: sub.name };
   }

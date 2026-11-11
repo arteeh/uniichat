@@ -181,7 +181,7 @@ export namespace Tools {
     const subs = tools.seats.get(who)?.subs?.working() ?? [];
     const mine = (agent: string) => agent === who || subs.some((s) => s.startsWith(agent + " "));
     const jobs = [...tools.devices].flatMap(([device, d]) => d.bg.jobs.filter((j) => mine(j.agent)).map((j) => j.id + " (" + [device, ...(j.agent === who ? [] : [j.agent]), j.command.replace(/\s+/g, " ").trim().slice(0, 60), Math.round((Date.now() - j.since) / 60e3) + " min"].join(", ") + ")"));
-    const text = (subs.length === 0 ? "" : "Subagents at work now: " + subs.join(", ") + ".\n") + (jobs.length === 0 ? "" : Prompts.prompt("jobs", { jobs: jobs.join(", ") }) + "\n");
+    const text = (subs.length === 0 ? "" : Prompts.prompt("subs", { subs: subs.join(", ") }) + "\n") + (jobs.length === 0 ? "" : Prompts.prompt("jobs", { jobs: jobs.join(", ") }) + "\n");
     return { text: text === "" ? "" : text + "\n", mark: false };
   }
 

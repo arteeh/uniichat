@@ -88,16 +88,16 @@ function text_block(x: unknown): Md.Code[] {
 
 function tasks_show(tasks: unknown): string {
   const all = list(tasks);
-  const knobs = [...new Set(all.map((t) => knobs_show(get(t, "model"), get(t, "effort"))))].filter((k) => k !== "").map((k) => " · " + k).join("");
+  const knobs = [...new Set(all.map((t) => knobs_show(get(t, "model"), get(t, "effort"), get(t, "memory"))))].filter((k) => k !== "").map((k) => " · " + k).join("");
   return all.length + (all.length === 1 ? " subagent" : " subagents") + knobs;
 }
 
-function knobs_show(model: unknown, effort: unknown): string {
-  return [model, effort].filter((k) => typeof k === "string").join(" ");
+function knobs_show(model: unknown, effort: unknown, memory: unknown): string {
+  return [model, effort, memory === false ? "memory: false" : null].filter((k) => typeof k === "string").join(" ");
 }
 
 function task_block(t: unknown): Md.Code[] {
-  return typeof t === "string" ? text_block(t) : text_block(get(t, "task")).map((b) => ({ ...b, k: knobs_show(get(t, "model"), get(t, "effort")) }));
+  return typeof t === "string" ? text_block(t) : text_block(get(t, "task")).map((b) => ({ ...b, k: knobs_show(get(t, "model"), get(t, "effort"), get(t, "memory")) }));
 }
 
 function msg_show(id: unknown, n: unknown): string {
