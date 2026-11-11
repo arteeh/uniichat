@@ -1229,7 +1229,7 @@ export namespace Memory {
     return root;
   }
 
-  // the subagents whose log's last line is older than before
+  // the subagents whose log file was last written to before `before`
   export function agents_ended(mem: Memory, before: number): string[] {
     return Memory.agents(mem).filter((name) => {
       try {

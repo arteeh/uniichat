@@ -1146,11 +1146,6 @@ function mine_above(el: HTMLElement): boolean {
   return el.getBoundingClientRect().top < $("header").getBoundingClientRect().bottom;
 }
 
-// the history holds the screens above this one, the list first, so the
-// phone's back and the header's < both go up a level (up_to): to a
-// screen, the history goes back to where the two part (popped), then
-// pushes the rest, which drops the screens forward of there; the history
-// changes at once, only the drawing waits for the slide
 function start(team: View.Mate[]): void {
   const on = team.filter((m) => m.archived === 0);
   if (START && location.pathname === "/" && on.length === 1) {
@@ -1161,6 +1156,11 @@ function start(team: View.Mate[]): void {
   document.body.classList.remove("start");
 }
 
+// the history holds the screens above this one, the list first, so the
+// phone's back and the header's < both go up a level (up_to): to a
+// screen, the history goes back to where the two part (popped), then
+// pushes the rest, which drops the screens forward of there; the history
+// changes at once, only the drawing waits for the slide
 function go(path: string): void {
   const want = depth(path);
   if (LAY !== null) {

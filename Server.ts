@@ -1067,7 +1067,7 @@ export namespace Chat {
     const live = run.live.at(-1);
     const last = [...run.calls.values()].at(-1)?.text ?? (live && live.kind + ": " + live.text);
     const doing = last === undefined ? "" : " It was last at " + last.replace(/\s+/g, " ").slice(0, 300);
-    sub.why = (by === "" ? why.trim() || STOPPED : "Stopped by " + by + (why.trim() === "" ? "." : ": " + why.trim().replace(/\.?$/, "."))) + doing;
+    sub.why = "Stopped by " + by + (why.trim() === "" ? "." : ": " + why.trim().replace(/\.?$/, ".")) + doing;
     if (!run.busy) {
       Chat.sub_done(chat, sub, false);
       return { text: "Stopped " + name + ".", fail: false };
@@ -2511,8 +2511,6 @@ export namespace Main {
     return Response.json(out.body, { status: out.status, headers: fresh });
   }
 
-  // an editor or Settings saves by moving a new file over the old one,
-  // which a watch on the file itself stops seeing
   // only: the device just opened, else every open one; one at a time on
   // each, a folder dropped once per device
   export async function scratch_sweep(only: string | null): Promise<void> {
@@ -2532,6 +2530,8 @@ export namespace Main {
     }));
   }
 
+  // an editor or Settings saves by moving a new file over the old one,
+  // which a watch on the file itself stops seeing
   export function watch(): void {
     const names = [config.FILE_PATH, config.KEYS_PATH].map((f) => path.basename(f));
     const off = (err: unknown) => console.error("unii: settings saved by hand apply after a restart: " + err_why(err));
