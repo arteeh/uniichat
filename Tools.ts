@@ -4,7 +4,7 @@ import * as config from "./Config.ts";
 import { Limit } from "./Limit.ts";
 import { INT, JOB, STR, TOOLS, spec, type Bg, type Job, type Skill, type Spec } from "./Machine.ts";
 import { clip_page } from "./Clip.ts";
-import { Mcp, type Servers } from "./Mcp.ts";
+import { Mcp, type Held, type Servers } from "./Mcp.ts";
 import { Memory } from "./Memory.ts";
 import * as Prompts from "./Prompts.ts";
 import { Team, UNII } from "./Team.ts";
@@ -63,7 +63,7 @@ export type Tools = {
   devices : Map<string, Device>;
   seats   : Map<string, Seat>;
   mcp     : Servers;
-  next    : config.McpServer[] | null;
+  held    : Map<string, Held>;
   left    : boolean;
   key     : string;
   url     : string;
@@ -125,7 +125,7 @@ export namespace Tools {
     const url = Tools.base() + key + "/";
     const run = (device: string, job: Job, signal: AbortSignal) => Tools.job(tools, device, job, signal, crypto.randomUUID());
     const mcp = Mcp.servers((text) => hub.note(text), run, (device) => Tools.live(tools.devices.get(device)));
-    const tools: Tools = { devices: new Map(), seats: new Map(), mcp, next: null, left: false, key, url, hub, owner: () => undefined };
+    const tools: Tools = { devices: new Map(), seats: new Map(), mcp, held: new Map(), left: false, key, url, hub, owner: () => undefined };
     CHATS.set(key, tools);
     return tools;
   }
@@ -234,7 +234,7 @@ export namespace Tools {
         return { protocolVersion, capabilities: { tools: {} }, serverInfo: { name: "unii", version: "1" } };
       }
       case "tools/list": {
-        const theirs = await Mcp.list(tools.mcp, () => Tools.off(tools));
+        const theirs = await Mcp.list(tools.mcp, Tools.held(tools, who), () => Tools.off(tools));
         const notes = Mcp.heard(tools.mcp, Tools.off(tools), who);
         return { tools: [...Tools.list(tools.seats.get(who)?.subs === null), ...theirs].map((t) => ({ name: t.name, description: t.info, inputSchema: t.schema })), notes };
       }
@@ -242,7 +242,7 @@ export namespace Tools {
         const name = String(params.name);
         const args = rec(params.arguments) ? params.arguments : {};
         const has = Tools.list(tools.seats.get(who)?.subs === null).some((t) => t.name === name);
-        const mcp = has ? null : Mcp.find(tools.mcp, Tools.off(tools), name);
+        const mcp = has ? null : Mcp.find(Tools.held(tools, who), Tools.off(tools), name);
         Mcp.used(tools.mcp);
         const no: Out = { text: "No tool " + name + ".", fail: true };
         const out = has ? await Tools.call(tools, who, name, args, signal, id) : mcp !== null ? await Mcp.call(tools.mcp, mcp, name, args, signal) : no;
@@ -526,7 +526,7 @@ export namespace Tools {
         next.push(...d.mcp);
       }
     }
-    tools.next = next;
+    Mcp.sync(tools.mcp, next);
     tools.hub.change();
   }
 
@@ -541,11 +541,23 @@ export namespace Tools {
     return d !== undefined && [...d.terms.values()].some((t) => t.live());
   }
 
-  export function apply(tools: Tools): void {
-    if (tools.next !== null) {
-      Mcp.sync(tools.mcp, tools.next);
-      tools.next = null;
+  // a turn of who's (an agent's, a subagent's) starts, and ends
+  export function hold(tools: Tools, who: string): void {
+    Tools.free(tools, who);
+    tools.held.set(who, Mcp.hold(tools.mcp));
+  }
+
+  export function free(tools: Tools, who: string): void {
+    const all = tools.held.get(who);
+    tools.held.delete(who);
+    if (all !== undefined) {
+      Mcp.free(all);
     }
+  }
+
+  // the servers who's turn holds, else the ones now
+  export function held(tools: Tools, who: string): Held {
+    return tools.held.get(who) ?? tools.mcp.all;
   }
 
   export function prune(tools: Tools, kept: Set<string>): void {

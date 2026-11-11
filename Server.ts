@@ -434,10 +434,11 @@ export namespace Chat {
 
   export function begin(chat: Chat): void {
     Tools.left(chat.tools);
-    Tools.apply(chat.tools);
+    Tools.hold(chat.tools, chat.who);
   }
 
   export function ending(chat: Chat): void {
+    Tools.free(chat.tools, chat.who);
     const halt = chat.main.halt.signal;
     const reason: unknown = halt.reason;
     const why = halt.aborted && typeof reason === "string" ? reason : null;
@@ -948,7 +949,7 @@ export namespace Chat {
   export function sub_kind(chat: Chat, sub: () => Sub<Msg>): Run<Say, Msg>["kind"] {
     return {
       pick   : () => Chat.sub_pick(chat, sub()),
-      begin  : () => {},
+      begin  : () => Tools.hold(chat.tools, sub().name),
       log    : (run, say) => {
         const msg = Chat.push(chat, run, "user", say.text, [], false, undefined, {}, true);
         Memory.agent_held(chat.mem, run.name, run.queue.map((x) => x.q.text));
@@ -973,7 +974,7 @@ export namespace Chat {
       failed : (_, why) => {
         sub().replies.push("failed: " + why);
       },
-      ending : () => {},
+      ending : () => Tools.free(chat.tools, sub().name),
       finish : (run) => Chat.sub_done(chat, sub(), !run.halt.signal.aborted),
       parked : () => false,
       on     : (_, ev) => Chat.sub_on(chat, sub(), ev),
@@ -1561,9 +1562,6 @@ export namespace Chat {
 
   export function change(chat: Chat): void {
     const work = Chat.running(chat);
-    if (!chat.main.busy) {
-      Tools.apply(chat.tools);
-    }
     if (String(work) !== String(chat.mem.work)) {
       chat.mem.work = work;
       Memory.save(chat.mem);

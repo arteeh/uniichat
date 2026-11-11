@@ -30,9 +30,11 @@ type Told = {
   left  : string;
 };
 
+// turns: how many running turns hold it (#142)
 type Kept = {
   conf  : config.McpServer;
   calls : number;
+  turns : number;
   gone  : boolean;
 };
 
@@ -40,6 +42,9 @@ type Server = Kept & Started & Told;
 
 type Run = (device: string, job: Job, signal: AbortSignal) => Promise<Out>;
 export type Servers = { all: Map<string, Server>; note: (text: string) => void; run: Run; open: (device: string) => boolean };
+
+// the servers a turn started with, which it keeps to its end
+export type Held = Servers["all"];
 
 const START_MS = 60e3;
 const LIST_MS = 5e3;
@@ -73,30 +78,49 @@ export namespace Mcp {
     for (const [name, s] of servers.all) {
       if (JSON.stringify(want.get(name)) !== JSON.stringify(s.conf)) {
         s.gone = true;
-        if (s.calls === 0) {
-          Mcp.close(s);
-        }
+        Mcp.done(s);
         servers.all.delete(name);
       }
     }
     for (const conf of want.values()) {
       if (!servers.all.has(conf.name)) {
-        servers.all.set(conf.name, { conf, up: null, fail: null, link: null, names: new Map(), stale: false, kept: null, said: null, shown: false, heard: new Map(), left: "", calls: 0, gone: false });
+        servers.all.set(conf.name, { conf, up: null, fail: null, link: null, names: new Map(), stale: false, kept: null, said: null, shown: false, heard: new Map(), left: "", calls: 0, turns: 0, gone: false });
       }
     }
   }
 
-  // the servers' tools; one removed or turned off while the list waited
-  // has none
-  export async function list(servers: Servers, off: () => string[]): Promise<Spec[]> {
-    const on = [...servers.all.values()].filter((s) => !s.gone && !off().includes(s.conf.name)).sort((a, b) => Mcp.by_name(a.conf.name, b.conf.name));
+  // a turn's servers: as they are when it starts, kept to its end, so a
+  // change applies to the turns after it and cuts none
+  export function hold(servers: Servers): Held {
+    const all = new Map(servers.all);
+    all.forEach((s) => (s.turns += 1));
+    return all;
+  }
+
+  export function free(all: Held): void {
+    all.forEach((s) => {
+      s.turns -= 1;
+      Mcp.done(s);
+    });
+  }
+
+  // a server removed or replaced closes once nothing uses it
+  export function done(s: Server): void {
+    if (s.gone && s.calls === 0 && s.turns === 0) {
+      Mcp.close(s);
+    }
+  }
+
+  // the servers' tools; one turned off while the list waited has none
+  export async function list(servers: Servers, all: Held, off: () => string[]): Promise<Spec[]> {
+    const on = [...all.values()].filter((s) => !off().includes(s.conf.name)).sort((a, b) => Mcp.by_name(a.conf.name, b.conf.name));
     const waited = new AbortController();
     const late = Machine.nap(LIST_MS, waited.signal).then(() => null);
     const now = Machine.nap(0, waited.signal).then(() => null);
     try {
       const lists = await Promise.all(on.map(async (s) => ({ s, got: await Mcp.tools(servers, s, Mcp.kept(s) === null || s.stale ? late : now) })));
       const still = off();
-      return lists.flatMap(({ s, got }) => (servers.all.get(s.conf.name) === s && !still.includes(s.conf.name) ? got : []));
+      return lists.flatMap(({ s, got }) => (!still.includes(s.conf.name) ? got : []));
     } finally {
       waited.abort();
     }
@@ -277,10 +301,10 @@ export namespace Mcp {
     }
   }
 
-  export function find(servers: Servers, off: string[], name: string): Server | null {
+  export function find(all: Held, off: string[], name: string): Server | null {
     const at = name.indexOf("__");
-    const s = at > 0 ? servers.all.get(name.slice(0, at)) : undefined;
-    return s !== undefined && !s.gone && !off.includes(s.conf.name) ? s : null;
+    const s = at > 0 ? all.get(name.slice(0, at)) : undefined;
+    return s !== undefined && !off.includes(s.conf.name) ? s : null;
   }
 
   export async function call(servers: Servers, s: Server, name: string, args: object, signal: AbortSignal): Promise<Out> {
@@ -328,9 +352,7 @@ export namespace Mcp {
       }
     } finally {
       s.calls -= 1;
-      if (s.gone && s.calls === 0) {
-        Mcp.close(s);
-      }
+      Mcp.done(s);
     }
   }
 
