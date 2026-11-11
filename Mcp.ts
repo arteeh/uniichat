@@ -41,7 +41,7 @@ type Kept = {
 type Server = Kept & Started & Told;
 
 type Run = (device: string, job: Job, signal: AbortSignal) => Promise<Out>;
-export type Servers = { all: Map<string, Server>; note: (text: string) => void; run: Run; open: (device: string) => boolean };
+export type Servers = { all: Map<string, Server>; note: (text: string) => void; run: Run; open: (device: string) => boolean; off: () => string[] };
 
 // the servers a turn started with, which it keeps to its end
 export type Held = Servers["all"];
@@ -69,8 +69,8 @@ const HERE = new Map<string, { link: Link; changed: boolean }>();
 
 export namespace Mcp {
 
-  export function servers(note: (text: string) => void, run: Run, open: (device: string) => boolean): Servers {
-    return { all: new Map(), note, run, open };
+  export function servers(note: (text: string) => void, run: Run, open: (device: string) => boolean, off: () => string[]): Servers {
+    return { all: new Map(), note, run, open, off };
   }
 
   export function sync(servers: Servers, confs: config.McpServer[]): void {
@@ -78,7 +78,7 @@ export namespace Mcp {
     for (const [name, s] of servers.all) {
       if (JSON.stringify(want.get(name)) !== JSON.stringify(s.conf)) {
         s.gone = true;
-        Mcp.done(s);
+        Mcp.done(servers, s);
         servers.all.delete(name);
       }
     }
@@ -89,38 +89,41 @@ export namespace Mcp {
     }
   }
 
-  // a turn's servers: as they are when it starts, kept to its end, so a
-  // change applies to the turns after it and cuts none
+  // a turn's servers: the ones on when it starts, kept to its end, so a
+  // change (Settings' switch too) applies to the turns after it and cuts none
   export function hold(servers: Servers): Held {
-    const all = new Map(servers.all);
+    const all = Mcp.on(servers);
     all.forEach((s) => (s.turns += 1));
     return all;
   }
 
-  export function free(all: Held): void {
+  export function free(servers: Servers, all: Held): void {
     all.forEach((s) => {
       s.turns -= 1;
-      Mcp.done(s);
+      Mcp.done(servers, s);
     });
   }
 
-  // a server removed or replaced closes once nothing uses it
-  export function done(s: Server): void {
-    if (s.gone && s.calls === 0 && s.turns === 0) {
+  export function on(servers: Servers): Held {
+    const off = servers.off();
+    return new Map([...servers.all].filter(([name]) => !off.includes(name)));
+  }
+
+  // a server removed, replaced or turned off closes once nothing uses it
+  export function done(servers: Servers, s: Server): void {
+    if ((s.gone || servers.off().includes(s.conf.name)) && s.calls === 0 && s.turns === 0) {
       Mcp.close(s);
     }
   }
 
-  // the servers' tools; one turned off while the list waited has none
-  export async function list(servers: Servers, all: Held, off: () => string[]): Promise<Spec[]> {
-    const on = [...all.values()].filter((s) => !off().includes(s.conf.name)).sort((a, b) => Mcp.by_name(a.conf.name, b.conf.name));
+  export async function list(servers: Servers, all: Held): Promise<Spec[]> {
+    const on = [...all.values()].sort((a, b) => Mcp.by_name(a.conf.name, b.conf.name));
     const waited = new AbortController();
     const late = Machine.nap(LIST_MS, waited.signal).then(() => null);
     const now = Machine.nap(0, waited.signal).then(() => null);
     try {
-      const lists = await Promise.all(on.map(async (s) => ({ s, got: await Mcp.tools(servers, s, Mcp.kept(s) === null || s.stale ? late : now) })));
-      const still = off();
-      return lists.flatMap(({ s, got }) => (!still.includes(s.conf.name) ? got : []));
+      const lists = await Promise.all(on.map((s) => Mcp.tools(servers, s, Mcp.kept(s) === null || s.stale ? late : now)));
+      return lists.flat();
     } finally {
       waited.abort();
     }
@@ -301,10 +304,9 @@ export namespace Mcp {
     }
   }
 
-  export function find(all: Held, off: string[], name: string): Server | null {
+  export function find(all: Held, name: string): Server | null {
     const at = name.indexOf("__");
-    const s = at > 0 ? all.get(name.slice(0, at)) : undefined;
-    return s !== undefined && !off.includes(s.conf.name) ? s : null;
+    return (at > 0 ? all.get(name.slice(0, at)) : undefined) ?? null;
   }
 
   export async function call(servers: Servers, s: Server, name: string, args: object, signal: AbortSignal): Promise<Out> {
@@ -352,7 +354,7 @@ export namespace Mcp {
       }
     } finally {
       s.calls -= 1;
-      Mcp.done(s);
+      Mcp.done(servers, s);
     }
   }
 

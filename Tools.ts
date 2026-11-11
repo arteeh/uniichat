@@ -124,7 +124,7 @@ export namespace Tools {
     const key = crypto.randomUUID();
     const url = Tools.base() + key + "/";
     const run = (device: string, job: Job, signal: AbortSignal) => Tools.job(tools, device, job, signal, crypto.randomUUID());
-    const mcp = Mcp.servers((text) => hub.note(text), run, (device) => Tools.live(tools.devices.get(device)));
+    const mcp = Mcp.servers((text) => hub.note(text), run, (device) => Tools.live(tools.devices.get(device)), () => hub.off());
     const tools: Tools = { devices: new Map(), seats: new Map(), mcp, held: new Map(), left: false, key, url, hub, owner: () => undefined };
     CHATS.set(key, tools);
     return tools;
@@ -234,7 +234,7 @@ export namespace Tools {
         return { protocolVersion, capabilities: { tools: {} }, serverInfo: { name: "unii", version: "1" } };
       }
       case "tools/list": {
-        const theirs = await Mcp.list(tools.mcp, Tools.held(tools, who), () => Tools.off(tools));
+        const theirs = await Mcp.list(tools.mcp, Tools.held(tools, who));
         const notes = Mcp.heard(tools.mcp, Tools.off(tools), who);
         return { tools: [...Tools.list(tools.seats.get(who)?.subs === null), ...theirs].map((t) => ({ name: t.name, description: t.info, inputSchema: t.schema })), notes };
       }
@@ -242,7 +242,7 @@ export namespace Tools {
         const name = String(params.name);
         const args = rec(params.arguments) ? params.arguments : {};
         const has = Tools.list(tools.seats.get(who)?.subs === null).some((t) => t.name === name);
-        const mcp = has ? null : Mcp.find(Tools.held(tools, who), Tools.off(tools), name);
+        const mcp = has ? null : Mcp.find(Tools.held(tools, who), name);
         Mcp.used(tools.mcp);
         const no: Out = { text: "No tool " + name + ".", fail: true };
         const out = has ? await Tools.call(tools, who, name, args, signal, id) : mcp !== null ? await Mcp.call(tools.mcp, mcp, name, args, signal) : no;
@@ -269,7 +269,7 @@ export namespace Tools {
   export function unplug(tools: Tools, name: string): void {
     const s = tools.mcp.all.get(name);
     if (s !== undefined) {
-      Mcp.close(s);
+      Mcp.done(tools.mcp, s);
     }
   }
 
@@ -551,13 +551,13 @@ export namespace Tools {
     const all = tools.held.get(who);
     tools.held.delete(who);
     if (all !== undefined) {
-      Mcp.free(all);
+      Mcp.free(tools.mcp, all);
     }
   }
 
-  // the servers who's turn holds, else the ones now
+  // the servers who's turn holds, else the ones on now
   export function held(tools: Tools, who: string): Held {
-    return tools.held.get(who) ?? tools.mcp.all;
+    return tools.held.get(who) ?? Mcp.on(tools.mcp);
   }
 
   export function prune(tools: Tools, kept: Set<string>): void {
