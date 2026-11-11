@@ -831,15 +831,15 @@ export async function post(url: string, body: object, auth: Record<string, strin
   return { ...(rec(out) ? out : {}), ok: res?.ok === true, status: res?.status ?? 0 };
 }
 
-// one message is shown as itself, never as a fold of one (#120): a team
-// copy as its line; two and more are a fold till opened, which shows
-// its two halves
+// one message is shown as itself, never as a fold of one (#120), a team
+// copy not at all (#134); two and more are a fold till opened, which
+// shows its two halves
 function part_rows(v: View, id: number, n: number, t: number): Row[] {
   const key   = id + "+" + n;
   const entry = v.whole.get(id);
   const half  = n / 2;
   if (n === 1 && entry?.kind === "team") {
-    return id >= t ? [] : sum_rows(id, n, v.nodes.get(key));
+    return [];
   }
   if (n === 1 && entry !== undefined) {
     const minds = id < t || v.thinking === false ? [] : v.minds.get(id) ?? [];

@@ -133,6 +133,9 @@ const SPARE      = 2 ** 30;
 // another agent's message (agent id/message id): its place in Unii's memory
 const COPIES = new Map<string, number>();
 
+// how many of a memory's messages before each id are team copies
+const TEAMS = new WeakMap<Memory, number[]>();
+
 const TIMER_TEXT = 200;
 const LAST       = 120;
 const RING       = 60000;
@@ -1838,9 +1841,23 @@ export namespace Chat {
     const tree = Memory.roots(count).flatMap((part) => Chat.blocks(part, cover));
     const ids = (a: number, b: number) => Array.from({ length: Math.max(0, b - a) }, (_, k): Part => [a + k, 1]);
     const raw = [...ids(from, cover[0]), ...ids(Math.max(from, cover[1]), count)];
-    const parts = [...eye, ...tree, ...raw].sort((x, y) => x[0] - y[0]);
+    const parts = Chat.own([...eye, ...tree, ...raw].sort((x, y) => x[0] - y[0]), chat.mem);
     Chat.teach(chat, sock, parts);
     Chat.send(sock, { $: "view", parts, turn: from });
+  }
+
+  // the chat page shows no team copies (#134): a part of only copies goes,
+  // one with some is shown as its halves
+  export function own(parts: Part[], mem: Memory): Part[] {
+    const teams = TEAMS.get(mem) ?? [0];
+    TEAMS.set(mem, teams);
+    for (let i = teams.length - 1; i < mem.count; i++) {
+      teams.push(teams[i] + (Memory.message(mem, i)?.kind === "team" ? 1 : 0));
+    }
+    return parts.flatMap(([id, n]): Part[] => {
+      const copies = teams[Math.min(id + n, teams.length - 1)] - teams[Math.min(id, teams.length - 1)];
+      return copies === 0 ? [[id, n]] : copies === n || n === 1 ? [] : Chat.own([[id, n / 2], [id + n / 2, n / 2]], mem);
+    });
   }
 
   export function blocks(part: { l: number; i: number }, [a, b]: [number, number]): Part[] {
