@@ -952,12 +952,14 @@ export namespace Chat {
       log    : (run, say) => {
         const msg = Chat.push(chat, run, "user", say.text, [], false, undefined, {}, true);
         Memory.agent_held(chat.mem, run.name, run.queue.map((x) => x.q.text));
+        Main.team_soon();
         return msg;
       },
       say    : (say) => ({ ...say, from: say.text.startsWith(JOB) ? Prompts.sender("job") : Chat.name(chat) || "Unii" }),
       queued : (run) => {
         Memory.agent_held(chat.mem, run.name, run.queue.map((x) => x.q.text));
         Chat.change(chat);
+        Main.team_soon();
       },
       again  : () => false,
       ask    : (_, take) => {
@@ -1923,7 +1925,7 @@ export namespace Main {
   export function mates(): Mate[] {
     return Team.all().map((a) => {
       const chat = Main.chats.get(a.id);
-      return { id: a.id, name: a.name, about: a.about, picture: a.picture, unread: a.unread, last: chat === undefined ? "" : Chat.last(chat), busy: chat?.main.busy === true, archived: a.archived, subs: chat === undefined ? [] : [...chat.subs.values()].map((sub) => Sub.row(sub, Chat.sub_shown(chat, sub))) };
+      return { id: a.id, name: a.name, about: a.about, picture: a.picture, unread: a.unread, last: chat === undefined ? "" : Chat.last(chat), busy: chat?.main.busy === true, archived: a.archived, subs: chat === undefined ? [] : [...chat.subs.values()].map((sub) => Sub.row(sub, Chat.sub_shown(chat, sub), sub.run.sent.flatMap(({ m }) => Array.from({ length: m.end - m.id }, (_, k) => m.id + k)))) };
     });
   }
 

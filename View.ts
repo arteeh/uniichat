@@ -173,14 +173,16 @@ export type Act =
   | { $: "Plug"; name: string }
   | { $: "Talk"; on: boolean }
   | { $: "Goto"; name: string | null }
-  | { $: "Earlier" }
 
 export type Row =
   | { $: "Sum"; id: number; n: number; text: string }
   | { $: "Box"; id: number; n: number; text: string; rows: Row[] }
-  | { $: "Msg"; id: number | null; kind: Kind; who: string; text: string; body: Md.Block[]; call: Call.Call | null; images: string[]; queued?: boolean; from?: string; of?: string }
-  | { $: "Line"; id: number | null; call: Call.Call; echo: string | null; rows: Row[] }
-  | { $: "Cap"; text: string; think?: true; earlier?: true }
+  | { $: "Msg"; id: number | null; kind: Kind; who: string; text: string; body: Md.Block[]; call: Call.Call | null; images: string[]; queued?: boolean; from?: string; of?: string; writing?: true }
+  | { $: "Line"; id: number | null; call: Call.Call; echo: string | null; rows: Row[]; phase?: Phase }
+  | { $: "Cap"; text: string; think?: true; earlier?: true; wait?: true }
+
+// a tool call while it's written, then while it runs (#129)
+type Phase = "typing" | "running";
 
 export type Knob = { text: string; move: Move; hint: string; choices: Choice[] };
 
@@ -518,14 +520,6 @@ export function view_act(v: View, act: Act): Client[] {
       v.pages.set(act.name, v.page);
       return known === undefined ? [{ $: "agent", name: act.name }] : [];
     }
-    case "Earlier": {
-      const page = v.page;
-      if (page === null || page.log === null || page.from === 0 || page.loading) {
-        return [];
-      }
-      page.loading = true;
-      return [{ $: "agent", name: page.name, before: page.from }];
-    }
     case "Plug": {
       const asked = v.out.flatMap((p) => (p.msg.$ === "mcp" && p.msg.name === act.name ? [p.msg.on] : [])).at(-1);
       const on = asked ?? v.mcp.find((p) => p.name === act.name)?.on;
@@ -541,16 +535,35 @@ export function view_act(v: View, act: Act): Client[] {
 
 export function view_body(v: View): Row[] {
   if (v.page !== null) {
-    return page_rows(v.page, v.thinking !== false);
+    const sub = view_sub(v);
+    const rows = page_rows(v.page, v.thinking !== false, sub);
+    return sub === undefined ? rows : running(rows, 0);
   }
-  return view_lines(view_rows(v, v.parts).flat());
+  const rows = view_lines(view_rows(v, v.parts).flat());
+  return v.busy ? running(rows, v.turn) : rows;
 }
 
-// a subagent's page: its log, earlier entries on a tap
-function page_rows(page: Page, minds: boolean): Row[] {
+// a subagent's page shown near its top: its earlier entries (#143)
+export function view_earlier(v: View): Client[] {
+  const page = v.page;
+  if (page === null || page.log === null || page.from === 0 || page.loading) {
+    return [];
+  }
+  page.loading = true;
+  return [{ $: "agent", name: page.name, before: page.from }];
+}
+
+// the shown subagent page's row in the chat list, while it runs
+export function view_sub(v: View): SubRow | undefined {
+  return v.team.find((m) => m.id === v.agent)?.subs?.find((s) => s.name === v.page?.name);
+}
+
+// a subagent's page: its log, earlier entries as it scrolls up (#143),
+// the messages it took but hasn't answered marked (#144)
+function page_rows(page: Page, minds: boolean, sub: SubRow | undefined): Row[] {
   const log = (page.log ?? []).filter((e) => minds || e.kind !== "mind");
-  const earlier: Row[] = page.from > 0 ? [{ $: "Cap", text: page.loading ? "Loading…" : "Earlier messages", earlier: true }] : [];
-  const rows = log.flatMap((e, k) => (e.id === 0 && e.kind === "note" ? [] : whole_rows(e.id ?? null, e, log[k - 1])));
+  const earlier: Row[] = page.from > 0 ? [{ $: "Cap", text: page.loading ? "Loading…" : "", earlier: true }] : [];
+  const rows = log.flatMap((e, k) => (e.id === 0 && e.kind === "note" ? [] : sent_rows(e.id !== undefined && sub?.sent.includes(e.id) === true, whole_rows(e.id ?? null, e, log[k - 1]))));
   return [...earlier, ...view_lines(rows), ...(page.done && page.log !== null ? [Cap("Done: its report is in the chat that spawned it.")] : [])];
 }
 
@@ -583,14 +596,37 @@ function view_rows(v: View, parts: Part[]): Row[][] {
   return parts.map(([id, n]) => part_rows(v, id, n, v.turn));
 }
 
+// a busy agent looks busy (#129): waiting for its model, writing, thinking,
+// writing a tool call, waiting for its result
+const WAITING: Row = { $: "Cap", text: "", wait: true };
+
+// what streams in now: the text being written, a tool call being written
+// or waiting to run
+function live_rows(live: Live[], writing: boolean): Row[] {
+  return live.flatMap((l, k) => view_lines(entry_rows(null, l.kind, l.text, [], undefined, undefined, l.of)).map((r): Row => {
+    if (r.$ === "Line") {
+      return { ...r, phase: l.of === undefined ? "typing" : "running" };
+    }
+    return r.$ === "Msg" && l.kind === "unii" && writing && k === live.length - 1 ? { ...r, writing: true } : r;
+  }));
+}
+
+// a tool call of the turn going on with no result yet runs
+function running(rows: Row[], from: number): Row[] {
+  return rows.map((r) => (r.$ === "Line" && r.echo === null && r.id !== null && r.id >= from ? { ...r, phase: "running" } : r));
+}
+
 export function view_tail(v: View): Row[] {
   if (v.page !== null) {
     const page = v.page.live.filter((l) => v.thinking !== false || l.kind !== "mind");
     const thinks = page.length < v.page.live.length ? [{ $: "Cap" as const, text: "Thinking", think: true as const }] : [];
-    return [...thinks, ...view_lines(page.flatMap((l) => entry_rows(null, l.kind, l.text, [], undefined, undefined, l.of)))];
+    const sub = view_sub(v);
+    const queued = (sub?.queue ?? []).flatMap((text) => sent_rows(true, entry_rows(null, "user", text)));
+    const idle = sub !== undefined && v.page.live.length === 0 && v.page.log?.at(-1)?.kind !== "tool" && sub.doing !== "usage limit";
+    return [...thinks, ...live_rows(page, sub !== undefined), ...(idle ? [WAITING] : []), ...queued];
   }
   const thought = v.thinking === false && v.live.some((l) => l.kind === "mind") ? [{ $: "Cap" as const, text: "Thinking", think: true as const }] : [];
-  const rows = [...thought, ...view_lines(v.live.filter((l) => v.thinking !== false || l.kind !== "mind").flatMap((l) => entry_rows(null, l.kind, l.text, [], undefined, undefined, l.of)))];
+  const rows = [...thought, ...live_rows(v.live.filter((l) => v.thinking !== false || l.kind !== "mind"), v.busy && v.wait === "")];
   const load = v.importing !== null ? [Cap(progress_show(v.importing))] : [];
   const said = !v.up ? v.out.flatMap((p) => entry_rows(null, "user", p.said)) : [];
   const kept = said.length > 0 ? [...said, Cap(UNSENT)] : [];
@@ -599,10 +635,10 @@ export function view_tail(v: View): Row[] {
   if (v.limit !== null) {
     return [...rows, Cap(limit_show(v.limit)), ...after];
   }
-  if (rows.length > 0 || v.wait === "") {
-    return [...rows, ...after];
+  if (v.wait === SUMMARIES) {
+    return [...rows, ...(rows.length > 0 ? [] : [Cap(sums_show(v.sums, v.again))]), ...after];
   }
-  return [Cap(v.wait === SUMMARIES ? sums_show(v.sums, v.again) : "waiting for " + v.wait + "…"), ...after];
+  return [...rows, ...(v.busy && v.wait !== "" ? [WAITING] : []), ...after];
 }
 
 function sums_show(sums: Sums | null, again: Again | null, now = Date.now()): string {

@@ -403,11 +403,6 @@ function act(a: View.Act): void {
 
 function click(ev: MouseEvent): void {
   const target = ev.target as HTMLElement;
-  const open = target.closest<HTMLElement>(".subopen")?.dataset.sub;
-  if (open !== undefined) {
-    go("/a/" + v.agent + "/s/" + open);
-    return;
-  }
   const el = target.closest<HTMLElement>("[data-act], [data-copy], [data-go], [data-knob], .choices > button, .imp");
   const sel = getSelection();
   const pic = Viewer.viewer_pic(target);
@@ -981,6 +976,30 @@ function html_parse(html: string): Element {
   return child;
 }
 
+// a screen before the top of a subagent page's loaded entries, the next
+// ones load (#143)
+const EARLIER = new IntersectionObserver((seen) => {
+  if (seen.some((e) => e.isIntersecting)) {
+    View.view_earlier(v).forEach((out) => View.link_send(v, out));
+    P.rows = true;
+    draw(false);
+  }
+}, { rootMargin: "100% 0px 0px 0px" });
+
+const WATCHED: { el: Element | null; from: number } = { el: null, from: 0 };
+
+function earlier_watch(): void {
+  const el = document.querySelector("#log .earlier");
+  const from = v.page?.from ?? 0;
+  if (el !== WATCHED.el || from !== WATCHED.from) {
+    EARLIER.disconnect();
+    if (el !== null) {
+      EARLIER.observe(el);
+    }
+    [WATCHED.el, WATCHED.from] = [el, from];
+  }
+}
+
 function draw(stick: boolean): void {
   SCROLL.stick = SCROLL.stick && stick;
   if (P.frame === 0) {
@@ -1005,10 +1024,16 @@ function paint(): void {
   P.frame = 0;
   SCROLL.stick = true;
   bars();
+  const sub = View.view_sub(v);
+  $("header .title").dataset.on = sub === undefined ? "" : [sub.model, sub.effort].filter((x) => x !== "").join(" · ");
+  if (Html.names_set(v.team, v.agent, v.page?.name ?? null)) {
+    P.rows = true;
+  }
   if (P.rows) {
     markup($("#log .rows"), View.view_body(v).map(Html.row_html));
     Box.box_sizes($("#log .rows"));
     P.rows = false;
+    earlier_watch();
   }
   markup($("#log .tail"), View.view_tail(v).map(Html.row_html));
   Box.box_sizes($("#log .tail"));

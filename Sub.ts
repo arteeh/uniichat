@@ -27,7 +27,9 @@ export type Sub<M> = {
 };
 
 // a subagent's row in the chat list
-export type Row = { name: string; face: string; task: string; model: string; effort: string; doing: string; at: number };
+// queue: the messages it hasn't taken yet; sent: its log's ones it took
+// but hasn't answered
+export type Row = { name: string; face: string; task: string; model: string; effort: string; doing: string; at: number; queue: string[]; sent: number[] };
 
 const NOTE = "subagent";
 const ON   = " on ";
@@ -36,6 +38,8 @@ const BARE = " without view";
 const ROLE = new RegExp("^" + NOTE + "(?:" + ON + "(\\S+))?(?:" + AT + "(\\S+))?(" + BARE + ")?$");
 
 const TASK_SHOWN = 120;
+
+const QUEUED_SHOWN = 4000;
 
 export namespace Sub {
 
@@ -93,7 +97,7 @@ export namespace Sub {
     return "[" + sub.name + "]\n" + (sub.replies.join("\n\n").trim() || "(no reply)");
   }
 
-  export function row<M>(sub: Sub<M>, pick: Pick | null): Row {
+  export function row<M>(sub: Sub<M>, pick: Pick | null, sent: number[]): Row {
     const task = sub.task.replace(/\s+/g, " ").trim();
     return {
       name   : sub.name,
@@ -103,6 +107,8 @@ export namespace Sub {
       effort : pick?.effort ?? sub.role.effort ?? "",
       doing  : sub.doing,
       at     : sub.at,
+      queue  : sub.run.queue.map(({ q }) => (q.text.length > QUEUED_SHOWN ? q.text.slice(0, QUEUED_SHOWN) + "…" : q.text)),
+      sent,
     };
   }
 

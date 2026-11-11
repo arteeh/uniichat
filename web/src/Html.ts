@@ -66,11 +66,39 @@ export function list_html(team: View.Mate[], here: string | null, sub: string | 
   });
 }
 
-const MADE = new WeakMap<View.Row, string>();
+const MADE = new WeakMap<View.Row, { html: string; names: string }>();
+
+// the names that link to their chat (#141): the team's, and the running
+// subagents' of the chat shown, but not its own
+const NAMES: { key: string; re: RegExp | null; to: Map<string, string> } = { key: "", re: null, to: new Map() };
+
+export function names_set(team: View.Mate[], here: string, sub: string | null): boolean {
+  const to = new Map<string, string>();
+  for (const m of team.filter((m) => m.archived === 0)) {
+    to.set(m.name, "/a/" + m.id);
+  }
+  for (const s of team.find((m) => m.id === here)?.subs ?? []) {
+    to.set(s.name, "/a/" + here + "/s/" + s.name);
+  }
+  to.delete(sub ?? team.find((m) => m.id === here)?.name ?? "");
+  const key = JSON.stringify([...to]);
+  if (key === NAMES.key) {
+    return false;
+  }
+  const names = [...to.keys()].filter((n) => n !== "").sort((a, b) => b.length - a.length);
+  NAMES.key = key;
+  NAMES.to = to;
+  NAMES.re = names.length === 0 ? null : new RegExp("(?<![\\p{L}\\p{N}_])(" + names.map((n) => n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|") + ")(?![\\p{L}\\p{N}_])", "u");
+  return true;
+}
 
 export function row_html(row: View.Row): string {
-  const html = MADE.get(row) ?? row_make(row);
-  MADE.set(row, html);
+  const made = MADE.get(row);
+  if (made !== undefined && made.names === NAMES.key) {
+    return made.html;
+  }
+  const html = row_make(row);
+  MADE.set(row, { html, names: NAMES.key });
   return html;
 }
 
@@ -97,19 +125,20 @@ function row_make(row: View.Row): string {
       const tall = ["user", "work"].includes(row.kind) && row.text.length + 80 * row.text.split("\n").length > TALL && !row.text.includes("](/media/");
       const fold = tall ? `<div class="clip">${body}</div><details class="more"><summary></summary></details>` : body;
       const who = row.who === "" ? "" : ` data-who="${esc(row.who)}"`;
-      const queued = row.queued === true ? " queued" : "";
+      const queued = (row.queued === true ? " queued" : "") + (row.writing === true ? " writing" : "");
       if (row.from !== undefined) {
         const mate = TEAM.get(row.from);
         const gist = Md.md_flat(Call.report_read(row.text)?.text ?? row.text);
         const head = `<summary>${face_html(mate?.picture ?? "")}<b>${esc(mate?.name ?? row.who)}</b><span>${esc(gist)}</span></summary>`;
         return `<div class="msg ${row.kind} said${queued}"${at}><details>${head}${copy}${body}${pics}</details></div>`;
       }
-      // a subagent's report opens its chat
-      const sub = row.kind === "work" && /^[A-Z][a-z]+[A-Z][a-z]+$/.test(row.who) ? `<button class="subopen" data-sub="${esc(row.who)}">${esc(row.who)}'s chat</button>` : "";
-      return `<div class="msg ${row.kind}${queued}"${at}${who}>${copy}${fold}${pics}${sub}</div>`;
+      return `<div class="msg ${row.kind}${queued}"${at}${who}>${copy}${fold}${pics}</div>`;
     }
     case "Cap": {
-      return row.earlier === true ? `<button class="cap earlier"${act_html({ $: "Earlier" })}>${esc(row.text)}</button>` : `<p class="cap${row.think === true ? " think" : ""}">${esc(row.text)}</p>`;
+      if (row.wait === true) {
+        return `<p class="cap wait" role="status" aria-label="Working"><i></i><i></i><i></i></p>`;
+      }
+      return `<p class="cap${row.think === true ? " think" : ""}${row.earlier === true ? " earlier" : ""}">${esc(row.text)}</p>`;
     }
     case "Line": {
       return line_html(row);
@@ -135,7 +164,8 @@ function line_html(row: Extract<View.Row, { $: "Line" }>): string {
   const name = c.name === "" ? "" : `<b>${esc(c.name)}</b>`;
   const where = c.device === "" ? "" : `<span class="on">· ${esc(c.device)}</span>`;
   const head = `<summary><span class="ic">${Theme.tool_glyph(c.name)}</span>${name}${what}${diff}${fail}${where}</summary>`;
-  return `<details class="msg tool line"${at}${of}>${head}<div class="full">${row.rows.map(line_part).join("")}</div></details>`;
+  const phase = row.phase === undefined ? "" : " " + row.phase;
+  return `<details class="msg tool line${phase}"${at}${of}>${head}<div class="full">${row.rows.map(line_part).join("")}</div></details>`;
 }
 
 // an opened line's part: the call's whole input, or the result as it is
@@ -511,32 +541,41 @@ function chip_html(url: string, name: string): string {
   return `<a class="file" href="${esc(url)}" download="${esc(shown)}" title="Download ${esc(shown)}"><span class="ic">📎</span><span class="fname">${esc(shown)}</span><small data-of="${esc(url)}"></small></a>`;
 }
 
-function spans_html(spans: Md.Span[]): string {
-  return spans.map(span_html).join("");
+// linked: whether names may become links, not in a link already
+function spans_html(spans: Md.Span[], linked = true): string {
+  return spans.map((s) => span_html(s, linked)).join("");
 }
 
-function span_html(s: Md.Span): string {
+function text_html(x: string, linked: boolean): string {
+  const parts = linked && NAMES.re !== null ? x.split(NAMES.re) : [x];
+  return parts.map((p, k) => {
+    const to = k % 2 === 1 ? NAMES.to.get(p) : undefined;
+    return to === undefined ? esc(p).replaceAll("UniiChat", `<span class="brand">UniiChat</span>`) : `<a class="name" href="${esc(to)}" data-go="${esc(to)}">${esc(p)}</a>`;
+  }).join("");
+}
+
+function span_html(s: Md.Span, linked: boolean): string {
   switch (s.$) {
     case "Text": {
-      return esc(s.x).replaceAll("UniiChat", `<span class="brand">UniiChat</span>`);
+      return text_html(s.x, linked);
     }
     case "Code": {
       return `<code>${esc(s.x)}</code>`;
     }
     case "Bold": {
-      return `<strong>${spans_html(s.x)}</strong>`;
+      return `<strong>${spans_html(s.x, linked)}</strong>`;
     }
     case "Ital": {
-      return `<em>${spans_html(s.x)}</em>`;
+      return `<em>${spans_html(s.x, linked)}</em>`;
     }
     case "Strk": {
-      return `<del>${spans_html(s.x)}</del>`;
+      return `<del>${spans_html(s.x, linked)}</del>`;
     }
     case "Link": {
       if (View.store_file(s.k)) {
         return chip_html(s.k, Md.spans_text(s.x));
       }
-      return `<a href="${esc(s.k)}"${s.t === "" ? "" : ` title="${esc(s.t)}"`} target="_blank" rel="noopener">${spans_html(s.x)}</a>`;
+      return `<a href="${esc(s.k)}"${s.t === "" ? "" : ` title="${esc(s.t)}"`} target="_blank" rel="noopener">${spans_html(s.x, false)}</a>`;
     }
     case "Pict": {
       const [k, title, kind] = [esc(s.k), s.t === "" ? "" : ` title="${esc(s.t)}"`, View.media_kind(s.k)];
