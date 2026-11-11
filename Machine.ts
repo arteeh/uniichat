@@ -45,6 +45,9 @@ export const JOB = "[Job ";
 // changes or ends (Device.ts)
 export const JOBS = { running: new Map<Bun.Subprocess, Bg>(), n: 0, changed: () => {}, ended: (_job: Bg, _text: string) => {} };
 
+// jobs ended with their agent: nothing is left to tell
+const KILLED = new Set<Bun.Subprocess>();
+
 const GONE = 3000;
 
 const CONTEXT = 3;
@@ -144,12 +147,12 @@ export namespace Machine {
           if (agent === "main" || agent === "jobs" || agent === "") {
             return { text: "Not an agent's folder: " + agent, fail: true };
           }
-          await Machine.halt(agent);
+          await Machine.halt(agent, true);
           fs.rmSync(Machine.agent_dir(agent), { recursive: true, force: true });
           return { text: "Removed " + Machine.agent_dir(agent) + ".", fail: false };
         }
         case "halt": {
-          const left = await Machine.halt(String(input.agent));
+          const left = await Machine.halt(String(input.agent), input.jobs === true);
           return { text: left === null ? "Its shells' trees killed; Windows can't find a process that left one." : left + " left", fail: (left ?? 0) > 0 };
         }
         default: {
@@ -219,6 +222,9 @@ export namespace Machine {
       void read.then(() => {
         JOBS.running.delete(proc);
         JOBS.changed();
+        if (KILLED.delete(proc)) {
+          return;
+        }
         JOBS.ended(job, Machine.exit(proc) + " in " + Math.round(took()) + " s, " + where() + Machine.fenced(shown()));
       });
       return { text: shown() + "(moved to the background after " + Math.round(took()) + " s as job " + job.id + ", pid " + proc.pid + ", " + where() + "; it reports back when it ends)", fail: false };
@@ -321,19 +327,23 @@ export namespace Machine {
     Machine.sweep(null);
   }
 
-  export async function halt(agent: string): Promise<number | null> {
+  // jobs: its background jobs too, which then report nothing
+  export async function halt(agent: string, jobs = false): Promise<number | null> {
     const until = Date.now() + GONE;
-    let left = Machine.sweep(agent);
+    let left = Machine.sweep(agent, jobs);
     while (left !== null && left > 0 && Date.now() < until) {
       await Bun.sleep(100);
-      left = Machine.sweep(agent);
+      left = Machine.sweep(agent, jobs);
     }
     return left;
   }
 
-  export function sweep(agent: string | null): number | null {
+  export function sweep(agent: string | null, jobs = false): number | null {
     for (const [proc, who] of SHELLS) {
-      if ((agent === null || (who === agent && !JOBS.running.has(proc))) && Machine.group_may_hold_job(proc)) {
+      if ((agent === null || (who === agent && (jobs || !JOBS.running.has(proc)))) && Machine.group_may_hold_job(proc)) {
+        if (agent !== null && JOBS.running.has(proc)) {
+          KILLED.add(proc);
+        }
         Machine.kill(-proc.pid);
       }
     }
@@ -341,8 +351,8 @@ export namespace Machine {
       return null; // no ps: a process that left its shell's tree lives on
     }
     const marks = ["UNII_RUN=" + RUN, ...(agent === null ? [] : ["UNII_AGENT=" + agent])];
-    const jobs = new Set(agent === null ? [] : [...JOBS.running.keys()].map((p) => String(p.pid)));
-    const found = Bun.spawnSync(PS).stdout.toString().split("\n").map((line) => line.trim().split(/\s+/)).filter((words) => marks.every((m) => words.includes(m)) && !jobs.has(words[1]));
+    const kept = new Set(agent === null || jobs ? [] : [...JOBS.running.keys()].map((p) => String(p.pid)));
+    const found = Bun.spawnSync(PS).stdout.toString().split("\n").map((line) => line.trim().split(/\s+/)).filter((words) => marks.every((m) => words.includes(m)) && !kept.has(words[1]));
     found.forEach((words) => Machine.kill(Number(words[0])));
     return found.length;
   }

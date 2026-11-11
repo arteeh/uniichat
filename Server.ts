@@ -1026,6 +1026,7 @@ export namespace Chat {
     chat.subs.delete(sub.name);
     chat.tools.seats.delete(sub.name);
     chat.gone.set(sub.name, sub.why === null ? "finished" : "stopped");
+    void Chat.sub_sweep(chat, sub.name);
     Chat.all(chat, { $: "agent", name: sub.name, found: true, from: 0, entries: [], done: true, end: true });
     Chat.report(chat, Sub.report(sub), take);
     Chat.change(chat);
@@ -1069,7 +1070,7 @@ export namespace Chat {
 
   export async function sub_sweep(chat: Chat, name: string): Promise<string[]> {
     const outs = await Promise.all(Tools.opened(chat.tools).map(async ([device]) => {
-      const job = Tools.start_job(chat.tools, device, { name: "halt", input: { agent: name }, cwd: "main" }, crypto.randomUUID());
+      const job = Tools.start_job(chat.tools, device, { name: "halt", input: { agent: name, jobs: true }, cwd: "main" }, crypto.randomUUID());
       if (typeof job === "string") {
         return null;
       }
@@ -2050,6 +2051,13 @@ export namespace Main {
     if (chat.main.busy) {
       return { error: Chat.name(chat) + " is still finishing a turn: delete it once that ends." };
     }
+    // its subagents end unreported, and every one's folder goes with its own
+    const subs = Memory.agents(chat.mem);
+    chat.subs.forEach((sub) => {
+      chat.subs.delete(sub.name);
+      chat.tools.seats.delete(sub.name);
+      Run.stop(sub.run, null);
+    });
     Chat.stop(chat, null);
     clearTimeout(chat.bell);
     Chat.gone(chat);
@@ -2059,7 +2067,9 @@ export namespace Main {
     Team.drop(chat.id);
     fs.rmSync(chat.mem.dir, { recursive: true, force: true });
     for (const [device] of Tools.opened(Main.tools)) {
-      void Tools.job(Main.tools, device, { name: "drop", input: { agent: chat.who }, cwd: "main" }, AbortSignal.timeout(60e3), crypto.randomUUID());
+      for (const agent of [chat.who, ...subs]) {
+        void Tools.job(Main.tools, device, { name: "drop", input: { agent }, cwd: "main" }, AbortSignal.timeout(60e3), crypto.randomUUID());
+      }
     }
     chat.socks.forEach((sock) => Chat.join(Main.unii(), sock));
     Main.team_soon();

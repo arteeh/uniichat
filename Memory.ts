@@ -1227,6 +1227,10 @@ export namespace Memory {
     return root;
   }
 
+  export function agents(mem: Memory): string[] {
+    return (fs.existsSync(mem.dir + AGENTS) ? fs.readdirSync(mem.dir + AGENTS) : []).filter((f) => /^[A-Za-z]+\.jsonl$/.test(f)).map((f) => f.slice(0, -".jsonl".length));
+  }
+
   export function agent_show(mem: Memory, name: string): string {
     return Memory.agent(mem, name)?.map((root) => root.i + "|" + Memory.show(root)).join("\n\n") ?? "No agent " + name + ".";
   }

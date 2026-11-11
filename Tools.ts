@@ -107,7 +107,7 @@ const BOSS: Spec[] = [
     memory : { type: "boolean", description: "Whether it starts with your view; default true." },
   }, required: ["task"] } } }, ["tasks"]),
   spec("tell", "Send a message to a running subagent, by name: it gets it right after its current tool calls, and its report answers it. A subagent that has reported or was stopped is done: spawn a new one.", { name: STR, message: STR }, ["name", "message"]),
-  spec("stop", "Stop a running subagent at once, by name, whatever it is doing. It is done then: its report says it was stopped. Its background jobs keep running, and their reports reach you.", { name: STR, why: { type: "string", description: "Why, for its report." } }, ["name"]),
+  spec("stop", "Stop a running subagent at once, by name, whatever it is doing (mid-call, waiting on a usage limit, running a tool on a device). Others keep running. It is done then, and its jobs end with it: its report says it was stopped.", { name: STR, why: { type: "string", description: "Why, for its report." } }, ["name"]),
   spec("resume", "Wake every call on this server waiting for an AI service's usage limit (other turns, summaries), when the user says a limit was reset early. Each asks again once; one still limited waits again.", {}, []),
 ];
 const DEVICE = { device: { type: "string", description: "The name of the device to run on, one listed under Devices." } };
