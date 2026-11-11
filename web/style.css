@@ -107,13 +107,15 @@ body.list footer > :not(#toast) { display: none; }
 .mate .text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
 .mate b { font-size: 15.5px; font-weight: 600; }
 .mate small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13.5px; color: var(--mid); }
-.mate.sub { gap: 10px; padding-top: 5px; padding-bottom: 7px; padding-left: max(46px, env(safe-area-inset-left)); }
-.mate.sub .face { flex: none; display: grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; background: var(--block); font-size: 15px; line-height: 1; }
-.mate.sub[aria-current] .face { background: var(--paper); }
-.mate.sub .line { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
-.mate.sub .line b { flex: none; font-size: 14px; }
-.mate.sub .line small { min-width: 0; }
-.mate.sub .text > small { font-size: 12px; }
+.mate:has(+ .kid) { padding-bottom: 4px; }
+.mate.kid { gap: 10px; padding-top: 3px; padding-bottom: 3px; padding-left: max(46px, env(safe-area-inset-left)); }
+.mate.kid:not(:has(+ .kid)) { padding-bottom: 8px; }
+.mate.kid .face { flex: none; display: grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; background: var(--block); font-size: 15px; line-height: 1; }
+.mate.kid[aria-current] .face { background: var(--paper); }
+.mate.kid .line { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.mate.kid .line b { flex: none; font-size: 14px; }
+.mate.kid .line small { min-width: 0; }
+.mate.kid .text > small { font-size: 12px; }
 body.subpage footer { display: none; }
 body.subpage header > .who { display: none; }
 body.subpage header > .title { display: block; }

@@ -60,7 +60,7 @@ export function list_html(team: View.Mate[], here: string | null, sub: string | 
       const mins = Math.round((now - s.at) / 60e3);
       const what = [s.model, s.effort, s.doing + (mins > 0 ? ", " + mins + " min" : "")].filter((x) => x !== "").join(" · ");
       const at = m.id === here && s.name === sub ? ` aria-current="page"` : "";
-      return `<a class="mate sub" href="${to}" data-go="${to}"${at}><span class="face">${esc(s.face)}</span><span class="text"><span class="line"><b>${esc(s.name)}</b><small>${esc(s.task)}</small></span><small>${esc(what)}</small></span></a>`;
+      return `<a class="mate kid" href="${to}" data-go="${to}"${at}><span class="face">${esc(s.face)}</span><span class="text"><span class="line"><b>${esc(s.name)}</b><small>${esc(s.task)}</small></span><small>${esc(what)}</small></span></a>`;
     });
     return [`<a class="mate" href="/a/${esc(m.id)}" data-go="/a/${esc(m.id)}"${on}>${face_html(m.picture)}<span class="text"><b>${esc(m.name)}</b><small>${esc(m.last)}</small></span>${pill}</a>`, ...subs];
   });
