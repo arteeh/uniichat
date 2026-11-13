@@ -499,7 +499,11 @@ case $rc in
   *) fail "nothing changed; ki $VER was not installed.";;
 esac
 renaming=""
-if [ -n "$moving" ] || [ -n "$olds" ] || [ -e "$cur/unii.db" ] || [ -e "$cur/.renaming" ]; then renaming=1; fi
+# (a device alone has no data folder, and no service if it runs in a
+# terminal: its sign-in, in unii's config folder, and unii's executable
+# are enough)
+if [ -n "$moving" ] || [ -n "$olds" ] || [ -e "$cur/unii.db" ] || [ -e "$cur/.renaming" ] \
+  || { [ -d "$oconf" ] && [ ! -e "$conf" ]; } || { [ -f "$OLD_BIN" ] && [ "$OLD_BIN" != "$BIN" ]; }; then renaming=1; fi
 copying=""
 if [ -d "$cur/chat" ] && [ ! -e "$cur/agents/unii" ]; then copying=1; fi
 
@@ -540,7 +544,8 @@ fresh=""
 add_fresh() { case " $fresh " in *" $1 "*) ;; *) fresh="$fresh $1";; esac; }
 if [ -n "$renaming" ]; then
   for s in $(sed -n 's/^start \(ki-[a-z]*\)$/\1/p' "$cur/.renaming" 2>/dev/null); do add_fresh "$s"; done
-  touch "$cur/.renaming"
+  [ -d "$cur" ] || [ -z "$olds" ] || mkdir -p "$cur"
+  [ ! -d "$cur" ] || touch "$cur/.renaming"
   if [ -n "$moving" ]; then
     mkdir -p "$(dirname "$dir")"
     if [ -L "$odir" ]; then lto=$(readlink "$odir"); else lto=""; fi
@@ -568,7 +573,7 @@ if [ -n "$renaming" ]; then
             -e "s#<!-- unii-made: .*#<!-- ki-made: \`ki $p -d\` wrote this, and writes it again; \`ki $p stop\` removes it. -->#" "$from" > "$to.new" && mv "$to.new" "$to";;
       esac
     fi
-    grep -qs ki-made "$to" && add_fresh "ki-$p" && echo "start ki-$p" >> "$dir/.renaming"
+    if grep -qs ki-made "$to"; then add_fresh "ki-$p"; echo "start ki-$p" >> "$dir/.renaming"; fi
     case $os in
       linux) systemctl --user disable --now --quiet "$s" 2>/dev/null || true;;
       darwin) launchctl bootout "gui/$(id -u)/$s" 2>/dev/null || true;;

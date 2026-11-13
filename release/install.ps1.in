@@ -140,7 +140,11 @@
     if ((Test-Path -LiteralPath (Join-Path $cur 'unii.db')) -and (Test-Path -LiteralPath (Join-Path $cur 'ki.db'))) {
       throw "$cur has both unii.db (unii's sign-ins, agents and settings) and ki.db (made by a ki that started on it before it was moved over), and which one to keep isn't clear, so nothing changed and ki $Ver was not installed. Move ki.db (and ki.db-wal, ki.db-shm) aside to keep unii's, or unii.db (and its -wal, -shm) to keep ki's, then run this again."
     }
-    $renaming = $moving -or ($olds.Count -gt 0) -or (Test-Path -LiteralPath (Join-Path $cur 'unii.db')) -or (Test-Path -LiteralPath (Join-Path $cur '.renaming'))
+    # (a device alone has no data folder, and no task if it runs in a
+    # terminal: its sign-in, in unii's config folder, and unii's exe are
+    # enough)
+    $renaming = $moving -or ($olds.Count -gt 0) -or (Test-Path -LiteralPath (Join-Path $cur 'unii.db')) -or (Test-Path -LiteralPath (Join-Path $cur '.renaming')) -or
+      ((Test-Path -LiteralPath $oconf) -and -not (Test-Path -LiteralPath $conf)) -or ((Test-Path -LiteralPath $oldBin -PathType Leaf) -and -not ($oldBin -ieq $bin))
 
     # a ki (or unii) device or server running (a ki.exe or unii.exe, or one
     # by $bin's name or path) that no service runs: it would keep the old
@@ -268,7 +272,8 @@
       $mark = Join-Path $cur '.renaming'
       if (Test-Path -LiteralPath $mark) {
         $fresh = @(Get-Content -LiteralPath $mark | Where-Object { $_ -match '^start ki-(serve|device)$' } | ForEach-Object { $_.Substring(6) } | Select-Object -Unique)
-      } else {
+      } elseif ((Test-Path -LiteralPath $cur) -or ($olds.Count -gt 0)) {
+        New-Item -ItemType Directory -Force -Path $cur | Out-Null
         New-Item -ItemType File -Path $mark | Out-Null
       }
       if ($moving) {
