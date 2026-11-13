@@ -238,7 +238,7 @@
     [IO.File]::WriteAllText($rename, [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('@RENAME_JS_B64@')))
     $named = {
       $env:BUN_BE_BUN = '1'
-      try { & $exe $rename $dir } finally { Remove-Item Env:\BUN_BE_BUN -ErrorAction SilentlyContinue }
+      try { & $exe $rename $dir $conf } finally { Remove-Item Env:\BUN_BE_BUN -ErrorAction SilentlyContinue }
       if ($LASTEXITCODE -ne 0) { throw "giving your data in $dir ki's names stopped halfway (see above): run this again. ki $Ver was not installed." }
     }
 

@@ -604,7 +604,7 @@ if [ -n "$renaming" ]; then
     echo "  Removed unii's service $s."
   done
   [ "$os" != linux ] || [ -z "$olds" ] || systemctl --user daemon-reload || true
-  BUN_BE_BUN=1 "$new_ki" "$tmp/rename.js" "$dir" || fail "giving your data in $dir ki's names stopped halfway (see above): run this again. ki $VER was not installed."
+  BUN_BE_BUN=1 "$new_ki" "$tmp/rename.js" "$dir" "$conf" || fail "giving your data in $dir ki's names stopped halfway (see above): run this again. ki $VER was not installed."
   cur="$dir"
 fi
 
@@ -631,7 +631,7 @@ if [ -d "$dir/chat" ] && [ ! -e "$dir/agents/unii" ]; then
   rm -rf "$dir/agents/.unii-copy"
   touch "$dir/.renaming"
   cp -Rp "$dir/chat" "$dir/agents/.unii-copy" && mv "$dir/agents/.unii-copy" "$dir/agents/unii" || fail "could not copy $dir/chat to $dir/agents/unii; ki $VER was not installed."
-  BUN_BE_BUN=1 "$new_ki" "$tmp/rename.js" "$dir" || fail "giving your data in $dir ki's names stopped halfway (see above): run this again. ki $VER was not installed."
+  BUN_BE_BUN=1 "$new_ki" "$tmp/rename.js" "$dir" "$conf" || fail "giving your data in $dir ki's names stopped halfway (see above): run this again. ki $VER was not installed."
   echo "  Copied $dir/chat to $dir/agents/unii, the main agent's memory in the agent team ($dir/chat stays as it was)."
 fi
 share="${XDG_DATA_HOME:-$HOME/.local/share}/ki"
