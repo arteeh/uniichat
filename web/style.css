@@ -119,6 +119,7 @@ body.list footer > :not(#toast) { display: none; }
 .mate.kid .text > small { font-size: 12px; }
 body.subpage footer { display: none; }
 body.subpage header > .who { display: none; }
+body.subpage header > :is(.brain, .timers) { display: none !important; }
 body.subpage header > .title { display: block; }
 body.subpage header > .title:not([data-on=""])::after { content: attr(data-on); display: block; overflow: hidden; text-overflow: ellipsis; font: 400 12.5px/1.3 var(--sans); color: var(--mid); }
 .cap.earlier { min-height: 1px; text-align: center; }
