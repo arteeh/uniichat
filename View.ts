@@ -108,6 +108,7 @@ export type View = State & {
   up    : boolean;
   down  : number;
   tries : number;
+  woke  : number;
   retry : ReturnType<typeof setTimeout> | null;
   flush : () => void;
   wake  : () => void;
@@ -161,7 +162,7 @@ export type Link = {
   open : (query: string) => WebSocket;
   post : (path: string, body: Upload) => Promise<Response>;
   hear : (msg: Server) => void;
-  lost : (up: boolean) => Promise<boolean>;
+  lost : (up: boolean) => void;
 };
 
 export type Act =
@@ -311,6 +312,7 @@ export function view_new(agent: string): View {
     up        : false,
     down      : Date.now(),
     tries     : 0,
+    woke      : 0,
     retry     : null,
     flush     : () => {},
     wake      : () => {},
@@ -745,6 +747,11 @@ function view_entry(v: View, msg: Server & { $: "entry" }): void {
 // offline shows only once a reconnect has failed or this long has gone
 export const GRACE = 3000;
 const BACKOFF = 30000;
+// just after the page comes back in view (#159), while the phone's network
+// may still be coming back: a link that doesn't open in OPEN_WAIT is tried
+// again, every RETRY
+const WOKE = 30000;
+const OPEN_WAIT = 3000;
 
 export function view_offline(v: View, now = Date.now()): boolean {
   return !v.up && (v.tries > 1 || now - v.down >= GRACE);
@@ -758,27 +765,32 @@ export function link_open(v: View, link: Link): void {
   let heard  = Date.now();
   const tick = setInterval(() => {
     if (Date.now() - heard > PING) {
-      void drop();
+      drop();
     }
   }, PING / 2);
+  const slow = setTimeout(() => {
+    if (!v.up && v.ws === ws) {
+      drop();
+    }
+  }, woken(v) ? OPEN_WAIT : PING);
   function shut(): void {
     ws.onmessage = null;
     ws.onclose   = null;
     clearInterval(tick);
+    clearTimeout(slow);
     ws.close();
     [v.ws, v.up] = [null, false];
   }
-  async function drop(): Promise<void> {
+  function drop(): void {
     const up = v.up;
     shut();
     if (up) {
       v.down = Date.now();
     }
-    const wait = v.tries === 0 ? 0 : Math.min(BACKOFF, RETRY * 2 ** (v.tries - 1));
+    link.lost(up);
+    const wait = v.tries === 0 ? 0 : woken(v) ? RETRY : Math.min(BACKOFF, RETRY * 2 ** (v.tries - 1));
     v.tries++;
-    if (await link.lost(up)) {
-      v.retry = setTimeout(() => link_open(v, link), wait);
-    }
+    v.retry = setTimeout(() => link_open(v, link), wait);
   }
   function flush(): void {
     for (const post of v.up && v.ws === ws ? v.out.filter((p) => p.ws !== ws) : []) {
@@ -798,18 +810,21 @@ export function link_open(v: View, link: Link): void {
     if (out != null) {
       link.hear({ $: "ack", id: post.msg.id, ...out });
     } else if (post.ws === ws && v.ws === ws) {
-      void drop();
+      drop();
     }
   }
-  // back in view: a link not heard from since the server's last tick (or
-  // since it opened) is dead, and one waiting to open again opens now
+  // back in view: a link not heard from since the server's last tick is
+  // dead, one still opening after RETRY is hung, and one waiting to open
+  // again opens now
   function wake(): void {
+    v.woke = Date.now();
     if (!v.up) {
       v.down = Date.now();
-    }
-    if (v.ws === ws && Date.now() - heard > PING / 2 + RETRY) {
       v.tries = 0;
-      void drop();
+    }
+    if (v.ws === ws && Date.now() - heard > (v.up ? PING / 2 + RETRY : RETRY)) {
+      v.tries = 0;
+      drop();
     } else if (v.ws === null && v.retry !== null) {
       clearTimeout(v.retry);
       v.tries = 0;
@@ -852,7 +867,11 @@ export function link_open(v: View, link: Link): void {
       flush();
     }
   };
-  ws.onclose = () => void drop();
+  ws.onclose = () => drop();
+}
+
+function woken(v: View): boolean {
+  return Date.now() - v.woke < WOKE;
 }
 
 export function link_send(v: View, msg: Client, done = (a: Answer) => link_note(v, a), said = ""): void {

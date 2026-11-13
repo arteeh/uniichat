@@ -159,6 +159,7 @@ async function boot(): Promise<void> {
   });
   addEventListener("pageshow", () => v.wake());
   addEventListener("online", () => v.wake());
+  (navigator as Navigator & { connection?: EventTarget }).connection?.addEventListener("change", () => v.wake());
   // a phone freezes a page in the background, its links dead: the server
   // hears it leave now, and it comes back at once (#114)
   document.addEventListener("freeze", () => v.ws?.close());
@@ -668,15 +669,17 @@ function me(): Promise<Response | null> {
   return fetch("/api/me", { signal: AbortSignal.timeout(ME_WAIT) }).catch(() => null);
 }
 
-async function lost(up: boolean): Promise<boolean> {
+// a sign-in that ended sends to the start; the link tries again meanwhile
+function lost(up: boolean): void {
   draw(true);
   setTimeout(() => draw(false), View.GRACE + 100);
-  const res = up ? null : await me();
-  if (res !== null && res.status === 401) {
-    location.href = "/";
-    return false;
+  if (!up) {
+    void me().then((res) => {
+      if (res !== null && res.status === 401) {
+        location.href = "/";
+      }
+    });
   }
-  return true;
 }
 
 function hear(msg: View.Server): void {

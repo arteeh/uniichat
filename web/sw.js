@@ -1,6 +1,7 @@
 const CACHE = "unii-shell-{build}";
 const SHELL = ["/", "/app.js", "/style.css", "/favicon.svg", "/mark.svg", "/manifest.webmanifest", "/icon-192.png"];
 const PAGES = ["/", "/settings", "/account", "/tree", "/new"];
+const PAGE_WAIT = 3000;
 
 // Safari takes a subscription back from a site whose pushes show nothing,
 // so there every push shows
@@ -21,16 +22,23 @@ self.addEventListener("fetch", (ev) => {
   if (req.method !== "GET" || url.origin !== location.origin || !(page || SHELL.includes(url.pathname))) {
     return;
   }
-  ev.respondWith(fresh(req, page ? "/" : url.pathname));
+  ev.respondWith(fresh(req, page ? "/" : url.pathname, page));
 });
 
-async function fresh(req, key) {
+// a page whose network hangs (a phone's, just woken) comes from the cache
+// after PAGE_WAIT (#159)
+async function fresh(req, key, page) {
   const cache = await caches.open(CACHE);
-  try {
-    const res = await fetch(req.mode === "navigate" ? req.url : req, { cache: "no-cache" });
+  const net = fetch(req.mode === "navigate" ? req.url : req, { cache: "no-cache" }).then(async (res) => {
     if (res.ok) {
       await cache.put(key, res.clone());
     }
+    return res;
+  });
+  net.catch(() => {});
+  try {
+    const late = page ? new Promise((ok) => setTimeout(ok, PAGE_WAIT, null)) : net;
+    const res = (await Promise.race([net, late])) ?? (await cache.match(key)) ?? (await net);
     return res.status < 500 ? res : (await cache.match(key)) ?? res;
   } catch (err) {
     const kept = await cache.match(key);
