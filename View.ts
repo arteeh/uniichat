@@ -631,6 +631,13 @@ function running(rows: Row[], from: number): Row[] {
   return rows.map((r) => (r.$ === "Line" && r.echo === null && r.id !== null && r.id >= from ? { ...r, phase: "running" } : r));
 }
 
+// hidden thinking that just ended (#163) stays "Thinking" until what the
+// model goes on with comes
+function thought_last(v: View): boolean {
+  const last = v.parts.findLast(([at]) => v.whole.get(at)?.kind !== "team");
+  return last !== undefined && v.minds.has(last[0] + last[1] - 1);
+}
+
 export function view_tail(v: View): Row[] {
   if (v.page !== null) {
     const live = v.page.live;
@@ -641,7 +648,7 @@ export function view_tail(v: View): Row[] {
     const idle = sub !== undefined && v.page.live.length === 0 && v.page.log?.at(-1)?.kind !== "tool" && sub.doing !== "usage limit";
     return [...thought, ...live_rows(page, sub !== undefined), ...(idle ? [WAITING] : []), ...queued];
   }
-  const thought = v.thinking === false && v.live.some((_, k) => thinks(v.live, k)) ? [THINKING] : [];
+  const thought = v.thinking === false && (v.live.some((_, k) => thinks(v.live, k)) || (v.live.length === 0 && v.busy && v.wait === "" && thought_last(v))) ? [THINKING] : [];
   const rows = [...thought, ...live_rows(v.live.filter((l) => v.thinking !== false || l.kind !== "mind"), v.busy && v.wait === "")];
   const load = v.importing !== null ? [Cap(progress_show(v.importing))] : [];
   const said = !v.up ? v.out.flatMap((p) => entry_rows(null, "user", p.said)) : [];
