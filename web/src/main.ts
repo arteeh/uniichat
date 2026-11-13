@@ -1619,16 +1619,25 @@ async function notify_sub(): Promise<PushSubscription | null> {
 
 // notifications this device had on stay on (#152): when the app opens, a
 // subscription the server lost is sent again and one the browser lost is
-// made again; if the browser took the permission back, a bar says so.
-// Off is only what the user turned off here
+// made again; if the browser took the permission back, a bar says so, and
+// if it blocks them, says so once. Off is only what the user turned off here
 async function notify_keep(): Promise<void> {
   const was = localStorage.getItem(NOTIFY);
   const state = await notify_state().catch(() => null);
   if (was === "off" || state === null || state === "home") {
     return;
   }
-  if (Notification.permission !== "granted") {
+  if (state === "blocked") {
     if (was === "on") {
+      toast("Notifications are off on this device: they're blocked in this browser's settings for this site.", true, ["OK", () => {
+        $("#toast").hidden = true;
+      }]);
+      localStorage.setItem(NOTIFY, "blocked");
+    }
+    return;
+  }
+  if (Notification.permission !== "granted") {
+    if (was === "on" || was === "blocked") {
       toast("Notifications are off on this device.", true, ["Turn on", () => {
         $("#toast").hidden = true;
         void notify(true);
@@ -1637,7 +1646,10 @@ async function notify_keep(): Promise<void> {
     return;
   }
   if (state === "off" && P.push !== null) {
-    await notify_on(P.push.reg, P.push.key).catch(() => {});
+    const out = await notify_on(P.push.reg, P.push.key).catch(() => null);
+    if (out === null || out.error !== undefined) {
+      return;
+    }
   }
   localStorage.setItem(NOTIFY, "on");
 }
