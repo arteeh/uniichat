@@ -80,14 +80,25 @@ async function update(): Promise<void> {
   if (no !== null) {
     fail(url + " was not run (" + no + "), and nothing changed.");
   }
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "unii-update-"));
+  let dir: string;
+  try {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), "unii-update-"));
+  } catch (err) {
+    fail("could not make a folder for the installer in " + os.tmpdir() + " (" + err_why(err) + "); nothing changed. Set TMPDIR (TEMP on Windows) to a folder you can write to.");
+  }
   const file = path.join(dir, name);
+  const gone = (): void => fs.rmSync(dir, { recursive: true, force: true });
+  const stop = (sig: NodeJS.Signals): void => {
+    gone();
+    process.kill(process.pid, sig);
+  };
+  process.once("SIGINT", stop).once("SIGTERM", stop);
   try {
     fs.writeFileSync(file, script);
     const run = WIN ? powershell_exiting_as_installer("iex ([IO.File]::ReadAllText('" + file.replaceAll("'", "''") + "'))") : ["sh", file];
     process.exitCode = child.spawnSync(run[0], run.slice(1), { stdio: "inherit", env: updater_env() }).status ?? 1;
   } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
+    gone();
   }
 }
 
