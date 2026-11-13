@@ -143,17 +143,19 @@ if [ -n "$oldrun" ] && [ -z "${KI_INSTALL_OUTSIDE:-}" ]; then
       log="${TMPDIR:-/tmp}/ki-install.$$.log"
       self="${TMPDIR:-/tmp}/ki-install.$$.sh"
       if [ -f "$0" ] && head -c 200 "$0" 2>/dev/null | grep -q 'Installs ki'; then cp "$0" "$self"; else curl --proto '=https' --tlsv1.2 -fsSL -o "$self" "$BASE/install.sh" || fail "could not download $BASE/install.sh again to run it outside $s"; fi
-      envs="KI_INSTALL_OUTSIDE=1 PATH=$PATH HOME=$HOME"
-      for v in UNII_BIN UNII_DIR KI_BIN KI_DIR XDG_CONFIG_HOME XDG_DATA_HOME TMPDIR; do
-        eval "x=\${$v:-}"; [ -z "$x" ] || envs="$envs $v=$x"
-      done
+      # this run's settings, for the run outside, as a script it reads
+      # first: each value in '' (spaces and all), not words on a line
+      envf="${TMPDIR:-/tmp}/ki-install.$$.env"
+      { echo "export KI_INSTALL_OUTSIDE=1"
+        for v in PATH HOME UNII_BIN UNII_DIR KI_BIN KI_DIR XDG_CONFIG_HOME XDG_DATA_HOME TMPDIR; do
+          eval "x=\${$v:-}"; [ -z "$x" ] || printf "export %s='%s'\n" "$v" "$(printf '%s' "$x" | sed "s/'/'\\\\''/g")"
+        done; } > "$envf" || fail "could not write $envf to run the installer outside $s. Nothing changed: run this installer in a terminal."
+      outside='. "$3"; rm -f "$3"; sh "$1" > "$2" 2>&1; rm -f "$1"'
       case $os in
         linux) command -v systemd-run >/dev/null 2>&1 || fail "this runs inside $s, and moving unii to ki stops it; without systemd-run it can't go on outside it. Nothing changed: run this installer in a terminal."
-          # shellcheck disable=SC2086
-          systemd-run --user --quiet --collect --unit "ki-install-$$" $(for e in $envs; do printf -- '--setenv=%s ' "$e"; done) sh -c 'sh "$1" > "$2" 2>&1; rm -f "$1"' sh "$self" "$log" || fail "systemd-run could not start the installer outside $s. Nothing changed: run this installer in a terminal.";;
+          systemd-run --user --quiet --collect --unit "ki-install-$$" sh -c "$outside" sh "$self" "$log" "$envf" || fail "systemd-run could not start the installer outside $s. Nothing changed: run this installer in a terminal.";;
         darwin) command -v perl >/dev/null 2>&1 || fail "this runs inside $s, and moving unii to ki stops it; without perl it can't go on outside it. Nothing changed: run this installer in a terminal."
-          # shellcheck disable=SC2086
-          env $envs nohup perl -MPOSIX -e 'POSIX::setsid(); exec @ARGV' sh -c 'sh "$1" > "$2" 2>&1; rm -f "$1"' sh "$self" "$log" < /dev/null > /dev/null 2>&1 &
+          nohup perl -MPOSIX -e 'POSIX::setsid(); exec @ARGV' sh -c "$outside" sh "$self" "$log" "$envf" < /dev/null > /dev/null 2>&1 &
           ;;
       esac
       echo "  unii becomes ki: that stops $s, which this runs in, so the install goes on by itself outside it. Its output: $log"
