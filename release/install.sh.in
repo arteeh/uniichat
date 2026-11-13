@@ -527,10 +527,16 @@ fi
 # unii's own become ki's: the data and sign-ins move, unii's services
 # give way to ki's (made now, started below, once ki is in place)
 q() { printf '%s' "$1" | sed 's/[#&\\]/\\&/g'; }
+# ki's services made from unii's, to start once ki is in place: kept in
+# <data dir>/.renaming (a line "start <name>" each) with the rest of the
+# move's state, till all is done, so a run stopped halfway (a failed
+# write of the executable, a crash) starts them, and removes unii's
+# executable, when it runs again
 fresh=""
+add_fresh() { case " $fresh " in *" $1 "*) ;; *) fresh="$fresh $1";; esac; }
 if [ -n "$renaming" ]; then
-  # till rename.js is done, so a run stopped halfway gives it another go
-  : > "$cur/.renaming"
+  for s in $(sed -n 's/^start \(ki-[a-z]*\)$/\1/p' "$cur/.renaming" 2>/dev/null); do add_fresh "$s"; done
+  touch "$cur/.renaming"
   if [ -n "$moving" ]; then
     mkdir -p "$(dirname "$dir")"
     mv "$odir" "$dir" || fail "could not move $odir to $dir; ki $VER was not installed."
@@ -556,8 +562,8 @@ if [ -n "$renaming" ]; then
             -e "s#<key>UNII_#<key>KI_#g" \
             -e "s#<!-- unii-made: .*#<!-- ki-made: \`ki $p -d\` wrote this, and writes it again; \`ki $p stop\` removes it. -->#" "$from" > "$to.new" && mv "$to.new" "$to";;
       esac
-      fresh="$fresh ki-$p"
     fi
+    grep -qs ki-made "$to" && add_fresh "ki-$p" && echo "start ki-$p" >> "$dir/.renaming"
     case $os in
       linux) systemctl --user disable --now --quiet "$s" 2>/dev/null || true;;
       darwin) launchctl bootout "gui/$(id -u)/$s" 2>/dev/null || true;;
@@ -567,7 +573,6 @@ if [ -n "$renaming" ]; then
   done
   [ "$os" != linux ] || [ -z "$olds" ] || systemctl --user daemon-reload || true
   BUN_BE_BUN=1 "$new_ki" "$tmp/rename.js" "$dir" || fail "giving your data in $dir ki's names stopped halfway (see above): run this again. ki $VER was not installed."
-  rm -f "$dir/.renaming"
   cur="$dir"
 fi
 
@@ -592,10 +597,9 @@ fi
 if [ -d "$dir/chat" ] && [ ! -e "$dir/agents/unii" ]; then
   mkdir -p "$dir/agents"
   rm -rf "$dir/agents/.unii-copy"
-  : > "$dir/.renaming"
+  touch "$dir/.renaming"
   cp -Rp "$dir/chat" "$dir/agents/.unii-copy" && mv "$dir/agents/.unii-copy" "$dir/agents/unii" || fail "could not copy $dir/chat to $dir/agents/unii; ki $VER was not installed."
   BUN_BE_BUN=1 "$new_ki" "$tmp/rename.js" "$dir" || fail "giving your data in $dir ki's names stopped halfway (see above): run this again. ki $VER was not installed."
-  rm -f "$dir/.renaming"
   echo "  Copied $dir/chat to $dir/agents/unii, the main agent's memory in the agent team ($dir/chat stays as it was)."
 fi
 share="${XDG_DATA_HOME:-$HOME/.local/share}/ki"
@@ -605,7 +609,7 @@ mkdir -p "$share"
 mkdir -p "$(dirname "$BIN")"
 # copied beside $BIN, then renamed over it: a running ki (ki update)
 # keeps its old file, and /tmp may be another file system
-cp "$new_ki" "$BIN.new.$$" && chmod 755 "$BIN.new.$$" && mv -f "$BIN.new.$$" "$BIN" || { rm -f "$BIN.new.$$"; fail "could not write $BIN"; }
+cp "$new_ki" "$BIN.new.$$" && chmod 755 "$BIN.new.$$" && mv -f "$BIN.new.$$" "$BIN" || { rm -f "$BIN.new.$$"; fail "could not write $BIN$( [ -z "$renaming" ] || echo ": fix that, then run this again to finish moving unii over (its services start then)")"; }
 if [ -n "$renaming" ] && [ -f "$OLD_BIN" ] && [ "$OLD_BIN" != "$BIN" ]; then
   rm -f "$OLD_BIN" && echo "  Removed unii's executable $OLD_BIN."
 fi
@@ -623,6 +627,19 @@ case ":$PATH:" in
   *":$(dirname "$BIN"):"*) ;;
   *) echo "  $(dirname "$BIN") is not on your PATH; add it to run ki by name.";;
 esac
+# (the ones made from unii's that run already, started by hand, are left)
+# each runs $BIN (the one this run wrote: a run before may have failed
+# writing another)
+for s in $fresh; do
+  f=$(unit "$s")
+  case $os in
+    linux) sed -E "s#^ExecStart=\"([^\"\\\\]|\\\\.)*\"#ExecStart=\"$(q "$BIN")\"#" "$f" > "$f.new" && mv "$f.new" "$f";;
+    darwin) sed -e "s#<array><string>[^<]*</string>#<array><string>$(q "$BIN")</string>#" "$f" > "$f.new" && mv "$f.new" "$f";;
+  esac
+done
+x=""
+for s in $fresh; do case " $made " in *" $s "*) ;; *) up "$s" || x="$x $s";; esac; done
+fresh="${x:-}"
 if [ -n "$fresh" ]; then
   echo "  Starting$fresh, ki's services where unii's were."
   case $os in
@@ -630,6 +647,8 @@ if [ -n "$fresh" ]; then
     darwin) for s in $fresh; do launchctl bootstrap "gui/$(id -u)" "$(unit "$s")" || echo "  Could not start $s: run ki ${s#ki-} -d to."; done;;
   esac
 fi
+# the move is done
+rm -f "$dir/.renaming"
 # last: run from a ki service's shell (ki update), its restart ends
 # this, so that one goes last, and the temp dir before
 first="" last=""

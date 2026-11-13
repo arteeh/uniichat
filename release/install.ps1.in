@@ -236,7 +236,6 @@
       $env:BUN_BE_BUN = '1'
       try { & $exe $rename $dir } finally { Remove-Item Env:\BUN_BE_BUN -ErrorAction SilentlyContinue }
       if ($LASTEXITCODE -ne 0) { throw "giving your data in $dir ki's names stopped halfway (see above): run this again. ki $Ver was not installed." }
-      Remove-Item -LiteralPath (Join-Path $dir '.renaming') -Force -ErrorAction SilentlyContinue
     }
 
     # no server may run on the data while it moves or is copied: the tasks
@@ -259,10 +258,19 @@
 
     # unii's own become ki's: the data and sign-ins move, unii's tasks give
     # way to ki's (made now, started below, once ki.exe is in place)
+    # ki's tasks made from unii's, to start once ki.exe is in place: kept
+    # in <data dir>\.renaming (a line "start <name>" each) with the rest of
+    # the move's state, till all is done, so a run stopped halfway (a
+    # failed write of the exe, a crash) starts them, and removes unii's
+    # exe, when it runs again
     $fresh = @()
     if ($renaming) {
-      # till rename.js is done, so a run stopped halfway gives it another go
-      New-Item -ItemType File -Force -Path (Join-Path $cur '.renaming') | Out-Null
+      $mark = Join-Path $cur '.renaming'
+      if (Test-Path -LiteralPath $mark) {
+        $fresh = @(Get-Content -LiteralPath $mark | Where-Object { $_ -match '^start ki-(serve|device)$' } | ForEach-Object { $_.Substring(6) } | Select-Object -Unique)
+      } else {
+        New-Item -ItemType File -Path $mark | Out-Null
+      }
       if ($moving) {
         Move-Item -LiteralPath $odir -Destination $dir
         Write-Host "  Moved $odir to $dir."
@@ -282,10 +290,14 @@
           $xml = [regex]::Replace($xml, '<Description>unii-made:[^<]*</Description>', ('<Description>ki-made: `ki ' + $part + ' -d` made this task, and makes it again; `ki ' + $part + ' stop` removes it.</Description>'))
           try {
             Register-ScheduledTask -TaskName $n -TaskPath '\' -Xml $xml | Out-Null
-            $fresh += $n
           } catch {
             Write-Host ("  Could not make the task $n from " + $t.TaskName + " (" + $_.Exception.Message + "): run " + $(if ([string]$t.Principal.RunLevel -eq 'Highest') { 'sudo ' } else { '' }) + "ki $part -d to.")
           }
+        }
+        $k = & $task $n
+        if ($k -and ([string]$k.Description -match 'ki-made') -and ($fresh -notcontains $n)) {
+          $fresh += $n
+          Add-Content -LiteralPath (Join-Path $dir '.renaming') -Value "start $n"
         }
         try {
           Unregister-ScheduledTask -TaskName $t.TaskName -TaskPath '\' -Confirm:$false
@@ -306,7 +318,7 @@
       $copy = Join-Path $dir 'agents\.unii-copy'
       New-Item -ItemType Directory -Force -Path (Join-Path $dir 'agents') | Out-Null
       Remove-Item -LiteralPath $copy -Recurse -Force -ErrorAction SilentlyContinue
-      New-Item -ItemType File -Force -Path (Join-Path $dir '.renaming') | Out-Null
+      if (-not (Test-Path -LiteralPath (Join-Path $dir '.renaming'))) { New-Item -ItemType File -Path (Join-Path $dir '.renaming') | Out-Null }
       Copy-Item -LiteralPath $chat -Destination $copy -Recurse
       Move-Item -LiteralPath $copy -Destination $main
       & $named
@@ -396,10 +408,28 @@
     $made = @()
     try { $made = @('serve', 'device' | ForEach-Object { & $task "ki-$_" } | Where-Object { $_ -and ([string]$_.Description -match 'ki-made') -and ([string]$_.State -eq 'Running') }) } catch {}
     $made = @($made | Sort-Object { $mine -match ('\s"?' + $_.TaskName.Substring(3) + '"?\s') }, { $_.TaskName -eq 'ki-device' })
+    # each runs $bin (the one this run wrote: a run before may have
+    # failed writing another), and ki's that run already are left
+    $fresh = @($fresh | Where-Object { $k = & $task $_; $k -and ([string]$k.State -ne 'Running') -and (@($made | ForEach-Object { $_.TaskName }) -notcontains $_) })
+    foreach ($n in $fresh) {
+      try {
+        $doc = [xml](Export-ScheduledTask -TaskName $n -TaskPath '\')
+        $e = $doc.Task.Actions.Exec
+        $parts = @(& $argv ([string]$e.Arguments))
+        $at = [array]::IndexOf(@($parts | ForEach-Object { [IO.Path]::GetFileName($_) -ieq 'ki.exe' }), $true)
+        if ($at -ge 0 -and -not ($parts[$at] -ieq $bin)) {
+          $parts[$at] = $bin
+          $e.Arguments = (@($parts | ForEach-Object { & $winq $_ }) -join ' ')
+          Register-ScheduledTask -TaskName $n -TaskPath '\' -Xml $doc.OuterXml -Force | Out-Null
+        }
+      } catch {}
+    }
     foreach ($n in @($fresh) + @($halted | ForEach-Object { $_.TaskName })) {
       Write-Host ("  Starting $n, on ki $Ver.")
       try { Start-ScheduledTask -TaskName $n -TaskPath '\' } catch { Write-Host ("  Could not start ${n}: run ki " + $n.Substring(3) + " -d to.") }
     }
+    # the move is done
+    Remove-Item -LiteralPath (Join-Path $dir '.renaming') -Force -ErrorAction SilentlyContinue
     foreach ($t in $made) {
       Write-Host ("  Restarting " + $t.TaskName + " on ki $Ver.")
       try { Start-ScheduledTask -TaskName $t.TaskName -TaskPath '\' } catch { Write-Host ("  Could not restart " + $t.TaskName + ": run " + $(if ([string]$t.Principal.RunLevel -eq 'Highest') { 'sudo ' } else { '' }) + "ki " + $t.TaskName.Substring(3) + " -d to.") }
