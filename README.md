@@ -36,27 +36,25 @@ What this fork adds:
 Install
 -------
 
-This is the `rc` branch: the agent team, as release candidates. Each is a pre-release, `40.rc1`, `40.rc2`, …, on the [releases page](https://github.com/arteeh/uniichat/releases), installed only by hand, with its own install line (put its tag in place of `TAG`):
-
 Linux, macOS or WSL:
 
-`curl -fsSL https://github.com/arteeh/uniichat/releases/download/TAG/install.sh | sh`
+`curl -fsSL https://github.com/arteeh/uniichat/releases/latest/download/install.sh | sh`
 
 Windows (PowerShell, no admin needed):
 
-`irm https://github.com/arteeh/uniichat/releases/download/TAG/install.ps1 | iex`
+`irm https://github.com/arteeh/uniichat/releases/latest/download/install.ps1 | iex`
 
-Either way you get one `unii` program (in `~/.local/bin`, or `%LOCALAPPDATA%\Programs\unii` on Windows). `unii update` never moves to or from a release candidate: install the next one by its own line, which restarts the background services on it.
+Either way you get one `unii` program (in `~/.local/bin`, or `%LOCALAPPDATA%\Programs\unii` on Windows). `unii update` installs the newest release and restarts the background services on it.
 
 **Checked install.** The install scripts are signed with our release key, `ssh-ed25519 TODO-the-real-release-key-made-at-release-time`; `unii update` checks it before it runs one. To check yourself first (ssh-keygen comes with Linux, macOS and Windows 10/11):
 
 Linux, macOS or WSL:
 
-`curl -fsSLO https://github.com/arteeh/uniichat/releases/download/TAG/install.sh -O https://github.com/arteeh/uniichat/releases/download/TAG/install.sh.sig && echo "unii ssh-ed25519 TODO-the-real-release-key-made-at-release-time" > unii.signers && ssh-keygen -Y verify -f unii.signers -I unii -n unii-release -s install.sh.sig < install.sh && sh install.sh`
+`curl -fsSLO https://github.com/arteeh/uniichat/releases/latest/download/install.sh -O https://github.com/arteeh/uniichat/releases/latest/download/install.sh.sig && echo "unii ssh-ed25519 TODO-the-real-release-key-made-at-release-time" > unii.signers && ssh-keygen -Y verify -f unii.signers -I unii -n unii-release -s install.sh.sig < install.sh && sh install.sh`
 
 Windows (PowerShell):
 
-`$b = "https://github.com/arteeh/uniichat/releases/download/TAG"; irm $b/install.ps1 -OutFile install.ps1; irm $b/install.ps1.sig -OutFile install.ps1.sig; Set-Content unii.signers "unii ssh-ed25519 TODO-the-real-release-key-made-at-release-time" -Encoding ascii; cmd /c "ssh-keygen -Y verify -f unii.signers -I unii -n unii-release -s install.ps1.sig < install.ps1"; if ($LASTEXITCODE -eq 0) { iex (Get-Content -Raw install.ps1) }`
+`$b = "https://github.com/arteeh/uniichat/releases/latest/download"; irm $b/install.ps1 -OutFile install.ps1; irm $b/install.ps1.sig -OutFile install.ps1.sig; Set-Content unii.signers "unii ssh-ed25519 TODO-the-real-release-key-made-at-release-time" -Encoding ascii; cmd /c "ssh-keygen -Y verify -f unii.signers -I unii -n unii-release -s install.ps1.sig < install.ps1"; if ($LASTEXITCODE -eq 0) { iex (Get-Content -Raw install.ps1) }`
 
 If the key ever changes, a release signed with the old key says so and brings the new one; if the old key leaked, that release's notes tell you to reinstall with the lines above.
 
@@ -91,7 +89,7 @@ Use
 ---
 
 - **Web:** open the server's address. Install it as an app from your browser to get notifications when Unii replies.
-- **Agents** (release candidate): **+** in the chat list makes another agent, with its own chat, memory and prompt; agents can message each other, and Unii sees what all of them do. Each agent can spawn subagents for one-off tasks (a review, a search): they show under it in the chat list, report back once, and are done.
+- **Agents:** **+** in the chat list makes another agent, with its own chat, memory and prompt; agents can message each other, and Unii sees what all of them do. Each agent can spawn subagents for one-off tasks (a review, a search): they show under it in the chat list, report back once, and are done.
 - **Conversation mode:** the mode menu left of the model picker. From then on, your and Unii's messages stay word for word in Unii's memory, for a real discussion. It costs more per turn and turns itself off when the model's context window fills up.
 - `unii help` lists every command.
 

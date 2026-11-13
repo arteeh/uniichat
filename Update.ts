@@ -1,7 +1,7 @@
 import * as crypto from "node:crypto";
 import KEY from "./release/unii.pub" with { type: "text" };
 
-export const VERSION = "40.rc5";
+export const VERSION = "40";
 
 // a release candidate (N.rcM, a pre-release on the rc branch) is only ever
 // installed by hand, with its own release's install line: `unii update`
