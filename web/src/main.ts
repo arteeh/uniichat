@@ -49,7 +49,9 @@ const AGENT = /^\/a\/([a-z0-9]{1,16})(\/edit)?$/;
 // a subagent's page, under its spawner's chat (#116)
 const SUB = /^\/a\/([a-z0-9]{1,16})\/s\/([A-Za-z]{2,40})$/;
 
-const v = View.view_new(AGENT.exec(location.pathname)?.[1] ?? UNII);
+// a reloaded screen over a chat (#164) starts on that chat's agent
+const OVER = get(history.state, "chain");
+const v = View.view_new(AGENT.exec(location.pathname)?.[1] ?? (Array.isArray(OVER) ? AGENT.exec(String(OVER.at(-2)))?.[1] : undefined) ?? UNII);
 
 const BOX = $(".composer .field", HTMLElement);
 
@@ -1243,12 +1245,24 @@ function up_to(): string {
   return stack().at(-2) ?? "/";
 }
 
-// the screen above: from the memory or an agent's settings to its chat,
-// from a chat, a subagent, Settings or a new agent to the list
+// the screen above: from the memory or an agent's settings to its chat;
+// from Settings or a new agent, when wide, to the chat that was open
+// (#164); from those on a phone, a chat or a subagent to the list
 function up_from(path: string): string | null {
   const url = new URL(path, location.origin);
   const edit = FORM.exec(url.pathname)?.[2];
-  return url.pathname === TREE ? "/a/" + (url.searchParams.get("a") ?? UNII) : edit !== undefined ? "/a/" + edit : url.pathname === "/" ? null : "/";
+  if (url.pathname === TREE) {
+    return "/a/" + (url.searchParams.get("a") ?? UNII);
+  }
+  if (edit !== undefined) {
+    return "/a/" + edit;
+  }
+  return url.pathname === "/" ? null : over_chat(url.pathname) && WIDE.matches && v.agent !== UNII ? "/a/" + v.agent : "/";
+}
+
+// a screen that sits over the chat that was open, when wide
+function over_chat(path: string): boolean {
+  return PAGES.includes(path) || path === "/new";
 }
 
 // a change of screen, in a short slide on a phone (in going down a level,
