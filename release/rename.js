@@ -3,7 +3,8 @@
 // names. unii.db becomes ki.db; the main agent keeps its id unii and its
 // folder agents/unii, and gets the lead field (it sees every agent's chat),
 // its picture "unii" becomes "logo"; in every agent's memory the kind
-// "unii" becomes "reply". Memory indexes of changed streams are removed:
+// "unii" becomes "reply" (in ki's own files only: the user's are left as
+// they are). Memory indexes of changed streams are removed:
 // ki rebuilds them at its next start. Each step is skipped once done, so a
 // run stopped halfway goes on where it stopped.
 import fs from "node:fs";
@@ -49,27 +50,27 @@ const fixed = (text) => {
   if (!text.includes('"unii"')) return text;
   try { changed = false; const out = JSON.stringify(fix(JSON.parse(text))); return changed ? out : text; } catch { return text; }
 };
+// only the files ki itself writes there: the memory streams (main/, tree/),
+// queue.json and view.json, and the subagents' state in docs/agent/; never
+// the user's files (docs/media/, uploads, anything else)
 let files = 0;
-const walk = (d, agent) => {
-  for (const e of fs.existsSync(d) ? fs.readdirSync(d, { withFileTypes: true }) : []) {
-    const p = path.join(d, e.name);
-    if (e.isDirectory()) {
-      walk(p, agent ?? p);
-    } else if (e.isFile() && /\.jsonl?$/.test(e.name)) {
-      const text = fs.readFileSync(p, "utf8");
-      if (!text.includes('"unii"')) continue;
-      const out = e.name.endsWith(".jsonl") ? text.split("\n").map((line) => (line.trim() === "" ? line : fixed(line))).join("\n") : fixed(text);
-      if (out === text) continue;
-      const stream = path.basename(d);
-      if (agent !== undefined && (stream === "main" || stream === "tree") && path.dirname(d) === agent) {
-        fs.rmSync(path.join(agent, stream + ".index"), { force: true });
-      }
-      write(p, out);
-      files += 1;
-    }
-  }
+const names = (d, test) => {
+  try { return fs.readdirSync(d, { withFileTypes: true }).filter((e) => e.isFile() && test.test(e.name)).map((e) => path.join(d, e.name)); } catch { return []; }
+};
+const redo = (p, agent, stream) => {
+  const text = fs.readFileSync(p, "utf8");
+  if (!text.includes('"unii"')) return;
+  const out = p.endsWith(".jsonl") ? text.split("\n").map((line) => (line.trim() === "" ? line : fixed(line))).join("\n") : fixed(text);
+  if (out === text) return;
+  if (stream !== undefined) fs.rmSync(path.join(agent, stream + ".index"), { force: true });
+  write(p, out);
+  files += 1;
 };
 for (const e of fs.existsSync(agents) ? fs.readdirSync(agents, { withFileTypes: true }) : []) {
-  if (e.isDirectory()) walk(path.join(agents, e.name), path.join(agents, e.name));
+  if (!e.isDirectory() || e.name.startsWith(".")) continue;
+  const a = path.join(agents, e.name);
+  for (const stream of ["main", "tree"]) for (const p of names(path.join(a, stream), /^\d{4}-\d\d-\d\d\.jsonl$/)) redo(p, a, stream);
+  for (const p of names(a, /^(queue|view)\.json$/)) redo(p, a);
+  for (const p of names(path.join(a, "docs", "agent"), /\.jsonl?$/)) redo(p, a);
 }
 if (files > 0) console.log("  Gave " + files + (files === 1 ? " memory file" : " memory files") + " in " + agents + " ki's names.");
