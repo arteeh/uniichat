@@ -356,9 +356,14 @@
     # old exe renamed (it may run: this may be its `ki update`), the old
     # ones that no longer run removed
     $folder = Split-Path -Parent $bin
-    New-Item -ItemType Directory -Force -Path $folder | Out-Null
     $new = "$bin.new"
-    Copy-Item -LiteralPath $exe -Destination $new -Force
+    $finish = $(if ($renaming) { ": fix that, then run this again to finish moving unii over (its tasks start then)" } else { '' })
+    try {
+      New-Item -ItemType Directory -Force -Path $folder | Out-Null
+      Copy-Item -LiteralPath $exe -Destination $new -Force
+    } catch {
+      throw "could not write $bin ($($_.Exception.Message))$finish"
+    }
     $old = $null
     if (Test-Path -LiteralPath $bin) {
       $olds2 = '^' + [regex]::Escape($leaf) + '\.old(-[0-9]+)?$'
@@ -372,7 +377,7 @@
     } catch {
       if ($old) { Move-Item -LiteralPath $old -Destination $bin }
       Remove-Item -LiteralPath $new -Force -ErrorAction SilentlyContinue
-      throw "could not write $bin ($($_.Exception.Message))"
+      throw "could not write $bin ($($_.Exception.Message))$finish"
     }
     # the version check's cache, from before unii 18 (it checks no more)
     Remove-Item -LiteralPath (Join-Path $conf 'check.json'), (Join-Path $dir 'check.json') -Force -ErrorAction SilentlyContinue
