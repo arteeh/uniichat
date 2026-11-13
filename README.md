@@ -56,7 +56,7 @@ Windows (PowerShell):
 
 `$b = "https://github.com/arteeh/uniichat/releases/latest/download"; irm $b/install.ps1 -OutFile install.ps1; irm $b/install.ps1.sig -OutFile install.ps1.sig; Set-Content unii.signers "unii ssh-ed25519 TODO-the-real-release-key-made-at-release-time" -Encoding ascii; cmd /c "ssh-keygen -Y verify -f unii.signers -I unii -n unii-install.ps1 -s install.ps1.sig < install.ps1"; if ($LASTEXITCODE -eq 0) { iex (Get-Content -Raw install.ps1) }`
 
-If the key ever changes, a release signed with the old key says so and brings the new one; if the old key leaked, that release's notes tell you to reinstall with the lines above.
+If the release key is ever lost or leaked, `unii update` refuses the releases signed with a new one: reinstall with the lines above.
 
 Set up
 ------
