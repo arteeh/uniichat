@@ -83,7 +83,7 @@
     if ((Test-Path -LiteralPath $oconf) -and (Test-Path -LiteralPath $conf)) {
       Write-Host "  $oconf was not moved: $conf exists already. Move $oconf aside if you don't need it."
     }
-    foreach ($v in @(Get-ChildItem env: | Where-Object { $_.Name -like 'UNII_*' -and @('UNII_BIN', 'UNII_UPDATER') -notcontains $_.Name })) {
+    foreach ($v in @(Get-ChildItem env: | Where-Object { $_.Name -like 'UNII_*' -and @('UNII_BIN', 'UNII_UPDATER', 'UNII_RUN', 'UNII_AGENT', 'UNII_SERVICE', 'UNII_SUPERVISOR') -notcontains $_.Name })) {
       Write-Host ("  " + $v.Name + " is set: ki doesn't read it any more; it reads KI_" + $v.Name.Substring(5) + ".")
     }
     $cur = $dir

@@ -25,7 +25,8 @@
 # settings. `unii update` runs this from inside a unii service, whose stop
 # would end it: then this starts itself again outside it (systemd-run;
 # on macOS in a session of its own) and says where its output goes.
-# UNII_* settings are KI_* now: this warns about each one it can see.
+# UNII_* settings are KI_* now: this warns about each one it can see
+# (not the ones unii sets for its own processes).
 #
 # Data an older unii left (uniichat.com's 1.0.138 in ~/.opt, or an arteeh
 # release up to arteeh.16 in ~/.unii) is moved to this version's layout
@@ -131,7 +132,7 @@ if [ -d "$oconf" ] && [ -e "$conf" ]; then
   echo "  $oconf was not moved: $conf exists already. Move $oconf aside if you don't need it."
 fi
 for v in $(env | sed -n 's/^\(UNII_[A-Za-z0-9_]*\)=.*/\1/p'); do
-  case $v in UNII_BIN|UNII_UPDATER) ;; *) echo "  $v is set: ki doesn't read it any more; it reads KI_${v#UNII_}.";; esac
+  case $v in UNII_BIN|UNII_UPDATER|UNII_RUN|UNII_AGENT|UNII_SERVICE|UNII_SUPERVISOR) ;; *) echo "  $v is set: ki doesn't read it any more; it reads KI_${v#UNII_}.";; esac
 done
 
 # `unii update` from a unii service's shell: stopping that service would
@@ -482,7 +483,7 @@ if [ -n "$need$renaming$copying" ]; then
   if [ -n "$pid" ]; then
     printf 'ki: your data must move, but a server (pid %s) runs on it.\n' "$pid" >&2
     printf 'Nothing changed, and ki %s was not installed. Stop the server, run this again, then start it, e.g.:\n' "$VER" >&2
-    printf '  systemctl --user stop unii-serve\n  curl -fsSL %s/install.sh | sh\n' "$BASE" >&2
+    printf '  systemctl --user stop %s-serve\n  curl -fsSL %s/install.sh | sh\n' "$( [ -n "$olds" ] && echo unii || echo ki )" "$BASE" >&2
     exit 1
   fi
 fi
