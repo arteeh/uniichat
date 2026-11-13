@@ -1233,12 +1233,11 @@ function up_to(): string {
 }
 
 // the screen above: from the memory or an agent's settings to its chat,
-// from a chat, Settings or a new agent to the list
+// from a chat, a subagent, Settings or a new agent to the list
 function up_from(path: string): string | null {
   const url = new URL(path, location.origin);
   const edit = FORM.exec(url.pathname)?.[2];
-  const sub = SUB.exec(url.pathname)?.[1];
-  return url.pathname === TREE ? "/a/" + (url.searchParams.get("a") ?? UNII) : edit !== undefined ? "/a/" + edit : sub !== undefined ? "/a/" + sub : url.pathname === "/" ? null : "/";
+  return url.pathname === TREE ? "/a/" + (url.searchParams.get("a") ?? UNII) : edit !== undefined ? "/a/" + edit : url.pathname === "/" ? null : "/";
 }
 
 // a change of screen, in a short slide on a phone (in going down a level,
