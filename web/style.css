@@ -143,6 +143,8 @@ body.subpage header > .title { display: block; }
 .cap.think::after { content: ""; animation: dots 4s steps(1) infinite; }
 @keyframes dots { 0% { content: ""; } 25% { content: "."; } 50% { content: ".."; } 75% { content: "..."; } }
 #log :is(.cap:not(.earlier), .msg.mind, .msg.unii) { min-height: var(--row); align-content: center; }
+/* a centred row holds its last block's margin in (#163) */
+#log :is(.msg.mind, .msg.unii) :last-child:not(:is(.msg.mind, .msg.unii) :not(:last-child) *) { margin-bottom: 0; }
 .cap.wait { display: flex; align-items: center; gap: 5px; }
 .cap.wait i { width: 6px; height: 6px; border-radius: 50%; background: var(--soft); animation: pulse 1.4s ease-in-out infinite; }
 .cap.wait i:nth-child(2) { animation-delay: .2s; } .cap.wait i:nth-child(3) { animation-delay: .4s; }
