@@ -60,9 +60,6 @@
     }
     $bin = $env:KI_BIN
     if (-not $bin) { $bin = Join-Path $env:LOCALAPPDATA 'Programs\ki\ki.exe' }
-    $dir = $env:KI_DIR
-    if (-not $dir) { $dir = $env:UNII_DIR }
-    if (-not $dir) { $dir = Join-Path $HOME '.ki' }
     $cfg = $env:XDG_CONFIG_HOME
     if (-not $cfg) { $cfg = Join-Path $HOME '.config' }
     $conf = Join-Path $cfg 'ki'
@@ -70,12 +67,64 @@
     # unii, as ki was called before: its data, sign-ins, tasks and exe
     $oldBin = $env:UNII_BIN
     if (-not $oldBin) { $oldBin = Join-Path $env:LOCALAPPDATA 'Programs\unii\unii.exe' }
-    $odir = $env:UNII_DIR
-    if (-not $odir) { $odir = Join-Path $HOME '.unii' }
-    if ($odir -ieq $dir) { $odir = $null }
-    $oconf = Join-Path $cfg 'unii'
     $task = { param($n) try { Get-ScheduledTask -TaskName $n -TaskPath '\' -ErrorAction Stop } catch { $null } }
     $olds = @('serve', 'device' | ForEach-Object { & $task "unii-$_" } | Where-Object { $_ -and ([string]$_.Description -match 'unii-made') })
+    # a command line split as Windows splits it (CommandLineToArgvW: a
+    # backslash run before a quote halved, an odd one escaping it), and
+    # put back (as Service.ts's winq)
+    $argv = {
+      param($s)
+      $out = New-Object System.Collections.Generic.List[string]
+      $i = 0; $n = $s.Length
+      while ($i -lt $n) {
+        while ($i -lt $n -and [char]::IsWhiteSpace($s[$i])) { $i++ }
+        if ($i -ge $n) { break }
+        $a = New-Object Text.StringBuilder; $q = $false
+        while ($i -lt $n -and ($q -or -not [char]::IsWhiteSpace($s[$i]))) {
+          $b = 0
+          while ($i -lt $n -and $s[$i] -eq [char]'\') { $b++; $i++ }
+          if ($i -lt $n -and $s[$i] -eq [char]'"') {
+            [void]$a.Append([string]::new([char]'\', [int][math]::Floor($b / 2)))
+            if ($b % 2 -eq 1) { [void]$a.Append('"') } else { $q = -not $q }
+            $i++
+          } elseif ($b -gt 0) {
+            [void]$a.Append([string]::new([char]'\', $b))
+          } else {
+            [void]$a.Append($s[$i]); $i++
+          }
+        }
+        $out.Add($a.ToString())
+      }
+      , $out.ToArray()
+    }
+    $winq = { param($a) if ($a -ne '' -and $a -notmatch '[\s"]') { return $a }; '"' + [regex]::Replace([regex]::Replace($a, '(\\*)"', '$1$1\"'), '(\\+)$', '$1$1') + '"' }
+    $samedir = { param($a, $b) ([string]$a).TrimEnd('\', '/') -ieq ([string]$b).TrimEnd('\', '/') }
+    # the data folder unii's tasks were given (--env=UNII_DIR=), else
+    # unii's default: where unii's data is, so ki keeps it there (as when
+    # UNII_DIR is set here)
+    $uniiDir = $env:UNII_DIR
+    $udir = $null; $uwho = $null
+    foreach ($t in $olds) {
+      $v = Join-Path $HOME '.unii'
+      foreach ($a in @(& $argv ([string]@($t.Actions)[0].Arguments))) { if ($a -like '--env=UNII_DIR=*') { $v = $a.Substring('--env=UNII_DIR='.Length) } }
+      if ($udir -and -not (& $samedir $udir $v)) {
+        throw ("unii's tasks keep their data in two folders, $udir ($uwho) and $v (" + $t.TaskName + "), and which one ki should use isn't clear, so nothing changed and ki $Ver was not installed. Remove the task whose folder you don't need (unii " + $uwho.Substring(5) + " stop, or unii " + $t.TaskName.Substring(5) + " stop), then run this again.")
+      }
+      $udir = $v; $uwho = $t.TaskName
+    }
+    if ($udir) {
+      if ($uniiDir -and -not (& $samedir $uniiDir $udir)) {
+        throw "unii's task $uwho keeps its data in $udir, but UNII_DIR here says $uniiDir, and which one ki should use isn't clear, so nothing changed and ki $Ver was not installed. Run this again without UNII_DIR (or with it set to $udir)."
+      }
+      if (-not (& $samedir $udir (Join-Path $HOME '.unii'))) { $uniiDir = $udir }
+    }
+    $dir = $env:KI_DIR
+    if (-not $dir) { $dir = $uniiDir }
+    if (-not $dir) { $dir = Join-Path $HOME '.ki' }
+    $odir = $uniiDir
+    if (-not $odir) { $odir = Join-Path $HOME '.unii' }
+    if (& $samedir $odir $dir) { $odir = $null }
+    $oconf = Join-Path $cfg 'unii'
     $moving = $odir -and (Test-Path -LiteralPath $odir -PathType Container)
     if ($moving -and (Test-Path -LiteralPath $dir)) {
       throw "both $odir (unii's, as ki was called before) and $dir are here, and which one to keep isn't clear, so nothing changed and ki $Ver was not installed. Move the one you don't need aside (or set KI_DIR to the one to use), then run this again."

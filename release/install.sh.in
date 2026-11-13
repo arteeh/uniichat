@@ -110,17 +110,45 @@ case $os-$arch in
   linux-x64) sum="@SUM_linux-x64@";;
 esac
 
+# a setting $2 in service file $1, as Service.ts wrote it: in a unit's
+# Environment="K=V" (systemd's quoting: \ and " escaped, a line break as
+# \n, % doubled), in a plist's EnvironmentVariables (XML's)
+unit_env() {
+  case $os in
+    linux) awk -v k="$2" 'BEGIN { h = "Environment=\"" k "=" }
+      index($0, h) == 1 { s = substr($0, length(h) + 1); sub(/"[ \t]*$/, "", s); v = ""
+        while (match(s, /\\.|%%/)) { c = substr(s, RSTART, 2); v = v substr(s, 1, RSTART - 1) (c == "\\n" ? "\n" : c == "%%" ? "%" : substr(c, 2, 1)); s = substr(s, RSTART + 2) }
+        v = v s; got = 1 }
+      END { if (got) printf "%s", v }' "$1" 2>/dev/null;;
+    darwin) sed -n "s#.*<key>$2</key><string>\([^<]*\)</string>.*#\1#p" "$1" 2>/dev/null | head -1 | sed 's/&lt;/</g; s/&gt;/>/g; s/&amp;/\&/g';;
+  esac
+}
+
 # unii, as ki was called before: its data, sign-ins, services and executable
-odir="${UNII_DIR:-$HOME/.unii}" oconf="${XDG_CONFIG_HOME:-$HOME/.config}/unii"
-dir="${KI_DIR:-${UNII_DIR:-$HOME/.ki}}" conf="${XDG_CONFIG_HOME:-$HOME/.config}/ki"
-[ "$odir" != "$dir" ] || odir=""
-olds="" oldrun=""
+olds="" oldrun="" udir="" uwho=""
 for p in serve device; do
   if grep -qs unii-made "$(unit "unii-$p")"; then
     olds="$olds unii-$p"
     if up "unii-$p"; then oldrun="$oldrun unii-$p"; fi
+    # the data folder it was given (UNII_DIR), else unii's default
+    v=$(unit_env "$(unit "unii-$p")" UNII_DIR); v=${v:-$HOME/.unii}
+    if [ -n "$udir" ] && [ "${udir%/}" != "${v%/}" ]; then
+      fail "unii's services keep their data in two folders, $udir ($uwho) and $v (unii-$p), and which one ki should use isn't clear, so nothing changed and ki $VER was not installed. Remove the service whose folder you don't need (unii ${uwho#unii-} stop, or unii $p stop), then run this again."
+    fi
+    udir=$v uwho=unii-$p
   fi
 done
+# a folder given to unii's services is where unii's data is: ki keeps it
+# there (as when UNII_DIR is set here), whatever this shell says
+if [ -n "$udir" ]; then
+  if [ -n "${UNII_DIR:-}" ] && [ "${UNII_DIR%/}" != "${udir%/}" ]; then
+    fail "unii's service $uwho keeps its data in $udir, but UNII_DIR here says $UNII_DIR, and which one ki should use isn't clear, so nothing changed and ki $VER was not installed. Run this again without UNII_DIR (or with UNII_DIR=$udir)."
+  fi
+  [ "${udir%/}" = "$HOME/.unii" ] || UNII_DIR=$udir
+fi
+odir="${UNII_DIR:-$HOME/.unii}" oconf="${XDG_CONFIG_HOME:-$HOME/.config}/unii"
+dir="${KI_DIR:-${UNII_DIR:-$HOME/.ki}}" conf="${XDG_CONFIG_HOME:-$HOME/.config}/ki"
+[ "$odir" != "$dir" ] || odir=""
 moving=""
 if [ -n "$odir" ] && [ -d "$odir" ] && [ ! -L "$odir" ]; then
   if [ -e "$dir" ] || [ -L "$dir" ]; then
@@ -128,18 +156,21 @@ if [ -n "$odir" ] && [ -d "$odir" ] && [ ! -L "$odir" ]; then
   fi
   moving=1
 fi
+if [ -n "$udir" ] && [ -z "$odir" ] && [ "$dir" != "$HOME/.unii" ] && [ -d "$HOME/.unii" ]; then
+  echo "  $HOME/.unii is left as it is: unii's services keep their data in $dir, so ki does too. Move $HOME/.unii aside if you don't need it."
+fi
 if [ -d "$oconf" ] && [ -e "$conf" ]; then
   echo "  $oconf was not moved: $conf exists already. Move $oconf aside if you don't need it."
 fi
 for v in $(env | sed -n 's/^\(UNII_[A-Za-z0-9_]*\)=.*/\1/p'); do
-  case $v in UNII_BIN|UNII_UPDATER|UNII_RUN|UNII_AGENT|UNII_SERVICE|UNII_SUPERVISOR) ;; *) echo "  $v is set: ki doesn't read it any more; it reads KI_${v#UNII_}.";; esac
+  case $v in UNII_BIN|UNII_UPDATER|UNII_RUN|UNII_AGENT|UNII_SERVICE|UNII_SUPERVISOR) ;; UNII_DIR) [ -n "$udir" ] || echo "  $v is set: ki doesn't read it any more; it reads KI_DIR.";; *) echo "  $v is set: ki doesn't read it any more; it reads KI_${v#UNII_}.";; esac
 done
 
 # `unii update` from a unii service's shell: stopping that service would
 # end this, so it runs again outside it, by itself
 if [ -n "$oldrun" ] && [ -z "${KI_INSTALL_OUTSIDE:-}" ]; then
   for s in $oldrun; do
-    if inside "$s" "$odir"; then
+    if inside "$s" "${odir:-$dir}"; then
       log="${TMPDIR:-/tmp}/ki-install.$$.log"
       self="${TMPDIR:-/tmp}/ki-install.$$.sh"
       if [ -f "$0" ] && head -c 200 "$0" 2>/dev/null | grep -q 'Installs ki'; then cp "$0" "$self"; else curl --proto '=https' --tlsv1.2 -fsSL -o "$self" "$BASE/install.sh" || fail "could not download $BASE/install.sh again to run it outside $s"; fi
