@@ -1,7 +1,8 @@
 #!/bin/sh
 # Installs unii @VER@ from arteeh's fork of UniiChat (github.com/arteeh/uniichat):
 #   curl -fsSL https://github.com/arteeh/uniichat/releases/latest/download/install.sh | sh
-# (or this release's own: .../releases/download/@VER@/install.sh)
+# (or this release's own: .../releases/download/@VER@/install.sh, the only
+# line for a release candidate, N.rcM: its `unii update` refuses)
 #
 # The agent team keeps Unii's memory in ~/.unii/agents/unii: the first time,
 # this copies ~/.unii/chat there (with unii's services stopped while it
@@ -452,7 +453,7 @@ cp "$new_unii" "$BIN.new.$$" && chmod 755 "$BIN.new.$$" && mv -f "$BIN.new.$$" "
 # the version check's cache, from before unii 18 (it checks no more)
 rm -f "$conf/check.json" "$dir/check.json"
 echo
-echo "  unii $VER (arteeh fork) is installed at $BIN."
+case $VER in *.rc*) echo "  unii $VER (arteeh fork, release candidate) is installed at $BIN.";; *) echo "  unii $VER (arteeh fork) is installed at $BIN.";; esac
 echo "  Server: unii serve -d   Device: unii device -d <url>"
 case " $made " in
   *" unii-serve "*) ;;

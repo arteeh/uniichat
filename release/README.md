@@ -2,12 +2,11 @@
 
 The owner's release tooling, run on the build computer from the checkout they build (`$REL/release`). Work dirs, locks and release notes stay in `~/Projects/uniichat-dev`.
 
-- `cut.sh [--publish]`: release `N` from `origin/main` (checked out in `~/Projects/uniichat-wt/release`), published as Latest.
-- `rc/cut.sh [--publish]`: release candidate `N.rcM` from `origin/rc` (`~/Projects/uniichat-wt/rc`), a pre-release; uses `../install.*.in` and `../sign.sh`.
+- `cut.sh [--publish]`: cuts the version in `Update.ts` from the checkout it is in: `N` is a release (from `origin/main`, in `~/Projects/uniichat-wt/release`, published as Latest), `N.rcM` a release candidate (from `origin/rc`, in `~/Projects/uniichat-wt/rc`, a pre-release, never Latest).
 - `install.sh.in`, `install.ps1.in`: the installers; cut.sh fills in the version, sums and prompts.
 - `sign.sh sign|verify DIR PUB`: signs or checks `SHA256SUMS`, `install.sh`, `install.ps1` in DIR with `ssh-keygen -Y sign`, one namespace per file. PUB is `release/unii.pub`.
 
-Both cut.sh refuse to build unless `unii.pub` holds a real `ssh-ed25519 AAAA…` key that README.md shows (and no other key, no `TODO`); they sign after writing the installers, and `--publish` checks every signature before it tags anything.
+cut.sh refuses to build unless `unii.pub` holds a real `ssh-ed25519 AAAA…` key that README.md shows (and no other key, no `TODO`); it signs after writing the installers, and `--publish` checks every signature before it tags anything.
 
 ## Release key
 

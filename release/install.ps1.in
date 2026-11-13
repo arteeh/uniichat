@@ -1,7 +1,8 @@
 # Installs unii on Windows from arteeh's fork of UniiChat
 # (github.com/arteeh/uniichat), in PowerShell (7, or Windows PowerShell 5.1):
 #   irm https://github.com/arteeh/uniichat/releases/latest/download/install.ps1 | iex
-# (or this release's own: .../releases/download/@VER@/install.ps1)
+# (or this release's own: .../releases/download/@VER@/install.ps1, the only
+# line for a release candidate, N.rcM: its `unii update` refuses)
 # The first time, it copies
 # ~\.unii\chat to ~\.unii\agents\unii (Unii's memory in the agent team; chat
 # stays as it was), with unii's server task stopped while it copies; every
@@ -174,7 +175,7 @@
     Remove-Item -LiteralPath (Join-Path $conf 'check.json'), (Join-Path $dir 'check.json') -Force -ErrorAction SilentlyContinue
 
     Write-Host ""
-    Write-Host "  unii $Ver (arteeh fork) is installed at $bin."
+    Write-Host ("  unii $Ver (arteeh fork" + $(if ($Ver -match '\.rc') { ', release candidate' } else { '' }) + ") is installed at $bin.")
     Write-Host "  Server: unii serve -d   Device: unii device -d <url>"
     # the user PATH, as written (REG_EXPAND_SZ, %VARS% kept), then a
     # setting's change told to Windows, so new terminals find unii: unless

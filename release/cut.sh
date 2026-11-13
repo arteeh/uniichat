@@ -1,11 +1,15 @@
 #!/bin/bash
-# cut.sh [--publish]: builds the fork release named by Update.ts's VERSION,
-# a plain release number N (18, 19, ...; the one source of the version:
-# `unii version`, the tag and release title $N, the archive names, install.sh and
-# install.ps1 all come from it) from origin/main
-# as checked out in ~/Projects/uniichat-wt/release ($REL: another
-# worktree, to check a branch builds; never published).
-#   1. checks: worktree clean; to publish, = origin/main and tag $VER unused
+# cut.sh [--publish]: builds the release named by Update.ts's VERSION
+# (the one source of the version: `unii version`, the tag and release
+# title, the archive names, install.sh and install.ps1 all come from it)
+# from the checkout this script is in ($REL; REL=<worktree> builds another,
+# never published). VERSION decides what it cuts:
+#   N (18, 19, ...): a release, from origin/main as checked out in
+#     ~/Projects/uniichat-wt/release, published as Latest;
+#   N.rcM (40.rc1, ...): a release candidate, from origin/rc as checked out
+#     in ~/Projects/uniichat-wt/rc, published as a pre-release, never Latest,
+#     so nothing installs it but its own install line.
+#   1. checks: worktree clean; to publish, = origin/main (origin/rc) and tag $VER unused
 #   2. `bun install --frozen-lockfile` then `bun run check` (tsc, eslint, knip) if package.json has a check
 #      script, else strict tsc (no errors beyond base's)
 #   3. builds 6 targets into work-release/a$N/b$N, checks the linux-x64
@@ -17,21 +21,28 @@
 #      install.sh and install.ps1 (sign.sh, the key of release/unii.pub)
 #   4. --publish (reuses a finished build of this version and commit; refuses
 #      unless every signature checks): tags $VER, pushes the tag, creates the
-#      GitHub release (marked Latest) with notes reviews/release/notes-$N.md
+#      GitHub release (Latest, or a pre-release) with notes reviews/release/notes-$N.md
 #      plus the key and every file's sha256
-# Bump VERSION in Update.ts (a commit on main) before each cut.
+# Bump VERSION in Update.ts (a commit on main or rc) before each cut.
 set -euo pipefail
 export PATH=$PATH:/home/linuxbrew/.linuxbrew/bin
 GH=/home/linuxbrew/.linuxbrew/bin/gh
 PODMAN=/usr/bin/podman
 DEV=~/Projects/uniichat-dev
-MAIN=~/Projects/uniichat-wt/release
-REL=${REL:-$MAIN}
+REL=${REL:-$(cd "$(dirname "$0")/.." && pwd)}
 HERE=$REL/release
 cd "$REL"
 
 VER=$(sed -n 's/^export const VERSION = "\([^"]*\)";$/\1/p' Update.ts)
-[[ "$VER" =~ ^[1-9][0-9]*$ ]] || { echo "Update.ts VERSION '$VER' is not a plain release number (18, 19, ...)"; exit 1; }
+if [[ "$VER" =~ ^[1-9][0-9]*$ ]]; then
+  RC="" MAIN=~/Projects/uniichat-wt/release BRANCH=main
+elif [[ "$VER" =~ ^[1-9][0-9]*\.rc[1-9][0-9]*$ ]]; then
+  RC=1 MAIN=~/Projects/uniichat-wt/rc BRANCH=rc
+else
+  echo "Update.ts VERSION '$VER' is neither a release number (18, 19, ...) nor a release candidate (40.rc1, 40.rc2, ...)"; exit 1
+fi
+# whether $REL is $MAIN, the worktree that publishes
+MAINS=""; [ "$(pwd -P)" != "$(cd "$MAIN" 2>/dev/null && pwd -P)" ] || MAINS=1
 grep -q "/releases/download/$VER/install.sh" web/install.sh || { echo "web/install.sh doesn't install $VER"; exit 1; }
 N=$VER
 TAG=$VER
@@ -46,8 +57,8 @@ echo "== $VER (tag $TAG)"
 git fetch -q origin --tags
 [ -z "$(git status --porcelain)" ] || { echo "worktree $REL not clean"; exit 1; }
 if [ "${1:-}" = "--publish" ]; then
-  [ "$REL" = "$MAIN" ] || { echo "only $MAIN publishes"; exit 1; }
-  [ "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)" ] || { echo "HEAD is not origin/main"; exit 1; }
+  [ -n "$MAINS" ] || { echo "only $MAIN publishes"; exit 1; }
+  [ "$(git rev-parse HEAD)" = "$(git rev-parse origin/$BRANCH)" ] || { echo "HEAD is not origin/$BRANCH"; exit 1; }
   ! git rev-parse -q --verify "refs/tags/$TAG" >/dev/null || { echo "tag $TAG exists"; exit 1; }
 fi
 HEAD=$(git rev-parse HEAD)
@@ -63,7 +74,7 @@ fi
 
 B=$DEV/work-release/a$N/b$N
 # a branch's build ($REL) goes to its own dir, never one a release reuses
-[ "$REL" = "$MAIN" ] || B=$DEV/work-release/rel-$(git rev-parse --short HEAD)
+[ -n "$MAINS" ] || B=$DEV/work-release/rel-$(git rev-parse --short HEAD)
 if [ "${1:-}" = "--publish" ] && [ -f "$B/dist/install.sh" ]; then
   echo "== publishing the existing build in $B"
   [ "$(cat "$B/commit")" = "$HEAD" ] || { echo "$B is a build of another commit"; exit 1; }
@@ -134,6 +145,11 @@ KEYLINE=$(cut -d' ' -f1-2 "$PUB")
 echo "== publish"
 git -C "$REL" tag -a "$TAG" -m "unii $VER" HEAD
 git -C "$REL" push origin "$TAG" 2>&1 | tail -1
-timeout 1800 $GH release create "$TAG" -R arteeh/uniichat --verify-tag --latest --title "$VER" --notes-file "$B/notes.md" \
+LATEST=(--latest); [ -z "$RC" ] || LATEST=(--prerelease --latest=false)
+timeout 1800 $GH release create "$TAG" -R arteeh/uniichat --verify-tag "${LATEST[@]}" --title "$VER" --notes-file "$B/notes.md" \
   install.sh install.ps1 SHA256SUMS install.sh.sig install.ps1.sig SHA256SUMS.sig unii-$VER-*.tar.gz unii-$VER-windows-*.zip 2>&1 | tail -1
-curl -sI https://github.com/arteeh/uniichat/releases/latest | grep -i '^location'
+if [ -z "$RC" ]; then
+  curl -sI https://github.com/arteeh/uniichat/releases/latest | grep -i '^location'
+else
+  echo "install line: curl -fsSL https://github.com/arteeh/uniichat/releases/download/$TAG/install.sh | sh"
+fi
