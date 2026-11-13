@@ -150,7 +150,11 @@ odir="${UNII_DIR:-$HOME/.unii}" oconf="${XDG_CONFIG_HOME:-$HOME/.config}/unii"
 dir="${KI_DIR:-${UNII_DIR:-$HOME/.ki}}" conf="${XDG_CONFIG_HOME:-$HOME/.config}/ki"
 [ "$odir" != "$dir" ] || odir=""
 moving=""
-if [ -n "$odir" ] && [ -d "$odir" ] && [ ! -L "$odir" ]; then
+# a link (to a folder elsewhere) moves as the link: ~/.ki links there then
+if [ -n "$odir" ] && [ -L "$odir" ] && [ ! -d "$odir" ]; then
+  fail "$odir (unii's data, as ki was called before) is a link to $(readlink "$odir"), which isn't there, so nothing changed and ki $VER was not installed. Point it at unii's data folder (or remove it if there is none), then run this again."
+fi
+if [ -n "$odir" ] && [ -d "$odir" ]; then
   if [ -e "$dir" ] || [ -L "$dir" ]; then
     fail "both $odir (unii's, as ki was called before) and $dir are here, and which one to keep isn't clear, so nothing changed and ki $VER was not installed. Move the one you don't need aside (or set KI_DIR to the one to use), then run this again."
   fi
@@ -539,8 +543,9 @@ if [ -n "$renaming" ]; then
   touch "$cur/.renaming"
   if [ -n "$moving" ]; then
     mkdir -p "$(dirname "$dir")"
+    if [ -L "$odir" ]; then lto=$(readlink "$odir"); else lto=""; fi
     mv "$odir" "$dir" || fail "could not move $odir to $dir; ki $VER was not installed."
-    echo "  Moved $odir to $dir."
+    if [ -n "$lto" ]; then echo "  Moved the link $odir to $dir (it links to $lto, which stays where it is)."; else echo "  Moved $odir to $dir."; fi
   fi
   if [ -d "$oconf" ] && [ ! -e "$conf" ]; then
     mv "$oconf" "$conf" && echo "  Moved $oconf to $conf."
