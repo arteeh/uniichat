@@ -26,13 +26,13 @@ const COMPACTION_MICRO_USD_FIT = { base: 187, per_source_doubling: 735, per_summ
 
 const PIECE_KEPT_AS_BLOB = 2 ** 20;
 
-export const OLD = "Nothing new: these chats are in Unii's memory already.";
+export const OLD = "Nothing new: these chats are in the main agent's memory already.";
 
 const NOT_EXPORT = "Not a Claude or ChatGPT export.";
 
-export const MIDWAY = "Meanwhile, UniiChat can answer with a partial tree.";
+export const MIDWAY = "Meanwhile, Ki can answer with a partial tree.";
 
-export const DONE = "Your past chats are in Unii's memory: ask about them any time.";
+export const DONE = "Your past chats are in the main agent's memory: ask about them any time.";
 
 const DAY   = new Intl.DateTimeFormat("en-US", { month: "short", day: "2-digit", year: "numeric" });
 const COUNT = new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 0 });
@@ -112,7 +112,7 @@ function line_msgs(s: Session, line: string, last: string): Msg[] {
 
 function import_pick(sessions: Session[], want: Want, done: Done): Session[] {
   const old  = [...sessions].sort((a, b) => a.start.localeCompare(b.start));
-  const keep = (m: Head, last?: string) => (want.tools || m.kind === "user" || m.kind === "unii") && m.date >= want.since && import_new(m, last);
+  const keep = (m: Head, last?: string) => (want.tools || m.kind === "user" || m.kind === "reply") && m.date >= want.since && import_new(m, last);
   const kept = (s: Session, last?: string) => s.heads.filter((m) => keep(m, last));
   return old.map((s) => ({ ...s, heads: kept(s, done[import_id(s)]) })).filter((s) => s.heads.length > 0);
 }
@@ -259,7 +259,7 @@ function chat_openai(chat: Chat, mapping: NonNullable<Chat["mapping"]>): Msg[] {
     }
     const role = m.author?.role;
     const type = String(m.content?.content_type);
-    const kind = role === "user" ? "user" : role === "assistant" ? (m.recipient === "all" ? "unii" : "tool") : role === "tool" ? "echo" : null;
+    const kind = role === "user" ? "user" : role === "assistant" ? (m.recipient === "all" ? "reply" : "tool") : role === "tool" ? "echo" : null;
     const skip = kind === null || m.metadata?.is_visually_hidden_from_conversation === true || type === "thoughts" || type === "reasoning_recap";
     date = import_date(m.create_time, date);
     return skip ? [] : msgs_of(kind, (kind === "tool" ? String(m.recipient) + " " : "") + parts_text(m.content?.parts ?? [m.content?.text]), date);
@@ -270,7 +270,7 @@ function chat_claude(chat: Chat): Msg[] {
   let date = import_date(chat.created_at, "");
   return (chat.chat_messages ?? []).flatMap((m) => {
     date = import_date(m.created_at, date);
-    const kind   = m.sender === "human" ? "user" : "unii";
+    const kind   = m.sender === "human" ? "user" : "reply";
     const blocks: Block[] = Array.isArray(m.content) ? (m.content as Block[]) : [{ type: "text", text: text_of(m.text) }];
     const files  = [...(m.attachments ?? []), ...(m.files ?? [])].map((f) => ({ type: "text", text: "[file " + String(f.file_name) + "]" }));
     return blocks_msgs(kind, [...blocks, ...files], date);
@@ -331,7 +331,7 @@ function line_claude(s: Session, j: Line, last: string): Msg[] {
   if (j.type === "attachment" && j.attachment?.type === "queued_command") {
     return msgs_of("user", text_of(j.attachment.prompt), date);
   }
-  return blocks_msgs(j.type === "user" ? "user" : "unii", blocks, date);
+  return blocks_msgs(j.type === "user" ? "user" : "reply", blocks, date);
 }
 
 function blocks_msgs(kind: Kind, blocks: Block[], date: string): Msg[] {
@@ -352,7 +352,7 @@ function line_codex(s: Session, j: Line, last: string): Msg[] {
 function item_codex(p: Codex, date: string): Msg[] {
   switch (p.type) {
     case "message": {
-      const kind  = p.role === "user" ? "user" : p.role === "assistant" ? "unii" : null;
+      const kind  = p.role === "user" ? "user" : p.role === "assistant" ? "reply" : null;
       const parts = (p.content ?? []).filter((c) => !INJECTED.test(c.text ?? ""));
       return kind === null ? [] : msgs_of(kind, parts_text(parts), date);
     }

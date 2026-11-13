@@ -8,8 +8,8 @@ type At = { model: string; reset: number };
 // whose events fail the response; `source` says where its text comes from
 type Case = { status: number; body: (at: At) => object | string; headers?: (at: At) => Record<string, string>; stream?: true; source: string };
 
-const LOG = "UniiChat's own server log";
-const CODE = "how UniiChat reads it (";
+const LOG = "Ki's own server log";
+const CODE = "how Ki reads it (";
 
 const wait = (at: At) => Math.max(1, Math.ceil((at.reset - Date.now()) / 1e3));
 

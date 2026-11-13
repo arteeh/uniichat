@@ -11,7 +11,7 @@ const parts  = target.replace(/^bun-/, "").split("-");
 const win    = parts[0] === "windows";
 const pkg    = "@anthropic-ai/claude-agent-sdk-" + [win ? "win32" : parts[0], ...parts.slice(1)].join("-");
 const exe    = HERE + "/node_modules/" + pkg + (win ? "/claude.exe" : "/claude");
-const out    = process.argv[3] ?? (win ? "unii.exe" : "unii");
+const out    = process.argv[3] ?? (win ? "ki.exe" : "ki");
 
 function run(cmd: string[], cwd = HERE): void {
   const p = Bun.spawnSync(cmd, { cwd, stdio: ["inherit", "inherit", "inherit"] });
@@ -25,7 +25,7 @@ if (!fs.existsSync(SDK)) {
 }
 if (!fs.existsSync(exe)) {
   const { version } = JSON.parse(fs.readFileSync(SDK + "/package.json", "utf8")) as { version: string };
-  const tmp = fs.mkdtempSync(os.tmpdir() + "/unii-build-");
+  const tmp = fs.mkdtempSync(os.tmpdir() + "/ki-build-");
   try {
     run(["npm", "pack", pkg + "@" + version, "--pack-destination", tmp], tmp);
     const tgz = fs.readdirSync(tmp).find((f) => f.endsWith(".tgz"));

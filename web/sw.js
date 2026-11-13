@@ -1,4 +1,4 @@
-const CACHE = "unii-shell-{build}";
+const CACHE = "ki-shell-{build}";
 const SHELL = ["/", "/app.js", "/style.css", "/favicon.svg", "/mark.svg", "/manifest.webmanifest", "/icon-192.png"];
 const PAGES = ["/", "/settings", "/account", "/tree", "/new"];
 const PAGE_WAIT = 3000;
@@ -66,7 +66,7 @@ async function notify(msg) {
   if (QUIET && tabs.some((tab) => tab.focused && new URL(tab.url).pathname === url)) {
     return;
   }
-  await self.registration.showNotification(String(msg.title ?? "UniiChat"), { body: String(msg.text ?? ""), tag: String(msg.tag ?? "unii"), renotify: true, data: { url } });
+  await self.registration.showNotification(String(msg.title ?? "Ki"), { body: String(msg.text ?? ""), tag: String(msg.tag ?? "ki"), renotify: true, data: { url } });
 }
 
 // the push service renewed the subscription: the server gets the new one

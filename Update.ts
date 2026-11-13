@@ -1,25 +1,25 @@
 import * as crypto from "node:crypto";
-import KEY from "./release/unii.pub" with { type: "text" };
+import KEY from "./release/ki.pub" with { type: "text" };
 
 export const VERSION = "40";
 
 // a release candidate (N.rcM, a pre-release on the rc branch) is only ever
-// installed by hand, with its own release's install line: `unii update`
+// installed by hand, with its own release's install line: `ki update`
 // never moves to or from one
 export const RC = /\.rc[0-9]+$/.test(VERSION);
 
-export const BASE = "https://github.com/arteeh/uniichat/releases/" + (RC ? "download/" + VERSION : "latest/download");
+export const BASE = "https://github.com/arteeh/ki/releases/" + (RC ? "download/" + VERSION : "latest/download");
 
 // a release candidate's own install line, else the latest release's
 export function install_cmd(win: boolean): string {
   return win ? "irm " + BASE + "/install.ps1 | iex" : "curl -fsSL " + BASE + "/install.sh | sh";
 }
 
-// each release file is signed with `ssh-keygen -Y sign -n unii-<its name>`
-// (PROTOCOL.sshsig) by the key in release/unii.pub, so one file's
+// each release file is signed with `ssh-keygen -Y sign -n ki-<its name>`
+// (PROTOCOL.sshsig) by the key in release/ki.pub, so one file's
 // signature doesn't pass for another's
 function namespace(file: string): string {
-  return "unii-" + file;
+  return "ki-" + file;
 }
 const ED = "ssh-ed25519";
 
@@ -55,7 +55,7 @@ export function unsigned(data: Uint8Array, sig: string, file: string, key = KEY)
     raw = [];
   }
   if (type !== ED || raw.length !== 2 || Buffer.from(raw[0]).toString() !== ED || raw[1].length !== 32) {
-    return "this unii has no release key built in";
+    return "this ki has no release key built in";
   }
   const armor = /-----BEGIN SSH SIGNATURE-----([^-]*)-----END SSH SIGNATURE-----/.exec(sig);
   if (armor === null) {
@@ -81,7 +81,7 @@ export function unsigned(data: Uint8Array, sig: string, file: string, key = KEY)
     return "signed by another key";
   }
   if (Buffer.from(space).toString() !== namespace(file)) {
-    return "not signed as unii's " + file;
+    return "not signed as ki's " + file;
   }
   const algo = Buffer.from(hash).toString();
   if (algo !== "sha512" && algo !== "sha256") {
@@ -92,7 +92,7 @@ export function unsigned(data: Uint8Array, sig: string, file: string, key = KEY)
   return crypto.verify(null, signed, verifier, inner[1]) ? null : "the signature doesn't match";
 }
 
-// why the installer of release `ver` mustn't replace this unii, or null:
+// why the installer of release `ver` mustn't replace this ki, or null:
 // it's never older, and a release never moves to a release candidate or
 // back
 export function refused(ver: string): string | null {
@@ -106,7 +106,7 @@ export function refused(ver: string): string | null {
   }
   for (let k = 0; k < Math.max(a.length, b.length); k++) {
     if ((a[k] ?? 0) !== (b[k] ?? 0)) {
-      return (a[k] ?? 0) < (b[k] ?? 0) ? ver + " is older than this unii " + VERSION : null;
+      return (a[k] ?? 0) < (b[k] ?? 0) ? ver + " is older than this ki " + VERSION : null;
     }
   }
   return null;

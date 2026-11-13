@@ -1,39 +1,49 @@
-# Installs unii on Windows from arteeh's fork of UniiChat
-# (github.com/arteeh/uniichat), in PowerShell (7, or Windows PowerShell 5.1):
-#   irm https://github.com/arteeh/uniichat/releases/latest/download/install.ps1 | iex
+# Installs ki on Windows (github.com/arteeh/ki), in PowerShell (7, or
+# Windows PowerShell 5.1):
+#   irm https://github.com/arteeh/ki/releases/latest/download/install.ps1 | iex
 # (or this release's own: .../releases/download/@VER@/install.ps1, the only
-# line for a release candidate, N.rcM: its `unii update` refuses)
-# The first time, it copies
-# ~\.unii\chat to ~\.unii\agents\unii (Unii's memory in the agent team; chat
-# stays as it was), with unii's server task stopped while it copies; every
-# time, it writes the fixed prompts (prompts/*.md) to
-# %LOCALAPPDATA%\unii (edits there are overwritten).
+# line for a release candidate, N.rcM: its `ki update` refuses)
 #
-# Like install.sh: downloads unii-<ver>-windows-<arch>.zip from this
-# release, checks its sha256, and puts its unii.exe at $env:UNII_BIN
-# (default %LOCALAPPDATA%\Programs\unii\unii.exe), adding that folder to
-# your user PATH. No admin. Your data stays in %USERPROFILE%\.unii
-# ($env:UNII_DIR) and %USERPROFILE%\.config\unii, as on Linux.
-# `unii update` runs the newest release's copy of this with UNII_BIN set
-# to the running unii.exe (and UNII_UPDATER to its pid): a running exe
-# can't be overwritten, only renamed, so the one replaced is left as
-# unii.exe.old, or .old-<n> (unii removes those exact names at its next
-# start). The background services unii made (`unii serve -d`, `unii
-# device -d`: the Scheduled Tasks unii-serve and unii-device, their
-# description holding "unii-made") that run are restarted on the new exe
-# once it is in place, by Task Scheduler (a run asked for while one runs
-# stops that one first). While any other unii device or server runs this
-# stops, changing nothing: stop it, run this, start it again. A terminal
-# chat may stay open (it keeps the old version till it quits).
+# Like install.sh: downloads ki-<ver>-windows-<arch>.zip from this
+# release, checks its sha256, and puts its ki.exe at $env:KI_BIN (default
+# %LOCALAPPDATA%\Programs\ki\ki.exe), adding that folder to your user
+# PATH. No admin. Your data stays in %USERPROFILE%\.ki ($env:KI_DIR) and
+# %USERPROFILE%\.config\ki, as on Linux. Every time, it writes the fixed
+# prompts (prompts/*.md) to %LOCALAPPDATA%\ki (edits there are
+# overwritten). `ki update` runs the newest release's copy of this with
+# KI_BIN set to the running ki.exe (and KI_UPDATER to its pid): a running
+# exe can't be overwritten, only renamed, so the one replaced is left as
+# ki.exe.old, or .old-<n> (ki removes those exact names at its next
+# start). The background services ki made (`ki serve -d`, `ki device -d`:
+# the Scheduled Tasks ki-serve and ki-device, their description holding
+# "ki-made") that run are restarted on the new exe once it is in place,
+# by Task Scheduler (a run asked for while one runs stops that one
+# first). While any other ki device or server runs this stops, changing
+# nothing: stop it, run this, start it again. A terminal chat may stay
+# open (it keeps the old version till it quits).
+#
+# ki was called unii before (UniiChat). Where this finds unii, it moves
+# everything over, once: unii's tasks (unii-serve, unii-device) are
+# stopped and become ki's (ki-serve, ki-device, same settings), %USERPROFILE%\.unii
+# moves to .ki and .config\unii to .config\ki (unless those exist
+# already: then it changes nothing and says so), the data in it is given
+# ki's names (by the new ki.exe, run as bun: BUN_BE_BUN=1), and unii's
+# exe and its PATH entry go (once the `unii update` that ran this has
+# quit). `unii update` runs this from inside a unii task, whose stop would
+# end it: then this starts itself again outside it and says where its
+# output goes. UNII_* settings are KI_* now: this warns about each one.
+#
+# The first time, it copies ~\.ki\chat to ~\.ki\agents\main (the main
+# agent's memory in the agent team; chat stays as it was), with the server
+# stopped while it copies.
 # It ends setting $LASTEXITCODE (0: installed, 1: not), never `exit`:
 # run by `irm | iex`, an exit would close your PowerShell window.
-# Nothing to move: no older unii kept a server's data on Windows.
 
 & {
   $ErrorActionPreference = 'Stop'
   $ProgressPreference = 'SilentlyContinue'
   $Ver = '@VER@'
-  $Base = "https://github.com/arteeh/uniichat/releases/download/$Ver"
+  $Base = "https://github.com/arteeh/ki/releases/download/$Ver"
   $Sums = @{ 'x64' = '@SUM_windows-x64@'; 'arm64' = '@SUM_windows-arm64@' }
   $Self = "$Base/install.ps1"
   $tmp = $null
@@ -48,26 +58,50 @@
       'ARM64' { $arch = 'arm64' }
       default { throw "$arch is not supported: x64 and arm64 only." }
     }
-    $bin = $env:UNII_BIN
-    if (-not $bin) { $bin = Join-Path $env:LOCALAPPDATA 'Programs\unii\unii.exe' }
-    $dir = $env:UNII_DIR
-    if (-not $dir) { $dir = Join-Path $HOME '.unii' }
-    $conf = $env:XDG_CONFIG_HOME
-    if (-not $conf) { $conf = Join-Path $HOME '.config' }
-    $conf = Join-Path $conf 'unii'
+    $bin = $env:KI_BIN
+    if (-not $bin) { $bin = Join-Path $env:LOCALAPPDATA 'Programs\ki\ki.exe' }
+    $dir = $env:KI_DIR
+    if (-not $dir) { $dir = $env:UNII_DIR }
+    if (-not $dir) { $dir = Join-Path $HOME '.ki' }
+    $cfg = $env:XDG_CONFIG_HOME
+    if (-not $cfg) { $cfg = Join-Path $HOME '.config' }
+    $conf = Join-Path $cfg 'ki'
 
-    # a unii device or server running (a unii.exe, or one by $bin's name
-    # or path) that no service of unii's runs: it would keep the old
+    # unii, as ki was called before: its data, sign-ins, tasks and exe
+    $oldBin = $env:UNII_BIN
+    if (-not $oldBin) { $oldBin = Join-Path $env:LOCALAPPDATA 'Programs\unii\unii.exe' }
+    $odir = $env:UNII_DIR
+    if (-not $odir) { $odir = Join-Path $HOME '.unii' }
+    if ($odir -ieq $dir) { $odir = $null }
+    $oconf = Join-Path $cfg 'unii'
+    $task = { param($n) try { Get-ScheduledTask -TaskName $n -TaskPath '\' -ErrorAction Stop } catch { $null } }
+    $olds = @('serve', 'device' | ForEach-Object { & $task "unii-$_" } | Where-Object { $_ -and ([string]$_.Description -match 'unii-made') })
+    $moving = $odir -and (Test-Path -LiteralPath $odir -PathType Container)
+    if ($moving -and (Test-Path -LiteralPath $dir)) {
+      throw "both $odir (unii's, as ki was called before) and $dir are here, and which one to keep isn't clear, so nothing changed and ki $Ver was not installed. Move the one you don't need aside (or set KI_DIR to the one to use), then run this again."
+    }
+    if ((Test-Path -LiteralPath $oconf) -and (Test-Path -LiteralPath $conf)) {
+      Write-Host "  $oconf was not moved: $conf exists already. Move $oconf aside if you don't need it."
+    }
+    foreach ($v in @(Get-ChildItem env: | Where-Object { $_.Name -like 'UNII_*' -and @('UNII_BIN', 'UNII_UPDATER') -notcontains $_.Name })) {
+      Write-Host ("  " + $v.Name + " is set: ki doesn't read it any more; it reads KI_" + $v.Name.Substring(5) + ".")
+    }
+    $cur = $dir
+    if ($moving) { $cur = $odir }
+    $renaming = $moving -or ($olds.Count -gt 0) -or (Test-Path -LiteralPath (Join-Path $cur 'unii.db')) -or (Test-Path -LiteralPath (Join-Path $cur 'agents\unii'))
+
+    # a ki (or unii) device or server running (a ki.exe or unii.exe, or one
+    # by $bin's name or path) that no service runs: it would keep the old
     # version, and its data must not change under it. One whose command
     # line Windows doesn't show (CIM failing, another user's, an elevated
-    # one) counts as running; the `unii update` that runs this
-    # (UNII_UPDATER) doesn't, nor a service's supervisor (`--service`)
-    # and what it started, which the restart below ends. A service that
-    # runs elevated (`sudo unii device -d`) shows no command line to a
-    # shell that isn't: its supervisor and unii are known by the pids it
-    # wrote (logs\<part>.pid), while its task runs
+    # one) counts as running; the `ki update` (or `unii update`) that runs
+    # this doesn't, nor a service's supervisor (`--service`) and what it
+    # started, which the restart below ends. A service that runs elevated
+    # (`sudo ki device -d`) shows no command line to a shell that isn't:
+    # its supervisor and ki are known by the pids it wrote
+    # (logs\<part>.pid), while its task runs
     $leaf = Split-Path -Leaf $bin
-    $names = @('unii.exe', $leaf)
+    $names = @('ki.exe', 'unii.exe', $leaf)
     $procs = $null
     $mine = ''
     try {
@@ -75,15 +109,16 @@
       $up = @{}
       foreach ($p in $all) { $up[[string]$p.ProcessId] = [string]$p.ParentProcessId }
       $sups = @($all | Where-Object { ($names -icontains $_.Name) -and ([string]$_.CommandLine -match '\s"?--service"?(\s|$)') } | ForEach-Object { [string]$_.ProcessId })
-      foreach ($part in 'serve', 'device') {
-        $task = $null
-        try { $task = Get-ScheduledTask -TaskName "unii-$part" -TaskPath '\' -ErrorAction Stop } catch {}
-        if ($task -and ([string]$task.Description -match 'unii-made') -and ([string]$task.State -eq 'Running')) {
-          try { $sups += @((Get-Content -LiteralPath (Join-Path $dir "logs\$part.pid") -ErrorAction Stop) -split '\s+' | Where-Object { $_ -match '^[0-9]+$' }) } catch {}
+      foreach ($pair in @(@('ki', $dir, 'ki-made'), @('unii', $cur, 'unii-made'))) {
+        foreach ($part in 'serve', 'device') {
+          $t = & $task ($pair[0] + "-$part")
+          if ($t -and ([string]$t.Description -match $pair[2]) -and ([string]$t.State -eq 'Running')) {
+            try { $sups += @((Get-Content -LiteralPath (Join-Path $pair[1] "logs\$part.pid") -ErrorAction Stop) -split '\s+' | Where-Object { $_ -match '^[0-9]+$' }) } catch {}
+          }
         }
       }
       $served = { param($id) for ($k = 0; $k -lt 8 -and $id; $k++) { if ($sups -contains $id) { return $true }; $id = $up[$id] }; return $false }
-      # the supervisor this runs under, if any (`unii update` from a service's shell): its command line
+      # the supervisor this runs under, if any (`ki update` from a service's shell): its command line
       $id = [string]$PID
       for ($k = 0; $k -lt 16 -and $id; $k++) { if ($sups -contains $id) { $mine = [string]($all | Where-Object { [string]$_.ProcessId -eq $id } | Select-Object -First 1).CommandLine; break }; $id = $up[$id] }
       $procs = @($all | Where-Object { ($names -icontains $_.Name) -or ($_.ExecutablePath -and $_.ExecutablePath -ieq $bin) } | Where-Object { -not (& $served ([string]$_.ProcessId)) } | ForEach-Object { [pscustomobject]@{ Id = [string]$_.ProcessId; Line = [string]$_.CommandLine } })
@@ -91,20 +126,44 @@
       $stems = @($names) + @($names | ForEach-Object { [IO.Path]::GetFileNameWithoutExtension($_) })
       $procs = @(Get-Process -ErrorAction SilentlyContinue | Where-Object { $stems -icontains $_.ProcessName } | ForEach-Object { [pscustomobject]@{ Id = [string]$_.Id; Line = '' } })
     }
-    $procs = @($procs | Where-Object { $_.Id -ne [string]$env:UNII_UPDATER })
+    $procs = @($procs | Where-Object { $_.Id -ne [string]$env:KI_UPDATER -and $_.Id -ne [string]$env:UNII_UPDATER })
     $busy = @($procs | Where-Object { $_.Line -match '\s"?(device|serve)"?(\s|$)' })
     $blind = @($procs | Where-Object { $_.Line -eq '' })
-    $again = "Stop it (taskkill /T /F /PID <pid>; if a Scheduled Task you made runs it, first Disable-ScheduledTask and Stop-ScheduledTask it), run this again (irm $Self | iex), then start it again. Run as unii device -d (or unii serve -d) instead, it's restarted by updates."
+    $again = "Stop it (taskkill /T /F /PID <pid>; if a Scheduled Task you made runs it, first Disable-ScheduledTask and Stop-ScheduledTask it), run this again (irm $Self | iex), then start it again. Run as ki device -d (or ki serve -d) instead, it's restarted by updates."
     if ($busy.Count -gt 0) {
-      throw ("a unii device or server runs (pid " + (($busy | ForEach-Object { $_.Id }) -join ', ') + "). Nothing changed, and unii $Ver was not installed. $again")
+      throw ("a device or server runs (pid " + (($busy | ForEach-Object { $_.Id }) -join ', ') + "). Nothing changed, and ki $Ver was not installed. $again")
     }
     if ($blind.Count -gt 0) {
-      throw ("unii runs (pid " + (($blind | ForEach-Object { $_.Id }) -join ', ') + "), and Windows won't say whether as a device or server. Nothing changed, and unii $Ver was not installed. Quit every unii (a terminal chat too), or: $again")
+      throw ("ki (or unii) runs (pid " + (($blind | ForEach-Object { $_.Id }) -join ', ') + "), and Windows won't say whether as a device or server. Nothing changed, and ki $Ver was not installed. Quit every one (a terminal chat too), or: $again")
+    }
+
+    # `unii update` from a unii task's shell: that task stops below, which
+    # would end this, so it runs again outside it (started by WMI, so not
+    # in the task's process tree), by itself
+    if ($renaming -and $mine -and ($mine -match '\\unii\.exe"?\s') -and -not $env:KI_INSTALL_OUTSIDE) {
+      $stage = Join-Path ([IO.Path]::GetTempPath()) ('ki-install-' + [guid]::NewGuid())
+      New-Item -ItemType Directory -Path $stage | Out-Null
+      $file = Join-Path $stage 'install.ps1'
+      $log = Join-Path $stage 'install.log'
+      $set = "`$env:KI_INSTALL_OUTSIDE = '1'`r`n"
+      foreach ($v in 'UNII_BIN', 'UNII_DIR', 'UNII_UPDATER', 'KI_BIN', 'KI_DIR', 'XDG_CONFIG_HOME') {
+        $x = [Environment]::GetEnvironmentVariable($v)
+        if ($x) { $set += "`$env:$v = '" + $x.Replace("'", "''") + "'`r`n" }
+      }
+      try { $body = (Invoke-WebRequest -UseBasicParsing -Uri $Self).Content } catch { throw "could not download $Self again to run it outside unii's task ($($_.Exception.Message)). Nothing changed: run this installer in a terminal." }
+      if ($body -is [byte[]]) { $body = [Text.Encoding]::UTF8.GetString($body) }
+      [IO.File]::WriteAllText($file, $set + $body)
+      $line = 'cmd.exe /c powershell.exe -NoProfile -ExecutionPolicy Bypass -File "' + $file + '" > "' + $log + '" 2>&1'
+      $made = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = $line }
+      if ($made.ReturnValue -ne 0) { throw "could not start the installer outside unii's task (WMI: $($made.ReturnValue)). Nothing changed: run this installer in a terminal." }
+      Write-Host "  unii becomes ki: that stops unii's task, which this runs in, so the install goes on by itself outside it. Its output: $log"
+      $global:LASTEXITCODE = 0
+      return
     }
 
     try { [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12 } catch {}
-    $name = "unii-$Ver-windows-$arch.zip"
-    $tmp = Join-Path ([IO.Path]::GetTempPath()) ('unii-' + [guid]::NewGuid())
+    $name = "ki-$Ver-windows-$arch.zip"
+    $tmp = Join-Path ([IO.Path]::GetTempPath()) ('ki-' + [guid]::NewGuid())
     New-Item -ItemType Directory -Path $tmp | Out-Null
     $zip = Join-Path $tmp $name
     Write-Host "downloading $Base/$name"
@@ -117,40 +176,93 @@
       throw "$name does not match its sha256; not installed"
     }
     Expand-Archive -LiteralPath $zip -DestinationPath (Join-Path $tmp 'x')
-    $exe = Join-Path $tmp 'x\unii.exe'
-    if (-not (Test-Path -LiteralPath $exe)) { throw "$name holds no unii.exe; not installed" }
+    $exe = Join-Path $tmp 'x\ki.exe'
+    if (-not (Test-Path -LiteralPath $exe)) { throw "$name holds no ki.exe; not installed" }
+    $rename = Join-Path $tmp 'rename.js'
+    [IO.File]::WriteAllText($rename, [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('@RENAME_JS_B64@')))
+    $named = {
+      $env:BUN_BE_BUN = '1'
+      try { & $exe $rename $dir } finally { Remove-Item Env:\BUN_BE_BUN -ErrorAction SilentlyContinue }
+      if ($LASTEXITCODE -ne 0) { throw "giving your data in $dir ki's names stopped halfway (see above): run this again. ki $Ver was not installed." }
+    }
 
-    # the agent team's own: Unii's memory, copied once from chat (with the server
-    # task stopped meanwhile, started again below), and the fixed prompts,
-    # written every time
+    # no server may run on the data while it moves or is copied: the tasks
+    # that run stop meanwhile (unii's for good, ki's to start again below)
     $halted = @()
-    $chat = Join-Path $dir 'chat'
-    $unii = Join-Path $dir 'agents\unii'
-    if ((Test-Path -LiteralPath $chat) -and -not (Test-Path -LiteralPath $unii)) {
-      try { $halted = @(Get-ScheduledTask -TaskName 'unii-serve' -TaskPath '\' -ErrorAction SilentlyContinue | Where-Object { ([string]$_.Description -match 'unii-made') -and ([string]$_.State -eq 'Running') }) } catch {}
-      foreach ($t in $halted) { Stop-ScheduledTask -TaskName $t.TaskName -TaskPath '\' }
-      # no server may write to chat while it is copied: the one whose pid
-      # server.pid holds must be gone (waited for up to 10 s), else nothing
-      # is copied and the stopped task starts again
-      $live = { $p = 0; try { $p = [int]((Get-Content -LiteralPath (Join-Path $dir 'server.pid') -ErrorAction Stop) | Select-Object -First 1) } catch {}; ($p -gt 0) -and ($null -ne (Get-Process -Id $p -ErrorAction SilentlyContinue)) }
+    $chat = Join-Path $cur 'chat'
+    $copying = (Test-Path -LiteralPath $chat) -and -not (Test-Path -LiteralPath (Join-Path $cur 'agents\main')) -and -not (Test-Path -LiteralPath (Join-Path $cur 'agents\unii'))
+    if ($renaming -or $copying) {
+      $halted = @('serve', 'device' | ForEach-Object { & $task "ki-$_" } | Where-Object { $_ -and ([string]$_.Description -match 'ki-made') -and ([string]$_.State -eq 'Running') })
+      foreach ($t in @($olds | Where-Object { [string]$_.State -eq 'Running' }) + $halted) { Stop-ScheduledTask -TaskName $t.TaskName -TaskPath '\' }
+      # the one whose pid server.pid holds must be gone (waited for up to
+      # 10 s), else nothing changes and the stopped tasks start again
+      $live = { $p = 0; try { $p = [int]((Get-Content -LiteralPath (Join-Path $cur 'server.pid') -ErrorAction Stop) | Select-Object -First 1) } catch {}; ($p -gt 0) -and ($null -ne (Get-Process -Id $p -ErrorAction SilentlyContinue)) }
       for ($k = 0; $k -lt 20 -and (& $live); $k++) { Start-Sleep -Milliseconds 500 }
       if (& $live) {
-        foreach ($t in $halted) { try { Start-ScheduledTask -TaskName $t.TaskName -TaskPath '\' } catch {} }
-        throw "the agent team copies your chat to $unii with no unii server running, but one still runs on it (its pid is in $dir\server.pid). Nothing changed, and unii $Ver was not installed: stop it, run this again, then start it."
+        foreach ($t in @($olds | Where-Object { [string]$_.State -eq 'Running' }) + $halted) { try { Start-ScheduledTask -TaskName $t.TaskName -TaskPath '\' } catch {} }
+        throw "your data must move with no server running, but one still runs on it (its pid is in $cur\server.pid). Nothing changed, and ki $Ver was not installed: stop it, run this again, then start it."
       }
-      $copy = Join-Path $dir 'agents\.unii-copy'
+    }
+
+    # unii's own become ki's: the data and sign-ins move, unii's tasks give
+    # way to ki's (made now, started below, once ki.exe is in place)
+    $fresh = @()
+    if ($renaming) {
+      if ($moving) {
+        Move-Item -LiteralPath $odir -Destination $dir
+        Write-Host "  Moved $odir to $dir."
+      }
+      if ((Test-Path -LiteralPath $oconf) -and -not (Test-Path -LiteralPath $conf)) {
+        Move-Item -LiteralPath $oconf -Destination $conf
+        Write-Host "  Moved $oconf to $conf."
+      }
+      foreach ($t in $olds) {
+        $part = $t.TaskName.Substring(5)
+        $n = "ki-$part"
+        if (-not (& $task $n)) {
+          $xml = [string](Export-ScheduledTask -TaskName $t.TaskName -TaskPath '\')
+          $xml = $xml.Replace('"' + $oldBin + '"', '"' + $bin + '"')
+          if ($moving) { $xml = $xml.Replace('--env=UNII_DIR=' + $odir, '--env=KI_DIR=' + $dir) }
+          $xml = $xml.Replace('--env=UNII_', '--env=KI_')
+          $xml = [regex]::Replace($xml, '<Description>unii-made:[^<]*</Description>', ('<Description>ki-made: `ki ' + $part + ' -d` made this task, and makes it again; `ki ' + $part + ' stop` removes it.</Description>'))
+          try {
+            Register-ScheduledTask -TaskName $n -TaskPath '\' -Xml $xml | Out-Null
+            $fresh += $n
+          } catch {
+            Write-Host ("  Could not make the task $n from " + $t.TaskName + " (" + $_.Exception.Message + "): run " + $(if ([string]$t.Principal.RunLevel -eq 'Highest') { 'sudo ' } else { '' }) + "ki $part -d to.")
+          }
+        }
+        try {
+          Unregister-ScheduledTask -TaskName $t.TaskName -TaskPath '\' -Confirm:$false
+          Write-Host ("  Removed unii's task " + $t.TaskName + ".")
+        } catch {
+          Write-Host ("  Could not remove unii's task " + $t.TaskName + " (" + $_.Exception.Message + "): remove it in an elevated shell: schtasks /delete /tn " + $t.TaskName + " /f")
+        }
+      }
+      & $named
+      $cur = $dir
+    }
+
+    # the agent team's own: the main agent's memory, copied once from chat,
+    # and the fixed prompts, written every time
+    $chat = Join-Path $dir 'chat'
+    $main = Join-Path $dir 'agents\main'
+    if ((Test-Path -LiteralPath $chat) -and -not (Test-Path -LiteralPath $main)) {
+      $copy = Join-Path $dir 'agents\.main-copy'
       New-Item -ItemType Directory -Force -Path (Join-Path $dir 'agents') | Out-Null
       Remove-Item -LiteralPath $copy -Recurse -Force -ErrorAction SilentlyContinue
       Copy-Item -LiteralPath $chat -Destination $copy -Recurse
-      Move-Item -LiteralPath $copy -Destination $unii
-      Write-Host "  Copied $chat to $unii, Unii's memory in the agent team ($chat stays as it was)."
+      Move-Item -LiteralPath $copy -Destination $main
+      & $named
+      Write-Host "  Copied $chat to $main, the main agent's memory in the agent team ($chat stays as it was)."
     }
-    $share = Join-Path $env:LOCALAPPDATA 'unii'
+    Remove-Item -LiteralPath (Join-Path $env:LOCALAPPDATA 'unii') -Recurse -Force -ErrorAction SilentlyContinue
+    $share = Join-Path $env:LOCALAPPDATA 'ki'
     New-Item -ItemType Directory -Force -Path $share | Out-Null
 @PROMPT_FILES_PS1@
 
     # beside $bin first (temp may be another drive), then swapped in: the
-    # old exe renamed (it may run: this may be its `unii update`), the old
+    # old exe renamed (it may run: this may be its `ki update`), the old
     # ones that no longer run removed
     $folder = Split-Path -Parent $bin
     New-Item -ItemType Directory -Force -Path $folder | Out-Null
@@ -158,8 +270,8 @@
     Copy-Item -LiteralPath $exe -Destination $new -Force
     $old = $null
     if (Test-Path -LiteralPath $bin) {
-      $olds = '^' + [regex]::Escape($leaf) + '\.old(-[0-9]+)?$'
-      Get-ChildItem -LiteralPath $folder -File | Where-Object { $_.Name -match $olds } | ForEach-Object { Remove-Item -LiteralPath $_.FullName -Force -ErrorAction SilentlyContinue }
+      $olds2 = '^' + [regex]::Escape($leaf) + '\.old(-[0-9]+)?$'
+      Get-ChildItem -LiteralPath $folder -File | Where-Object { $_.Name -match $olds2 } | ForEach-Object { Remove-Item -LiteralPath $_.FullName -Force -ErrorAction SilentlyContinue }
       $old = "$bin.old"
       for ($k = 2; Test-Path -LiteralPath $old; $k++) { $old = "$bin.old-$k" }
       Move-Item -LiteralPath $bin -Destination $old
@@ -175,46 +287,69 @@
     Remove-Item -LiteralPath (Join-Path $conf 'check.json'), (Join-Path $dir 'check.json') -Force -ErrorAction SilentlyContinue
 
     Write-Host ""
-    Write-Host ("  unii $Ver (arteeh fork" + $(if ($Ver -match '\.rc') { ', release candidate' } else { '' }) + ") is installed at $bin.")
-    Write-Host "  Server: unii serve -d   Device: unii device -d <url>"
+    Write-Host ("  ki $Ver" + $(if ($Ver -match '\.rc') { ' (release candidate)' } else { '' }) + " is installed at $bin.")
+    Write-Host "  Server: ki serve -d   Device: ki device -d <url>"
     # the user PATH, as written (REG_EXPAND_SZ, %VARS% kept), then a
-    # setting's change told to Windows, so new terminals find unii: unless
+    # setting's change told to Windows, so new terminals find ki: unless
     # the saved user or machine Path has the folder (this shell's own
-    # $env:Path may have it only for now); this shell's gets it too
+    # $env:Path may have it only for now); this shell's gets it too.
+    # unii's folder (the default one) leaves it.
     $key = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Environment', $true)
     $path = [string]$key.GetValue('Path', '', 'DoNotExpandEnvironmentNames')
     $have = @($path -split ';' | Where-Object { $_ -ne '' })
     $machine = @(([string][Environment]::GetEnvironmentVariable('Path', 'Machine')) -split ';' | Where-Object { $_ -ne '' })
-    $is = { param($p) [Environment]::ExpandEnvironmentVariables($p).TrimEnd('\') -ieq $folder.TrimEnd('\') }
-    $there = @($have + $machine | Where-Object { & $is $_ })
-    if ($there.Count -eq 0) {
-      $key.SetValue('Path', (($have + $folder) -join ';'), [Microsoft.Win32.RegistryValueKind]::ExpandString)
-      [Environment]::SetEnvironmentVariable('UNII_PATH_SET', '1', 'User')
-      [Environment]::SetEnvironmentVariable('UNII_PATH_SET', [NullString]::Value, 'User')
-      Write-Host "  Added $folder to your PATH: open a new terminal to run unii by name."
+    $same = { param($p, $f) [Environment]::ExpandEnvironmentVariables($p).TrimEnd('\') -ieq $f.TrimEnd('\') }
+    $oldFolder = Split-Path -Parent $oldBin
+    $gone = $renaming -and ((Split-Path -Leaf $oldBin) -ieq 'unii.exe') -and -not ($oldFolder -ieq $folder)
+    $keep = @($have | Where-Object { -not ($gone -and (& $same $_ $oldFolder)) })
+    $there = @($keep + $machine | Where-Object { & $same $_ $folder })
+    if ($there.Count -eq 0) { $keep += $folder }
+    if (($keep -join ';') -ne ($have -join ';')) {
+      $key.SetValue('Path', ($keep -join ';'), [Microsoft.Win32.RegistryValueKind]::ExpandString)
+      [Environment]::SetEnvironmentVariable('KI_PATH_SET', '1', 'User')
+      [Environment]::SetEnvironmentVariable('KI_PATH_SET', [NullString]::Value, 'User')
+      if ($there.Count -eq 0) { Write-Host "  Added $folder to your PATH: open a new terminal to run ki by name." }
     }
     $key.Close()
-    if (@($env:Path -split ';' | Where-Object { $_ -ne '' -and (& $is $_) }).Count -eq 0) {
+    if (@($env:Path -split ';' | Where-Object { $_ -ne '' -and (& $same $_ $folder) }).Count -eq 0) {
       $env:Path = "$env:Path;$folder"
     }
+    # unii's exe: removed now, or (while the `unii update` that ran this
+    # still runs it) once that has quit, with its folder if it was the
+    # default one and holds nothing else of ours
+    if ($renaming -and (Test-Path -LiteralPath $oldBin -PathType Leaf) -and -not ($oldBin -ieq $bin)) {
+      try {
+        Remove-Item -LiteralPath $oldBin -Force
+        Write-Host "  Removed unii's exe $oldBin."
+      } catch {
+        $wait = [int]("0" + $env:UNII_UPDATER)
+        $later = "try { Wait-Process -Id $wait -Timeout 600 -ErrorAction SilentlyContinue } catch {}; Remove-Item -LiteralPath '" + $oldBin.Replace("'", "''") + "' -Force -ErrorAction SilentlyContinue"
+        Start-Process -WindowStyle Hidden -FilePath 'powershell.exe' -ArgumentList @('-NoProfile', '-Command', $later) | Out-Null
+        Write-Host "  unii's exe $oldBin is removed once it quits."
+      }
+      if ($gone) {
+        Get-ChildItem -LiteralPath $oldFolder -File -ErrorAction SilentlyContinue | Where-Object { $_.Name -match '^unii\.exe\.(old(-[0-9]+)?|new)$' } | ForEach-Object { Remove-Item -LiteralPath $_.FullName -Force -ErrorAction SilentlyContinue }
+        Remove-Item -LiteralPath $oldFolder -ErrorAction SilentlyContinue
+      }
+    }
     $global:LASTEXITCODE = 0
-    # last: unii's services that run, restarted on the new exe by Task
-    # Scheduler (run from such a service's shell, `unii update`, this ends
+    # last: ki's tasks that run, restarted on the new exe by Task
+    # Scheduler (run from such a service's shell, `ki update`, this ends
     # with it: so that one goes last, else the device, whose shells run
     # such updates)
     $made = @()
-    try { $made = @(Get-ScheduledTask -TaskName 'unii-serve', 'unii-device' -TaskPath '\' -ErrorAction SilentlyContinue | Where-Object { ([string]$_.Description -match 'unii-made') -and ([string]$_.State -eq 'Running') }) } catch {}
-    $made = @($made | Sort-Object { $mine -match ('\s"?' + $_.TaskName.Substring(5) + '"?\s') }, { $_.TaskName -eq 'unii-device' })
-    foreach ($t in $halted) {
-      Write-Host ("  Starting " + $t.TaskName + " again, on unii $Ver.")
-      try { Start-ScheduledTask -TaskName $t.TaskName -TaskPath '\' } catch { Write-Host ("  Could not start " + $t.TaskName + ": run unii serve -d to.") }
+    try { $made = @('serve', 'device' | ForEach-Object { & $task "ki-$_" } | Where-Object { $_ -and ([string]$_.Description -match 'ki-made') -and ([string]$_.State -eq 'Running') }) } catch {}
+    $made = @($made | Sort-Object { $mine -match ('\s"?' + $_.TaskName.Substring(3) + '"?\s') }, { $_.TaskName -eq 'ki-device' })
+    foreach ($n in @($fresh) + @($halted | ForEach-Object { $_.TaskName })) {
+      Write-Host ("  Starting $n, on ki $Ver.")
+      try { Start-ScheduledTask -TaskName $n -TaskPath '\' } catch { Write-Host ("  Could not start ${n}: run ki " + $n.Substring(3) + " -d to.") }
     }
     foreach ($t in $made) {
-      Write-Host ("  Restarting " + $t.TaskName + " on unii $Ver.")
-      try { Start-ScheduledTask -TaskName $t.TaskName -TaskPath '\' } catch { Write-Host ("  Could not restart " + $t.TaskName + ": run " + $(if ([string]$t.Principal.RunLevel -eq 'Highest') { 'sudo ' } else { '' }) + "unii " + $t.TaskName.Substring(5) + " -d to.") }
+      Write-Host ("  Restarting " + $t.TaskName + " on ki $Ver.")
+      try { Start-ScheduledTask -TaskName $t.TaskName -TaskPath '\' } catch { Write-Host ("  Could not restart " + $t.TaskName + ": run " + $(if ([string]$t.Principal.RunLevel -eq 'Highest') { 'sudo ' } else { '' }) + "ki " + $t.TaskName.Substring(3) + " -d to.") }
     }
   } catch {
-    Write-Host ("unii: " + $_.Exception.Message) -ForegroundColor Red
+    Write-Host ("ki: " + $_.Exception.Message) -ForegroundColor Red
     $global:LASTEXITCODE = 1
   } finally {
     if ($tmp) { Remove-Item -LiteralPath $tmp -Recurse -Force -ErrorAction SilentlyContinue }

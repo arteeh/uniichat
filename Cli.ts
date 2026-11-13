@@ -8,7 +8,7 @@ import { err_why } from "./Err.ts";
 import type { Part } from "./Service.ts";
 import * as Update from "./Update.ts";
 
-const SET = /^--env=(UNII_DIR|XDG_CONFIG_HOME)=(.+)$/;
+const SET = /^--env=(KI_DIR|XDG_CONFIG_HOME)=(.+)$/;
 const ARGS = process.argv.slice(2).filter((a) => !SET.test(a));
 const SETS = process.argv.slice(2).filter((a) => SET.test(a));
 for (const a of SETS) {
@@ -24,10 +24,10 @@ const HELPS = ["--help", "-h", "help"];
 const REST = ARGS.filter((a) => !WEB.test(a) && !FLAGS.includes(a) && !HELPS.includes(a));
 const FLAG = new Set(ARGS.filter((a) => FLAGS.includes(a)));
 
-const SERVICE = process.env.UNII_SERVICE;
-const SUPERVISOR = Number(process.env.UNII_SUPERVISOR ?? 0);
-delete process.env.UNII_SERVICE;
-delete process.env.UNII_SUPERVISOR;
+const SERVICE = process.env.KI_SERVICE;
+const SUPERVISOR = Number(process.env.KI_SUPERVISOR ?? 0);
+delete process.env.KI_SERVICE;
+delete process.env.KI_SUPERVISOR;
 
 type Cmd = {
   use: string;
@@ -44,16 +44,16 @@ const PORT = /^\d+$/;
 
 async function serve_free(): Promise<void> {
   const Service = await import("./Service.ts");
-  const dir = (process.env.UNII_DIR ?? "~/.unii").replace(/^~(?=[\\/]|$)/, os.homedir());
+  const dir = (process.env.KI_DIR ?? "~/.ki").replace(/^~(?=[\\/]|$)/, os.homedir());
   const pid = Number(fs.existsSync(dir + "/server.pid") ? fs.readFileSync(dir + "/server.pid", "utf8") : 0);
   const up = pid > 0 && Service.ours("serve", [pid]).length > 0;
   if (up && Service.running("serve") === null) {
-    fail("a unii server runs here already (pid " + pid + "), not as unii serve -d's service: stop it first.");
+    fail("a ki server runs here already (pid " + pid + "), not as ki serve -d's service: stop it first.");
   }
 }
 
 function fail(why: string): never {
-  console.error("unii: " + why);
+  console.error("ki: " + why);
   process.exit(1);
 }
 
@@ -62,18 +62,18 @@ const BUN  = /^bun(\.exe)?$/i.test(path.basename(process.execPath));
 
 async function update(): Promise<void> {
   if (BUN) {
-    fail("this unii runs from source (bun): update it with git.");
+    fail("this ki runs from source (bun): update it with git.");
   }
   if (Update.RC) {
-    fail("unii " + Update.VERSION + " is a release candidate: `unii update` doesn't move from it. Install another release by its own install line (https://github.com/arteeh/uniichat/releases).");
+    fail("ki " + Update.VERSION + " is a release candidate: `ki update` doesn't move from it. Install another release by its own install line (https://github.com/arteeh/ki/releases).");
   }
   const name = WIN ? "install.ps1" : "install.sh";
   const url = Update.BASE + "/" + name;
-  console.error("unii: getting " + url + " and its signature");
+  console.error("ki: getting " + url + " and its signature");
   const [script, sig] = await Promise.all([get(url), get(url + ".sig")]).catch((err: unknown) => fail("could not download the installer (" + err_why(err) + "); nothing changed."));
   const why = Update.unsigned(script, Buffer.from(sig).toString(), name);
   if (why !== null) {
-    fail(url + " is not signed by unii's release key (" + why + "): it was not run, and nothing changed.");
+    fail(url + " is not signed by ki's release key (" + why + "): it was not run, and nothing changed.");
   }
   const ver = Update.installs(Buffer.from(script).toString());
   const no = ver === null ? "it names no version" : Update.refused(ver);
@@ -82,7 +82,7 @@ async function update(): Promise<void> {
   }
   let dir: string;
   try {
-    dir = fs.mkdtempSync(path.join(os.tmpdir(), "unii-update-"));
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), "ki-update-"));
   } catch (err) {
     fail("could not make a folder for the installer in " + os.tmpdir() + " (" + err_why(err) + "); nothing changed. Set TMPDIR (TEMP on Windows) to a folder you can write to.");
   }
@@ -117,17 +117,17 @@ function powershell_exiting_as_installer(cmd: string): string[] {
 }
 
 function updater_env(): Record<string, string | undefined> {
-  return { ...process.env, UNII_UPDATER: String(process.pid), UNII_BIN: process.execPath };
+  return { ...process.env, KI_UPDATER: String(process.pid), KI_BIN: process.execPath };
 }
 
 function unmark_from_parent_shell(): void {
-  for (const k of ["UNII_RUN", "UNII_AGENT", "INVOCATION_ID"]) {
+  for (const k of ["KI_RUN", "KI_AGENT", "INVOCATION_ID"]) {
     delete process.env[k];
   }
 }
 
-// on Windows a running unii.exe can't be replaced, only renamed: the
-// installer leaves the one it replaced as unii.exe.old (or .old-<n>),
+// on Windows a running ki.exe can't be replaced, only renamed: the
+// installer leaves the one it replaced as ki.exe.old (or .old-<n>),
 // removed here once it no longer runs (one still running stays till a
 // later start). Only those names: any other file beside it is the user's
 if (WIN && !BUN) {
@@ -168,7 +168,7 @@ function service(part: Part, run: (arg?: string) => unknown): Cmd[] {
 function not_by_sudo(cmd: string): void {
   const user = process.env.SUDO_USER;
   if (!WIN && process.getuid?.() === 0 && user !== undefined) {
-    fail("Run `unii " + cmd + "` without sudo. To give the agent admin rights, set up passwordless sudo for " + user + ".");
+    fail("Run `ki " + cmd + "` without sudo. To give the agent admin rights, set up passwordless sudo for " + user + ".");
   }
 }
 
@@ -184,7 +184,7 @@ function plan(name: "claude" | "chatgpt", about: string): Cmd {
   ] };
 }
 
-const TREE: Cmd = { use: "unii", about: "UniiChat: open your server's address in a browser to chat", kids: [
+const TREE: Cmd = { use: "ki", about: "Ki: open your server's address in a browser to chat", kids: [
   { use: "device [url]", about: "this computer as a device of a server", url: true, run: async () => { await run_here("device"); await (await import("./Device.ts")).run(URL_); }, kids: service("device", async () => {
     unmark_from_parent_shell();
     const Service = await import("./Service.ts");
@@ -192,7 +192,7 @@ const TREE: Cmd = { use: "unii", about: "UniiChat: open your server's address in
     await (await import("./Device.ts")).signin(URL_);
     await Service.start("device", [], admin);
   }) },
-  { use: "serve [port]", about: "your UniiChat server (port 8788)", arg: PORT, run: async (port) => { await run_here("serve"); await (await import("./Server.ts")).serve(Number(port ?? 8788)); }, kids: [
+  { use: "serve [port]", about: "your Ki server (port 8788)", arg: PORT, run: async (port) => { await run_here("serve"); await (await import("./Server.ts")).serve(Number(port ?? 8788)); }, kids: [
     ...service("serve", async (port) => {
       unmark_from_parent_shell();
       await serve_free();
@@ -207,7 +207,7 @@ const TREE: Cmd = { use: "unii", about: "UniiChat: open your server's address in
     plan("chatgpt", "your ChatGPT plan (openai-sub)"),
   ] },
   { use: "update", about: "install the newest release", run: update },
-  { use: "version", about: "this unii's version", run: () => console.log("unii " + Update.VERSION) },
+  { use: "version", about: "this ki's version", run: () => console.log("ki " + Update.VERSION) },
   { use: "help", about: "this" },
 ] };
 
@@ -220,7 +220,7 @@ function rows(c: Cmd, head: string, depth: number): [string, string][] {
 const words = REST[0] === "-v" || REST[0] === "--version" ? ["version", ...REST.slice(1)] : [...REST];
 const help = ARGS.some((a) => HELPS.includes(a)) || ARGS.length === 0;
 let cmd = TREE;
-const trail = ["unii"];
+const trail = ["ki"];
 while (words.length > 0) {
   const next = cmd.kids?.find((k) => key(k) === words[0]);
   if (next === undefined) {
@@ -231,6 +231,9 @@ while (words.length > 0) {
   words.shift();
 }
 const part = trail[1] === "device" || trail[1] === "serve" ? trail[1] : null;
+if (part !== null && !help && process.env.KI_DIR === undefined && !fs.existsSync(path.join(os.homedir(), ".ki")) && fs.existsSync(path.join(os.homedir(), ".unii"))) {
+  fail("~/.unii holds the data of unii, as ki was called before, and ~/.ki doesn't exist: run the installer (" + Update.install_cmd(WIN) + ") to move it, then start again.");
+}
 const daemon = FLAG.has("-d") ? cmd.kids?.find((k) => key(k) === "-d") : undefined;
 if (daemon !== undefined) {
   cmd = daemon;

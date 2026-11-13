@@ -376,7 +376,7 @@ export namespace Memory {
 
   export function show(root: Root): string {
     const pics = (root.images ?? []).map((name) => "\n[image docs/images/" + name + "]");
-    const who  = root.imported && (root.kind === "unii" || root.kind === "tool") ? "ai" : root.kind;
+    const who  = root.imported && (root.kind === "reply" || root.kind === "tool") ? "ai" : root.kind;
     return who + ": " + root.text + pics.join("");
   }
 
@@ -1067,7 +1067,7 @@ export namespace Memory {
   }
 
   export function said(root: Root): boolean {
-    return (root.kind === "user" || root.kind === "unii") && !root.imported;
+    return (root.kind === "user" || root.kind === "reply") && !root.imported;
   }
 
   export function talk_line(mem: Memory, i: number): string {
@@ -1158,7 +1158,7 @@ export namespace Memory {
     }
   }
 
-  // the images: all of the store for the agent it is kept with (Unii), only
+  // the images: all of the store for the agent it is kept with (the main agent), only
   // its own messages' for another
   export function* dump(mem: Memory): Generator<string> {
     const ls = (sub: string) => (fs.existsSync(mem.docs + sub) ? fs.readdirSync(mem.docs + sub).sort() : []);

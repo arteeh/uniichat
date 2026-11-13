@@ -1,59 +1,59 @@
 #!/bin/sh
-# Installs unii @VER@ from arteeh's fork of UniiChat (github.com/arteeh/uniichat):
-#   curl -fsSL https://github.com/arteeh/uniichat/releases/latest/download/install.sh | sh
+# Installs ki @VER@ (github.com/arteeh/ki):
+#   curl -fsSL https://github.com/arteeh/ki/releases/latest/download/install.sh | sh
 # (or this release's own: .../releases/download/@VER@/install.sh, the only
-# line for a release candidate, N.rcM: its `unii update` refuses)
+# line for a release candidate, N.rcM: its `ki update` refuses)
 #
-# The agent team keeps Unii's memory in ~/.unii/agents/unii: the first time,
-# this copies ~/.unii/chat there (with unii's services stopped while it
-# copies). chat/ itself stays as it was, so going back to a stable
-# release needs nothing. Every time, it writes the fixed prompts it
-# reads to ${XDG_DATA_HOME:-~/.local/share}/unii (edits there are
-# overwritten). No older prompt (~/.unii/prompt.md, SOUL.md, base.md) is
-# carried over: every agent starts on the shipped ones.
+# Downloads ki-<ver>-<os>-<arch>.tar.gz from this release, checks its
+# sha256, and moves the executable to $KI_BIN (default ~/.local/bin/ki).
+# No sudo. `ki update` runs the newest release's copy of this script with
+# KI_BIN set to the running ki, so it replaces itself in place. The
+# background services ki made (`ki serve -d`, `ki device -d`: a systemd
+# user unit or LaunchAgent ki-serve / ki-device holding "ki-made") that
+# run are restarted on the new ki once it is in place, last; a service you
+# made yourself is left alone (it keeps the old ki till you restart it).
+# Every time, it writes the fixed prompts ki reads to
+# ${XDG_DATA_HOME:-~/.local/share}/ki (edits there are overwritten).
 #
-# Like the official installer: downloads unii-<ver>-<os>-<arch>.tar.gz from
-# this release, checks its sha256, and moves the executable to
-# $UNII_BIN (default ~/.local/bin/unii, the same place as the official
-# installer, so it replaces an official unii there). No sudo.
-# `unii update` runs the newest release's copy of this script with
-# UNII_BIN set to the running unii, so it replaces itself in place.
-# The background services unii made (`unii serve -d`, `unii device -d`:
-# a systemd user unit or LaunchAgent unii-serve / unii-device holding
-# "unii-made") that run are restarted on the new unii once it is in
-# place, last; a service you made yourself is left alone (it keeps the
-# old unii till you restart it).
+# ki was called unii before (UniiChat). Where this finds unii, it moves
+# everything over, once: the services unii made (unii-serve,
+# unii-device) are stopped and removed, ~/.unii moves to ~/.ki and
+# ~/.config/unii to ~/.config/ki (unless those exist already: then it
+# changes nothing and says so), the data in it is given ki's names (by
+# the new ki, run as bun: BUN_BE_BUN=1), the old unii executable is
+# removed, and ki's services are made where unii's were, with the same
+# settings. `unii update` runs this from inside a unii service, whose stop
+# would end it: then this starts itself again outside it (systemd-run;
+# on macOS in a session of its own) and says where its output goes.
+# UNII_* settings are KI_* now: this warns about each one it can see.
 #
 # Data an older unii left (uniichat.com's 1.0.138 in ~/.opt, or an arteeh
 # release up to arteeh.16 in ~/.unii) is moved to this version's layout
-# first, by the new unii (run as bun: BUN_BE_BUN=1) before it is
-# installed. All is checked before anything changes: if the data needs
-# moving while a unii server runs on it, or it can't be moved as it is,
-# this says why and stops, with nothing changed and the old unii kept.
-# A move stopped halfway (a crash, a full disk) goes on where it stopped
-# when this runs again. Settings an old server read from its environment
-# (UNII_DIR, UNII_RULES, UNII_OWNER; OPT_RULES, OPT_OWNER) are read from
-# this script's: if your server got them from a systemd unit, run this
-# with the same ones set.
+# too, after the move to ~/.ki. All is checked before anything changes: if
+# the data needs moving while a server runs on it, or it can't be moved as
+# it is, this says why and stops, with nothing changed and the old version
+# kept. A move stopped halfway (a crash, a full disk) goes on where it
+# stopped when this runs again.
 set -eu
 
 VER="@VER@"
-BASE="https://github.com/arteeh/uniichat/releases/download/$VER"
-BIN="${UNII_BIN:-$HOME/.local/bin/unii}"
+BASE="https://github.com/arteeh/ki/releases/download/$VER"
+OLD_BIN="${UNII_BIN:-$HOME/.local/bin/unii}"
+BIN="${KI_BIN:-$(dirname "$OLD_BIN")/ki}"
 
-# a failure or any exit after unii's services were stopped (for a data
-# move) starts them again, on the old unii
-fail() { again; printf 'unii: %s\n' "$*" >&2; exit 1; }
-made="" stopped=""
+# a failure or any exit after services were stopped starts them again,
+# on the version they ran
+fail() { again; printf 'ki: %s\n' "$*" >&2; exit 1; }
+made="" stopped="" stopped_list=""
 again() {
   [ -n "$stopped" ] || return 0
   stopped=""
-  svc start $made || true
+  svc start $stopped_list || true
 }
-# unii-made services (unii-serve, unii-device): stopped, started, or
-# restarted (systemd's or launchd's doing, so it works from such a
-# service's own shell, as `unii update` run by Unii there is: one
-# systemctl for all, in their order, the one this runs in last)
+# services by name: stopped, started, or restarted (systemd's or
+# launchd's doing, so it works from such a service's own shell, as
+# `ki update` run by an agent there is: one systemctl for all, in their
+# order, the one this runs in last)
 svc() {
   w=$1; shift
   case $os in
@@ -62,16 +62,30 @@ svc() {
   esac
 }
 # whether this runs in service $1's process tree (its cgroup; on macOS
-# under its supervisor, whose pid leads $dir/logs/<part>.pid)
+# under its supervisor, whose pid leads <data dir>/logs/<part>.pid)
 inside() {
   case $os in
     linux) grep -qs "/$1.service" /proc/self/cgroup;;
-    darwin) sup=$(cut -d' ' -f1 "$dir/logs/${1#unii-}.pid" 2>/dev/null || true); p=$$
+    darwin) sup=$(cut -d' ' -f1 "$2/logs/${1#*-}.pid" 2>/dev/null || true); p=$$
       while [ -n "$sup" ] && [ "${p:-1}" -gt 1 ]; do
         [ "$p" = "$sup" ] && return 0
         p=$(ps -o ppid= -p "$p" 2>/dev/null | tr -d ' ')
       done
       return 1;;
+  esac
+}
+# a service's file
+unit() {
+  case $os in
+    linux) echo "${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user/$1.service";;
+    darwin) echo "$HOME/Library/LaunchAgents/$1.plist";;
+  esac
+}
+# whether service $1 runs
+up() {
+  case $os in
+    linux) command -v systemctl >/dev/null 2>&1 && systemctl --user is-active -q "$1" 2>/dev/null;;
+    darwin) launchctl print "gui/$(id -u)/$1" 2>/dev/null | grep -q 'state = running';;
   esac
 }
 
@@ -94,9 +108,62 @@ case $os-$arch in
   linux-arm64) sum="@SUM_linux-arm64@";;
   linux-x64) sum="@SUM_linux-x64@";;
 esac
-name="unii-$VER-$os-$arch.tar.gz"
+
+# unii, as ki was called before: its data, sign-ins, services and executable
+odir="${UNII_DIR:-$HOME/.unii}" oconf="${XDG_CONFIG_HOME:-$HOME/.config}/unii"
+dir="${KI_DIR:-${UNII_DIR:-$HOME/.ki}}" conf="${XDG_CONFIG_HOME:-$HOME/.config}/ki"
+[ "$odir" != "$dir" ] || odir=""
+olds="" oldrun=""
+for p in serve device; do
+  if grep -qs unii-made "$(unit "unii-$p")"; then
+    olds="$olds unii-$p"
+    if up "unii-$p"; then oldrun="$oldrun unii-$p"; fi
+  fi
+done
+moving=""
+if [ -n "$odir" ] && [ -d "$odir" ] && [ ! -L "$odir" ]; then
+  if [ -e "$dir" ] || [ -L "$dir" ]; then
+    fail "both $odir (unii's, as ki was called before) and $dir are here, and which one to keep isn't clear, so nothing changed and ki $VER was not installed. Move the one you don't need aside (or set KI_DIR to the one to use), then run this again."
+  fi
+  moving=1
+fi
+if [ -d "$oconf" ] && [ -e "$conf" ]; then
+  echo "  $oconf was not moved: $conf exists already. Move $oconf aside if you don't need it."
+fi
+for v in $(env | sed -n 's/^\(UNII_[A-Za-z0-9_]*\)=.*/\1/p'); do
+  case $v in UNII_BIN|UNII_UPDATER) ;; *) echo "  $v is set: ki doesn't read it any more; it reads KI_${v#UNII_}.";; esac
+done
+
+# `unii update` from a unii service's shell: stopping that service would
+# end this, so it runs again outside it, by itself
+if [ -n "$oldrun" ] && [ -z "${KI_INSTALL_OUTSIDE:-}" ]; then
+  for s in $oldrun; do
+    if inside "$s" "$odir"; then
+      log="${TMPDIR:-/tmp}/ki-install.$$.log"
+      self="${TMPDIR:-/tmp}/ki-install.$$.sh"
+      if [ -f "$0" ] && head -c 200 "$0" 2>/dev/null | grep -q 'Installs ki'; then cp "$0" "$self"; else curl --proto '=https' --tlsv1.2 -fsSL -o "$self" "$BASE/install.sh" || fail "could not download $BASE/install.sh again to run it outside $s"; fi
+      envs="KI_INSTALL_OUTSIDE=1 PATH=$PATH HOME=$HOME"
+      for v in UNII_BIN UNII_DIR KI_BIN KI_DIR XDG_CONFIG_HOME XDG_DATA_HOME TMPDIR; do
+        eval "x=\${$v:-}"; [ -z "$x" ] || envs="$envs $v=$x"
+      done
+      case $os in
+        linux) command -v systemd-run >/dev/null 2>&1 || fail "this runs inside $s, and moving unii to ki stops it; without systemd-run it can't go on outside it. Nothing changed: run this installer in a terminal."
+          # shellcheck disable=SC2086
+          systemd-run --user --quiet --collect --unit "ki-install-$$" $(for e in $envs; do printf -- '--setenv=%s ' "$e"; done) sh -c 'sh "$1" > "$2" 2>&1; rm -f "$1"' sh "$self" "$log" || fail "systemd-run could not start the installer outside $s. Nothing changed: run this installer in a terminal.";;
+        darwin) command -v perl >/dev/null 2>&1 || fail "this runs inside $s, and moving unii to ki stops it; without perl it can't go on outside it. Nothing changed: run this installer in a terminal."
+          # shellcheck disable=SC2086
+          env $envs nohup perl -MPOSIX -e 'POSIX::setsid(); exec @ARGV' sh -c 'sh "$1" > "$2" 2>&1; rm -f "$1"' sh "$self" "$log" < /dev/null > /dev/null 2>&1 &
+          ;;
+      esac
+      echo "  unii becomes ki: that stops $s, which this runs in, so the install goes on by itself outside it. Its output: $log"
+      exit 0
+    fi
+  done
+fi
+
 tmp=$(mktemp -d)
 trap 'again; rm -rf "$tmp"' EXIT
+name="ki-$VER-$os-$arch.tar.gz"
 echo "downloading $BASE/$name"
 curl --proto '=https' --tlsv1.2 -fL --progress-bar -o "$tmp/$name" "$BASE/$name" || fail "the download failed: $name"
 if command -v sha256sum >/dev/null 2>&1; then
@@ -107,24 +174,22 @@ else
   fail "sha256sum or shasum is needed to verify the download"
 fi
 tar -xzf "$tmp/$name" -C "$tmp"
-new_unii="$tmp/unii"
+new_ki="$tmp/ki"
 
-# the services unii made that run now
+# the services ki made that run now
 for p in serve device; do
-  case $os in
-    linux) f="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user/unii-$p.service"
-      if grep -qs unii-made "$f" && command -v systemctl >/dev/null 2>&1 && systemctl --user is-active -q "unii-$p" 2>/dev/null; then made="$made unii-$p"; fi;;
-    darwin) f="$HOME/Library/LaunchAgents/unii-$p.plist"
-      if grep -qs unii-made "$f" && launchctl print "gui/$(id -u)/unii-$p" 2>/dev/null | grep -q 'state = running'; then made="$made unii-$p"; fi;;
-  esac
+  if grep -qs ki-made "$(unit "ki-$p")" && up "ki-$p"; then made="$made ki-$p"; fi
 done
 
 # The data. uniichat.com's release kept it in ~/.opt (and read OPT_*
-# settings); this build keeps it in $UNII_DIR (default ~/.unii, and reads
-# UNII_*). So ~/.opt moves there when it has users and the target has no
+# settings); this build keeps it in $KI_DIR (default ~/.ki, and reads
+# KI_*). So ~/.opt moves there when it has users and the target has no
 # chat yet: a folder both have (work) is merged; a file both have keeps
 # the target's copy as <name>.before-move; users/ goes last.
-opt="$HOME/.opt" dir="${UNII_DIR:-$HOME/.unii}" conf="${XDG_CONFIG_HOME:-$HOME/.config}/unii"
+opt="$HOME/.opt"
+cur="$dir" ccur="$conf"
+[ -z "$moving" ] || cur="$odir"
+[ -z "$moving" ] || [ -e "$conf" ] || [ ! -d "$oconf" ] || ccur="$oconf"
 has() { [ -d "$1/users" ] && [ -n "$(ls -A "$1/users" 2>/dev/null)" ]; }
 # a live pid among a dir's server sockets (hand<k>.<pid>) and server.pid
 live() {
@@ -149,8 +214,8 @@ move() (
 )
 optmove="" optmsg=""
 if has "$opt"; then
-  if has "$dir" || [ -e "$dir/chat" ]; then
-    optmsg="  ~/.opt was not moved: $dir has a chat already. Move ~/.opt aside if you don't need it."
+  if has "$cur" || [ -e "$cur/chat" ]; then
+    optmsg="  ~/.opt was not moved: $cur has a chat already. Move ~/.opt aside if you don't need it."
   else
     optmove=1
   fi
@@ -159,22 +224,22 @@ fi
 # release up to arteeh.16): its server kept a chat per user, in
 # users/<id>, with the accounts in cloud.db, and each user's SOUL.md and
 # the owner's base.md beside the built-in prompt. This build keeps one
-# owner's chat in chat/ and their sign-ins in unii.db, and has two
+# owner's chat in chat/ and their sign-ins in ki.db, and has two
 # prompts, prompt.md and compact.md (none: the built-in ones). So the
 # owner's chat moves to chat/ (the only user's, or the one the owner
 # setting names; UNII_USER=<id> picks another), their sign-ins, pushes
-# and acts go to unii.db (cloud.db kept as cloud.db.before-single, other
+# and acts go to ki.db (cloud.db kept as cloud.db.before-single, other
 # users' chats as users.before-single), and their SOUL.md, base.md and
 # rules file are written into prompt.md (SOUL.md and base.md kept as
 # *.before-prompts; from base.md, what the built-in prompt said of
 # compactions is left out). Settings that are gone are taken out of
 # config.json (kept as config.json.before-single). The terminal's
-# sign-ins move from ~/.unii/<host>/token to ~/.config/unii/tui.json.
+# sign-ins move from ~/.unii/<host>/token to ~/.config/ki/tui.json.
 # `check` changes nothing: it exits 0 if there is nothing to do, 3 if
 # there is, else 1 saying why it can't be done; `move` does it, each step
 # once, so a move stopped halfway (dir/.migrating holds whose chat it
 # moves) goes on where it stopped.
-cat > "$tmp/migrate.js" <<'UNII_MIGRATE_JS'
+cat > "$tmp/migrate.js" <<'KI_MIGRATE_JS'
 const fs = require("fs"), path = require("path"), os = require("os");
 const { Database } = require("bun:sqlite");
 const [mode, dir, conf, from] = process.argv.slice(2);
@@ -275,7 +340,7 @@ if (hosts.length > 0) {
     fs.rmSync(path.join(src, h, "token"));
     try { fs.rmdirSync(path.join(src, h)); } catch {}
   }
-  say("Moved the terminal's sign-ins (" + hosts.join(", ") + ") to " + conf + "/tui.json. This unii's terminal is no device any more: run `unii device` where you want one (README: Devices).");
+  say("Moved the terminal's sign-ins (" + hosts.join(", ") + ") to " + conf + "/tui.json. This ki's terminal is no device any more: run `ki device` where you want one (README: Devices).");
 }
 for (const f of ["self", "check-arteeh.json"]) {
   fs.rmSync(path.join(src, f), { force: true });
@@ -309,16 +374,16 @@ if (prompting && !there(src + "/prompt.md.new")) {
   }
 }
 
-// the chat: its sign-ins to unii.db, then users/<id> to chat/ (the step
+// the chat: its sign-ins to ki.db, then users/<id> to chat/ (the step
 // after which an old server can't use the data), then what is left kept
 if (moving) {
   for (const f of fs.readdirSync(src).filter((f) => /^(hand\d*(\.\d+|\.link)?|lock)$/.test(f))) {
     fs.rmSync(path.join(src, f), { force: true });
   }
   let signed = 0;
-  if (!there(src + "/unii.db")) {
-    fs.rmSync(src + "/unii.db.new", { force: true });
-    const db = new Database(src + "/unii.db.new");
+  if (!there(src + "/ki.db")) {
+    fs.rmSync(src + "/ki.db.new", { force: true });
+    const db = new Database(src + "/ki.db.new");
     db.exec(`create table sessions (hash text primary key, what text not null default '', at integer not null default 0);
 create table pushes (token text primary key, session text not null);
 create table web_pushes (endpoint text primary key, p256dh text not null, auth text not null, session text not null);
@@ -344,7 +409,7 @@ create table acts (id text primary key, ans text not null, at integer not null);
       cloud.close();
     }
     db.close();
-    fs.renameSync(src + "/unii.db.new", src + "/unii.db");
+    fs.renameSync(src + "/ki.db.new", src + "/ki.db");
   }
   if (!there(chat)) {
     fs.renameSync(path.join(users, id), chat);
@@ -376,39 +441,97 @@ if (stale.length > 0) {
   say("Took the settings this version doesn't have (" + stale.join(", ") + ") out of config.json (as it was: config.json.before-single).");
 }
 fs.rmSync(MARK, { force: true });
-UNII_MIGRATE_JS
+KI_MIGRATE_JS
+
+cat > "$tmp/rename.js" <<'KI_RENAME_JS'
+@RENAME_JS@
+KI_RENAME_JS
 
 # All checked first: what the data needs, and that no server runs on it
 src=""
 [ -n "$optmove" ] && src="$opt"
 rc=0
-BUN_BE_BUN=1 "$new_unii" "$tmp/migrate.js" check "$dir" "$conf" "$src" || rc=$?
+BUN_BE_BUN=1 "$new_ki" "$tmp/migrate.js" check "$cur" "$ccur" "$src" || rc=$?
 case $rc in
   0) need="";;
   3) need=1;;
-  *) fail "nothing changed; unii $VER was not installed.";;
+  *) fail "nothing changed; ki $VER was not installed.";;
 esac
-if [ -n "$need" ] && [ -n "$made" ]; then
-  # the move needs no server running: unii's services stop till it's
-  # done (not from one's own shell: that stop would end this too)
+renaming=""
+if [ -n "$moving" ] || [ -n "$olds" ] || [ -e "$cur/unii.db" ] || [ -e "$cur/agents/unii" ]; then renaming=1; fi
+copying=""
+if [ -d "$cur/chat" ] && [ ! -e "$cur/agents/main" ] && [ ! -e "$cur/agents/unii" ]; then copying=1; fi
+
+# no server may run on the data while it moves: the services that run
+# stop till it's done (not ki's own from its own shell: that stop would
+# end this; unii's are left above)
+if [ -n "$need$renaming$copying" ]; then
   for s in $made; do
-    if inside "$s"; then
-      fail "your data must move to this version's layout with no unii server running, and this runs in a shell of $s, which stopping would end. Nothing changed, and unii $VER was not installed: run it again in a terminal of your own."
+    if inside "$s" "$dir"; then
+      fail "your data must move with no ki server running, and this runs in a shell of $s, which stopping would end. Nothing changed, and ki $VER was not installed: run this installer in a terminal."
     fi
   done
-  stopped=1
-  svc stop $made
-  # launchd stops it by and by
-  for k in 1 2 3 4 5 6 7 8 9 10; do [ -z "$(live "$dir")" ] && break; sleep 1; done
-fi
-if [ -n "$need" ]; then
-  pid=$(live "$dir"); [ -n "$optmove" ] && [ -z "$pid" ] && pid=$(live "$opt")
+  stopped_list="$oldrun $made"
+  if [ -n "${stopped_list# }" ]; then
+    stopped=1
+    svc stop $stopped_list
+    # launchd stops it by and by
+    for k in 1 2 3 4 5 6 7 8 9 10; do [ -z "$(live "$cur")" ] && break; sleep 1; done
+  fi
+  pid=$(live "$cur"); [ -n "$optmove" ] && [ -z "$pid" ] && pid=$(live "$opt")
   if [ -n "$pid" ]; then
-    printf 'unii: this version keeps its data in a new layout, and your data must move to it, but a unii server (pid %s) runs on it.\n' "$pid" >&2
-    printf 'Nothing changed, and unii %s was not installed. Stop the server, run this again, then start it, e.g.:\n' "$VER" >&2
-    printf '  systemctl --user stop unii-serve\n  curl -fsSL %s/install.sh | sh\n  systemctl --user start unii-serve\n' "$BASE" >&2
+    printf 'ki: your data must move, but a server (pid %s) runs on it.\n' "$pid" >&2
+    printf 'Nothing changed, and ki %s was not installed. Stop the server, run this again, then start it, e.g.:\n' "$VER" >&2
+    printf '  systemctl --user stop unii-serve\n  curl -fsSL %s/install.sh | sh\n' "$BASE" >&2
     exit 1
   fi
+fi
+
+# unii's own become ki's: the data and sign-ins move, unii's services
+# give way to ki's (made now, started below, once ki is in place)
+q() { printf '%s' "$1" | sed 's/[#&\\]/\\&/g'; }
+fresh=""
+if [ -n "$renaming" ]; then
+  if [ -n "$moving" ]; then
+    mkdir -p "$(dirname "$dir")"
+    mv "$odir" "$dir" || fail "could not move $odir to $dir; ki $VER was not installed."
+    echo "  Moved $odir to $dir."
+  fi
+  if [ -d "$oconf" ] && [ ! -e "$conf" ]; then
+    mv "$oconf" "$conf" && echo "  Moved $oconf to $conf."
+  fi
+  # unii's services, never to start again on data that moved away
+  stopped_list="$made"
+  for s in $olds; do
+    p=${s#unii-} from=$(unit "$s") to=$(unit "ki-$p")
+    if [ ! -e "$to" ]; then
+      case $os in
+        linux) sed -e "s#^ExecStart=\"[^\"]*\"#ExecStart=\"$(q "$BIN")\"#" \
+            -e "s#^Environment=\"UNII_DIR=$(q "$odir")\"#Environment=\"KI_DIR=$(q "$dir")\"#" \
+            -e 's#^Environment="UNII_#Environment="KI_#' \
+            -e "s#^\# unii-made: .*#\# ki-made: \`ki $p -d\` wrote this unit, and writes it again; \`ki $p stop\` removes it.#" \
+            -e "s#^Description=.*#Description=Ki $( [ "$p" = serve ] && echo server || echo device ) (ki $p)#" "$from" > "$to.new" && mv "$to.new" "$to";;
+        darwin) sed -e "s#<array><string>[^<]*</string>#<array><string>$(q "$BIN")</string>#" \
+            -e "s#<key>Label</key><string>unii-#<key>Label</key><string>ki-#" \
+            -e "s#<key>UNII_DIR</key><string>$(q "$odir")</string>#<key>KI_DIR</key><string>$(q "$dir")</string>#" \
+            -e "s#<key>UNII_#<key>KI_#g" \
+            -e "s#<!-- unii-made: .*#<!-- ki-made: \`ki $p -d\` wrote this, and writes it again; \`ki $p stop\` removes it. -->#" "$from" > "$to.new" && mv "$to.new" "$to";;
+      esac
+      fresh="$fresh ki-$p"
+    fi
+    case $os in
+      linux) systemctl --user disable --now --quiet "$s" 2>/dev/null || true;;
+      darwin) launchctl bootout "gui/$(id -u)/$s" 2>/dev/null || true;;
+    esac
+    rm -f "$from"
+    echo "  Removed unii's service $s."
+  done
+  [ "$os" != linux ] || [ -z "$olds" ] || systemctl --user daemon-reload || true
+  BUN_BE_BUN=1 "$new_ki" "$tmp/rename.js" "$dir" || fail "giving your data in $dir ki's names stopped halfway (see above): run this again. ki $VER was not installed."
+  cur="$dir"
+fi
+
+if [ -n "$need" ]; then
   if [ -n "$optmove" ]; then
     mkdir -p "$dir"
     rmdir "$dir/users" 2>/dev/null || true
@@ -418,60 +541,62 @@ if [ -n "$need" ]; then
     done
     move "$opt/users" "$dir/users"
     rmdir "$opt" 2>/dev/null && optmsg="  Moved ~/.opt to $dir." || optmsg="  Moved ~/.opt to $dir; what is left in ~/.opt could not be moved."
-    optmsg="$optmsg Settings you gave as OPT_* variables are read as UNII_* now."
+    optmsg="$optmsg Settings you gave as OPT_* variables are read as KI_* now."
   fi
-  BUN_BE_BUN=1 "$new_unii" "$tmp/migrate.js" move "$dir" "$conf" "" || { stopped=""; fail "the move stopped halfway (see above). unii $VER was not installed, and the old unii can't use the data now: fix what failed and run this again, and it goes on where it stopped. Don't start a unii server before that."; }
+  BUN_BE_BUN=1 "$new_ki" "$tmp/migrate.js" move "$dir" "$conf" "" || { stopped=""; fail "the move stopped halfway (see above). ki $VER was not installed, and the old version can't use the data now: fix what it says, then run this again to finish the move."; }
 fi
 
-# The agent team's own: Unii's memory, copied once from chat/ (no server may
-# write to it meanwhile), and the fixed prompts, written every time
-if [ -d "$dir/chat" ] && [ ! -e "$dir/agents/unii" ]; then
-  if [ -z "$stopped" ] && [ -n "$made" ]; then
-    for s in $made; do
-      if inside "$s"; then
-        fail "the agent team copies your chat to $dir/agents/unii with no unii server running, and this runs in a shell of $s, which stopping would end. Nothing changed, and unii $VER was not installed: run it again in a terminal of your own."
-      fi
-    done
-    stopped=1
-    svc stop $made
-    for k in 1 2 3 4 5 6 7 8 9 10; do [ -z "$(live "$dir")" ] && break; sleep 1; done
-  fi
-  pid=$(live "$dir")
-  [ -z "$pid" ] || fail "the agent team copies your chat to $dir/agents/unii, but a unii server (pid $pid) runs on it. Nothing changed, and unii $VER was not installed: stop it, run this again, then start it."
+# The agent team's own: the main agent's memory, copied once from chat/
+# (no server may write to it meanwhile), and the fixed prompts, written
+# every time
+if [ -d "$dir/chat" ] && [ ! -e "$dir/agents/main" ]; then
   mkdir -p "$dir/agents"
-  rm -rf "$dir/agents/.unii-copy"
-  cp -Rp "$dir/chat" "$dir/agents/.unii-copy" && mv "$dir/agents/.unii-copy" "$dir/agents/unii" || fail "could not copy $dir/chat to $dir/agents/unii; unii $VER was not installed."
-  echo "  Copied $dir/chat to $dir/agents/unii, Unii's memory in the agent team ($dir/chat stays as it was)."
+  rm -rf "$dir/agents/.main-copy"
+  cp -Rp "$dir/chat" "$dir/agents/.main-copy" && mv "$dir/agents/.main-copy" "$dir/agents/main" || fail "could not copy $dir/chat to $dir/agents/main; ki $VER was not installed."
+  BUN_BE_BUN=1 "$new_ki" "$tmp/rename.js" "$dir" || fail "giving your data in $dir ki's names stopped halfway (see above): run this again. ki $VER was not installed."
+  echo "  Copied $dir/chat to $dir/agents/main, the main agent's memory in the agent team ($dir/chat stays as it was)."
 fi
-share="${XDG_DATA_HOME:-$HOME/.local/share}/unii"
+share="${XDG_DATA_HOME:-$HOME/.local/share}/ki"
+rm -rf "${XDG_DATA_HOME:-$HOME/.local/share}/unii"
 mkdir -p "$share"
 @PROMPT_FILES@
 mkdir -p "$(dirname "$BIN")"
-# copied beside $BIN, then renamed over it: a running unii (unii update)
+# copied beside $BIN, then renamed over it: a running ki (ki update)
 # keeps its old file, and /tmp may be another file system
-cp "$new_unii" "$BIN.new.$$" && chmod 755 "$BIN.new.$$" && mv -f "$BIN.new.$$" "$BIN" || { rm -f "$BIN.new.$$"; fail "could not write $BIN"; }
+cp "$new_ki" "$BIN.new.$$" && chmod 755 "$BIN.new.$$" && mv -f "$BIN.new.$$" "$BIN" || { rm -f "$BIN.new.$$"; fail "could not write $BIN"; }
+if [ -n "$renaming" ] && [ -f "$OLD_BIN" ] && [ "$OLD_BIN" != "$BIN" ]; then
+  rm -f "$OLD_BIN" && echo "  Removed unii's executable $OLD_BIN."
+fi
 # the version check's cache, from before unii 18 (it checks no more)
 rm -f "$conf/check.json" "$dir/check.json"
 echo
-case $VER in *.rc*) echo "  unii $VER (arteeh fork, release candidate) is installed at $BIN.";; *) echo "  unii $VER (arteeh fork) is installed at $BIN.";; esac
-echo "  Server: unii serve -d   Device: unii device -d <url>"
+case $VER in *.rc*) echo "  ki $VER (release candidate) is installed at $BIN.";; *) echo "  ki $VER is installed at $BIN.";; esac
+echo "  Server: ki serve -d   Device: ki device -d <url>"
 case " $made " in
-  *" unii-serve "*) ;;
-  *) [ -z "$(live "$dir")" ] || echo "  The unii server running now keeps the old version until it restarts.";;
+  *" ki-serve "*) ;;
+  *) [ -z "$(live "$dir")" ] || echo "  The ki server running now keeps the old version until it restarts.";;
 esac
 [ -n "$optmsg" ] && echo "$optmsg"
 case ":$PATH:" in
   *":$(dirname "$BIN"):"*) ;;
-  *) echo "  $(dirname "$BIN") is not on your PATH; add it to run unii by name.";;
+  *) echo "  $(dirname "$BIN") is not on your PATH; add it to run ki by name.";;
 esac
-# last: run from a unii service's shell (unii update), its restart ends
+if [ -n "$fresh" ]; then
+  echo "  Starting$fresh, ki's services where unii's were."
+  case $os in
+    linux) systemctl --user daemon-reload && systemctl --user enable --quiet $fresh && systemctl --user start --no-block $fresh || echo "  Could not start$fresh: run ki serve -d (or ki device -d) to.";;
+    darwin) for s in $fresh; do launchctl bootstrap "gui/$(id -u)" "$(unit "$s")" || echo "  Could not start $s: run ki ${s#ki-} -d to."; done;;
+  esac
+fi
+# last: run from a ki service's shell (ki update), its restart ends
 # this, so that one goes last, and the temp dir before
 first="" last=""
-for s in $made; do if inside "$s"; then last="$last $s"; else first="$first $s"; fi; done
+for s in $made; do if inside "$s" "$dir"; then last="$last $s"; else first="$first $s"; fi; done
 made="$first$last"
 if [ -n "$made" ]; then
-  if [ -n "$stopped" ]; then w=start; echo "  Starting$made again, on unii $VER."; else w=restart; echo "  Restarting$made on unii $VER."; fi
+  if [ -n "$stopped" ]; then w=start; echo "  Starting$made again, on ki $VER."; else w=restart; echo "  Restarting$made on ki $VER."; fi
   stopped=""
   rm -rf "$tmp"
-  svc $w $made || echo "  Could not $w$made: run unii serve -d (or unii device -d) to."
+  svc $w $made || echo "  Could not $w$made: run ki serve -d (or ki device -d) to."
 fi
+stopped=""

@@ -174,7 +174,7 @@ export namespace Agent {
       }
       if (backs.length === 0) {
         end.ok   = true;
-        end.text = step.entries.filter((e) => e.kind === "unii").map((e) => e.text).join("\n\n");
+        end.text = step.entries.filter((e) => e.kind === "reply").map((e) => e.text).join("\n\n");
         return;
       }
       items.push({ $: "Back", backs });

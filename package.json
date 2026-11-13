@@ -1,5 +1,5 @@
 {
-  "name": "uniichat",
+  "name": "ki",
   "private": true,
   "scripts": {
     "build": "bun Build.ts",

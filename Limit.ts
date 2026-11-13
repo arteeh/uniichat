@@ -92,7 +92,7 @@ export namespace Limit {
     try {
       await Limit.wait(vendor, ms, until);
       if (parked && l.ask.agent === true && !until.aborted && ANSWERING().queued) {
-        await Limit.let_unii_answer_first(l, until);
+        await Limit.let_lead_answer_first(l, until);
       }
     } finally {
       l.poke = () => {};
@@ -106,7 +106,7 @@ export namespace Limit {
     on({ $: "Entry", kind: "mind", text: "The AI service is busy: asking again in " + Math.ceil(ms / 1e3) + " s." });
   }
 
-  export async function let_unii_answer_first(l: Limit, until: AbortSignal): Promise<void> {
+  export async function let_lead_answer_first(l: Limit, until: AbortSignal): Promise<void> {
     const end = Date.now() + STAGGER;
     const answering = () => ANSWERING().queued || ANSWERING().busy;
     l.on({ $: "Limit", limit: { until: end, known: false, vendor: l.ask.vendor } });

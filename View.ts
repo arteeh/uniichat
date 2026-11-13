@@ -193,9 +193,9 @@ export type Knob = { text: string; move: Move; hint: string; choices: Choice[] }
 
 export type Choice = { text: string; to: string; move: Move; here: boolean; vendor: string | null };
 
-export const TURN = "Unii's turn";
+export const TURN = "the main turn";
 
-export const WIRE = 5;
+export const WIRE = 6;
 
 export const PING  = 10000;
 export const RETRY = 1000;
@@ -209,14 +209,14 @@ export const USE_PING = 20000;
 
 export const FRAME = 2 ** 22;
 
-export const HINT = "Message UniiChat";
+export const HINT = "Message Ki";
 
 const WAIT = "compressing…";
 const SUMS = "compressing earlier messages…";
 
 const UNSENT = "Sends once connected.";
-const OLDER  = "This unii is older than the server: run `unii update`.";
-const NEWER  = "The server runs an older unii than this one: run `unii update` there. Trying again every " + SLOW / 1000 + " s.";
+const OLDER  = "This ki is older than the server: run `ki update`.";
+const NEWER  = "The server runs an older ki than this one: run `ki update` there. Trying again every " + SLOW / 1000 + " s.";
 
 const MARKS: Array<[string, number, string]> = [
   ["image/png", 0, "\x89PNG"],
@@ -622,7 +622,7 @@ function live_rows(live: Live[], writing: boolean): Row[] {
     if (r.$ === "Line") {
       return { ...r, phase: l.of === undefined ? "typing" : "running" };
     }
-    return r.$ === "Msg" && l.kind === "unii" && writing && k === live.length - 1 ? { ...r, writing: true } : r;
+    return r.$ === "Msg" && l.kind === "reply" && writing && k === live.length - 1 ? { ...r, writing: true } : r;
   }));
 }
 

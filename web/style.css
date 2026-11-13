@@ -142,9 +142,9 @@ body.subpage header > .title { display: block; }
 #account .archived .item p { flex: 1; }
 .cap.think::after { content: ""; animation: dots 4s steps(1) infinite; }
 @keyframes dots { 0% { content: ""; } 25% { content: "."; } 50% { content: ".."; } 75% { content: "..."; } }
-#log :is(.cap:not(.earlier), .msg.mind, .msg.unii) { min-height: var(--row); align-content: center; }
+#log :is(.cap:not(.earlier), .msg.mind, .msg.reply) { min-height: var(--row); align-content: center; }
 /* a centred row holds its last block's margin in (#163) */
-#log :is(.msg.mind, .msg.unii) :last-child:not(:is(.msg.mind, .msg.unii) :not(:last-child) *) { margin-bottom: 0; }
+#log :is(.msg.mind, .msg.reply) :last-child:not(:is(.msg.mind, .msg.reply) :not(:last-child) *) { margin-bottom: 0; }
 .cap.wait { display: flex; align-items: center; gap: 5px; }
 .cap.wait i { width: 6px; height: 6px; border-radius: 50%; background: var(--soft); animation: pulse 1.4s ease-in-out infinite; }
 .cap.wait i:nth-child(2) { animation-delay: .2s; } .cap.wait i:nth-child(3) { animation-delay: .4s; }
@@ -356,7 +356,7 @@ header > .imping { display: flex; flex-direction: column; justify-content: cente
 .msg.queued { border-style: dotted; }
 .msg.work::before { content: attr(data-who); position: absolute; left: 14px; top: -.75em; padding: 0 6px; background: var(--paper); font: 600 12px/1.5 var(--sans); color: var(--mid); }
 .msg.note { color: var(--mid); }
-.msg.unii { font: 16px/1.55 var(--sans); }
+.msg.reply { font: 16px/1.55 var(--sans); }
 .msg.user p, .msg.work p, .msg.echo p { white-space: pre-wrap; }
 .msg.tool, .msg.echo { font: 12.5px/1.5 var(--mono); }
 .msg.tool { padding: 9px 14px; background: var(--block); border-radius: 10px; }
@@ -390,9 +390,9 @@ header > .imping { display: flex; flex-direction: column; justify-content: cente
 @media (hover: hover) { .msg:hover > .copy, .msg pre:hover > .copy { opacity: 1; } }
 @media (hover: none) {
   .copy { opacity: .6; }
-  #log .msg:not(.mind, .unii):has(> .copy) { margin-top: 34px; }
-  #log :is(.msg.mind, .msg.unii) { padding-right: 34px; }
-  #log :is(.msg.mind, .msg.unii) > .copy { top: calc((var(--row) - 26px) / 2); bottom: auto; }
+  #log .msg:not(.mind, .reply):has(> .copy) { margin-top: 34px; }
+  #log :is(.msg.mind, .msg.reply) { padding-right: 34px; }
+  #log :is(.msg.mind, .msg.reply) > .copy { top: calc((var(--row) - 26px) / 2); bottom: auto; }
   .msg pre:has(> .copy) { padding-right: 40px; }
   .msg pre > .copy { top: 9px; right: 9px; }
 }
@@ -587,7 +587,7 @@ body.tree { height: 100dvh; }
 #tree .s:focus-visible { outline: 2px solid var(--ink); outline-offset: -2px; } #tree .wait { overflow: hidden; } #tree .s.in { box-shadow: inset 3px 0 var(--mid); } #tree .s.in h4::after { content: " · IN CONTEXT"; } #tree .s.none { background: none; outline: 1px dashed var(--hair); outline-offset: -1px; color: var(--mid); }
 #tree .up::after { content: ""; position: absolute; left: 100%; width: calc(var(--g) / 2); top: var(--c, 50%); border-top: 1px solid var(--frame); }
 #tree .dn::before { content: ""; position: absolute; right: 100%; width: calc(var(--g) / 2); top: var(--t); height: calc(var(--h) + 1px); border-left: 1px solid var(--frame); background: linear-gradient(var(--frame), var(--frame)) 0 var(--m) / 100% 1px no-repeat; }
-#tree .s.user pre, #tree .s.unii pre { font: 16px/1.55 var(--sans); } #tree .s.tool pre, #tree .s.echo pre { font: 12.5px/1.5 var(--mono); }
+#tree .s.user pre, #tree .s.reply pre { font: 16px/1.55 var(--sans); } #tree .s.tool pre, #tree .s.echo pre { font: 12.5px/1.5 var(--mono); }
 #tree .s { padding-bottom: var(--pb, .7em); } #tree .s h4 { margin-top: var(--hm, .7em); } #tree .s pre { opacity: var(--o, 1); }
 #tree .s.one { cursor: pointer; } #tree .s.line h4 { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; } #tree .s.thin h4 { visibility: hidden; }
 #tree .s.one pre { -webkit-mask-image: linear-gradient(#000 calc(100% - 2.4em), transparent 90%); mask-image: linear-gradient(#000 calc(100% - 2.4em), transparent 90%); }

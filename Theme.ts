@@ -7,7 +7,7 @@ export const WHO: Record<string, string> = { work: "Report", note: "Note" };
 const KIND: Record<Kind, Look> = {
   user : { dim: false, it: false },
   work : { dim: false, it: false },
-  unii : { dim: false, it: false },
+  reply: { dim: false, it: false },
   tool : { dim: true, it: false },
   echo : { dim: true, it: false },
   note : { dim: true, it: true },

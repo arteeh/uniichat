@@ -7,7 +7,7 @@ export type Agent = { id: string; name: string; about: string; picture: string; 
 
 type Fields = { name: string; about: string; picture: string; prompt: string | null };
 
-export const UNII = "unii";
+export const LEAD = "main";
 
 const SCHEMA = "create table if not exists agents (id text primary key, name text not null, about text not null, picture text not null, prompt text, archived integer not null default 0, made integer not null, unread integer not null default 0)";
 
@@ -17,20 +17,20 @@ const OWN   = 64 * 1024;
 
 const HEADS = 24;
 
-const UNII_ABOUT  = "Executive assistant: automatically keeps track of the whole team.";
+const MAIN_ABOUT  = "Executive assistant: automatically keeps track of the whole team.";
 
 export namespace Team {
 
   export function open(): void {
     const db = Owner.open();
     db.run(SCHEMA);
-    if (Team.get(UNII) === null) {
-      db.query("insert into agents (id, name, about, picture, prompt, made) values (?, ?, ?, ?, null, 0)").run(UNII, "Unii", UNII_ABOUT, UNII);
+    if (Team.get(LEAD) === null) {
+      db.query("insert into agents (id, name, about, picture, prompt, made) values (?, ?, ?, ?, null, 0)").run(LEAD, "Ki", MAIN_ABOUT, LEAD);
     }
   }
 
   export function all(): Agent[] {
-    return Owner.open().query("select * from agents order by id <> 'unii', made").all() as Agent[];
+    return Owner.open().query("select * from agents order by id <> 'main', made").all() as Agent[];
   }
 
   export function active(): Agent[] {
@@ -50,7 +50,7 @@ export namespace Team {
   }
 
   export function default_prompt(id: string, name: string): string {
-    return Prompts.prompt(id === UNII ? "unii" : "agent", { Name: name });
+    return Prompts.prompt(id === LEAD ? "lead" : "agent", { Name: name });
   }
 
   // the fields a form sent, checked: a text saying what's wrong, or the
@@ -88,7 +88,7 @@ export namespace Team {
 
   export function picture_ok(picture: string, id: string | null): boolean {
     const head = /^head-(\d\d)$/.exec(picture);
-    return (head !== null && Number(head[1]) >= 1 && Number(head[1]) <= HEADS) || /^\/media\/[0-9a-f]{16}\.(png|jpeg|webp)$/.test(picture) || (picture === UNII && id === UNII);
+    return (head !== null && Number(head[1]) >= 1 && Number(head[1]) <= HEADS) || /^\/media\/[0-9a-f]{16}\.(png|jpeg|webp)$/.test(picture) || (picture === LEAD && id === LEAD);
   }
 
   export function head_random(): string {
@@ -110,11 +110,11 @@ export namespace Team {
   }
 
   export function archive(id: string, on: boolean): void {
-    Owner.open().query("update agents set archived = ? where id = ? and id <> 'unii'").run(on ? Date.now() : 0, id);
+    Owner.open().query("update agents set archived = ? where id = ? and id <> 'main'").run(on ? Date.now() : 0, id);
   }
 
   export function drop(id: string): void {
-    Owner.open().query("delete from agents where id = ? and id <> 'unii'").run(id);
+    Owner.open().query("delete from agents where id = ? and id <> 'main'").run(id);
   }
 
   export function unread(id: string, n: number | null): void {

@@ -13,8 +13,8 @@ import { FRAME, media_kind, PING, QUIT, RETRY, SLOW, TICK, WIRE, type Server } f
 
 const LOCAL = process.platform === "darwin" ? child.spawnSync("scutil", ["--get", "LocalHostName"]).stdout?.toString().trim() : "";
 const HOST  = LOCAL || os.hostname();
-const WORK  = "~/.unii/work";
-const FILE  = Machine.home(process.env.UNII_DIR ?? "~/.unii") + "/config.json";
+const WORK  = "~/.ki/work";
+const FILE  = Machine.home(process.env.KI_DIR ?? "~/.ki") + "/config.json";
 
 const LOOK = 2000;
 
@@ -35,7 +35,7 @@ export async function signin(given: string | undefined): Promise<{ url: string; 
 
 export async function run(given: string | undefined): Promise<void> {
   const { url, token, name, work } = await signin(given);
-  console.log("unii device " + name + " on " + url + ", work dir " + work);
+  console.log("ki device " + name + " on " + url + ", work dir " + work);
   const query = "?tab=" + crypto.randomUUID() + "&wire=" + WIRE + "&device=" + encodeURIComponent(name) + "&work=" + encodeURIComponent(work) + "&scratch=" + encodeURIComponent(SCRATCH) + (WIN ? "&shell=PowerShell" : "");
   const jobs = new Map<string, AbortController>();
   const outs = new Map<string, { $: "out"; id: string; job: string; out: object } | { $: "done"; id: string; agent: string; text: string }>();
@@ -82,12 +82,12 @@ export async function run(given: string | undefined): Promise<void> {
       } else if (msg.$ === "error" && !joined) {
         const old = (msg.wire ?? 0) > WIRE;
         if (refused !== old) {
-          console.error("unii: " + (old ? "this device's unii is older than the server: run `unii update`; it stops trying till then" : "the server runs an older unii than this device: run `unii update` there; trying again every " + SLOW / 1000 + " s"));
+          console.error("ki: " + (old ? "this device's ki is older than the server: run `ki update`; it stops trying till then" : "the server runs an older ki than this device: run `ki update` there; trying again every " + SLOW / 1000 + " s"));
         }
         [refused, next] = [old, old ? null : SLOW];
         sock.close();
       } else if (msg.$ === "note" || msg.$ === "error") {
-        console.error("unii: " + msg.text);
+        console.error("ki: " + msg.text);
       }
       if (msg.$ !== "error") {
         [joined, refused] = [true, null];
@@ -101,7 +101,7 @@ export async function run(given: string | undefined): Promise<void> {
       ws = null;
       Mcp.lost();
       if (!up && !await Client.signed(url, token)) {
-        Client.fail("this device is signed out: run unii device to sign it in again");
+        Client.fail("this device is signed out: run ki device to sign it in again");
       }
       if (next !== null) {
         setTimeout(open, next);
@@ -207,7 +207,7 @@ function servers(): string | null {
     const why = err instanceof SyntaxError ? "isn't JSON" : "can't be read (" + (err_code(err) ?? String(err)) + ")";
     if (why !== said) {
       said = why;
-      console.error("unii: " + FILE + " or its mcp " + why + ": the MCP servers told stay as they were");
+      console.error("ki: " + FILE + " or its mcp " + why + ": the MCP servers told stay as they were");
     }
     return null;
   }

@@ -4,7 +4,7 @@ import { get, rec, text_of } from "./Json.ts";
 import * as View from "./View.ts";
 import { write_whole } from "./Write.ts";
 
-const DIR   = (process.env.XDG_CONFIG_HOME || os.homedir() + "/.config") + "/unii";
+const DIR   = (process.env.XDG_CONFIG_HOME || os.homedir() + "/.config") + "/ki";
 const LOCAL = "http://127.0.0.1:8788";
 
 export const Socket = WebSocket as unknown as new (url: string, options: Bun.WebSocketOptions) => WebSocket;
@@ -25,7 +25,7 @@ export function write(name: string, conf: object): void {
 }
 
 export function server(given: string | undefined, conf: Record<string, unknown>): string {
-  return (given ?? process.env.UNII_URL ?? (typeof conf.url === "string" ? conf.url : undefined) ?? LOCAL).replace(/\/$/, "");
+  return (given ?? process.env.KI_URL ?? (typeof conf.url === "string" ? conf.url : undefined) ?? LOCAL).replace(/\/$/, "");
 }
 
 export function auth(token: string | undefined): Record<string, string> {
@@ -48,14 +48,14 @@ export async function login(url: string, what: string): Promise<string> {
     fail(text_of(get(out, "error"), "no sign-in from " + url));
   }
   console.log("To sign " + what + " in to " + url + ", open this link in a browser signed in there");
-  console.log("(on the server, `unii serve link` signs a browser in):\n\n  " + link + "\n");
+  console.log("(on the server, `ki serve link` signs a browser in):\n\n  " + link + "\n");
   console.log("and type this code: " + String(get(out, "code")) + "\n");
   const wait = { headers: auth(key), timeout: false } as RequestInit;
   while (true) {
     const done = await fetch(url + "/api/wait", wait).catch(() => null);
     const ans: unknown = (await done?.json().catch(() => ({}))) ?? {};
     if (done?.status === 410) {
-      fail("the sign-in link expired: run unii again");
+      fail("the sign-in link expired: run ki again");
     }
     if (done?.ok && get(ans, "ok")) {
       console.log("Signed in.");
@@ -68,6 +68,6 @@ export async function login(url: string, what: string): Promise<string> {
 }
 
 export function fail(why: string): never {
-  console.error("unii: " + why);
+  console.error("ki: " + why);
   process.exit(1);
 }

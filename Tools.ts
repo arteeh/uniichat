@@ -7,7 +7,7 @@ import { clip_page } from "./Clip.ts";
 import { Mcp, type Held, type Servers } from "./Mcp.ts";
 import { Memory } from "./Memory.ts";
 import * as Prompts from "./Prompts.ts";
-import { Team, UNII } from "./Team.ts";
+import { Team, LEAD } from "./Team.ts";
 import * as Timer from "./Timer.ts";
 import { PING } from "./View.ts";
 import { Sub, type Spawn } from "./Sub.ts";
@@ -51,7 +51,7 @@ export type Subs = {
   show    : (name: string) => string | null;
 };
 
-// what the agents share: their notes on devices and MCP servers go to Unii
+// what the agents share: their notes on devices and MCP servers go to the main agent
 type Hub = {
   note   : (text: string) => void;
   change : () => void;
@@ -231,7 +231,7 @@ export namespace Tools {
     switch (method) {
       case "initialize": {
         const protocolVersion = params.protocolVersion ?? "2025-06-18";
-        return { protocolVersion, capabilities: { tools: {} }, serverInfo: { name: "unii", version: "1" } };
+        return { protocolVersion, capabilities: { tools: {} }, serverInfo: { name: "ki", version: "1" } };
       }
       case "tools/list": {
         const theirs = await Mcp.list(tools.mcp, Tools.held(tools, who));
@@ -350,7 +350,7 @@ export namespace Tools {
   }
 
   export function seat(tools: Tools, id: string): Seat | undefined {
-    return tools.seats.get(id === UNII ? "main" : id);
+    return tools.seats.get(id === LEAD ? "main" : id);
   }
 
   export function schedule(seat: Seat, timer: Timer.Timer | string): Out {
@@ -496,7 +496,7 @@ export namespace Tools {
     if (why !== d.why) {
       d.why = why;
       if (why !== "") {
-        console.error("unii: device " + device + ": " + why);
+        console.error("ki: device " + device + ": " + why);
         tools.hub.note("The device " + device + "'s MCP servers: " + why + ".");
       }
     }
@@ -504,7 +504,7 @@ export namespace Tools {
   }
 
   export function same_prefix_note(name: string, prefix: string, other: string): string {
-    return "The device " + name + "'s MCP servers are left out: their tools would be named " + prefix + "_…, as the device " + other + "'s are. Rename one of the two (name in its ~/.config/unii/device.json).";
+    return "The device " + name + "'s MCP servers are left out: their tools would be named " + prefix + "_…, as the device " + other + "'s are. Rename one of the two (name in its ~/.config/ki/device.json).";
   }
 
   export function plug(tools: Tools): void {
@@ -517,7 +517,7 @@ export namespace Tools {
       if (clash !== d.clash) {
         d.clash = clash;
         if (clash !== "") {
-          console.error("unii: " + clash);
+          console.error("ki: " + clash);
           tools.hub.note(clash);
         }
       }
@@ -576,7 +576,7 @@ export namespace Tools {
     const d = tools.devices.get(device);
     const open = Tools.opened(tools).map(([name]) => name).join(", ") || "none";
     if (d === undefined || d.terms.size === 0) {
-      return "No device " + device + " is open (its unii device isn't running). Open: " + open + ". Only the user starts it, so don't retry or wait: end your turn, saying what is left.";
+      return "No device " + device + " is open (its ki device isn't running). Open: " + open + ". Only the user starts it, so don't retry or wait: end your turn, saying what is left.";
     }
     return d;
   }
@@ -629,7 +629,7 @@ export namespace Tools {
   }
 
   // a job's report goes to the agent that started it, a done subagent's to
-  // its spawner, or to Unii if that one is gone
+  // its spawner, or to the main agent if that one is gone
   export function report(tools: Tools, who: string, text: string): void {
     const seat = tools.seats.get(who);
     const owner = seat === undefined ? tools.owner(who) : undefined;

@@ -40,8 +40,8 @@ const ENV = {
   CLAUDE_CODE_NO_MODEL_FALLBACK            : "1",
   CLAUDE_CODE_DISABLE_REFUSAL_FALLBACK     : "1",
   CLAUDE_CODE_MAX_OUTPUT_TOKENS            : "128000",
-  MCP_TIMEOUT                              : "60000", // connecting to unii's tools, whose list takes up to 5 s
-  CLAUDE_AGENT_SDK_CLIENT_APP              : "uniichat",
+  MCP_TIMEOUT                              : "60000", // connecting to ki's tools, whose list takes up to 5 s
+  CLAUDE_AGENT_SDK_CLIENT_APP              : "ki",
 };
 
 // Claude Code's model slots, its side jobs' too: all the picked model
@@ -51,13 +51,13 @@ const HOUR = { type: "ephemeral", ttl: "1h" };
 
 const OUTLASTS_CLAUDE_CODES_MCP_TIMEOUT = 1e8;
 
-const SIGN_IN = "claude-sub is not signed in, or its sign-in expired: run `unii serve claude login` on the server";
+const SIGN_IN = "claude-sub is not signed in, or its sign-in expired: run `ki serve claude login` on the server";
 
 const OFF = ["server_error", "overloaded", "billing_error", "account_on_hold", "oauth_org_not_allowed", "verification_required", "model_not_found"];
 
 const BUSY_ERRORS = ["server_error", "overloaded"];
 
-const NO_BIN = "claude-sub needs Claude Code: `bun install` in uniichat's folder, or set `claude` to a Claude Code executable";
+const NO_BIN = "claude-sub needs Claude Code: `bun install` in ki's folder, or set `claude` to a Claude Code executable";
 
 const DIED = "Claude Code ended early";
 
@@ -105,7 +105,7 @@ export namespace ClaudeSub {
 
   export async function carried(): Promise<string | null> {
     const inside = Bun.embeddedFiles.map((f) => (f as Blob & { name: string }).name).find((name) => /^claude(-|\.|$)/.test(name));
-    return inside === undefined ? null : ClaudeSub.extract_under_unii_dir((process.platform === "win32" ? "B:\\~BUN\\root\\" : "/$bunfs/root/") + inside);
+    return inside === undefined ? null : ClaudeSub.extract_under_ki_dir((process.platform === "win32" ? "B:\\~BUN\\root\\" : "/$bunfs/root/") + inside);
   }
 
   export function installed(): string {
@@ -121,7 +121,7 @@ export namespace ClaudeSub {
     return process.platform + "-" + process.arch + (musl ? "-musl" : "");
   }
 
-  export async function extract_under_unii_dir(inside: string): Promise<string> {
+  export async function extract_under_ki_dir(inside: string): Promise<string> {
     const { extractFromBunfs } = await import("@anthropic-ai/claude-agent-sdk/extract");
     const out = ClaudeSub.with_tmpdir(config.DIR, () => extractFromBunfs(inside));
     ClaudeSub.claim(path.dirname(out));
@@ -240,7 +240,7 @@ export namespace ClaudeSub {
       thinking               : { type: "adaptive", display: "summarized" },
       systemPrompt           : [ask.system, boundary, ...(ask.own === undefined || ask.own === "" ? [] : [ask.own])],
       tools,
-      allowedTools           : [...tools, "mcp__unii"],
+      allowedTools           : [...tools, "mcp__ki"],
       disallowedTools        : deny,
       permissionMode         : "dontAsk",
       mcpServers             : {},
@@ -262,7 +262,7 @@ export namespace ClaudeSub {
   }
 
   export function mcp(server: string): Parameters<Query["setMcpServers"]>[0] {
-    return server ? { unii: { type: "http", url: server, alwaysLoad: true, timeout: OUTLASTS_CLAUDE_CODES_MCP_TIMEOUT } } : {};
+    return server ? { ki: { type: "http", url: server, alwaysLoad: true, timeout: OUTLASTS_CLAUDE_CODES_MCP_TIMEOUT } } : {};
   }
 
 
@@ -351,8 +351,8 @@ export namespace ClaudeSub {
       return null;
     }
     const out = await Agent.unless_stopped(code.q.setMcpServers(ClaudeSub.mcp(server)), signal);
-    const err = out?.errors?.unii;
-    return err === undefined ? null : "claude-sub couldn't reach UniiChat's tools: " + err;
+    const err = out?.errors?.ki;
+    return err === undefined ? null : "claude-sub couldn't reach Ki's tools: " + err;
   }
 
   // when a limit Claude Code told resets (ms since 1970; null: not told).
@@ -482,8 +482,8 @@ export namespace ClaudeSub {
   // the messages steered in since, in one message: two would start two turns
   export async function go_on(code: Code, ask: Ask, lead: string[]): Promise<void> {
     const say = await AskAI.steered(ask);
-    const texts = [...lead.map((text) => AskAI.labeled({ text, imgs: [], from: Prompts.sender("uniichat") })), ...(say === null ? [] : [say.text])];
-    code.box.put(texts.length === 0 ? [AskAI.labeled({ text: Prompts.prompt("continue"), imgs: [], from: Prompts.sender("uniichat") })] : texts, say?.imgs ?? []);
+    const texts = [...lead.map((text) => AskAI.labeled({ text, imgs: [], from: Prompts.sender("ki") })), ...(say === null ? [] : [say.text])];
+    code.box.put(texts.length === 0 ? [AskAI.labeled({ text: Prompts.prompt("continue"), imgs: [], from: Prompts.sender("ki") })] : texts, say?.imgs ?? []);
   }
 
   export function died_before_saying(err: unknown, said: boolean, signal: AbortSignal): boolean {

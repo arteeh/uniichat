@@ -8,9 +8,9 @@ import { Push } from "./Push.ts";
 
 type Ticket = { session: string | null; what: string };
 
-export const FILE = config.DIR + "/unii.db";
+export const FILE = config.DIR + "/ki.db";
 
-const COOKIE = "unii";
+const COOKIE = "ki";
 
 // a session cookie's attributes: Secure only on an https site, as Safari
 // drops a Secure cookie an http one (a server on 127.0.0.1) sets
@@ -98,7 +98,7 @@ export namespace Owner {
     if (revoke !== undefined) {
       const row = rows[Number(revoke) - 1];
       if (!/^\d+$/.test(revoke) || row === undefined) {
-        throw new Error("no session " + revoke + (rows.length === 0 ? ": there are none" : ": `unii serve sessions` numbers them 1 to " + rows.length));
+        throw new Error("no session " + revoke + (rows.length === 0 ? ": there are none" : ": `ki serve sessions` numbers them 1 to " + rows.length));
       }
       db.query("delete from sessions where hash = ?").run(row.hash);
       return console.log("Signed out " + revoke + " (" + (row.what || "a session") + ").");
@@ -108,7 +108,7 @@ export namespace Owner {
     const kind = (what: string) => (what.startsWith("the device ") ? "device" : what === "a browser" ? "browser" : "-");
     const when = (at: number) => (at > 0 ? new Date(at).toISOString().slice(0, 16).replace("T", " ") + " UTC" : "before arteeh.17");
     rows.forEach((r, i) => console.log(String(i + 1).padStart(3) + ". " + kind(r.what).padEnd(9) + (r.what || "-").padEnd(32) + " signed in " + when(r.at) + (mine.has(r.hash) ? "  (" + mine.get(r.hash) + ")" : "")));
-    console.log(rows.length === 0 ? "No sessions." : "Last use isn't tracked. `unii serve sessions revoke <n>` signs one out; `--all`, all.");
+    console.log(rows.length === 0 ? "No sessions." : "Last use isn't tracked. `ki serve sessions revoke <n>` signs one out; `--all`, all.");
   }
 
   export function cli(): void {
@@ -150,13 +150,13 @@ export namespace Owner {
         }
         const link = Owner.ticket_read(t, false);
         if (link === null) {
-          return Owner.page("This sign-in link expired", "Ask for a new one: run <code>unii serve link</code> on the server, or start the device again.");
+          return Owner.page("This sign-in link expired", "Ask for a new one: run <code>ki serve link</code> on the server, or start the device again.");
         }
         if (link.session !== null) {
-          return owner ? Owner.page_confirm(t, link.what, "") : Owner.page("Sign in this browser first", "Run <code>unii serve link</code> on the server, open the link it prints, then open this link again.");
+          return owner ? Owner.page_confirm(t, link.what, "") : Owner.page("Sign in this browser first", "Run <code>ki serve link</code> on the server, open the link it prints, then open this link again.");
         }
         // a button, so a chat app's preview of the link doesn't use it up
-        return Owner.page("Sign in this browser", `Sign in to this unii server as its owner.</p><form method="post" action="/auth"><input type="hidden" name="t" value="${Owner.safe(t)}"><button type="submit" autofocus>Sign in</button></form><p>`);
+        return Owner.page("Sign in this browser", `Sign in to this ki server as its owner.</p><form method="post" action="/auth"><input type="hidden" name="t" value="${Owner.safe(t)}"><button type="submit" autofocus>Sign in</button></form><p>`);
       }
       case "/api/wait": {
         if (owner) {
@@ -262,7 +262,7 @@ export namespace Owner {
   }
 
   export function page(title: string, body: string): Response {
-    const page = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${title} · UniiChat</title><link rel="stylesheet" href="/style.css"></head><body class="solo"><main><h1>${title}</h1><p class="sub">${body}</p></main></body></html>`;
+    const page = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${title} · Ki</title><link rel="stylesheet" href="/style.css"></head><body class="solo"><main><h1>${title}</h1><p class="sub">${body}</p></main></body></html>`;
     return new Response(page, { headers: { "content-type": "text/html; charset=utf-8" } });
   }
 

@@ -35,12 +35,12 @@ export type McpServer = {
   timeout : number;
 };
 
-export const DIR = config_path(process.env.UNII_DIR ?? "~/.unii");
+export const DIR = config_path(process.env.KI_DIR ?? "~/.ki");
 
 export const FILE_PATH = DIR + "/config.json";
 
 // the fixed prompts' files, which the installer writes
-export const SHARE = process.platform === "win32" ? (process.env.LOCALAPPDATA ?? os.homedir() + "\\AppData\\Local") + "\\unii" : (process.env.XDG_DATA_HOME || os.homedir() + "/.local/share") + "/unii";
+export const SHARE = process.platform === "win32" ? (process.env.LOCALAPPDATA ?? os.homedir() + "\\AppData\\Local") + "\\ki" : (process.env.XDG_DATA_HOME || os.homedir() + "/.local/share") + "/ki";
 export const KEYS_PATH = DIR + "/keys.json";
 
 export const SETTINGS: Setting[] = [
@@ -68,7 +68,7 @@ const DEFAULT_MODEL: Record<Vendor, string> = {
   "openai-api" : "gpt-6.1-sol",
 };
 
-const NONE     = "Not signed in and no API key: sign in with `unii serve claude login` (or `unii serve chatgpt login`) on the server, or set a key in Settings";
+const NONE     = "Not signed in and no API key: sign in with `ki serve claude login` (or `ki serve chatgpt login`) on the server, or set a key in Settings";
 const NONE_WHY = "not signed in, no key";
 
 export const VARS: Record<string, string> = {
@@ -110,12 +110,12 @@ export let   COMPACTOR_CONTEXT = MADE.context;
 
 export const MEDIA_MAX  = (Number(config_get("media_mb", "")) || 1024) * 2 ** 20;
 
-const MCP_VAR = config_env_taken("UNII_MCP");
+const MCP_VAR = config_env_taken("KI_MCP");
 export const MCP_ENV_NOTE: string | null = config_mcp_some(MCP_VAR)
-  ? "UNII_MCP is set, but unii serve runs no MCP servers, so they are left out: put them in the mcp of a device's own ~/.unii/config.json (for this computer, run unii device beside the server)."
+  ? "KI_MCP is set, but ki serve runs no MCP servers, so they are left out: put them in the mcp of a device's own ~/.ki/config.json (for this computer, run ki device beside the server)."
   : null;
 export const MCP_FILE_STARTUP_NOTE: string | null = config_mcp_some(FILE.mcp)
-  ? "unii serve runs no MCP servers: the mcp in " + FILE_PATH + " runs only on a unii device that reads this file (unii device beside the server)."
+  ? "ki serve runs no MCP servers: the mcp in " + FILE_PATH + " runs only on a ki device that reads this file (ki device beside the server)."
   : null;
 
 function config_env_taken(name: string): string | undefined {
@@ -159,7 +159,7 @@ function config_named(file: Record<string, unknown>): Vendor[] {
   const set = ["pick", "compactor"].map((key) => config_env_value(key) ?? config_str(file[key]) ?? "");
   let profiles: unknown = file.profiles;
   try {
-    profiles = process.env.UNII_PROFILES === undefined ? profiles : JSON.parse(process.env.UNII_PROFILES);
+    profiles = process.env.KI_PROFILES === undefined ? profiles : JSON.parse(process.env.KI_PROFILES);
   } catch {
     profiles = null;
   }
@@ -177,7 +177,7 @@ export function config_keep(vendors: string[]): void {
   try {
     config_reload();
   } catch (err) {
-    console.error("unii: " + (err instanceof Error ? err.message : String(err)));
+    console.error("ki: " + (err instanceof Error ? err.message : String(err)));
   }
 }
 
@@ -219,13 +219,13 @@ export function config_follow(): boolean {
     config_reload();
     return true;
   } catch (err) {
-    console.error("unii: the sign-ins changed, but " + err_why(err));
+    console.error("ki: the sign-ins changed, but " + err_why(err));
     return false;
   }
 }
 
 function config_env_value(key: string): string | undefined {
-  return process.env["UNII_" + key.toUpperCase()];
+  return process.env["KI_" + key.toUpperCase()];
 }
 
 function config_str(x: unknown): string | undefined {
@@ -324,7 +324,7 @@ function config_run(key: string, text: string, offer: Offer): Pick {
 }
 
 function config_profiles(file: Record<string, unknown>, offer: Offer): Record<string, Fall[]> {
-  const env = process.env.UNII_PROFILES;
+  const env = process.env.KI_PROFILES;
   const all: unknown = env === undefined ? file.profiles ?? {} : JSON.parse(env);
   if (!rec(all)) {
     throw new Error("config: profiles is no object of names, each a list of models");
@@ -429,7 +429,7 @@ function config_server(name: string, s: unknown, device: string): McpServer {
     }
     return { ...server, url: s.url, headers: map(s.headers, "headers") };
   }
-  throw bad("has type " + JSON.stringify(type) + "; unii runs stdio and http (streamable HTTP) servers");
+  throw bad("has type " + JSON.stringify(type) + "; ki runs stdio and http (streamable HTTP) servers");
 }
 
 function config_key(name: string): string {

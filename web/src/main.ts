@@ -19,14 +19,14 @@ const DESK = matchMedia("(hover: hover)");
 
 const ME_WAIT = 4000;
 // "on" or "off": notifications as the user last had them on this device
-const NOTIFY = "unii.notify";
+const NOTIFY = "ki.notify";
 const TRAVEL = 1000;
 
 const NONE   = "No Claude or ChatGPT chats in that folder. Choose ~/.claude or ~/.codex.";
 
 const SCENES = `
   <div class="scene"><p>Your entire life.</p><p>One single chat.</p></div>
-  <div class="scene"><i class="mark"></i><h1>UniiChat</h1></div>`;
+  <div class="scene"><i class="mark"></i><h1>Ki</h1></div>`;
 
 const WIDE = matchMedia("(min-width: 900px)");
 
@@ -42,7 +42,7 @@ let START = false;
 const START_SHOWN = 2000;
 let TRIP = 0;
 
-const UNII = "unii";
+const LEAD = "main";
 
 const AGENT = /^\/a\/([a-z0-9]{1,16})(\/edit)?$/;
 
@@ -54,7 +54,7 @@ const PAGES = ["/settings", "/account"];
 // a reloaded screen over a chat (#164) starts on that chat's agent, or on
 // the last chat open in this tab, whatever width the chain was laid at
 const OVER = get(history.state, "chain");
-const v = View.view_new(AGENT.exec(location.pathname)?.[1] ?? (Array.isArray(OVER) ? AGENT.exec(String(OVER.at(-2)))?.[1] : undefined) ?? ([...PAGES, "/new"].includes(location.pathname) ? sessionStorage.getItem(kept("chat")) : null) ?? UNII);
+const v = View.view_new(AGENT.exec(location.pathname)?.[1] ?? (Array.isArray(OVER) ? AGENT.exec(String(OVER.at(-2)))?.[1] : undefined) ?? ([...PAGES, "/new"].includes(location.pathname) ? sessionStorage.getItem(kept("chat")) : null) ?? LEAD);
 
 const BOX = $(".composer .field", HTMLElement);
 
@@ -108,7 +108,7 @@ function $(sel: string, type: { new (): HTMLElement; prototype: HTMLElement } = 
 }
 
 function kept(fact: string): string {
-  return "unii." + fact;
+  return "ki." + fact;
 }
 
 async function boot(): Promise<void> {
@@ -139,7 +139,7 @@ async function boot(): Promise<void> {
   document.body.classList.toggle("start", START);
   setTimeout(() => document.body.classList.remove("start"), START_SHOWN);
   if (await boot_me() === null) {
-    solo("Sign in", "This UniiChat server is private. On the computer it runs on, run <code>unii serve link</code> and open the link it prints here.");
+    solo("Sign in", "This Ki server is private. On the computer it runs on, run <code>ki serve link</code> and open the link it prints here.");
     return;
   }
   chat();
@@ -190,7 +190,7 @@ async function boot_me(): Promise<unknown> {
       return got;
     }
     if (k === 0) {
-      toast("Can't reach UniiChat. Reconnecting…", true);
+      toast("Can't reach Ki. Reconnecting…", true);
     }
     await new Promise((ok) => setTimeout(ok, View.RETRY));
   }
@@ -398,7 +398,7 @@ function upload_answer(xhr: XMLHttpRequest): { name: string } | { error: string 
   if (typeof out === "object" && out !== null && "name" in out && typeof out.name === "string") {
     return { name: out.name };
   }
-  const why = typeof out === "object" && out !== null && "error" in out && typeof out.error === "string" ? out.error : xhr.status === 0 ? "Can't reach UniiChat." : "HTTP " + xhr.status;
+  const why = typeof out === "object" && out !== null && "error" in out && typeof out.error === "string" ? out.error : xhr.status === 0 ? "Can't reach Ki." : "HTTP " + xhr.status;
   return { error: "Could not upload: " + why };
 }
 
@@ -566,7 +566,7 @@ async function mic(): Promise<void> {
   }
   const stream = await navigator.mediaDevices.getUserMedia({ audio: true }).catch(() => null);
   if (stream === null) {
-    toast("UniiChat can't use the microphone.");
+    toast("Ki can't use the microphone.");
     return;
   }
   const mimeType = ["audio/webm", "audio/mp4"].find((type) => MediaRecorder.isTypeSupported(type));
@@ -658,7 +658,7 @@ function on_screen(): string | null {
 function notes_close(): void {
   const agent = on_screen();
   if (agent !== null) {
-    navigator.serviceWorker?.ready.then((reg) => reg.getNotifications({ tag: "unii-" + agent })).then((notes) => notes.forEach((n) => on_screen() === agent && n.close())).catch(() => {});
+    navigator.serviceWorker?.ready.then((reg) => reg.getNotifications({ tag: "ki-" + agent })).then((notes) => notes.forEach((n) => on_screen() === agent && n.close())).catch(() => {});
   }
 }
 
@@ -1254,12 +1254,12 @@ function up_from(path: string): string | null {
   const url = new URL(path, location.origin);
   const edit = FORM.exec(url.pathname)?.[2];
   if (url.pathname === TREE) {
-    return "/a/" + (url.searchParams.get("a") ?? UNII);
+    return "/a/" + (url.searchParams.get("a") ?? LEAD);
   }
   if (edit !== undefined) {
     return "/a/" + edit;
   }
-  return url.pathname === "/" ? null : over_chat(url.pathname) && WIDE.matches && v.agent !== UNII ? "/a/" + v.agent : "/";
+  return url.pathname === "/" ? null : over_chat(url.pathname) && WIDE.matches && v.agent !== LEAD ? "/a/" + v.agent : "/";
 }
 
 // a screen that sits over the chat that was open, when wide
@@ -1305,7 +1305,7 @@ function route(): void {
   const chat = !page && !tree && !list;
   const sub = SUB.exec(p);
   const left = !$("#log").hidden && v.page === null;
-  chat_to(AGENT.exec(p)?.[1] ?? sub?.[1] ?? (tree ? new URLSearchParams(location.search).get("a") ?? UNII : p === "/" ? UNII : v.agent));
+  chat_to(AGENT.exec(p)?.[1] ?? sub?.[1] ?? (tree ? new URLSearchParams(location.search).get("a") ?? LEAD : p === "/" ? LEAD : v.agent));
   sessionStorage.setItem(kept("chat"), v.agent);
   for (const out of View.view_act(v, { $: "Goto", name: sub?.[2] ?? null })) {
     View.link_send(v, out);
@@ -1411,7 +1411,7 @@ async function agent_page(id: string | null): Promise<void> {
     return;
   }
   $("header .title").textContent = a?.name ?? "New agent";
-  el.innerHTML = Html.agent_html(a, id === UNII);
+  el.innerHTML = Html.agent_html(a, id === LEAD);
   const form = find(el, "form", HTMLFormElement);
   const [name, prompt] = [find(form, "[name=name]", HTMLInputElement), find(form, "[name=prompt]", HTMLTextAreaElement)];
   const was = { prompt: a?.own === true ? null : a?.template ?? all.template };
@@ -1545,7 +1545,7 @@ function archived_draw(): void {
       return;
     }
     const res = await fetch("/api/agents/" + m.id, { method: "DELETE" }).catch(() => null);
-    const out = ((await res?.json().catch(() => null)) ?? { error: "Can't reach UniiChat." }) as { error?: string };
+    const out = ((await res?.json().catch(() => null)) ?? { error: "Can't reach Ki." }) as { error?: string };
     toast(out.error ?? m.name + " is deleted.");
   };
 }
@@ -2116,7 +2116,7 @@ async function renew(hidden = false): Promise<void> {
   const tries = was === v.build ? Number(n) : 0;
   const store = isSecureContext && "caches" in window ? window.caches : null;
   const keys = (await store?.keys().catch(() => [])) ?? [];
-  await Promise.all(store === null ? [] : keys.filter((k) => k.startsWith("unii-shell")).map((k) => store.delete(k)));
+  await Promise.all(store === null ? [] : keys.filter((k) => k.startsWith("ki-shell")).map((k) => store.delete(k)));
   if (tries > 0) {
     await Promise.all(["/", "/app.js", "/style.css", "/sw.js"].map((path) => fetch(path, { cache: "reload" }).catch(() => null)));
   }
@@ -2174,10 +2174,10 @@ function toast(text: string, stay = false, act?: [string, () => void]): void {
 
 function intro_play(): Promise<void> {
   const skip = new URLSearchParams(location.search).has("skip");
-  if (localStorage.getItem("unii.intro") !== null || skip) {
+  if (localStorage.getItem("ki.intro") !== null || skip) {
     return Promise.resolve();
   }
-  localStorage.setItem("unii.intro", "1");
+  localStorage.setItem("ki.intro", "1");
   const el = document.createElement("div");
   return new Promise((gone) => {
     function end(): void {

@@ -1,21 +1,18 @@
-UniiChat (arteeh's fork)
-========================
+Ki
+==
 
-UniiChat is an AI agent with one chat that never ends. There is no "new chat" button: you talk to the same agent for days, weeks, years, and it remembers.
+Ki is an AI agent with one chat that never ends. There is no "new chat" button: you talk to the same agent for days, weeks, years, and it remembers.
 
-Based on [Victor Taelin's UniiChat source code](https://github.com/VictorTaelin/uniichat).
+Ki started from [Victor Taelin's UniiChat](https://github.com/VictorTaelin/uniichat).
 
 Features
 --------
 
 - **One chat, forever.** No new chats or sessions. Every tab and phone shows the same live chat.
 - **A memory system that keeps everything.** Messages are summarized into a tree that the agent sees every turn: recent messages in detail, older ones more broadly. It can zoom into any line, down to the original message.
-- **All your computers.** Run `unii device` on a machine and the agent can run commands and edit files there.
-- **Goals.** `/goal` keeps UniiChat working until something is done.
-- **Don't start from scratch.** Import past conversations from either Claude Code, Codex or another UniiChat instance into your memory tree.
-
-What this fork adds:
-
+- **All your computers.** Run `ki device` on a machine and the agent can run commands and edit files there.
+- **Goals.** `/goal` keeps Ki working until something is done.
+- **Don't start from scratch.** Import past conversations from either Claude Code, Codex or another Ki instance into your memory tree.
 - **Claude and ChatGPT plans** as vendors (`claude-sub`, `openai-sub`) beside API keys; profiles that fall back to the next model when one is out; auto-resume after hitting usage limits.
 - **Native Windows**: server and devices, with a one-line PowerShell install.
 - **MCP servers** per device.
@@ -28,9 +25,9 @@ What this fork adds:
 - **Images, video, audio and HTML pages inline** for the agent to show you things, or for you to show the agent.
 - **Conversation mode** for when you want a short continuous back-and-forth without the agent forgetting anything you said.
 - **An installable web app (PWA)** on phones and desktops: icons, an offline shell, Web Push for replies, a nav bar that shows on Android; the composer stays above a phone's keyboard.
-- **One owner per server**, no accounts, email, billing, or anything else exclusive to the uniichat.com version; `unii serve sessions` and `unii serve sessions revoke` to sign a lost device out.
+- **One owner per server**, no accounts, email or billing; `ki serve sessions` and `ki serve sessions revoke` to sign a lost device out.
 - **Background services** (`-d`, `stop`, `logs`) that updates restart.
-- **No telemetry or update checker**: `unii update` when you want it.
+- **No telemetry or update checker**: `ki update` when you want it.
 - **Better defaults**: Sonnet 5.5 medium does the compaction, seeing 4 KB of chat around each message (was Haiku 5.5 high with 32 KB), so summaries make up less.
 
 Install
@@ -38,35 +35,35 @@ Install
 
 Linux, macOS or WSL:
 
-`curl -fsSL https://github.com/arteeh/uniichat/releases/latest/download/install.sh | sh`
+`curl -fsSL https://github.com/arteeh/ki/releases/latest/download/install.sh | sh`
 
 Windows (PowerShell, no admin needed):
 
-`irm https://github.com/arteeh/uniichat/releases/latest/download/install.ps1 | iex`
+`irm https://github.com/arteeh/ki/releases/latest/download/install.ps1 | iex`
 
-Either way you get one `unii` program (in `~/.local/bin`, or `%LOCALAPPDATA%\Programs\unii` on Windows). `unii update` installs the newest release and restarts the background services on it.
+Either way you get one `ki` program (in `~/.local/bin`, or `%LOCALAPPDATA%\Programs\ki` on Windows). `ki update` installs the newest release and restarts the background services on it.
 
-**Checked install.** The install scripts are signed with our release key, `ssh-ed25519 TODO-the-real-release-key-made-at-release-time`; `unii update` checks it before it runs one. To check yourself first (ssh-keygen comes with Linux, macOS and Windows 10/11):
+**Checked install.** The install scripts are signed with our release key, `ssh-ed25519 TODO-the-real-release-key-made-at-release-time`; `ki update` checks it before it runs one. To check yourself first (ssh-keygen comes with Linux, macOS and Windows 10/11):
 
 Linux, macOS or WSL:
 
-`curl -fsSLO https://github.com/arteeh/uniichat/releases/latest/download/install.sh -O https://github.com/arteeh/uniichat/releases/latest/download/install.sh.sig && echo "unii ssh-ed25519 TODO-the-real-release-key-made-at-release-time" > unii.signers && ssh-keygen -Y verify -f unii.signers -I unii -n unii-install.sh -s install.sh.sig < install.sh && sh install.sh`
+`curl -fsSLO https://github.com/arteeh/ki/releases/latest/download/install.sh -O https://github.com/arteeh/ki/releases/latest/download/install.sh.sig && echo "ki ssh-ed25519 TODO-the-real-release-key-made-at-release-time" > ki.signers && ssh-keygen -Y verify -f ki.signers -I ki -n ki-install.sh -s install.sh.sig < install.sh && sh install.sh`
 
 Windows (PowerShell):
 
-`$b = "https://github.com/arteeh/uniichat/releases/latest/download"; irm $b/install.ps1 -OutFile install.ps1; irm $b/install.ps1.sig -OutFile install.ps1.sig; Set-Content unii.signers "unii ssh-ed25519 TODO-the-real-release-key-made-at-release-time" -Encoding ascii; cmd /c "ssh-keygen -Y verify -f unii.signers -I unii -n unii-install.ps1 -s install.ps1.sig < install.ps1"; if ($LASTEXITCODE -eq 0) { iex (Get-Content -Raw install.ps1) }`
+`$b = "https://github.com/arteeh/ki/releases/latest/download"; irm $b/install.ps1 -OutFile install.ps1; irm $b/install.ps1.sig -OutFile install.ps1.sig; Set-Content ki.signers "ki ssh-ed25519 TODO-the-real-release-key-made-at-release-time" -Encoding ascii; cmd /c "ssh-keygen -Y verify -f ki.signers -I ki -n ki-install.ps1 -s install.ps1.sig < install.ps1"; if ($LASTEXITCODE -eq 0) { iex (Get-Content -Raw install.ps1) }`
 
-If the release key is ever lost or leaked, `unii update` refuses the releases signed with a new one: reinstall with the lines above.
+If the release key is ever lost or leaked, `ki update` refuses the releases signed with a new one: reinstall with the lines above.
 
 Set up
 ------
 
-1. **Start the server** on the computer that keeps your chat: `unii serve -d`. It runs in the background from then on, at http://127.0.0.1:8788, with its data in `~/.unii` (or `$UNII_DIR`). To use it from other devices, put it behind HTTPS (see Q&A) and set `site` in Settings to that address.
-2. **Sign in.** `unii serve link` on that computer prints a link that signs your browser in. Devices sign in with a link and a code you confirm in that browser.
-3. **Pick a model.** In the web app, Settings (the cogwheel): add API keys. To use your Claude or ChatGPT plan instead, run `unii serve claude login` or `unii serve chatgpt login` on the server's computer, then pick `claude-sub` or `openai-sub`.
-4. **Add your computers.** On each one Unii may work on: `unii device -d https://your-server`. Unii works in `~/.unii/work` there. Want it working on the server's computer too? Run a device there as well.
+1. **Start the server** on the computer that keeps your chat: `ki serve -d`. It runs in the background from then on, at http://127.0.0.1:8788, with its data in `~/.ki` (or `$KI_DIR`). To use it from other devices, put it behind HTTPS (see Q&A) and set `site` in Settings to that address.
+2. **Sign in.** `ki serve link` on that computer prints a link that signs your browser in. Devices sign in with a link and a code you confirm in that browser.
+3. **Pick a model.** In the web app, Settings (the cogwheel): add API keys. To use your Claude or ChatGPT plan instead, run `ki serve claude login` or `ki serve chatgpt login` on the server's computer, then pick `claude-sub` or `openai-sub`.
+4. **Add your computers.** On each one Ki may work on: `ki device -d https://your-server`. Ki works in `~/.ki/work` there. Want it working on the server's computer too? Run a device there as well.
 
-**MCP servers** belong to a device: list them in that device's `~/.unii/config.json`, in the same shape as Claude's `mcpServers`:
+**MCP servers** belong to a device: list them in that device's `~/.ki/config.json`, in the same shape as Claude's `mcpServers`:
 
 ```json
 {
@@ -79,61 +76,65 @@ Set up
 }
 ```
 
-Unii sees them from its next turn, no restart. Switch them on or off in Settings.
+Ki sees them from its next turn, no restart. Switch them on or off in Settings.
 
-**In the background**, `-d` runs the server or a device as a service of your user (systemd on Linux, a Scheduled Task on Windows, a LaunchAgent on macOS): it starts at login and restarts if it crashes. `unii serve stop` / `unii device stop` removes it, `logs -f` follows its output. On Linux, `loginctl enable-linger` keeps it running while you're logged out. On Windows, `sudo unii device -d` offers to run it as administrator, so Unii can control apps that run as admin; then `sudo unii device stop` removes it.
+**In the background**, `-d` runs the server or a device as a service of your user (systemd on Linux, a Scheduled Task on Windows, a LaunchAgent on macOS): it starts at login and restarts if it crashes. `ki serve stop` / `ki device stop` removes it, `logs -f` follows its output. On Linux, `loginctl enable-linger` keeps it running while you're logged out. On Windows, `sudo ki device -d` offers to run it as administrator, so Ki can control apps that run as admin; then `sudo ki device stop` removes it.
 
-**Settings** are mostly on the Settings page. They're kept in `~/.unii/config.json`, where `UNII_<KEY>` environment variables override them. One lives only there: `after`, a shell command to run after each turn.
+**Settings** are mostly on the Settings page. They're kept in `~/.ki/config.json`, where `KI_<KEY>` environment variables override them. One lives only there: `after`, a shell command to run after each turn.
 
 Use
 ---
 
-- **Web:** open the server's address. Install it as an app from your browser to get notifications when Unii replies.
-- **Agents:** **+** in the chat list makes another agent, with its own chat, memory and prompt; agents can message each other, and Unii sees what all of them do. Each agent can spawn subagents for one-off tasks (a review, a search): they show under it in the chat list, report back once, and are done.
-- **Conversation mode:** the mode menu left of the model picker. From then on, your and Unii's messages stay word for word in Unii's memory, for a real discussion. It costs more per turn and turns itself off when the model's context window fills up.
-- `unii help` lists every command.
+- **Web:** open the server's address. Install it as an app from your browser to get notifications when Ki replies.
+- **Agents:** **+** in the chat list makes another agent, with its own chat, memory and prompt; agents can message each other, and Ki sees what all of them do. Each agent can spawn subagents for one-off tasks (a review, a search): they show under it in the chat list, report back once, and are done.
+- **Conversation mode:** the mode menu left of the model picker. From then on, your and Ki's messages stay word for word in Ki's memory, for a real discussion. It costs more per turn and turns itself off when the model's context window fills up.
+- `ki help` lists every command.
 
-From source (Bun): `bun install`, `bun run web`, `bun Cli.ts <command>`, `bun run build` for a single `unii` program.
+From source (Bun): `bun install`, `bun run web`, `bun Cli.ts <command>`, `bun run build` for a single `ki` program.
 
 Uninstall
 ---------
 
-Back up `~/.unii` first if you may want your chat back. Run `unii device stop` and `unii serve stop` where you used `-d`, then:
+Back up `~/.ki` first if you may want your chat back. Run `ki device stop` and `ki serve stop` where you used `-d`, then:
 
-- **Linux, macOS:** `rm ~/.local/bin/unii` and `rm -rf ~/.unii ~/.config/unii`.
-- **Windows:** `Remove-Item -Recurse -Force "$env:LOCALAPPDATA\Programs\unii", "$HOME\.unii", "$HOME\.config\unii"`, and take `%LOCALAPPDATA%\Programs\unii` out of your user Path.
+- **Linux, macOS:** `rm ~/.local/bin/ki` and `rm -rf ~/.ki ~/.config/ki`.
+- **Windows:** `Remove-Item -Recurse -Force "$env:LOCALAPPDATA\Programs\ki", "$HOME\.ki", "$HOME\.config\ki"`, and take `%LOCALAPPDATA%\Programs\ki` out of your user Path.
 
 Q&A
 ---
 
-**Can Unii use my screen?**
+**Can Ki use my screen?**
 
-Not by itself: ask Unii to add a computer-use MCP server, such as [cua-driver](https://github.com/trycua/cua/tree/main/libs/cua-driver), to the device whose screen it should use.
+Not by itself: ask Ki to add a computer-use MCP server, such as [cua-driver](https://github.com/trycua/cua/tree/main/libs/cua-driver), to the device whose screen it should use.
 
-**I don't trust its unlimited tool calling. Can I sandbox Unii?**
+**I don't trust its unlimited tool calling. Can I sandbox Ki?**
 
-Yes, with [Docker Sandboxes](https://docs.docker.com/ai/sandboxes/). Run `unii device` inside the sandbox and on no other computer, pointed at your server outside it (`http://host.docker.internal:8788` if it runs on the same PC), and let the sandbox reach it: `sbx policy allow network localhost:8788`. That device's MCP servers run in the sandbox too.
+Yes, with [Docker Sandboxes](https://docs.docker.com/ai/sandboxes/). Run `ki device` inside the sandbox and on no other computer, pointed at your server outside it (`http://host.docker.internal:8788` if it runs on the same PC), and let the sandbox reach it: `sbx policy allow network localhost:8788`. That device's MCP servers run in the sandbox too.
 
 **I don't trust its unlimited tool calling. Can I make it ask for permission on tool calls?**
 
 You enjoy pressing enter?
 
-**How can I reach UniiChat from outside my home network?**
+**How can I reach Ki from outside my home network?**
 
-With Tailscale: ask Unii to set up Tailscale Serve on HTTPS port 443, pointing at `unii serve`. Only your own Tailscale devices can reach it, not the whole internet.
+With Tailscale: ask Ki to set up Tailscale Serve on HTTPS port 443, pointing at `ki serve`. Only your own Tailscale devices can reach it, not the whole internet.
 
-**How can i give Unii administrator rights?**
+**How can i give Ki administrator rights?**
 
 - Linux: set up passwordless sudo (run `sudo visudo` and then add the line `your_username ALL=(ALL) NOPASSWD: ALL`).
-- Windows: run `sudo unii device -d` and be sure to enable the sudo option in settings when it prompts you.
+- Windows: run `sudo ki device -d` and be sure to enable the sudo option in settings when it prompts you.
 
 **Can others use my server?**
 
 No: a server has one owner. Anthropic and OpenAI don't allow sharing a plan, either.
 
+**Coming from UniiChat (`unii`)?**
+
+Run the install line (or `unii update`) on every computer that has it: it stops and removes the `unii` services, moves `~/.unii` to `~/.ki` and `~/.config/unii` to `~/.config/ki`, replaces `unii` with `ki` and starts the `ki` services where `unii` ones ran. Your agents keep their names. Settings given as `UNII_*` environment variables are read as `KI_*` now. An installed phone or desktop app keeps its old name until you install it again; its notifications keep working.
+
 **Upgrading from arteeh.16 or older?**
 
-Stop the server first (`systemctl --user stop unii-serve`), run the installer, then start it again: it moves your data to the new layout. Run `unii device` on each computer Unii should work on.
+Stop the server first (`systemctl --user stop unii-serve`), run the installer, then start it again: it moves your data to the new layout. Run `ki device` on each computer Ki should work on.
 
 License
 -------

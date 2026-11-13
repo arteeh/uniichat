@@ -12,7 +12,7 @@ The agent's memory: the whole chat between it and the user, oldest first, inside
 
 Each message has a kind:
 - user: the user's words
-- unii: the agent's replies
+- reply: the agent's replies
 - tool: the agent's tool calls
 - echo: tool results
 - work: another agent's message to the agent, starting "[Name]", a scheduled
@@ -20,7 +20,7 @@ Each message has a kind:
   a job's report, starting "[Job id]"
 - team: a line copied from another agent's memory, starting "[Name]"
 - ai: another AI's replies and tool calls, from an imported chat; not the agent's
-- note: UniiChat's own notes, and memories from before this chat
+- note: the app's own notes, and memories from before this chat
 
 The summaries form a binary tree: each message is compressed into a line (a
 short message is its own line), then adjacent lines are merged in pairs, again

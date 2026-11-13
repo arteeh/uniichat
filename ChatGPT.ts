@@ -39,7 +39,7 @@ const LIMITS: Record<string, string> = {
   insufficient_quota  : "is out of quota",
 };
 
-const SIGN_IN = "run `unii serve chatgpt login` on the server";
+const SIGN_IN = "run `ki serve chatgpt login` on the server";
 
 let REFRESHING: Promise<Auth> | null = null;
 
@@ -292,7 +292,7 @@ export namespace ChatGPT {
       "openai-beta"        : "responses=experimental",
       "content-type"       : "application/json",
       accept               : "text/event-stream",
-      originator           : "uniichat",
+      originator           : "ki",
     };
   }
 

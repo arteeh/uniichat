@@ -10,7 +10,7 @@ import * as config from "./Config.ts";
 import { err_why } from "./Err.ts";
 import { get, text_of } from "./Json.ts";
 
-export type Kind = "user" | "work" | "mind" | "unii" | "tool" | "echo" | "note" | "team";
+export type Kind = "user" | "work" | "mind" | "reply" | "tool" | "echo" | "note" | "team";
 
 export type Vendor = "claude-api" | "openai-api" | "openai-sub" | "claude-sub";
 
@@ -223,7 +223,7 @@ export namespace AskAI {
 
   // output of the model's: a message it answered is no longer queued
   export function answers(ev: Event): boolean {
-    return ev.$ === "Delta" || (ev.$ === "Entry" && (ev.kind === "unii" || ev.kind === "tool"));
+    return ev.$ === "Delta" || (ev.$ === "Entry" && (ev.kind === "reply" || ev.kind === "tool"));
   }
 
   export function falls(pick: Pick): Pick[] {

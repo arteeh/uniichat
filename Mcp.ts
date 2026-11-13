@@ -57,7 +57,7 @@ const IMAGE_MAX_BYTES = 5 * 2 ** 20;
 const EXPIRED = "ended its session (HTTP 404)";
 
 const VERSION = "2025-06-18";
-const INIT    = { protocolVersion: VERSION, capabilities: {}, clientInfo: { name: "unii", version: "1" } };
+const INIT    = { protocolVersion: VERSION, capabilities: {}, clientInfo: { name: "ki", version: "1" } };
 
 const TAIL = 1000;
 
@@ -261,7 +261,7 @@ export namespace Mcp {
     if (left.join(", ") !== s.left) {
       s.left = left.join(", ");
       if (s.left !== "") {
-        console.error("unii: MCP server " + s.conf.name + " has tools left out: " + s.left);
+        console.error("ki: MCP server " + s.conf.name + " has tools left out: " + s.left);
         Mcp.say(servers, s, "MCP server " + s.conf.name + " has tools left out: " + s.left + ".");
       }
     }
@@ -348,7 +348,7 @@ export namespace Mcp {
           if (again && why?.startsWith(EXPIRED)) {
             continue;
           }
-          const next = why === "was ended by unii" ? "." : "; the next call starts it again.";
+          const next = why === "was ended by ki" ? "." : "; the next call starts it again.";
           return fail(head + (why === null ? "failed: " + err_why(err) + "." : why + next));
         }
       }
@@ -406,7 +406,7 @@ export namespace Mcp {
     if (get(msg, "method") === "ping") {
       return { jsonrpc: "2.0", id, result: {} };
     }
-    return { jsonrpc: "2.0", id, error: { code: -32601, message: "unii offers no " + String(get(msg, "method")) } };
+    return { jsonrpc: "2.0", id, error: { code: -32601, message: "ki offers no " + String(get(msg, "method")) } };
   }
 
   export async function* texts(stream: ReadableStream<Uint8Array>): AsyncGenerator<string> {
@@ -495,7 +495,7 @@ export namespace Mcp {
         lines.forEach((line) => line.trim() !== "" && heard(line));
       }
     })().catch((err: unknown) => {
-      fail(err_why(err) + "; unii ended it");
+      fail(err_why(err) + "; ki ended it");
       end();
     });
     const err = (async () => {
@@ -540,7 +540,7 @@ export namespace Mcp {
       write({ jsonrpc: "2.0", id, method, params });
     });
     const close = () => {
-      fail(dead ?? "was ended by unii");
+      fail(dead ?? "was ended by ki");
       end();
     };
     return { ask, tell, close, dead: () => dead };
@@ -578,7 +578,7 @@ export namespace Mcp {
     const tell = (method: string, params: object, signal = AbortSignal.timeout(START_MS)) => send({ method, params, tell: true }, signal).then(() => {});
     const close = () => {
       if (dead === null) {
-        dead = "was ended by unii";
+        dead = "was ended by ki";
         run(conf.device, job({ method: "close" }), AbortSignal.timeout(START_MS)).catch(() => undefined);
       }
     };
@@ -629,7 +629,7 @@ export namespace Mcp {
       HERE.set(key, (s = run));
     }
     if (s === undefined) {
-      return answer({ dead: "isn't running: unii there restarted or lost the server" });
+      return answer({ dead: "isn't running: ki there restarted or lost the server" });
     }
     try {
       const result = input.tell ? await s.link.tell(method, params) : await s.link.ask(method, params, signal);
@@ -742,7 +742,7 @@ export namespace Mcp {
         return get(msg, "result");
       } catch (err) {
         if (err_why(err).startsWith("sent a message over")) {
-          end(err_why(err) + "; unii ended it");
+          end(err_why(err) + "; ki ended it");
         }
         throw dead !== null ? new Error(dead) : err;
       } finally {
@@ -758,7 +758,7 @@ export namespace Mcp {
         }
       }
     };
-    return { ask, tell, close: () => end("was ended by unii"), dead: () => dead };
+    return { ask, tell, close: () => end("was ended by ki"), dead: () => dead };
   }
 
 }

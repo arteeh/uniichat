@@ -57,7 +57,7 @@ export namespace OpenAI {
   }
 
   export function session(ask: Ask): string {
-    return "unii-" + Bun.hash(JSON.stringify([OpenAI.sharer(ask), ask.model, OpenAI.system(ask)])).toString(36);
+    return "ki-" + Bun.hash(JSON.stringify([OpenAI.sharer(ask), ask.model, OpenAI.system(ask)])).toString(36);
   }
 
   export function sharer(ask: Ask): string {
@@ -89,7 +89,7 @@ export namespace OpenAI {
   export function read(st: State, ev: Event, on: Emit): boolean {
     switch (ev.type) {
       case "response.output_text.delta": {
-        on("unii", ev.delta ?? "");
+        on("reply", ev.delta ?? "");
         return false;
       }
       case "response.output_item.added": {
@@ -188,7 +188,7 @@ export namespace OpenAI {
         const text = content.map((c) => c.text ?? "").join("").trim();
         const urls = content.flatMap((c) => c.annotations ?? []).filter((a) => a.type === "url_citation");
         const cited = [...new Set(urls.map((a) => String(a.title) + " " + String(a.url)))];
-        const reply: Entry[] = text ? [{ kind: "unii", text }] : [];
+        const reply: Entry[] = text ? [{ kind: "reply", text }] : [];
         const sources: Entry[] = cited.length > 0 ? [{ kind: "echo", text: "sources:\n" + cited.join("\n") }] : [];
         return [...reply, ...sources];
       }

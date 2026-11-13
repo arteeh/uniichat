@@ -1,6 +1,6 @@
 #!/bin/bash
 # cut.sh [--publish]: builds the release named by Update.ts's VERSION
-# (the one source of the version: `unii version`, the tag and release
+# (the one source of the version: `ki version`, the tag and release
 # title, the archive names, install.sh and install.ps1 all come from it)
 # from the checkout this script is in ($REL; REL=<worktree> builds another,
 # never published). VERSION decides what it cuts:
@@ -13,12 +13,12 @@
 #   2. `bun install --frozen-lockfile` then `bun run check` (tsc, eslint, knip) if package.json has a check
 #      script, else strict tsc (no errors beyond base's)
 #   3. builds 6 targets into work-release/a$N/b$N, checks the linux-x64
-#      binary says "unii $VER", writes dist/: archives (tar.gz; zip for
+#      binary says "ki $VER", writes dist/: archives (tar.gz; zip for
 #      Windows), SHA256SUMS, install.sh (from install.sh.in, sums and the
 #      built-in prompt filled in), install.ps1 (from install.ps1.in, the
 #      Windows sums filled in; ASCII only, for Windows PowerShell 5.1),
 #      and the commit it built (dist/../commit), then signs SHA256SUMS,
-#      install.sh and install.ps1 (sign.sh, the key of release/unii.pub)
+#      install.sh and install.ps1 (sign.sh, the key of release/ki.pub)
 #   4. --publish (reuses a finished build of this version and commit; refuses
 #      unless every signature checks): tags $VER, pushes the tag, creates the
 #      GitHub release (Latest, or a pre-release) with notes reviews/release/notes-$N.md
@@ -47,7 +47,7 @@ grep -q "/releases/download/$VER/install.sh" web/install.sh || { echo "web/insta
 N=$VER
 TAG=$VER
 NOTES=$DEV/reviews/release/notes-$N.md
-PUB=$REL/release/unii.pub
+PUB=$REL/release/ki.pub
 grep -q '^ssh-ed25519 AAAA' "$PUB" || { echo "$PUB holds no release key: make it (see $HERE/sign.sh) and commit it first"; exit 1; }
 grep -qF "$(cut -d' ' -f2 "$PUB")" README.md || { echo "README.md doesn't show the release key in $PUB"; exit 1; }
 [ "$(grep -o 'ssh-ed25519 [^ "`]*' README.md | sort -u)" = "$(cut -d' ' -f1-2 "$PUB")" ] || { echo "README.md shows a key other than the one in $PUB (a placeholder left?)"; exit 1; }
@@ -78,8 +78,8 @@ B=$DEV/work-release/a$N/b$N
 if [ "${1:-}" = "--publish" ] && [ -f "$B/dist/install.sh" ]; then
   echo "== publishing the existing build in $B"
   [ "$(cat "$B/commit")" = "$HEAD" ] || { echo "$B is a build of another commit"; exit 1; }
-  SAYS=$($PODMAN run --rm -v "$B:/out:ro,z" localhost/uniidev:latest /out/linux-x64/unii version)
-  [ "$SAYS" = "unii $VER" ] || { echo "the build says '$SAYS', not 'unii $VER'"; exit 1; }
+  SAYS=$($PODMAN run --rm -v "$B:/out:ro,z" localhost/uniidev:latest /out/linux-x64/ki version)
+  [ "$SAYS" = "ki $VER" ] || { echo "the build says '$SAYS', not 'ki $VER'"; exit 1; }
   [ -f "$B/dist/install.ps1" ] || { echo "$B has no install.ps1"; exit 1; }
   cd "$B/dist"; $HERE/sign.sh verify "$B/dist" "$PUB"; sha256sum -c --quiet SHA256SUMS
 else
@@ -88,39 +88,42 @@ echo "== build"
 mkdir -p "$B/dist"
 R=(flock $DEV/heavy.lock $PODMAN run --rm --memory 8g -e BUN_INSTALL_CACHE_DIR=/out/cache -e npm_config_cache=/out/npmcache -v "$REL:/src:z" -v "$B:/out:z" -w /src localhost/uniidev:latest bash -lc)
 for t in linux-x64 linux-arm64 darwin-arm64 darwin-x64; do
-  "${R[@]}" "bun Build.ts bun-$t /out/$t/unii 2>&1 | tail -1 && tar -czf /out/dist/unii-$VER-$t.tar.gz -C /out/$t unii"
+  "${R[@]}" "bun Build.ts bun-$t /out/$t/ki 2>&1 | tail -1 && tar -czf /out/dist/ki-$VER-$t.tar.gz -C /out/$t ki"
 done
 for a in x64 arm64; do
-  "${R[@]}" "bun Build.ts bun-windows-$a /out/windows-$a/unii.exe 2>&1 | tail -1"
+  "${R[@]}" "bun Build.ts bun-windows-$a /out/windows-$a/ki.exe 2>&1 | tail -1"
 done
-SAYS=$("${R[@]}" "/out/linux-x64/unii version")
+SAYS=$("${R[@]}" "/out/linux-x64/ki version")
 $PODMAN unshare rm -rf "$B/cache" "$B/npmcache"; $PODMAN unshare chown -R 0:0 "$B"
-[ "$SAYS" = "unii $VER" ] || { echo "the build says '$SAYS', not 'unii $VER'"; exit 1; }
+[ "$SAYS" = "ki $VER" ] || { echo "the build says '$SAYS', not 'ki $VER'"; exit 1; }
 echo "built: $SAYS"
 for a in x64 arm64; do
-  (cd "$B/windows-$a" && python3 -I -c "import zipfile,sys;z=zipfile.ZipFile(sys.argv[1],'w',zipfile.ZIP_DEFLATED);z.write('unii.exe');z.close()" "../dist/unii-$VER-windows-$a.zip")
+  (cd "$B/windows-$a" && python3 -I -c "import zipfile,sys;z=zipfile.ZipFile(sys.argv[1],'w',zipfile.ZIP_DEFLATED);z.write('ki.exe');z.close()" "../dist/ki-$VER-windows-$a.zip")
 done
 cd "$B/dist"
-sha256sum unii-* > SHA256SUMS
+sha256sum ki-* > SHA256SUMS
 python3 -I - "$HERE" "$VER" SHA256SUMS "$REL/prompts" <<'EOF'
 import base64, json, os, sys
 here, ver, sums, prompts = sys.argv[1:]
 texts = {f: open(os.path.join(prompts, f)).read().strip() for f in sorted(os.listdir(prompts)) if f.endswith(".md")}
-assert all("UNII_PROMPT_EOF" not in t for t in texts.values())
-sh = "\n".join("cat > \"$share/%s\" <<'UNII_PROMPT_EOF'\n%s\nUNII_PROMPT_EOF" % (f, t) for f, t in texts.items())
+assert all("KI_PROMPT_EOF" not in t for t in texts.values())
+rename = open(here + "/rename.js").read().strip()
+assert "KI_RENAME_JS" not in rename and rename.isascii()
+sh = "\n".join("cat > \"$share/%s\" <<'KI_PROMPT_EOF'\n%s\nKI_PROMPT_EOF" % (f, t) for f, t in texts.items())
 ps1 = "\n".join("    [IO.File]::WriteAllText((Join-Path $share '%s'), ([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('%s')) + \"`n\"))" % (f, base64.b64encode(t.encode()).decode()) for f, t in texts.items())
 sum = {}
 for line in open(sums):
     h, name = line.split()
     for t in ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "windows-x64", "windows-arm64"]:
-        if name == "unii-%s-%s.%s" % (ver, t, "zip" if t.startswith("windows") else "tar.gz"):
+        if name == "ki-%s-%s.%s" % (ver, t, "zip" if t.startswith("windows") else "tar.gz"):
             sum[t] = h
 for src, out in [("install.sh.in", "install.sh"), ("install.ps1.in", "install.ps1")]:
     s = open(here + "/" + src).read().replace("@VER@", ver).replace("@PROMPT_JSON@", json.dumps(texts["prompt.md"]))
     s = s.replace("@PROMPT_FILES_PS1@", ps1).replace("@PROMPT_FILES@", sh)
+    s = s.replace("@RENAME_JS_B64@", base64.b64encode(rename.encode()).decode()).replace("@RENAME_JS@", rename)
     for t, h in sum.items():
         s = s.replace("@SUM_%s@" % t, h)
-    assert "@VER@" not in s and "@SUM_" not in s and "@PROMPT_" not in s, "unfilled placeholder in " + out
+    assert "@VER@" not in s and "@SUM_" not in s and "@PROMPT_" not in s and "@RENAME_" not in s, "unfilled placeholder in " + out
     assert out != "install.ps1" or s.isascii(), "install.ps1 is not ASCII"
     open(out, "w").write(s)
 EOF
@@ -136,20 +139,20 @@ fi
 $HERE/sign.sh verify "$B/dist" "$PUB"
 KEYLINE=$(cut -d' ' -f1-2 "$PUB")
 { cat "$NOTES"; printf '\n## Checking the download\n\n'
-  printf 'install.sh, install.ps1 and SHA256SUMS are signed with our release key (`%s`); `unii update` checks it before it runs the installer. To check by hand, next to the downloaded files, with ssh-keygen (OpenSSH 8.1 or newer, built into Linux, macOS and Windows 10/11).\n\nLinux or macOS:\n\n' "$KEYLINE"
-  printf '    echo "unii %s" > unii.signers\n    ssh-keygen -Y verify -f unii.signers -I unii -n unii-install.sh -s install.sh.sig < install.sh\n\n' "$KEYLINE"
+  printf 'install.sh, install.ps1 and SHA256SUMS are signed with our release key (`%s`); `ki update` checks it before it runs the installer. To check by hand, next to the downloaded files, with ssh-keygen (OpenSSH 8.1 or newer, built into Linux, macOS and Windows 10/11).\n\nLinux or macOS:\n\n' "$KEYLINE"
+  printf '    echo "ki %s" > ki.signers\n    ssh-keygen -Y verify -f ki.signers -I ki -n ki-install.sh -s install.sh.sig < install.sh\n\n' "$KEYLINE"
   printf 'Windows (PowerShell):\n\n'
-  printf '    Set-Content unii.signers "unii %s" -Encoding ascii\n    cmd /c "ssh-keygen -Y verify -f unii.signers -I unii -n unii-install.ps1 -s install.ps1.sig < install.ps1"\n\n' "$KEYLINE"
+  printf '    Set-Content ki.signers "ki %s" -Encoding ascii\n    cmd /c "ssh-keygen -Y verify -f ki.signers -I ki -n ki-install.ps1 -s install.ps1.sig < install.ps1"\n\n' "$KEYLINE"
   printf 'The sha256 of each file (the archives are in the signed SHA256SUMS too, and the install scripts check the one they download):\n\n'
   sha256sum install.sh install.ps1 SHA256SUMS install.sh.sig install.ps1.sig SHA256SUMS.sig | cat - SHA256SUMS | sed 's/^/    /'; } > "$B/notes.md"
 echo "== publish"
-git -C "$REL" tag -a "$TAG" -m "unii $VER" HEAD
+git -C "$REL" tag -a "$TAG" -m "ki $VER" HEAD
 git -C "$REL" push origin "$TAG" 2>&1 | tail -1
 LATEST=(--latest); [ -z "$RC" ] || LATEST=(--prerelease --latest=false)
-timeout 1800 $GH release create "$TAG" -R arteeh/uniichat --verify-tag "${LATEST[@]}" --title "$VER" --notes-file "$B/notes.md" \
-  install.sh install.ps1 SHA256SUMS install.sh.sig install.ps1.sig SHA256SUMS.sig unii-$VER-*.tar.gz unii-$VER-windows-*.zip 2>&1 | tail -1
+timeout 1800 $GH release create "$TAG" -R arteeh/ki --verify-tag "${LATEST[@]}" --title "$VER" --notes-file "$B/notes.md" \
+  install.sh install.ps1 SHA256SUMS install.sh.sig install.ps1.sig SHA256SUMS.sig ki-$VER-*.tar.gz ki-$VER-windows-*.zip 2>&1 | tail -1
 if [ -z "$RC" ]; then
-  curl -sI https://github.com/arteeh/uniichat/releases/latest | grep -i '^location'
+  curl -sI https://github.com/arteeh/ki/releases/latest | grep -i '^location'
 else
-  echo "install line: curl -fsSL https://github.com/arteeh/uniichat/releases/download/$TAG/install.sh | sh"
+  echo "install line: curl -fsSL https://github.com/arteeh/ki/releases/download/$TAG/install.sh | sh"
 fi

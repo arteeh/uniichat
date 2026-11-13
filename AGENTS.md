@@ -1,21 +1,21 @@
 - **No unit tests.** Don't add `*.test.ts` files or a test runner.
-- **Test like a user.** Run your change the way a real user would use it: run uniichat in an isolated container, with the user's state copied over (NOT mounted) if needed, and use the software there. Test the web UI using [playwright-cli](https://www.npmjs.com/package/@playwright/cli).
+- **Test like a user.** Run your change the way a real user would use it: run ki in an isolated container, with the user's state copied over (NOT mounted) if needed, and use the software there. Test the web UI using [playwright-cli](https://www.npmjs.com/package/@playwright/cli).
 - `bun run check` (tsc, eslint, knip) must finish with 0 errors.
 - `web/app.js` is generated and not committed: run `bun run web` after changing `web/src`.
-- Don't write docs into the codebase. The readme and code speak for themselves. The README is for users: what UniiChat does and how to use it. Don't describe the codebase. Change it only when using the app changes, and keep that to a line or two.
+- Don't write docs into the codebase. The readme and code speak for themselves. The README is for users: what Ki does and how to use it. Don't describe the codebase. Change it only when using the app changes, and keep that to a line or two.
 - Be extremely strict on comments. Only add them if the information is essential and can't be inferred from the code.
 
 ## How to test
 
-The test rig is a container with UniiChat on your checkout, a device named `box`, and fake models of all four vendors (claude-api, claude-sub, openai-api, openai-sub) with fake sign-ins: no accounts, no network, no paid calls. From the repository's folder (Podman or Docker):
+The test rig is a container with Ki on your checkout, a device named `box`, and fake models of all four vendors (claude-api, claude-sub, openai-api, openai-sub) with fake sign-ins: no accounts, no network, no paid calls. From the repository's folder (Podman or Docker):
 
 ```sh
-podman build -t uniichat-test -f testing/Containerfile .   # again when bun.lock changes
-podman run -d --name rig --network none -v "$PWD:/src:ro,z" uniichat-test
+podman build -t ki-test -f testing/Containerfile .   # again when bun.lock changes
+podman run -d --name rig --network none -v "$PWD:/src:ro,z" ki-test
 podman logs -f rig                                          # until "rig up"
 ```
 
-It copies your checkout in at every start, so after a change, `podman restart rig`; `podman rm -f rig` forgets the chat and sign-ins. Work inside it with `podman exec -it rig bash`: `unii serve link` prints a sign-in link for `playwright-cli open`; the logs are in `/rig/logs`.
+It copies your checkout in at every start, so after a change, `podman restart rig`; `podman rm -f rig` forgets the chat and sign-ins. Work inside it with `podman exec -it rig bash`: `ki serve link` prints a sign-in link for `playwright-cli open`; the logs are in `/rig/logs`.
 
 Steer what the models answer with `fake`, never with test commands in chat messages. Each command applies to the next model call; with nothing queued, a call gets "ok":
 

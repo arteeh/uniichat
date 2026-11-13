@@ -10,9 +10,9 @@ RUN npm install -g @playwright/cli@0.1.23 && npx -y playwright install-deps chro
 WORKDIR /deps
 COPY package.json bun.lock ./
 RUN bun install --frozen-lockfile
-RUN printf '#!/bin/sh\nexec bun /app/Cli.ts "$@"\n' > /usr/local/bin/unii \
+RUN printf '#!/bin/sh\nexec bun /app/Cli.ts "$@"\n' > /usr/local/bin/ki \
     && printf '#!/bin/sh\nexec bun /app/testing/fake/fake.ts "$@"\n' > /usr/local/bin/fake \
-    && chmod +x /usr/local/bin/unii /usr/local/bin/fake
+    && chmod +x /usr/local/bin/ki /usr/local/bin/fake
 ENV NODE_EXTRA_CA_CERTS=/rig/certs/ca.pem PLAYWRIGHT_MCP_BROWSER=chromium PLAYWRIGHT_MCP_IGNORE_HTTPS_ERRORS=true
 WORKDIR /root
 CMD ["bash", "/src/testing/start.sh"]

@@ -26,7 +26,7 @@ export namespace Reap {
     }
     const wait = Reap.waitpid();
     if (wait === null) {
-      console.error("unii: PID 1 can't reap orphans (no libc): run its container with --init");
+      console.error("ki: PID 1 can't reap orphans (no libc): run its container with --init");
       return;
     }
     let last = new Set<number>();

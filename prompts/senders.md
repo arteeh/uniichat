@@ -1,5 +1,5 @@
 user: the user
-uniichat: UniiChat
+ki: the app
 timer: the timer
 job: a job
 agent: an agent

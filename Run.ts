@@ -212,7 +212,7 @@ export namespace Run {
     try {
       step();
     } catch (err) {
-      console.error("unii: " + run.name + ": " + err_stack(err));
+      console.error("ki: " + run.name + ": " + err_stack(err));
     }
   }
 

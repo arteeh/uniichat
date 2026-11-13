@@ -33,9 +33,9 @@ function copy_html(text: string): string {
   return `<button class="copy" data-copy="${esc(text)}" title="Copy">${SHEETS}</button>`;
 }
 
-// an agent's picture: Unii's logo, a premade head, or an upload
+// an agent's picture: the logo, a premade head, or an upload
 export function face_html(picture: string): string {
-  if (picture === "unii") {
+  if (picture === "main") {
     return `<span class="pic logo"><i class="mark"></i></span>`;
   }
   const src = /^head-\d\d$/.test(picture) ? "/heads/" + picture + ".svg" : picture;
@@ -70,7 +70,7 @@ const MADE = new WeakMap<View.Row, { html: string; names: string }>();
 
 // the names that link to their chat (#141): the team's, and the running
 // subagents' of the chat shown, but not its own. Every name is matched, so
-// one inside a longer one ("Unii" in "Unii Dev") stays part of it
+// one inside a longer one ("Ki" in "Ki Dev") stays part of it
 const NAMES: { key: string; re: RegExp | null; to: Map<string, string> } = { key: "", re: null, to: new Map() };
 
 const WORD_END = /[\p{L}\p{N}_]$/u;
@@ -199,8 +199,8 @@ function images_html(names: string[]): string {
 }
 
 const MODES: Array<[string, string]> = [
-  ["standard", "Each message is summarized for Unii's memory. Cheapest, good for long working sessions."],
-  ["conversation", "Messages stay word-for-word in Unii's view until you switch back. Use it for discussions. It costs more per turn."],
+  ["standard", "Each message is summarized for the agent's memory. Cheapest, good for long working sessions."],
+  ["conversation", "Messages stay word-for-word in the agent's view until you switch back. Use it for discussions. It costs more per turn."],
 ];
 
 // modes: the standard/conversation button; talk: the context meter
@@ -250,13 +250,13 @@ export function timers_html(timers: Timer.Timer[]): string[] {
 // an agent as its settings page reads and saves it
 export type Agent = { id: string; name: string; about: string; picture: string; prompt: string; own: boolean; template: string; archived: number };
 
-export function agent_html(a: Agent | null, unii: boolean): string {
+export function agent_html(a: Agent | null, lead: boolean): string {
   const heads = Array.from({ length: 24 }, (_, k) => "head-" + String(k + 1).padStart(2, "0"));
   const own = a !== null && a.picture.startsWith("/media/") ? [a.picture] : [];
-  const faces = (unii ? ["unii"] : []).concat(own, heads).map((f) => face_pick_html(f, f === a?.picture));
+  const faces = (lead ? ["main"] : []).concat(own, heads).map((f) => face_pick_html(f, f === a?.picture));
   const upload = `<button type="button" class="chip upload">Upload a picture</button><input type="file" class="upfile" accept="image/png,image/jpeg,image/webp,image/gif" hidden>`;
   const set = (key: string, name: string, about: string, control: string) => `<div class="set" data-key="${key}"><label for="ag-${key}">${esc(name)}${about === "" ? "" : `<small>${esc(about)}</small>`}</label><div class="field">${control}</div><p class="err"></p></div>`;
-  const archive = a === null || unii ? "" : section_html("Archive", `<div class="item"><p>Archive ${esc(a.name)}<small>Settings can restore it.</small></p><button type="button" class="chip red archive">Archive</button></div>`);
+  const archive = a === null || lead ? "" : section_html("Archive", `<div class="item"><p>Archive ${esc(a.name)}<small>Settings can restore it.</small></p><button type="button" class="chip red archive">Archive</button></div>`);
   // an agent saves as it's edited (#125); a new one is made with Create
   const create = a === null ? `<div class="save"><p class="why"></p><button class="chip go">Create</button></div>` : "";
   return `<form class="settings agent" autocomplete="off">`
@@ -283,17 +283,17 @@ export function account_html(notify: Notify | null = null): string {
   const acts    = [
     item("This browser", "Signed in to this server.", `<button class="chip out">Sign out</button>`),
     ...(notify === null ? [] : [notify_html(notify)]),
-    item("Export memory", "Unii's chat and its summaries, in one file.", `<a class="chip" href="/export">Download</a>`),
+    item("Export memory", "The main agent's chat and its summaries, in one file.", `<a class="chip" href="/export">Download</a>`),
   ];
   const mcp     = section_html("MCP servers", `<div class="mcp"></div>`);
-  const history = section_html("History", item("Import history", "Past Claude and ChatGPT chats, into Unii's memory.", `<button class="chip imp">Import</button>`));
+  const history = section_html("History", item("Import history", "Past Claude and ChatGPT chats, into the main agent's memory.", `<button class="chip imp">Import</button>`));
   return section_html("This browser", acts.join("")) + history + `<div class="archived"></div>` + mcp + `<div class="owned"></div>`;
 }
 
 function notify_html(notify: Notify): string {
   const note = {
-    off     : "Replies on this device, when UniiChat isn't open.",
-    on      : "Replies on this device, when UniiChat isn't open.",
+    off     : "Replies on this device, when Ki isn't open.",
+    on      : "Replies on this device, when Ki isn't open.",
     blocked : "Blocked in this browser's settings for this site.",
     home    : "On iPhone and iPad: Share, then Add to Home Screen, and open it from there.",
   }[notify];
@@ -566,7 +566,7 @@ function text_html(x: string, linked: boolean, glued: [boolean, boolean]): strin
   return parts.map((p, k) => {
     const cut = (k === 1 && parts[0] === "" && glued[0]) || (k === last && parts[k + 1] === "" && glued[1]);
     const to = k % 2 === 1 && !cut ? NAMES.to.get(p) : undefined;
-    return to === undefined ? esc(p).replaceAll("UniiChat", `<span class="brand">UniiChat</span>`) : `<a class="name" href="${esc(to)}" data-go="${esc(to)}">${esc(p)}</a>`;
+    return to === undefined ? esc(p).replace(/\bKi\b/g, `<span class="brand">Ki</span>`) : `<a class="name" href="${esc(to)}" data-go="${esc(to)}">${esc(p)}</a>`;
   }).join("");
 }
 

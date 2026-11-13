@@ -9,9 +9,9 @@ const WIN  = process.platform === "win32";
 const MAC  = process.platform === "darwin";
 const HOME = os.homedir();
 
-export const MARK = "unii-made";
+export const MARK = "ki-made";
 
-const DATA  = (process.env.UNII_DIR ?? "~/.unii").replace(/^~(?=[\\/]|$)/, HOME);
+const DATA  = (process.env.KI_DIR ?? "~/.ki").replace(/^~(?=[\\/]|$)/, HOME);
 const LOGS  = DATA + "/logs";
 const UNITS = (process.env.XDG_CONFIG_HOME || HOME + "/.config") + "/systemd/user";
 const PLIST = HOME + "/Library/LaunchAgents";
@@ -31,19 +31,19 @@ const UP       = 20000;
 
 let SERVED: Part | null = null;
 
-export const DIRS = ["UNII_DIR", "XDG_CONFIG_HOME"];
+export const DIRS = ["KI_DIR", "XDG_CONFIG_HOME"];
 
-const ABOUT: Record<Part, string> = { serve: "UniiChat server (unii serve)", device: "UniiChat device (unii device)" };
+const ABOUT: Record<Part, string> = { serve: "Ki server (ki serve)", device: "Ki device (ki device)" };
 
 const ASK_ADMIN: Record<Part, string> = {
-  device: "unii device will run as administrator: everything it runs, and every app it controls, gets admin rights. Run it as administrator? [y/N]",
-  serve: "unii serve will run as administrator: everything it runs gets admin rights. Run it as administrator? [y/N]",
+  device: "ki device will run as administrator: everything it runs, and every app it controls, gets admin rights. Run it as administrator? [y/N]",
+  serve: "ki serve will run as administrator: everything it runs gets admin rights. Run it as administrator? [y/N]",
 };
 
 const ADMIN_TASK = /<RunLevel>\s*HighestAvailable\s*<\/RunLevel>/;
 
 export function name(part: Part): string {
-  return "unii-" + part;
+  return "ki-" + part;
 }
 
 export function command(): string[] {
@@ -56,7 +56,7 @@ export function admin(part: Part): boolean {
     return false;
   }
   if (!process.stdin.isTTY) {
-    console.log("unii " + part + " -d runs elevated, but has no terminal to ask in whether to run it as administrator (sudo's input off?), so it runs without admin rights. `sudo config --enable normal`, then `sudo unii " + part + " -d`, asks.");
+    console.log("ki " + part + " -d runs elevated, but has no terminal to ask in whether to run it as administrator (sudo's input off?), so it runs without admin rights. `sudo config --enable normal`, then `sudo ki " + part + " -d`, asks.");
     return false;
   }
   return /^y$/i.test(prompt(ASK_ADMIN[part])?.trim() ?? "");
@@ -69,7 +69,7 @@ function elevated(): boolean {
 export async function start(part: Part, args: string[], admin = false): Promise<void> {
   const dirs = Object.fromEntries(DIRS.flatMap((k) => {
     const v = process.env[k];
-    return v ? [[k, path.resolve(k === "UNII_DIR" ? DATA : v)]] : [];
+    return v ? [[k, path.resolve(k === "KI_DIR" ? DATA : v)]] : [];
   }));
   if (part === "device") {
     alone();
@@ -94,7 +94,7 @@ export async function logs(part: Part, follow: boolean): Promise<void> {
   }
   const cmd = ["journalctl", "--user", "-u", name(part) + ".service", "-n", String(LINES), "--no-pager", ...(follow ? ["-f"] : [])];
   if (Bun.which("journalctl") === null) {
-    fail("journalctl isn't here: unii " + part + " -d runs it under systemd, whose journal holds its output.");
+    fail("journalctl isn't here: ki " + part + " -d runs it under systemd, whose journal holds its output.");
   }
   process.exitCode = await Bun.spawn(cmd, { stdio: ["inherit", "inherit", "inherit"] }).exited;
 }
@@ -131,10 +131,10 @@ export function ready(part: Part): void {
 export function foreground(part: Part): void {
   const where = running(part);
   if (where !== null) {
-    console.error("unii " + part + " already runs in the background (" + where + "): `unii " + part + " logs -f` follows it, `unii " + part + " stop` stops it.");
+    console.error("ki " + part + " already runs in the background (" + where + "): `ki " + part + " logs -f` follows it, `ki " + part + " stop` stops it.");
     process.exit(1);
   }
-  console.log("Running in the foreground. `unii " + part + " -d` runs it as a background service.");
+  console.log("Running in the foreground. `ki " + part + " -d` runs it as a background service.");
 }
 
 export const STOP_SIGNALS = ["SIGHUP", "SIGTERM", "SIGINT"] as const;
@@ -171,7 +171,7 @@ async function linux_start(part: Part, args: string[], env: Record<string, strin
   // \n, % doubled (and in a command $ too)
   const q = (s: string) => '"' + s.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/\n/g, "\\n").replace(/%/g, "%%") + '"';
   const text = [
-    "# " + MARK + ": `unii " + part + " -d` wrote this unit, and writes it again; `unii " + part + " stop` removes it.",
+    "# " + MARK + ": `ki " + part + " -d` wrote this unit, and writes it again; `ki " + part + " stop` removes it.",
     "[Unit]",
     "Description=" + ABOUT[part],
     "StartLimitIntervalSec=300",
@@ -179,7 +179,7 @@ async function linux_start(part: Part, args: string[], env: Record<string, strin
     "",
     "[Service]",
     "ExecStart=" + [...command(), part, ...args].map((a) => q(a).replace(/\$/g, "$$$$")).join(" "),
-    ...Object.entries({ ...env, UNII_SERVICE: part }).map(([k, v]) => "Environment=" + q(k + "=" + v)),
+    ...Object.entries({ ...env, KI_SERVICE: part }).map(([k, v]) => "Environment=" + q(k + "=" + v)),
     "Restart=on-failure",
     "RestartSec=10",
     "",
@@ -205,27 +205,27 @@ function linux_stop(part: Part): void {
   const n = name(part);
   linux_check(part);
   if (!fs.existsSync(unit(part))) {
-    console.log("unii " + part + " isn't set up as a background service here: nothing to stop.");
+    console.log("ki " + part + " isn't set up as a background service here: nothing to stop.");
     return;
   }
   systemctl("disable", "--quiet", n);
   fs.rmSync(unit(part));
   systemctl("daemon-reload");
   systemctl("stop", n);
-  console.log("unii " + part + " stopped: its background service " + n + " is removed.");
+  console.log("ki " + part + " stopped: its background service " + n + " is removed.");
 }
 
 function linux_check(part: Part): void {
   const n = name(part);
   if (Bun.which("systemctl") === null || run(["systemctl", "--user", "show", "--property=Version", "--value"]).code !== 0) {
-    fail("unii " + part + " -d runs it under systemd's user manager (systemctl --user), which isn't reachable here. Run `unii " + part + "` in the foreground, or under a service manager of your own.");
+    fail("ki " + part + " -d runs it under systemd's user manager (systemctl --user), which isn't reachable here. Run `ki " + part + "` in the foreground, or under a service manager of your own.");
   }
   const file = unit(part);
   const mine = read(file);
   const from = run(["systemctl", "--user", "show", "--property=FragmentPath", "--value", n + ".service"]).out;
   const theirs = mine !== null && !mine.includes(MARK) ? file : from !== "" && !same(from, file) ? from : null;
   if (theirs !== null) {
-    fail(n + " isn't unii's: " + theirs + " is a unit unii didn't make, so unii leaves it as it is. To use unii " + part + " -d, remove it (systemctl --user disable --now " + n + ", then the file); or keep using it.");
+    fail(n + " isn't ki's: " + theirs + " is a unit ki didn't make, so ki leaves it as it is. To use ki " + part + " -d, remove it (systemctl --user disable --now " + n + ", then the file); or keep using it.");
   }
 }
 
@@ -247,13 +247,13 @@ async function mac_start(part: Part, args: string[], env: Record<string, string>
   const was = read(file);
   const loaded = run(["launchctl", "print", job]).code === 0;
   if ((was !== null && !was.includes(MARK)) || (was === null && loaded)) {
-    fail(n + " isn't unii's: " + (was === null ? "a launchd job by that name" : file) + " isn't one unii made, so unii leaves it as it is. To use unii " + part + " -d, remove it (launchctl bootout " + job + ", then its plist); or keep using it.");
+    fail(n + " isn't ki's: " + (was === null ? "a launchd job by that name" : file) + " isn't one ki made, so ki leaves it as it is. To use ki " + part + " -d, remove it (launchctl bootout " + job + ", then its plist); or keep using it.");
   }
   const x = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   const strings = (list: string[]) => list.map((a) => "<string>" + x(a) + "</string>").join("");
   const text = `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<!-- ${MARK}: \`unii ${part} -d\` wrote this, and writes it again; \`unii ${part} stop\` removes it. -->
+<!-- ${MARK}: \`ki ${part} -d\` wrote this, and writes it again; \`ki ${part} stop\` removes it. -->
 <plist version="1.0">
 <dict>
   <key>Label</key><string>${n}</string>
@@ -290,18 +290,18 @@ function mac_stop(part: Part): void {
   const file = plist(part);
   const was = read(file);
   if (was === null) {
-    console.log("unii " + part + " isn't set up as a background service here: nothing to stop.");
+    console.log("ki " + part + " isn't set up as a background service here: nothing to stop.");
     return;
   }
   if (!was.includes(MARK)) {
-    fail(n + " isn't unii's: " + file + " isn't one unii made, so unii leaves it as it is.");
+    fail(n + " isn't ki's: " + file + " isn't one ki made, so ki leaves it as it is.");
   }
   const step = clock(part, "stop");
   fs.rmSync(file);
   fs.rmSync(LOGS + "/" + part + ".up", { force: true });
   run(["launchctl", "bootout", "gui/" + uid() + "/" + n]);
   step("LaunchAgent removed");
-  console.log("unii " + part + " stopped: its background service " + n + " is removed.");
+  console.log("ki " + part + " stopped: its background service " + n + " is removed.");
 }
 
 async function win_start(part: Part, args: string[], admin: boolean): Promise<void> {
@@ -312,11 +312,11 @@ async function win_start(part: Part, args: string[], admin: boolean): Promise<vo
   const had = win_task(n);
   step("task looked up");
   if (had !== null && !had.includes(MARK)) {
-    fail(n + " isn't unii's: that Scheduled Task isn't one unii made, so unii leaves it as it is. To use unii " + part + " -d, remove it (schtasks /delete /tn " + n + "); or keep using it.");
+    fail(n + " isn't ki's: that Scheduled Task isn't one ki made, so ki leaves it as it is. To use ki " + part + " -d, remove it (schtasks /delete /tn " + n + "); or keep using it.");
   }
   win_admin_check(part, had, "-d");
   const line = ["--headless", ...command(), part, "--service", ...args].map(winq).join(" ");
-  const about = MARK + ": `unii " + part + " -d` made this task, and makes it again; `unii " + part + " stop` removes it.";
+  const about = MARK + ": `ki " + part + " -d` made this task, and makes it again; `ki " + part + " stop` removes it.";
   const file = path.join(os.tmpdir(), n + "-" + process.pid + ".xml");
   // UTF-16, as schtasks reads a task's XML
   fs.writeFileSync(file, Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from(TASK(about, user(), line, HOME, admin), "utf16le")]));
@@ -339,17 +339,17 @@ function win_out_of_sight(part: Part): boolean {
 
 function win_admin_check(part: Part, had: string | null, verb: string): void {
   if (had !== null && ADMIN_TASK.test(had) && !elevated()) {
-    fail("unii " + part + " runs as administrator (its task was made by `sudo unii " + part + " -d`), so only an elevated shell can change it: run `sudo unii " + part + " " + verb + "`" + (verb === "-d" ? " (answer N to run it without admin rights)" : "") + ".");
+    fail("ki " + part + " runs as administrator (its task was made by `sudo ki " + part + " -d`), so only an elevated shell can change it: run `sudo ki " + part + " " + verb + "`" + (verb === "-d" ? " (answer N to run it without admin rights)" : "") + ".");
   }
 }
 
-function win_task_unii_made(part: Part, n: string, had: string | null): boolean {
+function win_task_ki_made(part: Part, n: string, had: string | null): boolean {
   if (had === null) {
-    console.log("unii " + part + " isn't set up as a background service here: nothing to stop.");
+    console.log("ki " + part + " isn't set up as a background service here: nothing to stop.");
     return false;
   }
   if (!had.includes(MARK)) {
-    fail(n + " isn't unii's: that Scheduled Task isn't one unii made, so unii leaves it as it is.");
+    fail(n + " isn't ki's: that Scheduled Task isn't one ki made, so ki leaves it as it is.");
   }
   return true;
 }
@@ -373,7 +373,7 @@ async function win_stop(part: Part): Promise<void> {
   step("processes looked up");
   const had = win_task(n);
   step("task looked up");
-  if (!win_task_unii_made(part, n, had)) {
+  if (!win_task_ki_made(part, n, had)) {
     return;
   }
   win_admin_check(part, had, "stop");
@@ -385,8 +385,8 @@ async function win_stop(part: Part): Promise<void> {
   schtasks("/delete", "/tn", "\\" + n, "/f");
   step("task removed");
   await win_quit(part, all[0], mine);
-  step("its unii ended");
-  console.log("unii " + part + " stopped: its background service " + n + " is removed.");
+  step("its ki ended");
+  console.log("ki " + part + " stopped: its background service " + n + " is removed.");
 }
 
 function TASK(about: string, who: string, line: string, dir: string, admin: boolean): string {
@@ -486,12 +486,12 @@ async function run_restarting(part: Part, args: string[], file: string, log: (li
   let [tries, code] = [0, 0];
   while (true) {
     const began = Date.now();
-    const env = { ...process.env, UNII_SERVICE: part, UNII_SUPERVISOR: String(process.pid) };
+    const env = { ...process.env, KI_SERVICE: part, KI_SUPERVISOR: String(process.pid) };
     const child = (run.child = Bun.spawn([...command(), part, ...args], { env, stdin: "ignore", stdout: "pipe", stderr: "pipe", windowsHide: true }));
     fs.writeFileSync(file, process.pid + " " + child.pid + "\n");
     await Promise.all([lines(child.stdout, log), lines(child.stderr, log), child.exited]);
     code = child.exitCode ?? 1;
-    log("unii " + part + " ended (exit " + code + ")");
+    log("ki " + part + " ended (exit " + code + ")");
     tries = Date.now() - began > RAN ? 1 : tries + 1;
     if (code === 0 || run.stopping || tries > RESTARTS) {
       return code;
@@ -541,7 +541,7 @@ async function lines(stream: ReadableStream<Uint8Array>, put: (line: string) => 
 async function file_logs(part: Part, follow: boolean): Promise<void> {
   const file = LOGS + "/" + part + ".log";
   if (!fs.existsSync(file)) {
-    fail("no log at " + file + " yet: it's written by unii " + part + " -d's background service.");
+    fail("no log at " + file + " yet: it's written by ki " + part + " -d's background service.");
   }
   let at = fs.statSync(file).size;
   const text = fs.readFileSync(file, "utf8");
@@ -581,13 +581,13 @@ function supervised(part: Part, was: string | null): boolean | null {
 }
 
 function say(part: Part, up: "up" | "late" | "down", where: string): void {
-  const logs = "`unii " + part + " logs` shows why.";
+  const logs = "`ki " + part + " logs` shows why.";
   if (up === "up") {
-    console.log("unii " + part + " runs in the background, as " + where + ": `unii " + part + " logs -f` follows it, `unii " + part + " stop` removes it.");
+    console.log("ki " + part + " runs in the background, as " + where + ": `ki " + part + " logs -f` follows it, `ki " + part + " stop` removes it.");
   } else if (up === "late") {
-    console.log("unii " + part + " runs as " + where + ", but " + (part === "device" ? "hasn't linked to its server" : "isn't listening yet") + " after " + UP / 1000 + " s: " + logs);
+    console.log("ki " + part + " runs as " + where + ", but " + (part === "device" ? "hasn't linked to its server" : "isn't listening yet") + " after " + UP / 1000 + " s: " + logs);
   } else {
-    console.log("unii " + part + " is set up as " + where + ", but isn't running: " + logs);
+    console.log("ki " + part + " is set up as " + where + ", but isn't running: " + logs);
   }
 }
 
@@ -598,7 +598,7 @@ function clock(part: Part, verb: string): (what: string) => void {
     if (WIN || MAC) {
       try {
         fs.mkdirSync(LOGS, { recursive: true, mode: 0o700 });
-        fs.appendFileSync(LOGS + "/" + part + ".log", new Date().toISOString() + " unii " + part + " " + verb + ": " + what + " in " + ((now - last) / 1000).toFixed(2) + " s\n");
+        fs.appendFileSync(LOGS + "/" + part + ".log", new Date().toISOString() + " ki " + part + " " + verb + ": " + what + " in " + ((now - last) / 1000).toFixed(2) + " s\n");
       } catch {}
     }
     last = now;
@@ -623,7 +623,7 @@ function alone(): void {
   const theirs = (pid: number) => (WIN || MAC ? service.includes(pid) : (read("/proc/" + pid + "/cgroup") ?? "").includes("/" + name("device") + ".service"));
   const found = procs("CommandLine LIKE '%device%'").filter(([pid, line]) => pid !== process.pid && runs(line, "device", '(\\s+"?https?://[^\\s"]*"?)?\\s*$') && !theirs(pid));
   if (found.length > 0) {
-    console.error("unii: warning: a unii device runs here in the foreground already (pid " + found.map(([pid]) => pid).join(", ") + "). With the same sign-in (device.json) the two take turns as one device: stop it.");
+    console.error("ki: warning: a ki device runs here in the foreground already (pid " + found.map(([pid]) => pid).join(", ") + "). With the same sign-in (device.json) the two take turns as one device: stop it.");
   }
 }
 
@@ -635,7 +635,7 @@ function runs(line: string, part: Part, then = "(\\s|$)"): boolean {
 
 function procs(wql: string): Array<[number, string]> {
   const out = WIN
-    ? run([pwsh(), "-NoProfile", "-NonInteractive", "-Command", "Get-CimInstance Win32_Process -Filter $env:UNII_WQL | ForEach-Object { [string]$_.ProcessId + ' ' + $_.CommandLine }"], { UNII_WQL: wql }).out
+    ? run([pwsh(), "-NoProfile", "-NonInteractive", "-Command", "Get-CimInstance Win32_Process -Filter $env:KI_WQL | ForEach-Object { [string]$_.ProcessId + ' ' + $_.CommandLine }"], { KI_WQL: wql }).out
     : run(["ps", "-A", "-ww", "-o", "pid=,args="]).out;
   return out.split(/\r?\n/).flatMap((line): Array<[number, string]> => {
     const m = line.trim().match(/^(\d+)\s*(.*)$/);
@@ -699,6 +699,6 @@ function run(cmd: string[], env: Record<string, string> = {}): { code: number; o
 }
 
 function fail(why: string): never {
-  console.error("unii: " + why);
+  console.error("ki: " + why);
   process.exit(1);
 }
