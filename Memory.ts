@@ -12,7 +12,7 @@ import type { Timer } from "./Timer.ts";
 import { FIT, HEAD, IMAGE, image_kind, MEDIA, media_ext, PIXELS, STORED, TOKEN, type Pending } from "./View.ts";
 import { move_over } from "./Write.ts";
 
-type Root = Msg & { i: number; size: number; date: string };
+export type Root = Msg & { i: number; size: number; date: string };
 
 // from: the agent whose message it is, by id; copy: a team line's
 // message there

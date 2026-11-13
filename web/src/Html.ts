@@ -203,24 +203,25 @@ const MODES: Array<[string, string]> = [
   ["conversation", "Messages stay word-for-word in Unii's view until you switch back. Use it for discussions. It costs more per turn."],
 ];
 
-export function pick_html(knobs: View.Knob[], talk?: View.Talk | null): string[] {
+// modes: the standard/conversation button; talk: the context meter
+export function pick_html(knobs: View.Knob[], talk: View.Talk | null, modes: boolean): string[] {
   const knob = (move: string, hint: string, text: string, rows: string) => [
     `<button title="${esc(hint)}" data-knob="${move}" popovertarget="pick-${move}" aria-haspopup="menu">${esc(text)}</button>`,
     `<div id="pick-${move}" class="choices" popover role="menu" aria-label="${move[0].toUpperCase() + move.slice(1)}">${rows}</div>`,
   ];
   const parts = knobs.map((k) => k.choices.length === 0 ? [`<span class="knob" title="${esc(k.hint)}">${esc(k.text)}</span>`] : knob(k.move, k.hint, k.text, k.choices.map(choice_html).join("")));
   const mode = ([name, hint]: [string, string], k: number) => {
-    const here = (talk != null) === (k === 1);
+    const here = (talk !== null) === (k === 1);
     return `<button role="menuitemradio" aria-checked="${here}" title="${esc(hint)}"${here ? " autofocus" : act_html({ $: "Talk", on: k === 1 })}>${name}</button>`;
   };
-  const [now, about] = MODES[talk == null ? 0 : 1];
-  const modes = talk === undefined ? [] : knob("mode", about, now, MODES.map(mode).join(""));
-  const used = talk == null ? 0 : View.talk_percent(talk);
+  const [now, about] = MODES[talk === null ? 0 : 1];
+  const mode_knob = modes ? knob("mode", about, now, MODES.map(mode).join("")) : [];
+  const used = talk === null ? 0 : View.talk_percent(talk);
   const heat = used >= 80 ? " hot" : used >= 50 ? " warm" : "";
-  const rule = talk == null ? `<span class="rule"></span>` : `<span class="rule meter${heat}" style="--used:${used}%" title="Context: ${used}% used (${esc(View.talk_tokens(talk))})" role="meter" aria-valuenow="${used}" aria-valuemin="0" aria-valuemax="100" aria-label="Context used"></span>`;
+  const rule = talk === null ? `<span class="rule"></span>` : `<span class="rule meter${heat}" style="--used:${used}%" title="Context: ${used}% used (${esc(View.talk_tokens(talk))})" role="meter" aria-valuenow="${used}" aria-valuemin="0" aria-valuemax="100" aria-label="Context used"></span>`;
   const dot = `<span class="dot">·</span>`;
   const join = (groups: string[][]) => groups.filter((g) => g.length > 0).flatMap((g, i) => (i === 0 ? g : [dot, ...g]));
-  return [...join([modes]), rule, ...join(parts)];
+  return [...join([mode_knob]), rule, ...join(parts)];
 }
 
 function choice_html(c: View.Choice): string {

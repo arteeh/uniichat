@@ -686,7 +686,13 @@ export function view_stoppable(v: View): boolean {
   return v.busy || v.limit !== null;
 }
 
+// a subagent's page shows its model and effort, not to be changed (#156)
 export function view_pick(v: View): Knob[] {
+  if (v.page !== null) {
+    const sub = view_sub(v);
+    const shown = (text: string, move: Move): Knob[] => (text === "" ? [] : [{ text, move, hint: text, choices: [] }]);
+    return sub === undefined ? [] : sub.pick !== null ? view_knobs(v, sub.pick, false) : [...shown(sub.model, "model"), ...shown(sub.effort, "effort")];
+  }
   return v.pick === null ? [] : view_knobs(v, v.pick, true);
 }
 

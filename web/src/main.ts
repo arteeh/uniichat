@@ -1019,8 +1019,6 @@ function paint(): void {
   P.frame = 0;
   SCROLL.stick = true;
   bars();
-  const sub = View.view_sub(v);
-  $("header .title").dataset.on = sub === undefined ? "" : [sub.model, sub.effort].filter((x) => x !== "").join(" · ");
   if (Html.names_set(v.team, v.agent, v.page?.name ?? null)) {
     P.rows = true;
   }
@@ -1097,7 +1095,7 @@ function bars(): void {
   $(".mic").classList.toggle("rec", P.rec !== null);
   $(".composer").classList.toggle("rec", P.rec !== null);
   const knob = (document.activeElement as HTMLElement | null)?.dataset?.knob;
-  markup($("#pick"), Html.pick_html(View.view_pick(v), v.talk));
+  markup($("#pick"), v.page === null ? Html.pick_html(View.view_pick(v), v.talk, true) : Html.pick_html(View.view_pick(v), View.view_sub(v)?.meter ?? null, false));
   if (knob !== undefined) {
     $("#pick [data-knob=" + knob + "]").focus();
   }

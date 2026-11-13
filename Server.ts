@@ -7,13 +7,13 @@ import type { ServerWebSocket } from "bun";
 import type { Out as Done } from "./Agent.ts";
 import { AskAI, type Ask, type Block, type Call, type End, type Event, type Kind, type Parked, type Said, type Say, type Vendor } from "./AskAI.ts";
 import { report_read, tool_name } from "./Call.ts";
-import { Sub, type Role, type Spawn } from "./Sub.ts";
+import { Sub, type Role, type Row as SubRow, type Spawn } from "./Sub.ts";
 import { clip_pages } from "./Clip.ts";
 import { Disk } from "./Disk.ts";
 import { Mcp } from "./Mcp.ts";
 import * as Import from "./Import.ts";
 import * as Md from "./Md.ts";
-import { JOBS, Memory, VIEW_HIGH, type Msg as Log, type Pair, type Room, type Share } from "./Memory.ts";
+import { JOBS, Memory, VIEW_HIGH, type Msg as Log, type Pair, type Room, type Root, type Share } from "./Memory.ts";
 import { OpenAI } from "./OpenAI.ts";
 import { Owner } from "./Owner.ts";
 import { Pick } from "./Pick.ts";
@@ -925,7 +925,8 @@ export namespace Chat {
     // a name no other agent's subagent has, now or before: it keys the
     // seat at the tools, the jobs' reports and the scratch folder
     const it = name ?? Memory.agent_new(chat.mem, (n) => [...Main.chats.values()].some((c) => c.subs.has(n) || Memory.agent(c.mem, n) !== null));
-    const sub: Sub<Msg> = { name: it, role, task, view, replies: [], why: null, run: Run.make<Say, Msg>(it, Chat.sub_kind(chat, () => sub)), doing: "starting", at: Date.now() };
+    const sub: Sub<Msg> = { name: it, role, task, view, replies: [], why: null, run: Run.make<Say, Msg>(it, Chat.sub_kind(chat, () => sub)), doing: "starting", at: Date.now(), used: null, used_at: 0, bytes: 0 };
+    sub.bytes = (Memory.agent(chat.mem, it) ?? []).reduce((n, root) => n + Chat.sub_bytes(root), 0);
     chat.subs.set(it, sub);
     // a job's report reaches it while it runs, else its spawner
     const report = (text: string) => (sub.run.busy && sub.why === null ? void Run.take(sub.run, { text, imgs: [] }) : Chat.report(chat, text.replace("] ", "] " + it + "'s job, "), true));
@@ -999,6 +1000,27 @@ export namespace Chat {
     }
   }
 
+  // how full its context is (#156): its last request and its log since,
+  // before that a guess from its prompt, view and log
+  export function sub_meter(sub: Sub<Msg>, pick: Pick | null): Meter | null {
+    if (pick === null) {
+      return null;
+    }
+    const window = Pick.window(pick, config.OFFER);
+    const start = Memory.bytes(Prompts.prompt("sub")) + sub.view.reduce((n, b) => n + Memory.bytes(b.text), 0);
+    const tokens = sub.used === null ? Math.ceil((start + sub.bytes) / TOKEN) : sub.used + Math.ceil((sub.bytes - sub.used_at) / TOKEN);
+    return { from: 0, used: Math.min(1, tokens / window), tokens, window, model: pick.model, guess: sub.used === null };
+  }
+
+  export function sub_row(chat: Chat, sub: Sub<Msg>): SubRow {
+    const pick = Chat.sub_shown(chat, sub);
+    return Sub.row(sub, pick, Chat.sub_meter(sub, pick), sub.run.sent.flatMap(({ m }) => Array.from({ length: m.end - m.id }, (_, k) => m.id + k)));
+  }
+
+  export function sub_bytes(root: Root): number {
+    return Memory.bytes(root.i + "|" + Memory.show(root)) + 2;
+  }
+
   // a chat's subagents share one prompt and one cache ("sub"): what is
   // each one's own, its name and folder, comes after the view
   export function sub_ask(chat: Chat, sub: Sub<Msg>): Ask {
@@ -1006,12 +1028,20 @@ export namespace Chat {
     const agent = Team.get(chat.id);
     const own = agent === null ? "" : Prompts.prompt("sub-prompt", { prompt: Team.prompt(agent) });
     const blocks = [...sub.view, Tools.devices(chat.tools), Tools.skills(chat.tools), Tools.at_work(chat.tools, sub.name), log];
-    return { ...Pick.ask(Chat.sub_pick(chat, sub)), system: Prompts.prompt("sub"), own, blocks, searches: SEARCHES, server: Tools.at(chat.tools, sub.name), agent: true, who: sub.name };
+    const used = (tokens: number) => {
+      [sub.used, sub.used_at] = [tokens, sub.bytes];
+      Main.team_soon();
+    };
+    return { ...Pick.ask(Chat.sub_pick(chat, sub)), system: Prompts.prompt("sub"), own, blocks, searches: SEARCHES, server: Tools.at(chat.tools, sub.name), agent: true, who: sub.name, used };
   }
 
   export function sub_put(chat: Chat, run: Talk, msg: Log, sent: boolean): Msg {
     const { kind, text, of, tool } = msg;
     const root = Memory.agent_push(chat.mem, run.name, kind, text, { of, tool });
+    const sub = chat.subs.get(run.name);
+    if (sub !== undefined) {
+      sub.bytes += Chat.sub_bytes(root);
+    }
     Chat.all(chat, { $: "entry", agent: run.name, id: root.i, kind, text, date: root.date, of, tool, ...(sent ? { sent } : {}) });
     return { id: root.i, end: root.i + 1 };
   }
@@ -1943,7 +1973,7 @@ export namespace Main {
   export function mates(): Mate[] {
     return Team.all().map((a) => {
       const chat = Main.chats.get(a.id);
-      return { id: a.id, name: a.name, about: a.about, picture: a.picture, unread: a.unread, last: chat === undefined ? "" : Chat.last(chat), busy: chat?.main.busy === true, archived: a.archived, subs: chat === undefined ? [] : [...chat.subs.values()].map((sub) => Sub.row(sub, Chat.sub_shown(chat, sub), sub.run.sent.flatMap(({ m }) => Array.from({ length: m.end - m.id }, (_, k) => m.id + k)))) };
+      return { id: a.id, name: a.name, about: a.about, picture: a.picture, unread: a.unread, last: chat === undefined ? "" : Chat.last(chat), busy: chat?.main.busy === true, archived: a.archived, subs: chat === undefined ? [] : [...chat.subs.values()].map((sub) => Chat.sub_row(chat, sub)) };
     });
   }
 

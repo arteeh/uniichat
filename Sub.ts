@@ -4,6 +4,7 @@ import { list as items, rec, text_of } from "./Json.ts";
 import * as Names from "./Names.ts";
 import { EFFORTS, Pick } from "./Pick.ts";
 import type { Run } from "./Run.ts";
+import type { Talk } from "./View.ts";
 
 // subagents (#116): one-off agents an agent spawns for a task, each with
 // its own run, its log in its spawner's folder; done once it has reported,
@@ -14,6 +15,8 @@ export type Role = { model: string | null; effort: string | null };
 export type Spawn = { task: string; role: Role; memory: boolean };
 
 // doing: what it does now, since at (a tool's name, thinking, a usage limit)
+// used: the tokens of its last request, when its log had used_at bytes of
+// the bytes it has now
 export type Sub<M> = {
   name    : string;
   role    : Role;
@@ -24,12 +27,15 @@ export type Sub<M> = {
   run     : Run<Say, M>;
   doing   : string;
   at      : number;
+  used    : number | null;
+  used_at : number;
+  bytes   : number;
 };
 
 // a subagent's row in the chat list
 // queue: the messages it hasn't taken yet; sent: its log's ones it took
 // but hasn't answered
-export type Row = { name: string; face: string; task: string; model: string; effort: string; doing: string; at: number; queue: string[]; sent: number[] };
+export type Row = { name: string; face: string; task: string; model: string; effort: string; pick: Pick | null; meter: Talk | null; doing: string; at: number; queue: string[]; sent: number[] };
 
 const NOTE = "subagent";
 const ON   = " on ";
@@ -97,7 +103,7 @@ export namespace Sub {
     return "[" + sub.name + "]\n" + (sub.replies.join("\n\n").trim() || "(no reply)");
   }
 
-  export function row<M>(sub: Sub<M>, pick: Pick | null, sent: number[]): Row {
+  export function row<M>(sub: Sub<M>, pick: Pick | null, meter: Talk | null, sent: number[]): Row {
     const task = sub.task.replace(/\s+/g, " ").trim();
     return {
       name   : sub.name,
@@ -105,6 +111,8 @@ export namespace Sub {
       task   : task.length > TASK_SHOWN ? task.slice(0, TASK_SHOWN) + "…" : task,
       model  : pick?.model ?? sub.role.model ?? "",
       effort : pick?.effort ?? sub.role.effort ?? "",
+      pick,
+      meter,
       doing  : sub.doing,
       at     : sub.at,
       queue  : sub.run.queue.map(({ q }) => (q.text.length > QUEUED_SHOWN ? q.text.slice(0, QUEUED_SHOWN) + "…" : q.text)),
