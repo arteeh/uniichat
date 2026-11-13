@@ -131,7 +131,7 @@ body.subpage header > .title:not([data-on=""])::after { content: attr(data-on); 
 .msg.said summary span:last-child { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--mid); }
 .msg.said details[open] > :not(summary) { margin: 10px 14px 0; }
 .faces { display: grid; grid-template-columns: repeat(auto-fill, minmax(52px, 1fr)); gap: 8px; }
-.faces .face { display: grid; place-items: center; padding: 3px; border-radius: 50%; cursor: pointer; }
+.faces .face { display: grid; place-items: center; justify-self: center; padding: 3px; border-radius: 50%; cursor: pointer; }
 .faces input { position: absolute; opacity: 0; pointer-events: none; }
 .faces .face:has(:checked) { outline: 2.5px solid var(--ink); }
 .faces .face:has(:focus-visible) { outline: 2.5px dashed var(--mid); }
