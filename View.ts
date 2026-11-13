@@ -10,7 +10,9 @@ import { rec } from "./Json.ts";
 
 export type Part = [number, number];
 
-type Entry = { kind: Kind; text: string; date?: string; images?: string[]; of?: string; tool?: string; from?: string };
+// pages: a message split in memory comes whole, under its first page's id
+// (#151)
+type Entry = { kind: Kind; text: string; date?: string; images?: string[]; of?: string; tool?: string; from?: string; pages?: number };
 
 export type Queued = { kind: Kind; text: string };
 
@@ -98,6 +100,7 @@ export type View = State & {
   turn  : number;
   nodes : Map<string, Node>;
   whole : Map<number, Entry>;
+  firsts: Map<number, number>;
   open  : Map<string, boolean>;
   live  : Live[];
   minds : Map<number, string[]>;
@@ -302,6 +305,7 @@ export function view_new(agent: string): View {
     turn      : Infinity,
     nodes     : new Map(),
     whole     : new Map(),
+    firsts    : new Map(),
     open      : new Map(),
     live      : [],
     minds     : new Map(),
@@ -334,7 +338,7 @@ export function view_switch(v: View, agent: string): Client[] {
 
 function view_chat(v: View): void {
   const fresh = view_new(v.agent);
-  for (const k of ["busy", "wait", "importing", "limit", "queue", "sent", "sums", "again", "timers", "talk", "parts", "turn", "nodes", "whole", "open", "live", "minds"] as const) {
+  for (const k of ["busy", "wait", "importing", "limit", "queue", "sent", "sums", "again", "timers", "talk", "parts", "turn", "nodes", "whole", "firsts", "open", "live", "minds"] as const) {
     Object.assign(v, { [k]: fresh[k] });
   }
 }
@@ -596,7 +600,8 @@ function view_lines(rows: Row[]): Row[] {
 }
 
 function view_rows(v: View, parts: Part[]): Row[][] {
-  return parts.map(([id, n]) => part_rows(v, id, n, v.turn));
+  const drawn = new Set<number>();
+  return parts.map(([id, n]) => part_rows(v, id, n, v.turn, drawn));
 }
 
 // a busy agent looks busy (#129): waiting for its model, writing, thinking,
@@ -726,7 +731,14 @@ function view_learn(v: View, pack: Pack): void {
     v.nodes.set(key, node);
   }
   for (const [id, entry] of Object.entries(pack.whole ?? {})) {
-    v.whole.set(Number(id), entry);
+    view_whole(v, Number(id), entry);
+  }
+}
+
+function view_whole(v: View, id: number, entry: Entry): void {
+  v.whole.set(id, entry);
+  for (let k = 1; k < (entry.pages ?? 1); k++) {
+    v.firsts.set(id + k, id);
   }
 }
 
@@ -737,8 +749,10 @@ function view_entry(v: View, msg: Server & { $: "entry" }): void {
   }
   const last = v.parts.findLast(([at]) => v.whole.get(at)?.kind !== "team");
   if (id !== undefined) {
-    v.whole.set(id, entry);
-    v.parts.push([id, 1]);
+    view_whole(v, id, entry);
+    for (let k = 0; k < (entry.pages ?? 1); k++) {
+      v.parts.push([id + k, 1]);
+    }
   } else if (msg.kind === "mind" && last !== undefined) {
     const at = last[0] + last[1] - 1;
     v.minds.set(at, [...(v.minds.get(at) ?? []), msg.text]);
@@ -904,9 +918,12 @@ export async function post(url: string, body: object, auth: Record<string, strin
 // one message is shown as itself, never as a fold of one (#120), a team
 // copy not at all (#134); two and more are a fold till opened, which
 // shows its two halves
-function part_rows(v: View, id: number, n: number, t: number): Row[] {
+// a message split in memory shows whole, once, at the first of its pages
+// shown whole (drawn: those shown so far); a fold counts messages (#151)
+function part_rows(v: View, id: number, n: number, t: number, drawn: Set<number>): Row[] {
   const key   = id + "+" + n;
-  const entry = v.whole.get(id);
+  const at    = n === 1 ? v.firsts.get(id) ?? id : id;
+  const entry = v.whole.get(at);
   const half  = n / 2;
   if (n === 1 && entry?.kind === "team") {
     return [];
@@ -914,13 +931,19 @@ function part_rows(v: View, id: number, n: number, t: number): Row[] {
   if (n === 1 && entry !== undefined) {
     const minds = id < t || v.thinking === false ? [] : v.minds.get(id) ?? [];
     const after = minds.flatMap((x) => entry_rows(null, "mind", x));
-    return [...sent_rows(v.sent.includes(id), whole_rows(id, entry, v.whole.get(id - 1))), ...after];
+    if (drawn.has(at)) {
+      return after;
+    }
+    drawn.add(at);
+    const before = v.firsts.get(at - 1) ?? at - 1;
+    return [...sent_rows(v.sent.includes(at), whole_rows(at, entry, v.whole.get(before))), ...after];
   }
   if (n === 1 || v.open.get(key) !== true) {
     return sum_rows(id, n, v.nodes.get(key));
   }
-  const rows = [...part_rows(v, id, half, t), ...part_rows(v, id + half, half, t)];
-  return [{ $: "Box", id, n, text: GLYPH.open + " " + n + "x · fold", rows }];
+  const rows = [...part_rows(v, id, half, t, drawn), ...part_rows(v, id + half, half, t, drawn)];
+  const msgs = n - [...v.firsts.keys()].filter((k) => k >= id && k < id + n).length;
+  return [{ $: "Box", id, n, text: GLYPH.open + " " + msgs + "x · fold", rows }];
 }
 
 const ROWS  = new WeakMap<Entry | Node, Row[]>();

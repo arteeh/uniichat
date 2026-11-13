@@ -1,6 +1,6 @@
 import * as fs from "node:fs";
 import { AskAI, type Again, type Ask, type Block, type Call, type End as Answered, type Event, type Img, type Kind, type Say } from "./AskAI.ts";
-import { clip_page, clip_pages } from "./Clip.ts";
+import { clip_page, clip_pages, split_of } from "./Clip.ts";
 import * as config from "./Config.ts";
 import { Disk } from "./Disk.ts";
 import { err_code, err_why } from "./Err.ts";
@@ -100,6 +100,7 @@ type Hooks = {
 export type Memory = Logs & Chosen & Unlogged & Tree & Hooks;
 
 const NODE  = 512;
+const PART_BEGINS = 150;
 export const JOBS = 64;
 
 const LOGGED = 60e3;
@@ -405,7 +406,7 @@ export namespace Memory {
   // a message's pages, all of its date
   export function pages(msg: Msg): Msg[] {
     const date = msg.date ?? new Date().toISOString();
-    const texts = clip_pages(msg.text);
+    const texts = clip_pages(msg.text, split_of(msg.kind));
     const pics = msg.images ?? [];
     const n = Math.max(texts.length, Math.ceil(pics.length / PICS));
     return Array.from({ length: n }, (_, k) => {
@@ -567,10 +568,35 @@ export namespace Memory {
   export function source(mem: Memory, l: number, i: number): string | null {
     if (l === 0) {
       const root = Memory.message(mem, i);
-      return root === null ? null : root.line ?? (root.kind === "team" ? null : Memory.show(root));
+      return root === null ? null : root.line ?? (root.kind === "team" ? null : Memory.part_of(mem, i) + Memory.show(root));
     }
     const [a, b] = Memory.halves({ l, i }).map((half) => Memory.node(mem, half));
     return a === null || b === null ? null : Memory.flat(a) + "\n" + Memory.flat(b);
+  }
+
+  // a later page of a split message is summarized before the ones before
+  // it are in view: it says whose part it is and how that one begins (#151)
+  export function part_of(mem: Memory, i: number): string {
+    const [a, b] = Memory.pages_of(mem, i);
+    if (a === i) {
+      return "";
+    }
+    const first = Memory.at(mem, a);
+    return "[part " + (i - a + 1) + " of " + (b - a) + " of message " + a + ", " + first.kind + ", which begins: " + Memory.flat(first.text).slice(0, PART_BEGINS) + "…]\n";
+  }
+
+  // the pages [a, b) of the message page i is one of: a page before is
+  // "more", of the same kind and date (Memory.pages)
+  export function pages_of(mem: Memory, i: number): [number, number] {
+    const of = (up: Msg, m: Msg) => up.more === true && up.kind === m.kind && up.date === m.date;
+    let [a, b] = [i, i + 1];
+    while (a > 0 && of(Memory.at(mem, a - 1), Memory.at(mem, a))) {
+      a--;
+    }
+    while (b < mem.count && of(Memory.at(mem, b - 1), Memory.at(mem, b))) {
+      b++;
+    }
+    return [a, b];
   }
 
   export function ctx(l: number, i: number): number {

@@ -8,7 +8,6 @@ import type { Out as Done } from "./Agent.ts";
 import { AskAI, type Ask, type Block, type Call, type End, type Event, type Kind, type Parked, type Said, type Say, type Vendor } from "./AskAI.ts";
 import { report_read, tool_name } from "./Call.ts";
 import { Sub, type Role, type Row as SubRow, type Spawn } from "./Sub.ts";
-import { clip_pages } from "./Clip.ts";
 import { Disk } from "./Disk.ts";
 import { Mcp } from "./Mcp.ts";
 import * as Import from "./Import.ts";
@@ -356,8 +355,6 @@ export namespace Chat {
   // job's to 0 and this chat (null), UniiChat's own note leaves them;
   // mid-turn only the user's sets them, to 0 and this chat
   export function posted(chat: Chat, post: Pending): Msg {
-    const pages = post.kind === "user" ? clip_pages(post.text) : [post.text];
-    let id = -1;
     const keep = post.kind !== "user" && (!chat.fresh || post.kind === "note");
     const hop = post.kind === "user" ? 0 : keep ? chat.mem.hop : post.hop ?? 0;
     const origin = post.kind === "user" ? null : keep ? chat.mem.origin : post.origin === undefined || post.origin === chat.id ? null : post.origin;
@@ -366,12 +363,7 @@ export namespace Chat {
       [chat.mem.hop, chat.mem.origin] = [hop, origin];
       Memory.save(chat.mem);
     }
-    pages.forEach((page, k) => {
-      const last = k === pages.length - 1;
-      const msg = Chat.push(chat, chat.main, post.kind, page, last ? post.images : [], !last, last ? post.act : undefined, post.from === undefined ? {} : { from: post.from }, true);
-      id = id < 0 ? msg.id : id;
-    });
-    return { id, end: chat.mem.count };
+    return Chat.push(chat, chat.main, post.kind, post.text, post.images, false, post.act, post.from === undefined ? {} : { from: post.from }, true);
   }
 
   export function queued(chat: Chat, run: Run<Pending, Msg>): void {
@@ -698,9 +690,9 @@ export namespace Chat {
       Team.unread(chat.id, null);
       chat.told = true;
     }
-    for (const { i, kind, text, date, images, of, tool, from } of roots) {
-      Chat.all(chat, { $: "entry", id: i, kind, text, date, images, of, tool, from, ...queued });
-    }
+    const { i, kind, date, of, tool, from } = roots[0];
+    const pages = roots.length > 1 ? { pages: roots.length } : {};
+    Chat.all(chat, { $: "entry", id: i, kind, text: roots.map((r) => r.text).join(""), date, images: roots.flatMap((r) => r.images ?? []), of, tool, from, ...pages, ...queued });
     if (first && Chat.real(roots[0])) {
       chat.gist = roots[0].i;
     }
@@ -1210,7 +1202,9 @@ export namespace Chat {
       console.log("push " + agent.name + ": skipped (" + not + ")");
       return;
     }
-    Push.notify(Owner.open(), last.text, { title: agent.name, url: "/a/" + agent.id, tag: "unii-" + agent.id });
+    const [a, b] = Memory.pages_of(chat.mem, k);
+    const text = Array.from({ length: b - a }, (_, n) => Memory.at(chat.mem, a + n).text).join("");
+    Push.notify(Owner.open(), text, { title: agent.name, url: "/a/" + agent.id, tag: "unii-" + agent.id });
   }
 
   export function after(chat: Chat): void {
@@ -1935,16 +1929,23 @@ export namespace Chat {
     return Memory.halves(part).flatMap((half) => Chat.blocks(half, [a, b]));
   }
 
+  // a page of a message split in memory goes as the whole message, under
+  // its first page's id, with how many pages it has (#151)
   export function teach(chat: Chat, sock: Sock, parts: Part[]): void {
     for (const [id, n] of parts.filter(([id, n]) => !sock.data.seen.has(id + "+" + n))) {
       sock.data.seen.add(id + "+" + n);
       if (n === 1) {
-        const m = Memory.at(chat.mem, id);
-        Chat.send(sock, { $: "know", whole: { [id]: { kind: m.kind, text: m.text, date: m.date, images: m.images, of: m.of, tool: m.tool, from: m.from } } });
+        const [a, b] = Memory.pages_of(chat.mem, id);
+        const pages = Array.from({ length: b - a }, (_, k) => Memory.at(chat.mem, a + k));
+        const m = pages[0];
+        const text = pages.map((p) => p.text).join("");
+        const images = pages.flatMap((p) => p.images ?? []);
+        Chat.send(sock, { $: "know", whole: { [a]: { kind: m.kind, text, date: m.date, images, of: m.of, tool: m.tool, from: m.from, ...(b - a > 1 ? { pages: b - a } : {}) } } });
       }
       Chat.know(chat, sock, id, n);
     }
   }
+
 
   export function know(chat: Chat, sock: Sock, id: number, n: number): void {
     const text = Memory.node(chat.mem, { l: Math.log2(n), i: id / n });

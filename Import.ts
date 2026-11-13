@@ -1,5 +1,5 @@
 import type { Kind } from "./AskAI.ts";
-import { clip_pages, stream_lines } from "./Clip.ts";
+import { clip_pages, split_of, stream_lines } from "./Clip.ts";
 import { get, list, text_of } from "./Json.ts";
 
 type Msg = { kind: Kind; text: string; date: string; more?: boolean };
@@ -379,7 +379,7 @@ function import_date(at: unknown, last: string): string {
 }
 
 function msgs_of(kind: Kind, text: string, date: string): Msg[] {
-  const pages = text.trim() === "" ? [] : clip_pages(text);
+  const pages = text.trim() === "" ? [] : clip_pages(text, split_of(kind));
   return pages.map((page, k) => ({ kind, text: page, date, more: k < pages.length - 1 }));
 }
 
