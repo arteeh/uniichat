@@ -95,7 +95,7 @@
         }
         $out.Add($a.ToString())
       }
-      , $out.ToArray()
+      $out.ToArray()
     }
     $winq = { param($a) if ($a -ne '' -and $a -notmatch '[\s"]') { return $a }; '"' + [regex]::Replace([regex]::Replace($a, '(\\*)"', '$1$1\"'), '(\\+)$', '$1$1') + '"' }
     $samedir = { param($a, $b) ([string]$a).TrimEnd('\', '/') -ieq ([string]$b).TrimEnd('\', '/') }
@@ -283,13 +283,31 @@
         $part = $t.TaskName.Substring(5)
         $n = "ki-$part"
         if (-not (& $task $n)) {
-          $xml = [string](Export-ScheduledTask -TaskName $t.TaskName -TaskPath '\')
-          $xml = $xml.Replace('"' + $oldBin + '"', '"' + $bin + '"')
-          if ($moving) { $xml = $xml.Replace('--env=UNII_DIR=' + $odir, '--env=KI_DIR=' + $dir) }
-          $xml = $xml.Replace('--env=UNII_', '--env=KI_')
-          $xml = [regex]::Replace($xml, '<Description>unii-made:[^<]*</Description>', ('<Description>ki-made: `ki ' + $part + ' -d` made this task, and makes it again; `ki ' + $part + ' stop` removes it.</Description>'))
           try {
-            Register-ScheduledTask -TaskName $n -TaskPath '\' -Xml $xml | Out-Null
+            # its command line read as Windows reads it (unii.exe's path is
+            # quoted only if it has a space), each part changed, and
+            # written back quoted as Service.ts does; the XML by the XML
+            # writer, so it is encoded as it should be
+            $doc = [xml](Export-ScheduledTask -TaskName $t.TaskName -TaskPath '\')
+            $e = $doc.Task.Actions.Exec
+            $parts = New-Object System.Collections.Generic.List[string]
+            $given = $false
+            foreach ($a in @(& $argv ([string]$e.Arguments))) {
+              if (($a -match '(^|[\\/])unii\.exe$') -or ($a -ieq $oldBin)) { $a = $bin }
+              elseif ($a -like '--env=UNII_DIR=*') { $a = '--env=KI_DIR=' + $dir; $given = $true }
+              elseif ($a -like '--env=UNII_*') { $a = '--env=KI_' + $a.Substring('--env=UNII_'.Length) }
+              $parts.Add($a)
+            }
+            # unii's data moved from the default folder to one ki isn't
+            # told of otherwise
+            if (-not $given -and -not (& $samedir $dir (Join-Path $HOME '.ki'))) {
+              $at = $parts.IndexOf('--service')
+              if ($at -lt 0) { $at = $parts.Count - 1 }
+              $parts.Insert($at + 1, '--env=KI_DIR=' + $dir)
+            }
+            $e.Arguments = (@($parts | ForEach-Object { & $winq $_ }) -join ' ')
+            $doc.Task.RegistrationInfo.Description = 'ki-made: `ki ' + $part + ' -d` made this task, and makes it again; `ki ' + $part + ' stop` removes it.'
+            Register-ScheduledTask -TaskName $n -TaskPath '\' -Xml $doc.OuterXml | Out-Null
           } catch {
             Write-Host ("  Could not make the task $n from " + $t.TaskName + " (" + $_.Exception.Message + "): run " + $(if ([string]$t.Principal.RunLevel -eq 'Highest') { 'sudo ' } else { '' }) + "ki $part -d to.")
           }
@@ -416,7 +434,7 @@
         $doc = [xml](Export-ScheduledTask -TaskName $n -TaskPath '\')
         $e = $doc.Task.Actions.Exec
         $parts = @(& $argv ([string]$e.Arguments))
-        $at = [array]::IndexOf(@($parts | ForEach-Object { [IO.Path]::GetFileName($_) -ieq 'ki.exe' }), $true)
+        $at = [array]::IndexOf(@($parts | ForEach-Object { $_ -match '(^|[\\/])ki\.exe$' }), $true)
         if ($at -ge 0 -and -not ($parts[$at] -ieq $bin)) {
           $parts[$at] = $bin
           $e.Arguments = (@($parts | ForEach-Object { & $winq $_ }) -join ' ')
