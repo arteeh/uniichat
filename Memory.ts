@@ -90,9 +90,11 @@ type Tree = {
   again  : Again | null;
 };
 
+// reuse: a node's line made elsewhere, or "wait" till it is (#149)
 type Hooks = {
   share  : () => Omit<Share, keyof Pick>;
   made?  : (l: number, i: number) => void;
+  reuse? : (l: number, i: number) => { text: string } | "wait" | null;
   name?  : () => string;
   acted  : (id: string, ans: object) => void;
 };
@@ -663,7 +665,13 @@ export namespace Memory {
           break;
         }
         const text = mem.busy.has(Memory.slot(l, i)) ? null : Memory.source(mem, l, i);
-        if (text !== null && Memory.bytes(text) <= NODE) {
+        const reused = text === null || l === 0 ? null : mem.reuse?.(l, i) ?? null;
+        if (reused === "wait") {
+          continue;
+        }
+        if (reused !== null) {
+          free.push({ l, i, text: reused.text });
+        } else if (text !== null && Memory.bytes(text) <= NODE) {
           free.push({ l, i, text });
         } else if (text !== null) {
           Memory.job(mem, l, i, text);

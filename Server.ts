@@ -137,6 +137,9 @@ const SPARE      = 2 ** 30;
 // another agent's message (agent id/message id): its place in Unii's memory
 const COPIES = new Map<string, number>();
 
+// Unii's memory, when a node of it waits on another agent's (#149)
+const REUSING = new Set<Memory>();
+
 // how many of a memory's messages before each id are team copies
 const TEAMS = new WeakMap<Memory, number[]>();
 
@@ -276,6 +279,9 @@ export namespace Chat {
     chat.gist = Chat.gist(chat);
     mem.made = (l, i) => Chat.made(chat, l, i);
     mem.name = () => Chat.name(chat);
+    if (id === UNII) {
+      mem.reuse = (l, i) => Chat.reused(chat, l, i);
+    }
     mem.wait.add(() => Chat.progress(chat));
     chat.batch = Chat.resumed(chat);
     Chat.timed(chat);
@@ -1347,6 +1353,10 @@ export namespace Chat {
     if (l === 0 && chat.id !== UNII) {
       Chat.copy(chat, i);
     }
+    const unii = Main.chats.get(UNII);
+    if (l > 0 && chat.id !== UNII && unii !== undefined && REUSING.delete(unii.mem)) {
+      Memory.pump(unii.mem);
+    }
     if (chat.batch !== null) {
       Chat.built(chat.batch, l, i - Math.floor(chat.batch.a / 2 ** l));
     }
@@ -1385,6 +1395,33 @@ export namespace Chat {
     }
     COPIES.delete(key);
     Memory.fill(Main.unii().mem, at, "[" + Chat.name(chat) + "] " + Memory.flat(line));
+  }
+
+  // a node of Unii's of only one agent's copies, of a run of its messages
+  // that is one node in its own tree: that node's line, once made (#149)
+  export function reused(unii: Chat, l: number, i: number): { text: string } | "wait" | null {
+    const n = 2 ** l;
+    const [a] = Memory.span({ l, i });
+    const first = Memory.message(unii.mem, a);
+    if (first?.kind !== "team" || first.from === undefined || first.copy === undefined || first.copy % n !== 0) {
+      return null;
+    }
+    for (let k = 1; k < n; k++) {
+      const m = Memory.message(unii.mem, a + k);
+      if (m?.kind !== "team" || m.from !== first.from || m.copy !== first.copy + k) {
+        return null;
+      }
+    }
+    const chat = Main.chats.get(first.from);
+    const line = chat === undefined ? null : Memory.node(chat.mem, { l, i: first.copy / n });
+    if (line !== null && chat !== undefined) {
+      return { text: "[" + Chat.name(chat) + "] " + Memory.flat(line) };
+    }
+    if (Team.get(first.from) === null || chat?.mem.done === true) {
+      return null;
+    }
+    REUSING.add(unii.mem);
+    return "wait";
   }
 
   // the places still waiting, after a restart: each line made meanwhile
@@ -2458,6 +2495,7 @@ export namespace Main {
     Limit.answering(() => ({ queued: [...Main.chats.values()].some((c) => Run.waiting(c.main)), busy: [...Main.chats.values()].some((c) => c.main.busy) }));
     Team.all().forEach((agent) => Chat.open(agent.id, Main.tools));
     Chat.copies();
+    Memory.pump(Main.unii().mem);
     Main.watch();
     setInterval(() => void Main.scratch_sweep(null), SCRATCH_SWEEP).unref();
     process.on("unhandledRejection", Main.unowned);
