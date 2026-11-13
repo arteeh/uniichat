@@ -184,7 +184,7 @@ body.subpage header > .title:not([data-on=""])::after { content: attr(data-on); 
   body.wide :is(.mine, .down) { right: max(20px, (66.667vw - var(--col)) / 2); }
 }
 
-footer { position: sticky; bottom: 0; z-index: 2; padding: 18px max(20px, env(safe-area-inset-right)) max(14px, env(safe-area-inset-bottom)) max(20px, env(safe-area-inset-left)); background: linear-gradient(transparent, var(--paper) 14px); }
+footer { position: sticky; bottom: 0; z-index: 2; margin-top: -12px; padding: 9px max(20px, env(safe-area-inset-right)) max(14px, env(safe-area-inset-bottom)) max(20px, env(safe-area-inset-left)); background: linear-gradient(transparent, var(--paper) 9px); }
 body:is(.account, .tree) footer { position: fixed; inset: auto 0 0; background: none; pointer-events: none; }
 body:is(.account, .tree) footer > :not(#toast) { display: none; }
 #pick { width: min(var(--col), 100%); margin: 0 auto 6px; display: flex; align-items: center; gap: 6px; font: 12.5px/20px var(--sans); color: var(--mid); }
@@ -312,7 +312,7 @@ header > .imping { display: flex; flex-direction: column; justify-content: cente
 @media not (pointer: fine) { #import .desk { display: none; } }
 @media (max-width: 420px) { #import .two { grid-template-columns: 1fr; } }
 
-#log { width: min(var(--col), 100% - 40px); margin: 0 auto; padding: 24px 0 40px; flex: 1 0 auto; }
+#log { width: min(var(--col), 100% - 40px); margin: 0 auto; padding: 24px 0 0; flex: 1 0 auto; }
 #log > * > * { margin-block: 14px; }
 .cap { font: italic 14.5px var(--serif); color: var(--mid); }
 
@@ -455,7 +455,7 @@ header > .imping { display: flex; flex-direction: column; justify-content: cente
   .brand span { display: none; }
   header > :is(button, a) { height: 30px; padding: 0 10px; font-size: 13px; }
   #log { width: calc(100% - 28px); }
-  footer { padding: 12px 14px max(8px, env(safe-area-inset-bottom)); }
+  footer { padding: 9px 14px max(8px, env(safe-area-inset-bottom)); }
   .composer { padding: 5px 5px 5px 16px; }
   #account { width: calc(100% - 28px); }
   [popover] { left: 12px; right: 12px; width: auto; }
