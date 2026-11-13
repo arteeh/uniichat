@@ -16,7 +16,7 @@ export type Root = Msg & { i: number; size: number; date: string };
 
 // from: the agent whose message it is, by id; copy: a team line's
 // message there
-export type Msg = { kind: Kind; text: string; date?: string; images?: string[]; imported?: boolean; line?: string; more?: boolean; act?: string; from?: string; copy?: number } & Pair;
+export type Msg = { kind: Kind; text: string; date?: string; images?: string[]; imported?: boolean; line?: string; more?: boolean; page?: boolean; act?: string; from?: string; copy?: number } & Pair;
 
 export type Pair = { of?: string; tool?: string };
 
@@ -416,7 +416,8 @@ export namespace Memory {
       const images = pics.slice(Math.max(0, end - PICS), end);
       const more = k < n - 1 || msg.more === true ? true : undefined;
       const act = k === n - 1 ? msg.act : undefined;
-      return { ...msg, date, text: texts[k - n + texts.length] ?? "", images, line: k === 0 ? msg.line : undefined, more, act };
+      const page = k > 0 || msg.page === true ? true : undefined;
+      return { ...msg, date, text: texts[k - n + texts.length] ?? "", images, line: k === 0 ? msg.line : undefined, more, page, act };
     });
   }
 
@@ -587,18 +588,26 @@ export namespace Memory {
     return "[part " + (i - a + 1) + " of " + (b - a) + " of message " + a + ", " + first.kind + ", which begins: " + Memory.flat(first.text).slice(0, PART_BEGINS) + "…]\n";
   }
 
-  // the pages [a, b) of the message page i is one of: a page before is
-  // "more", of the same kind and date (Memory.pages)
+  // the pages [a, b) of the message page i is one of
   export function pages_of(mem: Memory, i: number): [number, number] {
-    const of = (up: Msg, m: Msg) => up.more === true && up.kind === m.kind && up.date === m.date;
     let [a, b] = [i, i + 1];
-    while (a > 0 && of(Memory.at(mem, a - 1), Memory.at(mem, a))) {
+    while (a > 0 && Memory.page_of(Memory.at(mem, a - 1), Memory.at(mem, a))) {
       a--;
     }
-    while (b < mem.count && of(Memory.at(mem, b - 1), Memory.at(mem, b))) {
+    while (b < mem.count && Memory.page_of(Memory.at(mem, b - 1), Memory.at(mem, b))) {
       b++;
     }
     return [a, b];
+  }
+
+  // a later page is marked (Memory.pages); one logged before that mark is
+  // after a "more" page of the same kind and date, but an import marks every
+  // message "more", so an unmarked import is a message of its own
+  export function page_of(up: Msg, m: Msg): boolean {
+    if (m.page !== undefined) {
+      return m.page;
+    }
+    return m.imported !== true && up.more === true && up.kind === m.kind && up.date === m.date;
   }
 
   export function ctx(l: number, i: number): number {
@@ -1157,9 +1166,9 @@ export namespace Memory {
     let sep = "\n";
     yield '{"messages": [';
     for (let i = 0; i < mem.count; i++) {
-      const { kind, text, date, images, more, of, tool } = Memory.at(mem, i);
+      const { kind, text, date, images, more, page, of, tool } = Memory.at(mem, i);
       images?.forEach((name) => own.add(name));
-      yield (i === 0 ? "\n" : ",\n") + JSON.stringify({ id: i, kind, text, date, images, more, of, tool });
+      yield (i === 0 ? "\n" : ",\n") + JSON.stringify({ id: i, kind, text, date, images, more, page, of, tool });
     }
     yield '],\n"summaries": [';
     for (const l of Memory.levels(mem)) {

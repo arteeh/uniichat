@@ -2,7 +2,7 @@ import type { Kind } from "./AskAI.ts";
 import { clip_pages, split_of, stream_lines } from "./Clip.ts";
 import { get, list, text_of } from "./Json.ts";
 
-type Msg = { kind: Kind; text: string; date: string; more?: boolean };
+type Msg = { kind: Kind; text: string; date: string; more?: boolean; page?: boolean };
 
 type Head = { kind: Kind; date: string; size: number; n: number };
 
@@ -380,7 +380,7 @@ function import_date(at: unknown, last: string): string {
 
 function msgs_of(kind: Kind, text: string, date: string): Msg[] {
   const pages = text.trim() === "" ? [] : clip_pages(text, split_of(kind));
-  return pages.map((page, k) => ({ kind, text: page, date, more: k < pages.length - 1 }));
+  return pages.map((page, k) => ({ kind, text: page, date, more: k < pages.length - 1, ...(k > 0 ? { page: true } : {}) }));
 }
 
 function parts_text(content: unknown): string {

@@ -1346,7 +1346,7 @@ export namespace Chat {
     }
     const date = Number.isNaN(Date.parse(when)) ? undefined : new Date(when).toISOString();
     const pair = (y: unknown) => (typeof y === "string" && y.length <= PAIR ? y : undefined);
-    return { kind, text, date, more: get(x, "more") === true, of: pair(of), tool: pair(tool) };
+    return { kind, text, date, more: get(x, "more") === true, ...(get(x, "page") === true ? { page: true } : {}), of: pair(of), tool: pair(tool) };
   }
 
   export function made(chat: Chat, l: number, i: number): void {
@@ -1665,23 +1665,14 @@ export namespace Chat {
     return (m.kind === "user" || m.kind === "unii" || (m.kind === "work" && m.from !== undefined)) && m.imported !== true;
   }
 
-  // the first page of the last real message, imports aside: a page before
-  // is "more", of the same kind and date (Memory.pages)
+  // the first page of the last real message, imports aside
   export function gist(chat: Chat): number {
     for (let i = chat.mem.count - 1; i >= 0; i--) {
-      const m = Memory.at(chat.mem, i);
-      if (Chat.real(m)) {
-        while (i > 0 && Chat.page_of(Memory.at(chat.mem, i - 1), m)) {
-          i--;
-        }
-        return i;
+      if (Chat.real(Memory.at(chat.mem, i))) {
+        return Memory.pages_of(chat.mem, i)[0];
       }
     }
     return -1;
-  }
-
-  export function page_of(up: Log, m: Log): boolean {
-    return up.more === true && up.kind === m.kind && up.date === m.date;
   }
 
   export function join(chat: Chat, sock: Sock): void {
