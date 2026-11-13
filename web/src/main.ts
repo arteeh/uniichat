@@ -49,9 +49,12 @@ const AGENT = /^\/a\/([a-z0-9]{1,16})(\/edit)?$/;
 // a subagent's page, under its spawner's chat (#116)
 const SUB = /^\/a\/([a-z0-9]{1,16})\/s\/([A-Za-z]{2,40})$/;
 
-// a reloaded screen over a chat (#164) starts on that chat's agent
+const PAGES = ["/settings", "/account"];
+
+// a reloaded screen over a chat (#164) starts on that chat's agent, or on
+// the last chat open in this tab, whatever width the chain was laid at
 const OVER = get(history.state, "chain");
-const v = View.view_new(AGENT.exec(location.pathname)?.[1] ?? (Array.isArray(OVER) ? AGENT.exec(String(OVER.at(-2)))?.[1] : undefined) ?? UNII);
+const v = View.view_new(AGENT.exec(location.pathname)?.[1] ?? (Array.isArray(OVER) ? AGENT.exec(String(OVER.at(-2)))?.[1] : undefined) ?? ([...PAGES, "/new"].includes(location.pathname) ? sessionStorage.getItem(kept("chat")) : null) ?? UNII);
 
 const BOX = $(".composer .field", HTMLElement);
 
@@ -193,7 +196,6 @@ async function boot_me(): Promise<unknown> {
   }
 }
 
-const PAGES = ["/settings", "/account"];
 
 const FORM = /^\/(new|a\/([a-z0-9]{1,16})\/edit)$/;
 
@@ -1304,6 +1306,7 @@ function route(): void {
   const sub = SUB.exec(p);
   const left = !$("#log").hidden && v.page === null;
   chat_to(AGENT.exec(p)?.[1] ?? sub?.[1] ?? (tree ? new URLSearchParams(location.search).get("a") ?? UNII : p === "/" ? UNII : v.agent));
+  sessionStorage.setItem(kept("chat"), v.agent);
   for (const out of View.view_act(v, { $: "Goto", name: sub?.[2] ?? null })) {
     View.link_send(v, out);
   }
