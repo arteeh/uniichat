@@ -535,6 +535,39 @@ fi
 # unii's own become ki's: the data and sign-ins move, unii's services
 # give way to ki's (made now, started below, once ki is in place)
 q() { printf '%s' "$1" | sed 's/[#&\\]/\\&/g'; }
+# a value as Service.ts writes it in a unit ("", \ and " escaped, % doubled;
+# in ExecStart, sd_exec, $ doubled too) and in a plist (XML's &, <, >)
+sd_env() { printf '"%s"' "$(printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g; s/%/%%/g')"; }
+sd_exec() { sd_env "$1" | sed 's/\$/$$/g'; }
+xml() { printf '%s' "$1" | sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g'; }
+# ki's service $3 in file $2 from unii's in $1, the same but: it runs
+# $BIN, its data folder is $dir (KI_DIR, unless ki's default), UNII_*
+# settings are KI_*, and it says it's ki's
+ki_unit() {
+  case $os in
+    linux) KI_X_BIN=$(sd_exec "$BIN") KI_X_DIR=$( [ "$dir" = "$HOME/.ki" ] || sd_env "KI_DIR=$dir") KI_X_PART=$3 awk '
+      BEGIN { b = ENVIRON["KI_X_BIN"]; d = ENVIRON["KI_X_DIR"]; p = ENVIRON["KI_X_PART"] }
+      /^# unii-made: / { print "# ki-made: `ki " p " -d` wrote this unit, and writes it again; `ki " p " stop` removes it."; next }
+      /^Description=/ { print "Description=Ki " (p == "serve" ? "server" : "device") " (ki " p ")"; next }
+      /^ExecStart=/ { if (match($0, /^ExecStart="([^"\\]|\\.)*"/)) $0 = "ExecStart=" b substr($0, RLENGTH + 1); print; if (d != "") print "Environment=" d; next }
+      /^Environment="(UNII|KI)_DIR=/ { next }
+      { sub(/^Environment="UNII_/, "Environment=\"KI_"); print }' "$1" > "$2.new" && mv "$2.new" "$2";;
+    darwin) d=""; [ "$dir" = "$HOME/.ki" ] || d="<key>KI_DIR</key><string>$(xml "$dir")</string>"
+      sed -E -e "s#<array><string>[^<]*</string>#<array><string>$(q "$(xml "$BIN")")</string>#" \
+        -e "s#<key>Label</key><string>unii-#<key>Label</key><string>ki-#" \
+        -e "s#<key>(UNII|KI)_DIR</key><string>[^<]*</string>##g" \
+        -e "s#<key>UNII_#<key>KI_#g" \
+        -e "s#<key>EnvironmentVariables</key><dict>#&$(q "$d")#" \
+        -e "s#<!-- unii-made: .*#<!-- ki-made: \`ki $3 -d\` wrote this, and writes it again; \`ki $3 stop\` removes it. -->#" "$1" > "$2.new" && mv "$2.new" "$2";;
+  esac
+}
+# ki's service file $1 made to run $BIN
+point() {
+  case $os in
+    linux) KI_X_BIN=$(sd_exec "$BIN") awk 'BEGIN { b = ENVIRON["KI_X_BIN"] } /^ExecStart=/ && match($0, /^ExecStart="([^"\\]|\\.)*"/) { $0 = "ExecStart=" b substr($0, RLENGTH + 1) } { print }' "$1" > "$1.new" && mv "$1.new" "$1";;
+    darwin) sed -e "s#<array><string>[^<]*</string>#<array><string>$(q "$(xml "$BIN")")</string>#" "$1" > "$1.new" && mv "$1.new" "$1";;
+  esac
+}
 # ki's services made from unii's, to start once ki is in place: kept in
 # <data dir>/.renaming (a line "start <name>" each) with the rest of the
 # move's state, till all is done, so a run stopped halfway (a failed
@@ -560,18 +593,7 @@ if [ -n "$renaming" ]; then
   for s in $olds; do
     p=${s#unii-} from=$(unit "$s") to=$(unit "ki-$p")
     if [ ! -e "$to" ]; then
-      case $os in
-        linux) sed -e "s#^ExecStart=\"[^\"]*\"#ExecStart=\"$(q "$BIN")\"#" \
-            -e "s#^Environment=\"UNII_DIR=$(q "$odir")\"#Environment=\"KI_DIR=$(q "$dir")\"#" \
-            -e 's#^Environment="UNII_#Environment="KI_#' \
-            -e "s#^\# unii-made: .*#\# ki-made: \`ki $p -d\` wrote this unit, and writes it again; \`ki $p stop\` removes it.#" \
-            -e "s#^Description=.*#Description=Ki $( [ "$p" = serve ] && echo server || echo device ) (ki $p)#" "$from" > "$to.new" && mv "$to.new" "$to";;
-        darwin) sed -e "s#<array><string>[^<]*</string>#<array><string>$(q "$BIN")</string>#" \
-            -e "s#<key>Label</key><string>unii-#<key>Label</key><string>ki-#" \
-            -e "s#<key>UNII_DIR</key><string>$(q "$odir")</string>#<key>KI_DIR</key><string>$(q "$dir")</string>#" \
-            -e "s#<key>UNII_#<key>KI_#g" \
-            -e "s#<!-- unii-made: .*#<!-- ki-made: \`ki $p -d\` wrote this, and writes it again; \`ki $p stop\` removes it. -->#" "$from" > "$to.new" && mv "$to.new" "$to";;
-      esac
+      ki_unit "$from" "$to" "$p"
     fi
     if grep -qs ki-made "$to"; then add_fresh "ki-$p"; echo "start ki-$p" >> "$dir/.renaming"; fi
     case $os in
@@ -640,13 +662,7 @@ esac
 # (the ones made from unii's that run already, started by hand, are left)
 # each runs $BIN (the one this run wrote: a run before may have failed
 # writing another)
-for s in $fresh; do
-  f=$(unit "$s")
-  case $os in
-    linux) sed -E "s#^ExecStart=\"([^\"\\\\]|\\\\.)*\"#ExecStart=\"$(q "$BIN")\"#" "$f" > "$f.new" && mv "$f.new" "$f";;
-    darwin) sed -e "s#<array><string>[^<]*</string>#<array><string>$(q "$BIN")</string>#" "$f" > "$f.new" && mv "$f.new" "$f";;
-  esac
-done
+for s in $fresh; do point "$(unit "$s")"; done
 x=""
 for s in $fresh; do case " $made " in *" $s "*) ;; *) up "$s" || x="$x $s";; esac; done
 fresh="${x:-}"
