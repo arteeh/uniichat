@@ -1971,8 +1971,9 @@ export namespace Chat {
   export function teach(chat: Chat, sock: Sock, parts: Part[]): void {
     for (const [id, n] of parts.filter(([id, n]) => !sock.data.seen.has(id + "+" + n))) {
       sock.data.seen.add(id + "+" + n);
-      if (n === 1) {
-        const [a, b] = Memory.pages_of(chat.mem, id);
+      const [a, b] = n === 1 ? Memory.pages_of(chat.mem, id) : [0, 0];
+      if (n === 1 && !sock.data.seen.has("whole " + a)) {
+        sock.data.seen.add("whole " + a);
         const pages = Array.from({ length: b - a }, (_, k) => Memory.at(chat.mem, a + k));
         const m = pages[0];
         const text = pages.map((p) => p.text).join("");

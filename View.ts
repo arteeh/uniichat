@@ -783,11 +783,21 @@ export function link_open(v: View, link: Link): void {
       drop();
     }
   }, PING / 2);
-  const slow = setTimeout(() => {
-    if (!v.up && v.ws === ws) {
-      drop();
+  // a link still opening is dropped after its wait of silence, read again
+  // each time: a wake shortens it for the first tries, and a link slower
+  // than that gets the long wait after
+  function opening(): void {
+    if (v.up || v.ws !== ws) {
+      return;
     }
-  }, woken(v) ? OPEN_WAIT : PING);
+    const left = (woken(v) && v.tries <= 1 ? OPEN_WAIT : PING) - (Date.now() - heard);
+    if (left <= 0) {
+      drop();
+    } else {
+      slow = setTimeout(opening, left);
+    }
+  }
+  let slow = setTimeout(opening, OPEN_WAIT);
   function shut(): void {
     ws.onmessage = null;
     ws.onclose   = null;
@@ -840,6 +850,9 @@ export function link_open(v: View, link: Link): void {
     if (v.ws === ws && Date.now() - heard > (v.up ? PING / 2 + RETRY : RETRY)) {
       v.tries = 0;
       drop();
+    } else if (v.ws === ws && !v.up) {
+      clearTimeout(slow);
+      opening();
     } else if (v.ws === null && v.retry !== null) {
       clearTimeout(v.retry);
       v.tries = 0;
