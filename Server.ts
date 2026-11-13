@@ -34,7 +34,7 @@ import { ACTIVE, FRAME, IDLE, IMAGES, limit_note, live_push, MEDIA, PING, QUIT, 
 import * as config from "./Config.ts";
 import { err_code, err_stack, err_why } from "./Err.ts";
 import { get, rec, text_of } from "./Json.ts";
-import hello_md from "./hello.md" with { type: "text" };
+import hello_md from "./prompts/hello.md" with { type: "text" };
 import app_js from "./web/app.js" with { type: "file" };
 import index_html from "./web/index.html" with { type: "file" };
 import install_sh from "./web/install.sh" with { type: "file" };
