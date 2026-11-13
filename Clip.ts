@@ -49,20 +49,38 @@ export function split_of(kind: string): number {
   return kind === "echo" ? SPLIT_ECHO : SPLIT;
 }
 
-// equal pages, each cut at a line's end near its share where there is one
+// equal pages, each cut at a line's end near its share where there is one,
+// never inside a surrogate pair: where the cap leaves no room for that, one
+// page more
 export function clip_pages(str: string, most = SPLIT): string[] {
+  for (let n = Math.max(1, Math.ceil(str.length / most)); ; n++) {
+    const pages = pages_of(str, most, n);
+    if (pages !== null) {
+      return pages;
+    }
+  }
+}
+
+function pages_of(str: string, most: number, n: number): string[] | null {
   const pages: string[] = [];
   let at = 0;
-  for (let left = Math.max(1, Math.ceil(str.length / most)); left > 1; left--) {
+  for (let left = n; left > 1; left--) {
     const share = (str.length - at) / left;
     const want = at + Math.round(share);
-    const [low, high] = [Math.max(at + Math.ceil(share * 3 / 4), str.length - (left - 1) * most), Math.min(at + most, str.length - 1)];
+    const low  = Math.max(at + Math.ceil(share * 7 / 8), str.length - (left - 1) * most);
+    const high = Math.max(low, Math.min(at + most, at + Math.floor(share * 9 / 8), str.length - 1));
     const back = str.lastIndexOf("\n", want - 1);
     const on = str.indexOf("\n", want - 1);
     const near = [back, on].filter((nl) => nl >= 0 && nl + 1 >= low && nl + 1 <= high).sort((a, b) => Math.abs(a + 1 - want) - Math.abs(b + 1 - want));
     let end = near.length > 0 ? near[0] + 1 : Math.min(high, Math.max(low, want));
-    if (str.charCodeAt(end) >> 10 === 0x37 && end - 1 >= low) {
-      end--;
+    if (str.charCodeAt(end) >> 10 === 0x37 && str.charCodeAt(end - 1) >> 10 === 0x36) {
+      if (end - 1 >= low && end - 1 > at) {
+        end--;
+      } else if (end + 1 <= high) {
+        end++;
+      } else {
+        return null;
+      }
     }
     pages.push(str.slice(at, end));
     at = end;
