@@ -699,7 +699,6 @@ function hear(msg: View.Server): void {
   if (v.ws !== P.used.ws) {
     in_use();
   }
-  const was = View.view_pick(v);
   const sent = JSON.stringify(v.sent);
   for (const out of View.view_hear(v, msg)) {
     View.link_send(v, out);
@@ -713,10 +712,6 @@ function hear(msg: View.Server): void {
   }
   if (AGENT.test(location.pathname) && !FORM.test(location.pathname) && AGENT.exec(location.pathname)?.[1] !== v.agent) {
     history.replaceState({ chain: depth("/a/" + v.agent) }, "", "/a/" + v.agent);
-  }
-  const now = View.view_pick(v).filter((k) => was.length > 0 && !was.some((w) => w.text === k.text));
-  if (now.length > 0) {
-    toast("Now " + now.map((k) => k.hint).join("; ") + ".");
   }
   P.rows ||= msg.$ === "state" ? JSON.stringify(v.sent) !== sent : msg.$ !== "delta" && msg.$ !== "live";
   if (msg.$ === "state") {
