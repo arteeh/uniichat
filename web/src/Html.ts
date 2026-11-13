@@ -35,7 +35,7 @@ function copy_html(text: string): string {
 
 // an agent's picture: the logo, a premade head, or an upload
 export function face_html(picture: string): string {
-  if (picture === "main") {
+  if (picture === "logo") {
     return `<span class="pic logo"><i class="mark"></i></span>`;
   }
   const src = /^head-\d\d$/.test(picture) ? "/heads/" + picture + ".svg" : picture;
@@ -248,12 +248,13 @@ export function timers_html(timers: Timer.Timer[]): string[] {
 }
 
 // an agent as its settings page reads and saves it
-export type Agent = { id: string; name: string; about: string; picture: string; prompt: string; own: boolean; template: string; archived: number };
+export type Agent = { id: string; name: string; about: string; picture: string; prompt: string; own: boolean; template: string; lead: number; archived: number };
 
-export function agent_html(a: Agent | null, lead: boolean): string {
+export function agent_html(a: Agent | null): string {
+  const lead = a?.lead === 1;
   const heads = Array.from({ length: 24 }, (_, k) => "head-" + String(k + 1).padStart(2, "0"));
   const own = a !== null && a.picture.startsWith("/media/") ? [a.picture] : [];
-  const faces = (lead ? ["main"] : []).concat(own, heads).map((f) => face_pick_html(f, f === a?.picture));
+  const faces = (lead ? ["logo"] : []).concat(own, heads).map((f) => face_pick_html(f, f === a?.picture));
   const upload = `<button type="button" class="chip upload">Upload a picture</button><input type="file" class="upfile" accept="image/png,image/jpeg,image/webp,image/gif" hidden>`;
   const set = (key: string, name: string, about: string, control: string) => `<div class="set" data-key="${key}"><label for="ag-${key}">${esc(name)}${about === "" ? "" : `<small>${esc(about)}</small>`}</label><div class="field">${control}</div><p class="err"></p></div>`;
   const archive = a === null || lead ? "" : section_html("Archive", `<div class="item"><p>Archive ${esc(a.name)}<small>Settings can restore it.</small></p><button type="button" class="chip red archive">Archive</button></div>`);

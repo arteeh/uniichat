@@ -11,6 +11,8 @@ type Ticket = { session: string | null; what: string };
 export const FILE = config.DIR + "/ki.db";
 
 const COOKIE = "ki";
+// migration from 39/40.rc, remove in 41: the cookie was unii
+const OLD_COOKIE = "unii";
 
 // a session cookie's attributes: Secure only on an https site, as Safari
 // drops a Secure cookie an http one (a server on 127.0.0.1) sets
@@ -54,8 +56,16 @@ export namespace Owner {
   export function token(req: Request): string {
     const auth = (req.headers.get("authorization") ?? "").replace(/^Bearer /, "");
     const cookies = (req.headers.get("cookie") ?? "").split(/;\s*/);
-    const cookie = cookies.find((c) => c.startsWith(COOKIE + "=")) ?? "";
-    return auth || decodeURIComponent(cookie.slice(COOKIE.length + 1));
+    const cookie = cookies.find((c) => c.startsWith(COOKIE + "=")) ?? cookies.find((c) => c.startsWith(OLD_COOKIE + "=")) ?? "";
+    return auth || decodeURIComponent(cookie.slice(cookie.indexOf("=") + 1));
+  }
+
+  // migration from 39/40.rc, remove in 41: a browser signed in with the
+  // old cookie gets it as the new one
+  export function moved(req: Request): string[] {
+    const cookies = (req.headers.get("cookie") ?? "").split(/;\s*/);
+    const old = !cookies.some((c) => c.startsWith(COOKIE + "=")) && cookies.some((c) => c.startsWith(OLD_COOKIE + "="));
+    return old && Owner.is(req) ? [COOKIE + "=" + Owner.token(req) + KEEP, OLD_COOKIE + "=; Path=/; Max-Age=0"] : [];
   }
 
   export function is(req: Request): boolean {

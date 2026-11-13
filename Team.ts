@@ -3,19 +3,20 @@ import { get as field } from "./Json.ts";
 import * as Prompts from "./Prompts.ts";
 
 // prompt null: the default, which follows renames until it's edited
-export type Agent = { id: string; name: string; about: string; picture: string; prompt: string | null; archived: number; made: number; unread: number };
+// lead 1: the agent that sees every agent's chat (the team view)
+export type Agent = { id: string; name: string; about: string; picture: string; prompt: string | null; lead: number; archived: number; made: number; unread: number };
 
 type Fields = { name: string; about: string; picture: string; prompt: string | null };
 
-export const LEAD = "main";
-
-const SCHEMA = "create table if not exists agents (id text primary key, name text not null, about text not null, picture text not null, prompt text, archived integer not null default 0, made integer not null, unread integer not null default 0)";
+const SCHEMA = "create table if not exists agents (id text primary key, name text not null, about text not null, picture text not null, prompt text, lead integer not null default 0, archived integer not null default 0, made integer not null, unread integer not null default 0)";
 
 const NAME  = 24;
 const ABOUT = 120;
 const OWN   = 64 * 1024;
 
 const HEADS = 24;
+
+const LOGO = "logo";
 
 const MAIN_ABOUT  = "Executive assistant: automatically keeps track of the whole team.";
 
@@ -24,13 +25,17 @@ export namespace Team {
   export function open(): void {
     const db = Owner.open();
     db.run(SCHEMA);
-    if (Team.get(LEAD) === null) {
-      db.query("insert into agents (id, name, about, picture, prompt, made) values (?, ?, ?, ?, null, 0)").run(LEAD, "Ki", MAIN_ABOUT, LEAD);
+    if (db.query("select 1 from agents where lead = 1").get() === null) {
+      db.query("insert into agents (id, name, about, picture, prompt, lead, made) values (?, ?, ?, ?, null, 1, 0)").run(Team.new_id(), "Ki", MAIN_ABOUT, LOGO);
     }
   }
 
   export function all(): Agent[] {
-    return Owner.open().query("select * from agents order by id <> 'main', made").all() as Agent[];
+    return Owner.open().query("select * from agents order by lead desc, made").all() as Agent[];
+  }
+
+  export function lead(): Agent {
+    return Team.all()[0];
   }
 
   export function active(): Agent[] {
@@ -46,11 +51,11 @@ export namespace Team {
   }
 
   export function prompt(a: Agent): string {
-    return a.prompt ?? Team.default_prompt(a.id, a.name);
+    return a.prompt ?? Team.default_prompt(a.lead === 1, a.name);
   }
 
-  export function default_prompt(id: string, name: string): string {
-    return Prompts.prompt(id === LEAD ? "lead" : "agent", { Name: name });
+  export function default_prompt(lead: boolean, name: string): string {
+    return Prompts.prompt(lead ? "lead" : "agent", { Name: name });
   }
 
   // the fields a form sent, checked: a text saying what's wrong, or the
@@ -62,6 +67,7 @@ export namespace Team {
     const picture = text("picture").trim() || Team.head_random();
     const own = text("prompt").trim();
     const taken = Team.by_name(name);
+    const lead = id !== null && Team.get(id)?.lead === 1;
     if (name === "" || name.length > NAME) {
       return "A name is 1 to " + NAME + " characters.";
     }
@@ -74,7 +80,7 @@ export namespace Team {
     if (about === "" || about.length > ABOUT || /[\r\n]/.test(about)) {
       return "A description is one line of 1 to " + ABOUT + " characters.";
     }
-    if (!Team.picture_ok(picture, id)) {
+    if (!Team.picture_ok(picture, lead)) {
       return "No picture " + picture + ".";
     }
     if (own === "") {
@@ -83,23 +89,28 @@ export namespace Team {
     if (own.length > OWN) {
       return "A system prompt holds at most " + OWN / 1024 + " KB.";
     }
-    return { name, about, picture, prompt: own === Team.default_prompt(id ?? "", name) ? null : own };
+    return { name, about, picture, prompt: own === Team.default_prompt(lead, name) ? null : own };
   }
 
-  export function picture_ok(picture: string, id: string | null): boolean {
+  export function picture_ok(picture: string, lead: boolean): boolean {
     const head = /^head-(\d\d)$/.exec(picture);
-    return (head !== null && Number(head[1]) >= 1 && Number(head[1]) <= HEADS) || /^\/media\/[0-9a-f]{16}\.(png|jpeg|webp)$/.test(picture) || (picture === LEAD && id === LEAD);
+    return (head !== null && Number(head[1]) >= 1 && Number(head[1]) <= HEADS) || /^\/media\/[0-9a-f]{16}\.(png|jpeg|webp)$/.test(picture) || (picture === LOGO && lead);
   }
 
   export function head_random(): string {
     return "head-" + String(1 + Math.floor(Math.random() * HEADS)).padStart(2, "0");
   }
 
-  export function add(f: Fields): Agent {
+  export function new_id(): string {
     let id = "";
     do {
       id = "a" + Math.random().toString(36).slice(2, 9);
     } while (Team.get(id) !== null);
+    return id;
+  }
+
+  export function add(f: Fields): Agent {
+    const id = Team.new_id();
     Owner.open().query("insert into agents (id, name, about, picture, prompt, made) values (?, ?, ?, ?, ?, ?)").run(id, f.name, f.about, f.picture, f.prompt, Date.now());
     return Team.get(id) as Agent;
   }
@@ -110,11 +121,11 @@ export namespace Team {
   }
 
   export function archive(id: string, on: boolean): void {
-    Owner.open().query("update agents set archived = ? where id = ? and id <> 'main'").run(on ? Date.now() : 0, id);
+    Owner.open().query("update agents set archived = ? where id = ? and lead = 0").run(on ? Date.now() : 0, id);
   }
 
   export function drop(id: string): void {
-    Owner.open().query("delete from agents where id = ? and id <> 'main'").run(id);
+    Owner.open().query("delete from agents where id = ? and lead = 0").run(id);
   }
 
   export function unread(id: string, n: number | null): void {

@@ -7,7 +7,7 @@ import { clip_page } from "./Clip.ts";
 import { Mcp, type Held, type Servers } from "./Mcp.ts";
 import { Memory } from "./Memory.ts";
 import * as Prompts from "./Prompts.ts";
-import { Team, LEAD } from "./Team.ts";
+import { Team } from "./Team.ts";
 import * as Timer from "./Timer.ts";
 import { PING } from "./View.ts";
 import { Sub, type Spawn } from "./Sub.ts";
@@ -350,7 +350,7 @@ export namespace Tools {
   }
 
   export function seat(tools: Tools, id: string): Seat | undefined {
-    return tools.seats.get(id === LEAD ? "main" : id);
+    return tools.seats.get(id);
   }
 
   export function schedule(seat: Seat, timer: Timer.Timer | string): Out {
@@ -633,7 +633,7 @@ export namespace Tools {
   export function report(tools: Tools, who: string, text: string): void {
     const seat = tools.seats.get(who);
     const owner = seat === undefined ? tools.owner(who) : undefined;
-    (seat ?? owner ?? tools.seats.get("main"))?.report(owner === undefined ? text : text.replace("] ", "] " + who + "'s job, "));
+    (seat ?? owner ?? tools.seats.get(Team.lead().id))?.report(owner === undefined ? text : text.replace("] ", "] " + who + "'s job, "));
   }
 
 }

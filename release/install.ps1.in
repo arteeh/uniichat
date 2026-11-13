@@ -33,7 +33,7 @@
 # end it: then this starts itself again outside it and says where its
 # output goes. UNII_* settings are KI_* now: this warns about each one.
 #
-# The first time, it copies ~\.ki\chat to ~\.ki\agents\main (the main
+# The first time, it copies ~\.ki\chat to ~\.ki\agents\unii (the main
 # agent's memory in the agent team; chat stays as it was), with the server
 # stopped while it copies.
 # It ends setting $LASTEXITCODE (0: installed, 1: not), never `exit`:
@@ -88,7 +88,7 @@
     }
     $cur = $dir
     if ($moving) { $cur = $odir }
-    $renaming = $moving -or ($olds.Count -gt 0) -or (Test-Path -LiteralPath (Join-Path $cur 'unii.db')) -or (Test-Path -LiteralPath (Join-Path $cur 'agents\unii'))
+    $renaming = $moving -or ($olds.Count -gt 0) -or (Test-Path -LiteralPath (Join-Path $cur 'unii.db')) -or (Test-Path -LiteralPath (Join-Path $cur '.renaming'))
 
     # a ki (or unii) device or server running (a ki.exe or unii.exe, or one
     # by $bin's name or path) that no service runs: it would keep the old
@@ -184,13 +184,14 @@
       $env:BUN_BE_BUN = '1'
       try { & $exe $rename $dir } finally { Remove-Item Env:\BUN_BE_BUN -ErrorAction SilentlyContinue }
       if ($LASTEXITCODE -ne 0) { throw "giving your data in $dir ki's names stopped halfway (see above): run this again. ki $Ver was not installed." }
+      Remove-Item -LiteralPath (Join-Path $dir '.renaming') -Force -ErrorAction SilentlyContinue
     }
 
     # no server may run on the data while it moves or is copied: the tasks
     # that run stop meanwhile (unii's for good, ki's to start again below)
     $halted = @()
     $chat = Join-Path $cur 'chat'
-    $copying = (Test-Path -LiteralPath $chat) -and -not (Test-Path -LiteralPath (Join-Path $cur 'agents\main')) -and -not (Test-Path -LiteralPath (Join-Path $cur 'agents\unii'))
+    $copying = (Test-Path -LiteralPath $chat) -and -not (Test-Path -LiteralPath (Join-Path $cur 'agents\unii'))
     if ($renaming -or $copying) {
       $halted = @('serve', 'device' | ForEach-Object { & $task "ki-$_" } | Where-Object { $_ -and ([string]$_.Description -match 'ki-made') -and ([string]$_.State -eq 'Running') })
       foreach ($t in @($olds | Where-Object { [string]$_.State -eq 'Running' }) + $halted) { Stop-ScheduledTask -TaskName $t.TaskName -TaskPath '\' }
@@ -208,6 +209,8 @@
     # way to ki's (made now, started below, once ki.exe is in place)
     $fresh = @()
     if ($renaming) {
+      # till rename.js is done, so a run stopped halfway gives it another go
+      New-Item -ItemType File -Force -Path (Join-Path $cur '.renaming') | Out-Null
       if ($moving) {
         Move-Item -LiteralPath $odir -Destination $dir
         Write-Host "  Moved $odir to $dir."
@@ -246,11 +249,12 @@
     # the agent team's own: the main agent's memory, copied once from chat,
     # and the fixed prompts, written every time
     $chat = Join-Path $dir 'chat'
-    $main = Join-Path $dir 'agents\main'
+    $main = Join-Path $dir 'agents\unii'
     if ((Test-Path -LiteralPath $chat) -and -not (Test-Path -LiteralPath $main)) {
-      $copy = Join-Path $dir 'agents\.main-copy'
+      $copy = Join-Path $dir 'agents\.unii-copy'
       New-Item -ItemType Directory -Force -Path (Join-Path $dir 'agents') | Out-Null
       Remove-Item -LiteralPath $copy -Recurse -Force -ErrorAction SilentlyContinue
+      New-Item -ItemType File -Force -Path (Join-Path $dir '.renaming') | Out-Null
       Copy-Item -LiteralPath $chat -Destination $copy -Recurse
       Move-Item -LiteralPath $copy -Destination $main
       & $named

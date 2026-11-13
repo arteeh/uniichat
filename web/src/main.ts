@@ -22,6 +22,15 @@ const ME_WAIT = 4000;
 const NOTIFY = "ki.notify";
 const TRAVEL = 1000;
 
+// migration from 39/40.rc, remove in 41: this browser's keys were unii.*
+for (const k of ["intro", "notify", "welcomed"]) {
+  const was = localStorage.getItem("unii." + k);
+  if (was !== null && localStorage.getItem("ki." + k) === null) {
+    localStorage.setItem("ki." + k, was);
+  }
+  localStorage.removeItem("unii." + k);
+}
+
 const NONE   = "No Claude or ChatGPT chats in that folder. Choose ~/.claude or ~/.codex.";
 
 const SCENES = `
@@ -42,7 +51,8 @@ let START = false;
 const START_SHOWN = 2000;
 let TRIP = 0;
 
-const LEAD = "main";
+// the agent that sees every chat: the one / opens (Server stamps it)
+const LEAD = document.documentElement.dataset.lead ?? "";
 
 const AGENT = /^\/a\/([a-z0-9]{1,16})(\/edit)?$/;
 
@@ -1411,7 +1421,7 @@ async function agent_page(id: string | null): Promise<void> {
     return;
   }
   $("header .title").textContent = a?.name ?? "New agent";
-  el.innerHTML = Html.agent_html(a, id === LEAD);
+  el.innerHTML = Html.agent_html(a);
   const form = find(el, "form", HTMLFormElement);
   const [name, prompt] = [find(form, "[name=name]", HTMLInputElement), find(form, "[name=prompt]", HTMLTextAreaElement)];
   const was = { prompt: a?.own === true ? null : a?.template ?? all.template };

@@ -1,11 +1,11 @@
 // The installers run this with the new ki as bun (BUN_BE_BUN=1), with no
 // server on DIR, after unii's data moved there: it gives the data ki's
-// names. unii.db becomes ki.db; the main agent's id and picture "unii"
-// become "main", its folder agents/unii agents/main; in every agent's
-// memory the kind "unii" becomes "reply" and the sender or origin "unii"
-// "main". Memory indexes of changed streams are removed: ki rebuilds them
-// at its next start. Each step is skipped once done, so a run stopped
-// halfway goes on where it stopped.
+// names. unii.db becomes ki.db; the main agent keeps its id unii and its
+// folder agents/unii, and gets the lead field (it sees every agent's chat),
+// its picture "unii" becomes "logo"; in every agent's memory the kind
+// "unii" becomes "reply". Memory indexes of changed streams are removed:
+// ki rebuilds them at its next start. Each step is skipped once done, so a
+// run stopped halfway goes on where it stopped.
 import fs from "node:fs";
 import path from "node:path";
 import { Database } from "bun:sqlite";
@@ -18,25 +18,28 @@ if (there(path.join(dir, "unii.db")) && !there(path.join(dir, "ki.db"))) {
     if (there(path.join(dir, "unii.db" + end))) fs.renameSync(path.join(dir, "unii.db" + end), path.join(dir, "ki.db" + end));
   }
 }
-if (there(path.join(dir, "ki.db"))) {
+const agents = path.join(dir, "agents");
+if (there(path.join(dir, "ki.db")) || there(path.join(agents, "unii"))) {
   const db = new Database(path.join(dir, "ki.db"));
-  if (db.query("select 1 from sqlite_master where type = 'table' and name = 'agents'").get() !== null) {
-    db.run("update agents set id = 'main' where id = 'unii' and not exists (select 1 from agents where id = 'main')");
-    db.run("update agents set picture = 'main' where picture = 'unii'");
+  // as Team.ts makes it; 39 had none: 40.rc's ki made it at its first start
+  db.run("create table if not exists agents (id text primary key, name text not null, about text not null, picture text not null, prompt text, lead integer not null default 0, archived integer not null default 0, made integer not null, unread integer not null default 0)");
+  if (!db.query("pragma table_info(agents)").all().some((c) => c.name === "lead")) {
+    db.run("alter table agents add column lead integer not null default 0");
   }
+  if (there(path.join(agents, "unii"))) {
+    db.run("insert or ignore into agents (id, name, about, picture, prompt, made) values ('unii', 'Unii', 'Executive assistant: automatically keeps track of the whole team.', 'unii', null, 0)");
+  }
+  db.run("update agents set lead = 1 where id = 'unii' and not exists (select 1 from agents where lead = 1)");
+  db.run("update agents set picture = 'logo' where picture = 'unii'");
   db.close();
 }
-const agents = path.join(dir, "agents");
-if (there(path.join(agents, "unii")) && !there(path.join(agents, "main"))) {
-  fs.renameSync(path.join(agents, "unii"), path.join(agents, "main"));
-}
 
+let changed = false;
 const fix = (v) => {
   if (Array.isArray(v)) return v.map(fix);
   if (v === null || typeof v !== "object") return v;
   for (const k of Object.keys(v)) {
-    if (v[k] === "unii" && k === "kind") v[k] = "reply";
-    else if (v[k] === "unii" && (k === "from" || k === "origin")) v[k] = "main";
+    if (v[k] === "unii" && k === "kind") { v[k] = "reply"; changed = true; }
     else v[k] = fix(v[k]);
   }
   return v;
@@ -44,7 +47,7 @@ const fix = (v) => {
 // a line that isn't JSON (one cut short) is left as it is
 const fixed = (text) => {
   if (!text.includes('"unii"')) return text;
-  try { return JSON.stringify(fix(JSON.parse(text))); } catch { return text; }
+  try { changed = false; const out = JSON.stringify(fix(JSON.parse(text))); return changed ? out : text; } catch { return text; }
 };
 let files = 0;
 const walk = (d, agent) => {

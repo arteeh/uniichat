@@ -459,9 +459,9 @@ case $rc in
   *) fail "nothing changed; ki $VER was not installed.";;
 esac
 renaming=""
-if [ -n "$moving" ] || [ -n "$olds" ] || [ -e "$cur/unii.db" ] || [ -e "$cur/agents/unii" ]; then renaming=1; fi
+if [ -n "$moving" ] || [ -n "$olds" ] || [ -e "$cur/unii.db" ] || [ -e "$cur/.renaming" ]; then renaming=1; fi
 copying=""
-if [ -d "$cur/chat" ] && [ ! -e "$cur/agents/main" ] && [ ! -e "$cur/agents/unii" ]; then copying=1; fi
+if [ -d "$cur/chat" ] && [ ! -e "$cur/agents/unii" ]; then copying=1; fi
 
 # no server may run on the data while it moves: the services that run
 # stop till it's done (not ki's own from its own shell: that stop would
@@ -493,6 +493,8 @@ fi
 q() { printf '%s' "$1" | sed 's/[#&\\]/\\&/g'; }
 fresh=""
 if [ -n "$renaming" ]; then
+  # till rename.js is done, so a run stopped halfway gives it another go
+  : > "$cur/.renaming"
   if [ -n "$moving" ]; then
     mkdir -p "$(dirname "$dir")"
     mv "$odir" "$dir" || fail "could not move $odir to $dir; ki $VER was not installed."
@@ -529,6 +531,7 @@ if [ -n "$renaming" ]; then
   done
   [ "$os" != linux ] || [ -z "$olds" ] || systemctl --user daemon-reload || true
   BUN_BE_BUN=1 "$new_ki" "$tmp/rename.js" "$dir" || fail "giving your data in $dir ki's names stopped halfway (see above): run this again. ki $VER was not installed."
+  rm -f "$dir/.renaming"
   cur="$dir"
 fi
 
@@ -550,12 +553,14 @@ fi
 # The agent team's own: the main agent's memory, copied once from chat/
 # (no server may write to it meanwhile), and the fixed prompts, written
 # every time
-if [ -d "$dir/chat" ] && [ ! -e "$dir/agents/main" ]; then
+if [ -d "$dir/chat" ] && [ ! -e "$dir/agents/unii" ]; then
   mkdir -p "$dir/agents"
-  rm -rf "$dir/agents/.main-copy"
-  cp -Rp "$dir/chat" "$dir/agents/.main-copy" && mv "$dir/agents/.main-copy" "$dir/agents/main" || fail "could not copy $dir/chat to $dir/agents/main; ki $VER was not installed."
+  rm -rf "$dir/agents/.unii-copy"
+  : > "$dir/.renaming"
+  cp -Rp "$dir/chat" "$dir/agents/.unii-copy" && mv "$dir/agents/.unii-copy" "$dir/agents/unii" || fail "could not copy $dir/chat to $dir/agents/unii; ki $VER was not installed."
   BUN_BE_BUN=1 "$new_ki" "$tmp/rename.js" "$dir" || fail "giving your data in $dir ki's names stopped halfway (see above): run this again. ki $VER was not installed."
-  echo "  Copied $dir/chat to $dir/agents/main, the main agent's memory in the agent team ($dir/chat stays as it was)."
+  rm -f "$dir/.renaming"
+  echo "  Copied $dir/chat to $dir/agents/unii, the main agent's memory in the agent team ($dir/chat stays as it was)."
 fi
 share="${XDG_DATA_HOME:-$HOME/.local/share}/ki"
 rm -rf "${XDG_DATA_HOME:-$HOME/.local/share}/unii"
