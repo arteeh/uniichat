@@ -18,6 +18,8 @@ type Back = { at: { a: number; top: number } | null; y: number | null; away: { y
 const DESK = matchMedia("(hover: hover)");
 
 const ME_WAIT = 4000;
+// "on" or "off": notifications as the user last had them on this device
+const NOTIFY = "unii.notify";
 const TRAVEL = 1000;
 
 const NONE   = "No Claude or ChatGPT chats in that folder. Choose ~/.claude or ~/.codex.";
@@ -139,9 +141,13 @@ async function boot(): Promise<void> {
   signed();
   route();
   connect();
+  void notify_keep();
   for (const ev of ["keydown", "pointerdown", "pointermove", "wheel", "touchstart"]) {
     addEventListener(ev, () => in_use(), { capture: true, passive: true });
   }
+  // a chat watched without a touch is still in front: the server doesn't
+  // push to it, a push the phone would only drop (#152)
+  setInterval(() => in_use(), View.USE_PING);
   addEventListener("focus", () => {
     in_use();
     notes_close();
@@ -638,8 +644,9 @@ function connect(): void {
 
 // the agent whose chat is on screen, if one is: not the list, Settings or
 // a memory page
+// a subagent's page isn't its spawner's chat (#152)
 function on_screen(): string | null {
-  return document.visibilityState === "visible" && !$("#log").hidden ? v.agent : null;
+  return document.visibilityState === "visible" && !$("#log").hidden && v.page === null ? v.agent : null;
 }
 
 // that agent's notifications, only while its chat is still in view once
@@ -691,7 +698,10 @@ function hear(msg: View.Server): void {
       renew_due(msg.build);
     }
     if (!RENEW.due || !renew_free()) {
-      toast(old ? OLDER : msg.text, true, old);
+      toast(old ? OLDER : msg.text, true, old ? ["Reload", () => {
+        unsent_back();
+        location.reload();
+      }] : undefined);
     }
     draw(false);
     return;
@@ -1607,6 +1617,31 @@ async function notify_sub(): Promise<PushSubscription | null> {
   return (await reg?.pushManager.getSubscription()) ?? null;
 }
 
+// notifications this device had on stay on (#152): when the app opens, a
+// subscription the server lost is sent again and one the browser lost is
+// made again; if the browser took the permission back, a bar says so.
+// Off is only what the user turned off here
+async function notify_keep(): Promise<void> {
+  const was = localStorage.getItem(NOTIFY);
+  const state = await notify_state().catch(() => null);
+  if (was === "off" || state === null || state === "home") {
+    return;
+  }
+  if (Notification.permission !== "granted") {
+    if (was === "on") {
+      toast("Notifications are off on this device.", true, ["Turn on", () => {
+        $("#toast").hidden = true;
+        void notify(true);
+      }]);
+    }
+    return;
+  }
+  if (state === "off" && P.push !== null) {
+    await notify_on(P.push.reg, P.push.key).catch(() => {});
+  }
+  localStorage.setItem(NOTIFY, "on");
+}
+
 async function notify(on: boolean): Promise<void> {
   const push = P.push;
   if (push === null) {
@@ -1615,6 +1650,9 @@ async function notify(on: boolean): Promise<void> {
   const what = on ? "on" : "off";
   try {
     const out = on ? await notify_on(push.reg, push.key) : await notify_off(push.reg);
+    if (out.error === undefined) {
+      localStorage.setItem(NOTIFY, what);
+    }
     toast(text_of(out.error, "Notifications are " + what + "."));
   } catch (err) {
     const denied = typeof Notification !== "undefined" && Notification.permission === "denied";
@@ -2091,17 +2129,14 @@ function renewed(): void {
   y();
 }
 
-function toast(text: string, stay = false, reload = false): void {
+function toast(text: string, stay = false, act?: [string, () => void]): void {
   const el = $("#toast");
   el.textContent = text;
-  if (reload) {
-    const again = document.createElement("button");
-    again.textContent = "Reload";
-    again.onclick = () => {
-      unsent_back();
-      location.reload();
-    };
-    el.append(again);
+  if (act !== undefined) {
+    const button = document.createElement("button");
+    button.textContent = act[0];
+    button.onclick = act[1];
+    el.append(button);
   }
   el.hidden = false;
   clearTimeout(P.toast);

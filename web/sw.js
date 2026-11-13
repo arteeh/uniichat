@@ -49,7 +49,8 @@ async function fresh(req, key, page) {
   }
 }
 
-// a reply of an agent: its name, picture and chat
+// a reply of an agent: its name and chat; no picture, which Android would
+// show on the right, not where a messaging app has it (#152)
 self.addEventListener("push", (ev) => {
   let msg = {};
   try {
@@ -65,8 +66,20 @@ async function notify(msg) {
   if (QUIET && tabs.some((tab) => tab.focused && new URL(tab.url).pathname === url)) {
     return;
   }
-  await self.registration.showNotification(String(msg.title ?? "UniiChat"), { body: String(msg.text ?? ""), icon: String(msg.icon ?? "/icon-192.png"), tag: String(msg.tag ?? "unii"), renotify: true, data: { url } });
+  await self.registration.showNotification(String(msg.title ?? "UniiChat"), { body: String(msg.text ?? ""), tag: String(msg.tag ?? "unii"), renotify: true, data: { url } });
 }
+
+// the push service renewed the subscription: the server gets the new one
+// (#152)
+self.addEventListener("pushsubscriptionchange", (ev) => {
+  ev.waitUntil((async () => {
+    const options = ev.oldSubscription?.options;
+    const sub = ev.newSubscription ?? (options === undefined ? null : await self.registration.pushManager.subscribe(options));
+    if (sub !== null) {
+      await fetch("/api/webpush", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(sub.toJSON()) });
+    }
+  })());
+});
 
 self.addEventListener("notificationclick", (ev) => {
   ev.notification.close();

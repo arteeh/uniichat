@@ -37,7 +37,7 @@ type End = [number, number];
 
 type Kept = { parts: Array<[number, number]>; batch: boolean };
 
-type Saved = Kept & { seen?: Kept; main: End; tree: End; pick: object | null; goal?: string | null; work?: string[]; timers?: Timer[]; off?: string[]; talk?: number | null; used?: number | null; used_at?: number; hop?: number };
+type Saved = Kept & { seen?: Kept; main: End; tree: End; pick: object | null; goal?: string | null; work?: string[]; timers?: Timer[]; off?: string[]; talk?: number | null; used?: number | null; used_at?: number; hop?: number; origin?: string | null };
 
 // main: the run's inbox, as it was last; held: what came for an archived
 // agent, delivered on its restore
@@ -68,6 +68,7 @@ type Chosen = {
   work   : string[];
   timers : Timer[];
   hop    : number;
+  origin : string | null;
 };
 
 type Unlogged = {
@@ -141,7 +142,7 @@ export namespace Memory {
   export function load(dir: string, share: Memory["share"], acted: Memory["acted"] = () => {}, docs = dir): Memory {
     fs.mkdirSync(dir, { recursive: true });
     const mem: Memory = {
-      dir, docs, fds: new Map(), count: 0, open: 0, pick: null, goal: null, off: [], talk: null, talked: new Map(), used: null, used_at: 0, work: [], timers: [], hop: 0, queue: [], held: [], nodes: new Map(), ready: [[], []], ends: { main: [0, 0], tree: [0, 0] },
+      dir, docs, fds: new Map(), count: 0, open: 0, pick: null, goal: null, off: [], talk: null, talked: new Map(), used: null, used_at: 0, work: [], timers: [], hop: 0, origin: null, queue: [], held: [], nodes: new Map(), ready: [[], []], ends: { main: [0, 0], tree: [0, 0] },
       view: { parts: [], size: 0, batch: false, high: VIEW_HIGH }, seen: { parts: [], size: 0, batch: false, high: config.COMPACTOR_CONTEXT },
       busy: new Map(), sides: new Map(), calls: new Map(), hold: [null, "paused"], done: false, wait: new Set(), share, acted, again: null,
     };
@@ -154,6 +155,7 @@ export namespace Memory {
     mem.work = saved?.work ?? [];
     mem.timers = saved?.timers ?? [];
     mem.hop = saved?.hop ?? 0;
+    mem.origin = saved?.origin !== undefined ? saved.origin : mem.hop === 0 ? null : "";
     const queues = Memory.queues(dir);
     mem.queue = queues.main;
     mem.held = queues.held;
@@ -190,7 +192,7 @@ export namespace Memory {
   export function save(mem: Memory): void {
     const file = mem.dir + "/view.json";
     const [chat, seen] = [mem.view, mem.seen].map((view): Kept => ({ parts: view.parts.map((part) => [part.l, part.i]), batch: view.batch }));
-    fs.writeFileSync(file + ".new", JSON.stringify({ ...chat, seen, pick: mem.pick, goal: mem.goal, off: mem.off, talk: mem.talk, used: mem.used, used_at: mem.used_at, work: mem.work, timers: mem.timers, hop: mem.hop, ...mem.ends }));
+    fs.writeFileSync(file + ".new", JSON.stringify({ ...chat, seen, pick: mem.pick, goal: mem.goal, off: mem.off, talk: mem.talk, used: mem.used, used_at: mem.used_at, work: mem.work, timers: mem.timers, hop: mem.hop, origin: mem.origin, ...mem.ends }));
     move_over(file + ".new", file);
     void Disk.wrote(file);
   }

@@ -19,7 +19,7 @@ import { get, text_of } from "./Json.ts";
 
 type Sub = { endpoint: string; p256dh: string; auth: string };
 
-type Who = { title: string; icon: string; url: string; tag: string };
+type Who = { title: string; url: string; tag: string };
 
 type Keys = { jwk: JsonWebKey; public: string };
 
@@ -65,7 +65,7 @@ let KEYS: Keys | Broken | undefined;
 
 export namespace Push {
 
-  // who: the agent whose reply it is, its name, picture and chat
+  // who: the agent whose reply it is, its name and chat
   export function notify(db: Database, text: string, who: Who): void {
     Push.browsers(db, text, who);
   }
@@ -74,15 +74,26 @@ export namespace Push {
     return text.replace(/\s+/g, " ").slice(0, GIST);
   }
 
+  // a line for each push, whether it went (#152), with no more of the
+  // endpoint than its host
   export function browsers(db: Database, text: string, who: Who): void {
-        const subs = db.query("select endpoint, p256dh, auth from web_pushes").all() as Sub[];
+    const subs = db.query("select endpoint, p256dh, auth from web_pushes").all() as Sub[];
     const body = JSON.stringify({ text: Push.gist(text), ...who });
+    if (subs.length === 0) {
+      console.log("push " + who.title + ": no browser has notifications on");
+    }
     for (const sub of subs) {
+      const host = new URL(sub.endpoint).host;
+      const at = Date.now();
       void Push.send(sub, body).then((status) => {
+        const took = " in " + (Date.now() - at) + " ms";
         if (status === 404 || status === 410) {
           db.query("delete from web_pushes where endpoint = ?").run(sub.endpoint);
+          console.log("push " + who.title + ": " + host + " " + status + took + ": that subscription is gone, removed");
         } else if (status !== 0 && (status < 200 || status > 299)) {
-          console.error("web push: " + new URL(sub.endpoint).host + ": HTTP " + status);
+          console.error("web push: " + host + ": HTTP " + status);
+        } else if (status !== 0) {
+          console.log("push " + who.title + ": sent " + host + " " + status + took);
         }
       });
     }

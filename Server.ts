@@ -350,17 +350,20 @@ export namespace Chat {
     return buf.subarray(0, got.bytesRead);
   }
 
-  // the turn's hop, kept with the memory, so a turn cut and continued
-  // (a restart, a usage limit, the goal) keeps it: the message that starts
-  // a turn sets it, another agent's to its hop, a timer's or job's to 0,
-  // UniiChat's own note leaves it; mid-turn only the user's sets it, to 0
+  // the turn's hop and origin, kept with the memory, so a turn cut and
+  // continued (a restart, a usage limit, the goal) keeps them: the message
+  // that starts a turn sets them, another agent's to its own, a timer's or
+  // job's to 0 and this chat (null), UniiChat's own note leaves them;
+  // mid-turn only the user's sets them, to 0 and this chat
   export function posted(chat: Chat, post: Pending): Msg {
     const pages = post.kind === "user" ? clip_pages(post.text) : [post.text];
     let id = -1;
-    const hop = post.kind === "user" ? 0 : !chat.fresh || post.kind === "note" ? chat.mem.hop : post.hop ?? 0;
+    const keep = post.kind !== "user" && (!chat.fresh || post.kind === "note");
+    const hop = post.kind === "user" ? 0 : keep ? chat.mem.hop : post.hop ?? 0;
+    const origin = post.kind === "user" ? null : keep ? chat.mem.origin : post.origin === undefined || post.origin === chat.id ? null : post.origin;
     chat.fresh = false;
-    if (hop !== chat.mem.hop) {
-      chat.mem.hop = hop;
+    if (hop !== chat.mem.hop || origin !== chat.mem.origin) {
+      [chat.mem.hop, chat.mem.origin] = [hop, origin];
       Memory.save(chat.mem);
     }
     pages.forEach((page, k) => {
@@ -454,7 +457,7 @@ export namespace Chat {
   export function finish(chat: Chat): void {
     chat.fresh = true;
     Chat.live(chat, chat.main, []);
-    Chat.phone(chat);
+    Chat.phone(chat, true);
     Chat.after(chat);
     Chat.change(chat);
   }
@@ -543,6 +546,9 @@ export namespace Chat {
     if (end.note) {
       Chat.all(chat, { $: "note", text: end.note });
     }
+    if (end.ok) {
+      Chat.phone(chat, false);
+    }
     const goal = chat.mem.goal;
     if (end.ok && !halt.signal.aborted && !Run.waiting(main) && goal !== null) {
       return Chat.checked(chat, Chat.check(chat, goal), halt);
@@ -610,7 +616,7 @@ export namespace Chat {
       return { text: "hop limit reached, wait for the user", fail: true };
     }
     const there = Main.chats.get(them.id);
-    const why = there === undefined ? "No chat for " + them.name + "." : await Run.take(there.main, { kind: "work", text: "[" + name + "] " + text, images: [], hop, from: chat.id });
+    const why = there === undefined ? "No chat for " + them.name + "." : await Run.take(there.main, { kind: "work", text: "[" + name + "] " + text, images: [], hop, from: chat.id, origin: chat.mem.origin ?? chat.id });
     return why === null ? { text: "Sent to " + them.name + ". It doesn't answer by itself: a reply comes only if it messages you.", fail: false } : { text: why, fail: true };
   }
 
@@ -688,7 +694,7 @@ export namespace Chat {
     if (chat.id !== UNII && msg.imported !== true) {
       Chat.reserve(chat, roots.map(({ i, date }) => ({ i, date })));
     }
-    if (msg.kind === "unii" && chat.mem.hop === 0 && msg.imported !== true && !Chat.seen(chat)) {
+    if (msg.kind === "unii" && chat.mem.origin === null && msg.imported !== true && !Chat.seen(chat)) {
       Team.unread(chat.id, null);
       chat.told = true;
     }
@@ -1182,9 +1188,11 @@ export namespace Chat {
     }
   }
 
-  // a push for a turn whose reply counts as unread: one the user, a timer
-  // or a job started
-  export function phone(chat: Chat): void {
+  // a push for a reply that counts as unread, in a turn the user, a timer
+  // or a job started here, or that came back here from other agents: as
+  // the call that wrote it ends (#152); at the turn's end, a note it ended
+  // in (no reply, a usage limit)
+  export function phone(chat: Chat, done: boolean): void {
     const told = chat.told;
     chat.told = false;
     let k = chat.mem.count - 1;
@@ -1193,10 +1201,16 @@ export namespace Chat {
     }
     const last = Memory.message(chat.mem, k);
     const agent = Team.get(chat.id);
-    if (told && agent !== null && !Chat.seen(chat) && last !== null && last.kind === "unii") {
-      const icon = agent.picture === UNII ? "/icon-192.png" : agent.picture.startsWith("/") ? agent.picture : "/heads/" + agent.picture + ".svg";
-      Push.notify(Owner.open(), last.text, { title: agent.name, icon, url: "/a/" + agent.id, tag: "unii-" + agent.id });
+    const kind = done ? "note" : "unii";
+    if (agent === null || last === null || last.kind !== kind) {
+      return;
     }
+    const not = chat.mem.origin !== null ? "a turn from " + (Team.get(chat.mem.origin)?.name ?? "another agent") : Chat.seen(chat) ? "seen" : kind === "unii" && !told ? "not unread" : null;
+    if (not !== null) {
+      console.log("push " + agent.name + ": skipped (" + not + ")");
+      return;
+    }
+    Push.notify(Owner.open(), last.text, { title: agent.name, url: "/a/" + agent.id, tag: "unii-" + agent.id });
   }
 
   export function after(chat: Chat): void {
