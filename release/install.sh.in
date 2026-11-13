@@ -156,7 +156,7 @@ if [ -n "$odir" ] && [ -L "$odir" ] && [ ! -d "$odir" ]; then
 fi
 if [ -n "$odir" ] && [ -d "$odir" ]; then
   if [ -e "$dir" ] || [ -L "$dir" ]; then
-    fail "both $odir (unii's, as ki was called before) and $dir are here, and which one to keep isn't clear, so nothing changed and ki $VER was not installed. Move the one you don't need aside (or set KI_DIR to the one to use), then run this again."
+    fail "both $odir (unii's, as ki was called before) and $dir are here, and which one to keep isn't clear, so nothing changed and ki $VER was not installed. Move the one you don't need aside, then run this again."
   fi
   moving=1
 fi
@@ -504,6 +504,23 @@ renaming=""
 # are enough)
 if [ -n "$moving" ] || [ -n "$olds" ] || [ -e "$cur/unii.db" ] || [ -e "$cur/.renaming" ] \
   || { [ -d "$oconf" ] && [ ! -e "$conf" ]; } || { [ -f "$OLD_BIN" ] && [ "$OLD_BIN" != "$BIN" ]; }; then renaming=1; fi
+# a service of the user's own that runs unii: ki doesn't change it, and
+# once the data moved and unii's executable is gone it would fail
+if [ -n "$renaming" ]; then
+  theirs=""
+  case $os in
+    linux) sdir="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user" end=service runs='^ExecStart=(.*[/" ])?unii"? +"?(serve|device)';;
+    darwin) sdir="$HOME/Library/LaunchAgents" end=plist runs='(>|/)unii</string><string>(serve|device)<';;
+  esac
+  for f in "$sdir"/*."$end"; do
+    [ -f "$f" ] || continue
+    grep -qsE 'unii-made|ki-made' "$f" && continue
+    if grep -qsF -- "$OLD_BIN" "$f" || grep -qsE -- "$runs" "$f"; then theirs="$theirs $f"; fi
+  done
+  if [ -n "$theirs" ]; then
+    fail "a service you made runs unii:$theirs. unii becomes ki now, which doesn't change a service it didn't make, and once unii's data moves to $dir and unii's executable is removed, that one would fail. Nothing changed, and ki $VER was not installed. Remove it (on Linux: systemctl --user disable --now <name>, then its file) and run ki serve -d (or ki device -d) once this is done, or change it to run $BIN, with KI_DIR=$dir; then run this again."
+  fi
+fi
 copying=""
 if [ -d "$cur/chat" ] && [ ! -e "$cur/agents/unii" ]; then copying=1; fi
 
@@ -526,8 +543,8 @@ if [ -n "$need$renaming$copying" ]; then
   pid=$(live "$cur"); [ -n "$optmove" ] && [ -z "$pid" ] && pid=$(live "$opt")
   if [ -n "$pid" ]; then
     printf 'ki: your data must move, but a server (pid %s) runs on it.\n' "$pid" >&2
-    printf 'Nothing changed, and ki %s was not installed. Stop the server, run this again, then start it, e.g.:\n' "$VER" >&2
-    printf '  systemctl --user stop %s-serve\n  curl -fsSL %s/install.sh | sh\n' "$( [ -n "$olds" ] && echo unii || echo ki )" "$BASE" >&2
+    printf 'Nothing changed, and ki %s was not installed. Stop it (kill %s, or stop the terminal or service it runs in), run this again:\n' "$VER" "$pid" >&2
+    printf '  curl -fsSL %s/install.sh | sh\nthen start it again, as ki (ki serve -d makes it a service that updates restart).\n' "$BASE" >&2
     exit 1
   fi
 fi

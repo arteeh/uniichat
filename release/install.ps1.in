@@ -127,7 +127,7 @@
     $oconf = Join-Path $cfg 'unii'
     $moving = $odir -and (Test-Path -LiteralPath $odir -PathType Container)
     if ($moving -and (Test-Path -LiteralPath $dir)) {
-      throw "both $odir (unii's, as ki was called before) and $dir are here, and which one to keep isn't clear, so nothing changed and ki $Ver was not installed. Move the one you don't need aside (or set KI_DIR to the one to use), then run this again."
+      throw "both $odir (unii's, as ki was called before) and $dir are here, and which one to keep isn't clear, so nothing changed and ki $Ver was not installed. Move the one you don't need aside, then run this again."
     }
     if ((Test-Path -LiteralPath $oconf) -and (Test-Path -LiteralPath $conf)) {
       Write-Host "  $oconf was not moved: $conf exists already. Move $oconf aside if you don't need it."
