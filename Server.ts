@@ -30,7 +30,7 @@ import * as Timer from "./Timer.ts";
 import { SEARCHES, Tools, type Seat, type Subs } from "./Tools.ts";
 import { JOB } from "./Machine.ts";
 import { HEADS } from "./Heads.ts";
-import { ACTIVE, FRAME, IDLE, IMAGES, live_push, MEDIA, PING, QUIT, SUMMARIES, TICK, TURN, WIRE, type Answer, type Live, type Part, type Pending, type Queued, type Server as Out, type Sums, type Talk as Meter, TOKEN, type Wait, type Mate } from "./View.ts";
+import { ACTIVE, FRAME, IDLE, IMAGES, limit_note, live_push, MEDIA, PING, QUIT, SUMMARIES, TICK, TURN, WIRE, type Answer, type Live, type Part, type Pending, type Queued, type Server as Out, type Sums, type Talk as Meter, TOKEN, type Wait, type Mate } from "./View.ts";
 import * as config from "./Config.ts";
 import { err_code, err_stack, err_why } from "./Err.ts";
 import { get, rec, text_of } from "./Json.ts";
@@ -631,6 +631,7 @@ export namespace Chat {
     const vendor = end.vendor ?? chat.pick.vendor;
     const { ms, known } = Limit.wait_for(end.until ?? null, n, LIMIT);
     const until = Date.now() + ms;
+    const first = chat.limits?.vendor !== vendor;
     Chat.unpark(chat);
     const wake = new AbortController();
     chat.resume = { wake, goal };
@@ -638,6 +639,9 @@ export namespace Chat {
     chat.main.limit = { until, known, vendor };
     void Limit.wait(vendor, ms, wake.signal).then(() => Chat.go_on(chat, wake, goal));
     Chat.change(chat);
+    if (first) {
+      Chat.ring(chat, limit_note(vendor, known ? "resumes" : "tries again", until), true);
+    }
   }
 
   export function go_on(chat: Chat, wake: AbortController, goal: string | null): void {
@@ -1189,7 +1193,7 @@ export namespace Chat {
   // a push for a reply that counts as unread, in a turn the user, a timer
   // or a job started here, or that came back here from other agents: as
   // the call that wrote it ends (#152); at the turn's end, a note it ended
-  // in (no reply, a usage limit)
+  // in (no reply); a usage limit as the chat parks on it (Chat.park)
   export function phone(chat: Chat, done: boolean): void {
     const told = chat.told;
     chat.told = false;
@@ -1198,18 +1202,25 @@ export namespace Chat {
       k--;
     }
     const last = Memory.message(chat.mem, k);
-    const agent = Team.get(chat.id);
     const kind = done ? "note" : "unii";
-    if (agent === null || last === null || last.kind !== kind) {
-      return;
-    }
-    const not = chat.mem.origin !== null ? "a turn from " + (Team.get(chat.mem.origin)?.name ?? "another agent") : Chat.seen(chat) ? "seen" : kind === "unii" && !told ? "not unread" : null;
-    if (not !== null) {
-      console.log("push " + agent.name + ": skipped (" + not + ")");
+    if (last?.kind !== kind) {
+      if (done && last?.kind !== "unii") {
+        console.log("push " + (Team.get(chat.id)?.name ?? chat.id) + ": skipped (last is " + (last?.kind ?? "nothing") + ")");
+      }
       return;
     }
     const [a, b] = Memory.pages_of(chat.mem, k);
     const text = Array.from({ length: b - a }, (_, n) => Memory.at(chat.mem, a + n).text).join("");
+    Chat.ring(chat, text, done || told);
+  }
+
+  export function ring(chat: Chat, text: string, unread: boolean): void {
+    const agent = Team.get(chat.id);
+    const not = agent === null ? "not a team agent" : chat.mem.origin !== null ? "a turn from " + (Team.get(chat.mem.origin)?.name ?? "another agent") : Chat.seen(chat) ? "seen" : !unread ? "not unread" : null;
+    if (agent === null || not !== null) {
+      console.log("push " + (agent?.name ?? chat.id) + ": skipped (" + not + ")");
+      return;
+    }
     Push.notify(Owner.open(), text, { title: agent.name, url: "/a/" + agent.id, tag: "unii-" + agent.id });
   }
 
