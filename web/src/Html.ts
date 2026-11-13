@@ -114,7 +114,7 @@ function row_make(row: View.Row): string {
       // a fold is one line; one message's line (a team copy) opens nothing
       const fold = row.n > 1;
       const open = fold ? act_html({ $: "Open", id: row.id, n: row.n }) : "";
-      const lv = fold ? `<span class="lv">${row.n}x</span>` : "";
+      const lv = fold ? `<span class="lv">${row.msgs}x</span>` : "";
       return `<div class="block${fold ? "" : " one"}"${open} data-a="${row.id}">${lv}<div>${esc(row.text)}</div></div>`;
     }
     case "Box": {

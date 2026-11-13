@@ -180,8 +180,8 @@ export type Act =
   | { $: "Goto"; name: string | null }
 
 export type Row =
-  | { $: "Sum"; id: number; n: number; text: string }
-  | { $: "Box"; id: number; n: number; text: string; rows: Row[] }
+  | { $: "Sum"; id: number; n: number; msgs: number; text: string }
+  | { $: "Box"; id: number; n: number; msgs: number; text: string; rows: Row[] }
   | { $: "Msg"; id: number | null; kind: Kind; who: string; text: string; body: Md.Block[]; call: Call.Call | null; images: string[]; queued?: boolean; from?: string; of?: string; writing?: true }
   | { $: "Line"; id: number | null; call: Call.Call; echo: string | null; rows: Row[]; phase?: Phase }
   | { $: "Cap"; text: string; think?: true; earlier?: true; wait?: true }
@@ -952,11 +952,13 @@ function part_rows(v: View, id: number, n: number, t: number, drawn: Set<number>
     return [...sent_rows(v.sent.includes(at), whole_rows(at, entry, v.whole.get(before))), ...after];
   }
   if (n === 1 || v.open.get(key) !== true) {
-    return sum_rows(id, n, v.nodes.get(key));
+    const msgs = n - [...v.firsts.keys()].filter((k) => k >= id && k < id + n).length + (drawn.has(v.firsts.get(id) ?? id) ? 0 : v.firsts.has(id) ? 1 : 0);
+    return msgs === 0 ? [] : sum_rows(id, n, msgs, v.nodes.get(key));
   }
+  const had = drawn.size;
   const rows = [...part_rows(v, id, half, t, drawn), ...part_rows(v, id + half, half, t, drawn)];
-  const msgs = n - [...v.firsts.keys()].filter((k) => k >= id && k < id + n).length;
-  return [{ $: "Box", id, n, text: GLYPH.open + " " + msgs + "x · fold", rows }];
+  const msgs = drawn.size - had + folded(rows);
+  return msgs === 0 ? rows : [{ $: "Box", id, n, msgs, text: GLYPH.open + " " + msgs + "x · fold", rows }];
 }
 
 const ROWS  = new WeakMap<Entry | Node, Row[]>();
@@ -970,8 +972,14 @@ function whole_rows(id: number | null, entry: Entry, before: Entry | undefined):
   return rows;
 }
 
-function sum_rows(id: number, n: number, node: Node = { text: WAIT, to: "" }): Row[] {
-  const rows = ROWS.get(node) ?? [{ $: "Sum", id, n, text: Md.md_flat(node.text) }];
+// the messages in the closed folds of rows
+function folded(rows: Row[]): number {
+  return rows.reduce((sum, row) => sum + (row.$ === "Sum" ? row.msgs : row.$ === "Box" ? folded(row.rows) : 0), 0);
+}
+
+function sum_rows(id: number, n: number, msgs: number, node: Node = { text: WAIT, to: "" }): Row[] {
+  const had = ROWS.get(node);
+  const rows = had?.[0]?.$ === "Sum" && had[0].msgs === msgs ? had : [{ $: "Sum" as const, id, n, msgs, text: Md.md_flat(node.text) }];
   ROWS.set(node, rows);
   return rows;
 }
