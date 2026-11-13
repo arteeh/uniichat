@@ -2,6 +2,7 @@
 
 import * as child from "node:child_process";
 import * as fs from "node:fs";
+import * as os from "node:os";
 import * as path from "node:path";
 import { err_why } from "./Err.ts";
 import type { Part } from "./Service.ts";
@@ -43,7 +44,7 @@ const PORT = /^\d+$/;
 
 async function serve_free(): Promise<void> {
   const Service = await import("./Service.ts");
-  const dir = (process.env.UNII_DIR ?? "~/.unii").replace(/^~(?=[\\/]|$)/, (await import("node:os")).homedir());
+  const dir = (process.env.UNII_DIR ?? "~/.unii").replace(/^~(?=[\\/]|$)/, os.homedir());
   const pid = Number(fs.existsSync(dir + "/server.pid") ? fs.readFileSync(dir + "/server.pid", "utf8") : 0);
   const up = pid > 0 && Service.ours("serve", [pid]).length > 0;
   if (up && Service.running("serve") === null) {
@@ -59,17 +60,37 @@ function fail(why: string): never {
 const WIN  = process.platform === "win32";
 const BUN  = /^bun(\.exe)?$/i.test(path.basename(process.execPath));
 
-function update(): void {
+async function update(): Promise<void> {
   if (BUN) {
     fail("this unii runs from source (bun): update it with git.");
   }
   if (Update.RC) {
     fail("unii " + Update.VERSION + " is a release candidate: `unii update` doesn't move from it. Install another release by its own install line (https://github.com/arteeh/uniichat/releases).");
   }
-  const cmd = Update.install_cmd(WIN);
-  console.error(cmd);
-  const run = WIN ? powershell_exiting_as_installer(cmd) : ["sh", "-c", cmd];
-  process.exitCode = child.spawnSync(run[0], run.slice(1), { stdio: "inherit", env: updater_env() }).status ?? 1;
+  const url = Update.BASE + (WIN ? "/install.ps1" : "/install.sh");
+  console.error("unii: getting " + url + " and its signature");
+  const [script, sig] = await Promise.all([get(url), get(url + ".sig")]).catch((err: unknown) => fail("could not download the installer (" + err_why(err) + "); nothing changed."));
+  const why = Update.unsigned(script, Buffer.from(sig).toString());
+  if (why !== null) {
+    fail(url + " is not signed by unii's release key (" + why + "): it was not run, and nothing changed.");
+  }
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "unii-update-"));
+  const file = path.join(dir, path.basename(url));
+  try {
+    fs.writeFileSync(file, script);
+    const run = WIN ? powershell_exiting_as_installer("iex ([IO.File]::ReadAllText('" + file.replaceAll("'", "''") + "'))") : ["sh", file];
+    process.exitCode = child.spawnSync(run[0], run.slice(1), { stdio: "inherit", env: updater_env() }).status ?? 1;
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+async function get(url: string): Promise<Uint8Array> {
+  const res = await fetch(url, { signal: AbortSignal.timeout(60_000) });
+  if (!res.ok) {
+    throw new Error(url + ": HTTP " + res.status);
+  }
+  return new Uint8Array(await res.arrayBuffer());
 }
 
 const FAILED_TILL_INSTALLER_EXITS = "$global:LASTEXITCODE = 1; ";

@@ -48,6 +48,18 @@ Windows (PowerShell, no admin needed):
 
 Either way you get one `unii` program (in `~/.local/bin`, or `%LOCALAPPDATA%\Programs\unii` on Windows). `unii update` never moves to or from a release candidate: install the next one by its own line, which restarts the background services on it.
 
+**Checked install.** The install scripts are signed with our release key, `ssh-ed25519 TODO-the-real-release-key-made-at-release-time`; `unii update` checks it before it runs one. To check yourself first (ssh-keygen comes with Linux, macOS and Windows 10/11):
+
+Linux, macOS or WSL:
+
+`curl -fsSLO https://github.com/arteeh/uniichat/releases/download/TAG/install.sh -O https://github.com/arteeh/uniichat/releases/download/TAG/install.sh.sig && echo "unii ssh-ed25519 TODO-the-real-release-key-made-at-release-time" > unii.signers && ssh-keygen -Y verify -f unii.signers -I unii -n unii-release -s install.sh.sig < install.sh && sh install.sh`
+
+Windows (PowerShell):
+
+`$b = "https://github.com/arteeh/uniichat/releases/download/TAG"; irm $b/install.ps1 -OutFile install.ps1; irm $b/install.ps1.sig -OutFile install.ps1.sig; Set-Content unii.signers "unii ssh-ed25519 TODO-the-real-release-key-made-at-release-time" -Encoding ascii; cmd /c "ssh-keygen -Y verify -f unii.signers -I unii -n unii-release -s install.ps1.sig < install.ps1"; if ($LASTEXITCODE -eq 0) { iex (Get-Content -Raw install.ps1) }`
+
+If the key ever changes, a release signed with the old key says so and brings the new one; if the old key leaked, that release's notes tell you to reinstall with the lines above.
+
 Set up
 ------
 
