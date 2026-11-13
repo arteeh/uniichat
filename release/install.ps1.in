@@ -88,6 +88,9 @@
     }
     $cur = $dir
     if ($moving) { $cur = $odir }
+    if ((Test-Path -LiteralPath (Join-Path $cur 'unii.db')) -and (Test-Path -LiteralPath (Join-Path $cur 'ki.db'))) {
+      throw "$cur has both unii.db (unii's sign-ins, agents and settings) and ki.db (made by a ki that started on it before it was moved over), and which one to keep isn't clear, so nothing changed and ki $Ver was not installed. Move ki.db (and ki.db-wal, ki.db-shm) aside to keep unii's, or unii.db (and its -wal, -shm) to keep ki's, then run this again."
+    }
     $renaming = $moving -or ($olds.Count -gt 0) -or (Test-Path -LiteralPath (Join-Path $cur 'unii.db')) -or (Test-Path -LiteralPath (Join-Path $cur '.renaming'))
 
     # a ki (or unii) device or server running (a ki.exe or unii.exe, or one

@@ -193,6 +193,9 @@ opt="$HOME/.opt"
 cur="$dir" ccur="$conf"
 [ -z "$moving" ] || cur="$odir"
 [ -z "$moving" ] || [ -e "$conf" ] || [ ! -d "$oconf" ] || ccur="$oconf"
+if [ -e "$cur/unii.db" ] && [ -e "$cur/ki.db" ]; then
+  fail "$cur has both unii.db (unii's sign-ins, agents and settings) and ki.db (made by a ki that started on it before it was moved over), and which one to keep isn't clear, so nothing changed and ki $VER was not installed. Move ki.db (and ki.db-wal, ki.db-shm) aside to keep unii's, or unii.db (and its -wal, -shm) to keep ki's, then run this again."
+fi
 has() { [ -d "$1/users" ] && [ -n "$(ls -A "$1/users" 2>/dev/null)" ]; }
 # a live pid among a dir's server sockets (hand<k>.<pid>) and server.pid
 live() {

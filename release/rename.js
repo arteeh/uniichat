@@ -14,6 +14,12 @@ const dir = process.argv[2];
 const there = (p) => { try { fs.lstatSync(p); return true; } catch { return false; } };
 const write = (p, text) => { fs.writeFileSync(p + ".new", text); fs.renameSync(p + ".new", p); };
 
+// both: a ki started on a folder whose move stopped halfway made a new,
+// empty ki.db beside unii's. Which to keep is the user's call
+if (there(path.join(dir, "unii.db")) && there(path.join(dir, "ki.db"))) {
+  console.log("  " + dir + " has both unii.db (unii's sign-ins, agents and settings) and ki.db (made by a ki that started on it before it was moved over), and which one to keep isn't clear. Move ki.db (and ki.db-wal, ki.db-shm) aside to keep unii's, or unii.db (and its -wal, -shm) to keep ki's, then run the installer again.");
+  process.exit(1);
+}
 if (there(path.join(dir, "unii.db")) && !there(path.join(dir, "ki.db"))) {
   for (const end of ["-wal", "-shm", ""]) {
     if (there(path.join(dir, "unii.db" + end))) fs.renameSync(path.join(dir, "unii.db" + end), path.join(dir, "ki.db" + end));
