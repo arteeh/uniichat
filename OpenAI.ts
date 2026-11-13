@@ -138,6 +138,9 @@ export namespace OpenAI {
     if (item.type === "web_search_call") {
       on("tool", "web_search ", true);
     }
+    if (item.type === "reasoning") {
+      on("mind", "", true);
+    }
   }
 
   export function tier(res: Res): string {

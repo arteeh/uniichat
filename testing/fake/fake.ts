@@ -3,7 +3,7 @@ import type { Kind } from "./cases.ts";
 import { CONTROL, type Order } from "./server.ts";
 
 const USE = `fake reply "text"              the next call streams this text
-fake reply --think "t" "text"  the same after thinking "t" for 5 s (Claude only)
+fake reply --think "t" "text"  the same after 5 s of thinking, then its text "t" ("" for none)
 fake tool NAME 'JSON' [...]    the next call asks for these tools
 fake error KIND [--reset 5m]   the next call fails: prompt-too-long, overloaded, rate-limit, usage-limit, auth-expired
 fake stall 60s | fake cut      the next stream hangs that long, or drops halfway

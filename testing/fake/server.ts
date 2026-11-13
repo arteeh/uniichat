@@ -177,8 +177,8 @@ function anthropic(vendor: Vendor, model: string, sent: Sent, used: Used): Respo
   sent.blocks.forEach((b, index) => {
     if ("think" in b) {
       events.push(["content_block_start", { type: "content_block_start", index, content_block: { type: "thinking", thinking: "", signature: "" } }]);
-      chunks(b.think).forEach((thinking) => events.push(["content_block_delta", { type: "content_block_delta", index, delta: { type: "thinking_delta", thinking } }]));
       events.push(["pause", { ms: 5000 }]);
+      (b.think === "" ? [] : chunks(b.think)).forEach((thinking) => events.push(["content_block_delta", { type: "content_block_delta", index, delta: { type: "thinking_delta", thinking } }]));
       events.push(["content_block_delta", { type: "content_block_delta", index, delta: { type: "signature_delta", signature: "fake-signature" } }]);
     } else if ("text" in b) {
       events.push(["content_block_start", { type: "content_block_start", index, content_block: { type: "text", text: "" } }]);
@@ -228,6 +228,15 @@ function openai(vendor: Vendor, model: string, sent: Sent, used: Used): Response
   let out = 0;
   sent.blocks.forEach((b, output_index) => {
     if ("think" in b) {
+      const item = { id: hex("rs_"), type: "reasoning", summary: [] };
+      ev("response.output_item.added", { output_index, item });
+      events.push(["pause", { ms: 5000 }]);
+      if (b.think !== "") {
+        const part = { type: "summary_text", text: "" };
+        ev("response.reasoning_summary_part.added", { item_id: item.id, output_index, summary_index: 0, part });
+        chunks(b.think).forEach((delta) => ev("response.reasoning_summary_text.delta", { item_id: item.id, output_index, summary_index: 0, delta }));
+      }
+      ev("response.output_item.done", { output_index, item: { ...item, summary: b.think === "" ? [] : [{ type: "summary_text", text: b.think }] } });
       return;
     }
     if ("text" in b) {
@@ -351,7 +360,7 @@ async function model(req: Request, vendor: Vendor, url: URL): Promise<Response> 
   const named = (n: string) => tools.find((t) => t === n || t.endsWith("__" + n)) ?? n;
   const blocks: Sent["blocks"] = order.what === "tool"
     ? order.calls.map(([n, input]) => ({ id: claude ? id("toolu_01") : id("call_"), name: named(n), json: JSON.stringify(input) }))
-    : [...(order.what === "reply" && order.think !== undefined && claude ? [{ think: order.think }] : []), { text: order.what === "reply" ? order.text : "ok" }];
+    : [...(order.what === "reply" && order.think !== undefined ? [{ think: order.think }] : []), { text: order.what === "reply" ? order.text : "ok" }];
   const sent: Sent = { blocks, stall: order.what === "stall" ? order.ms : 0, cut: order.what === "cut" };
   const used = cache(got.segs, got.marks);
   return claude ? anthropic(vendor, name, sent, used) : openai(vendor, name, sent, used);

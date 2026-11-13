@@ -194,6 +194,9 @@ export namespace Anthropic {
     if (ev.type === "content_block_start" && block?.type.endsWith("tool_use") === true) {
       on("tool", (block.name ?? "") + " ", true);
     }
+    if (ev.type === "content_block_start" && block?.type.endsWith("thinking") === true) {
+      on("mind", "", true);
+    }
     if (delta?.type === "thinking_delta") {
       on("mind", delta.thinking ?? "");
     }

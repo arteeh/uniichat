@@ -599,11 +599,18 @@ function view_rows(v: View, parts: Part[]): Row[][] {
 // a busy agent looks busy (#129): waiting for its model, writing, thinking,
 // writing a tool call, waiting for its result
 const WAITING: Row = { $: "Cap", text: "", wait: true };
+const THINKING: Row = { $: "Cap", text: "Thinking", think: true };
+
+// thinking starts with no text yet (#154): "Thinking" until its text comes,
+// nothing once the model goes on without any
+function thinks(live: Live[], k: number): boolean {
+  return live[k].kind === "mind" && (live[k].text !== "" || k === live.length - 1);
+}
 
 // what streams in now: the text being written, a tool call being written
 // or waiting to run
 function live_rows(live: Live[], writing: boolean): Row[] {
-  return live.flatMap((l, k) => view_lines(entry_rows(null, l.kind, l.text, [], undefined, undefined, l.of)).map((r): Row => {
+  return live.flatMap((l, k) => l.kind === "mind" && l.text === "" ? (thinks(live, k) ? [THINKING] : []) : view_lines(entry_rows(null, l.kind, l.text, [], undefined, undefined, l.of)).map((r): Row => {
     if (r.$ === "Line") {
       return { ...r, phase: l.of === undefined ? "typing" : "running" };
     }
@@ -618,14 +625,15 @@ function running(rows: Row[], from: number): Row[] {
 
 export function view_tail(v: View): Row[] {
   if (v.page !== null) {
-    const page = v.page.live.filter((l) => v.thinking !== false || l.kind !== "mind");
-    const thinks = page.length < v.page.live.length ? [{ $: "Cap" as const, text: "Thinking", think: true as const }] : [];
+    const live = v.page.live;
+    const page = live.filter((l) => v.thinking !== false || l.kind !== "mind");
+    const thought = v.thinking === false && live.some((_, k) => thinks(live, k)) ? [THINKING] : [];
     const sub = view_sub(v);
     const queued = (sub?.queue ?? []).flatMap((text) => sent_rows(true, entry_rows(null, "user", text)));
     const idle = sub !== undefined && v.page.live.length === 0 && v.page.log?.at(-1)?.kind !== "tool" && sub.doing !== "usage limit";
-    return [...thinks, ...live_rows(page, sub !== undefined), ...(idle ? [WAITING] : []), ...queued];
+    return [...thought, ...live_rows(page, sub !== undefined), ...(idle ? [WAITING] : []), ...queued];
   }
-  const thought = v.thinking === false && v.live.some((l) => l.kind === "mind") ? [{ $: "Cap" as const, text: "Thinking", think: true as const }] : [];
+  const thought = v.thinking === false && v.live.some((_, k) => thinks(v.live, k)) ? [THINKING] : [];
   const rows = [...thought, ...live_rows(v.live.filter((l) => v.thinking !== false || l.kind !== "mind"), v.busy && v.wait === "")];
   const load = v.importing !== null ? [Cap(progress_show(v.importing))] : [];
   const said = !v.up ? v.out.flatMap((p) => entry_rows(null, "user", p.said)) : [];

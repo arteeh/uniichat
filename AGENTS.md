@@ -20,7 +20,7 @@ It copies your checkout in at every start, so after a change, `podman restart ri
 Steer what the models answer with `fake`, never with test commands in chat messages. Each command applies to the next model call; with nothing queued, a call gets "ok":
 
 ```sh
-fake reply "text"                        # or --think "t" "text": thinks 5 s first (Claude)
+fake reply "text"                        # or --think "t" "text": thinks 5 s first, its text "t" at the end
 fake tool NAME 'JSON' [NAME 'JSON' ...]  # tool calls
 fake error KIND [--reset 5m]             # prompt-too-long, overloaded, rate-limit, usage-limit, auth-expired
 fake stall 60s | fake cut                # the stream hangs, or drops halfway
