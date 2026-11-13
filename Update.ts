@@ -15,9 +15,12 @@ export function install_cmd(win: boolean): string {
   return win ? "irm " + BASE + "/install.ps1 | iex" : "curl -fsSL " + BASE + "/install.sh | sh";
 }
 
-// release files are signed with `ssh-keygen -Y sign -n unii-release`
-// (PROTOCOL.sshsig) by the key in release/unii.pub
-const NAMESPACE = "unii-release";
+// each release file is signed with `ssh-keygen -Y sign -n unii-<its name>`
+// (PROTOCOL.sshsig) by the key in release/unii.pub, so one file's
+// signature doesn't pass for another's
+function namespace(file: string): string {
+  return "unii-" + file;
+}
 const ED = "ssh-ed25519";
 
 function strings(b: Uint8Array): Uint8Array[] {
@@ -40,9 +43,9 @@ function string(b: Uint8Array | string): Buffer {
   return Buffer.concat([n, s]);
 }
 
-// why `data` isn't signed by the release key (`key`, an ssh-ed25519 line),
-// or null if it is
-export function unsigned(data: Uint8Array, sig: string, key = KEY): string | null {
+// why `data` isn't the release file `file` signed by the release key
+// (`key`, an ssh-ed25519 line), or null if it is
+export function unsigned(data: Uint8Array, sig: string, file: string, key = KEY): string | null {
   const [type, b64] = key.trim().split(/\s+/);
   const pub = Buffer.from(b64 ?? "", "base64");
   let raw: Uint8Array[];
@@ -77,8 +80,8 @@ export function unsigned(data: Uint8Array, sig: string, key = KEY): string | nul
   if (!pub.equals(signer)) {
     return "signed by another key";
   }
-  if (Buffer.from(space).toString() !== NAMESPACE) {
-    return "not signed as a unii release";
+  if (Buffer.from(space).toString() !== namespace(file)) {
+    return "not signed as unii's " + file;
   }
   const algo = Buffer.from(hash).toString();
   if (algo !== "sha512" && algo !== "sha256") {
@@ -87,4 +90,29 @@ export function unsigned(data: Uint8Array, sig: string, key = KEY): string | nul
   const signed = Buffer.concat([Buffer.from("SSHSIG"), string(space), string(reserved), string(hash), string(crypto.createHash(algo).update(data).digest())]);
   const verifier = crypto.createPublicKey({ key: { kty: "OKP", crv: "Ed25519", x: Buffer.from(raw[1]).toString("base64url") }, format: "jwk" });
   return crypto.verify(null, signed, verifier, inner[1]) ? null : "the signature doesn't match";
+}
+
+// why the installer of release `ver` mustn't replace this unii, or null:
+// it's never older, and a release never moves to a release candidate or
+// back
+export function refused(ver: string): string | null {
+  if (/\.rc[0-9]+$/.test(ver) !== RC) {
+    return ver + " is " + (RC ? "not a release candidate" : "a release candidate");
+  }
+  const n = (v: string): number[] => v.split(".").map((p) => Number(p.replace(/^rc/, "")));
+  const [a, b] = [n(ver), n(VERSION)];
+  if (a.some(Number.isNaN)) {
+    return "it installs no known version (" + ver + ")";
+  }
+  for (let k = 0; k < Math.max(a.length, b.length); k++) {
+    if ((a[k] ?? 0) !== (b[k] ?? 0)) {
+      return (a[k] ?? 0) < (b[k] ?? 0) ? ver + " is older than this unii " + VERSION : null;
+    }
+  }
+  return null;
+}
+
+// the version an installer (install.sh or install.ps1) installs
+export function installs(script: string): string | null {
+  return (/^VER="([^"]+)"$/m.exec(script) ?? /^\s*\$Ver = '([^']+)'\s*$/m.exec(script))?.[1] ?? null;
 }

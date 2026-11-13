@@ -67,15 +67,21 @@ async function update(): Promise<void> {
   if (Update.RC) {
     fail("unii " + Update.VERSION + " is a release candidate: `unii update` doesn't move from it. Install another release by its own install line (https://github.com/arteeh/uniichat/releases).");
   }
-  const url = Update.BASE + (WIN ? "/install.ps1" : "/install.sh");
+  const name = WIN ? "install.ps1" : "install.sh";
+  const url = Update.BASE + "/" + name;
   console.error("unii: getting " + url + " and its signature");
   const [script, sig] = await Promise.all([get(url), get(url + ".sig")]).catch((err: unknown) => fail("could not download the installer (" + err_why(err) + "); nothing changed."));
-  const why = Update.unsigned(script, Buffer.from(sig).toString());
+  const why = Update.unsigned(script, Buffer.from(sig).toString(), name);
   if (why !== null) {
     fail(url + " is not signed by unii's release key (" + why + "): it was not run, and nothing changed.");
   }
+  const ver = Update.installs(Buffer.from(script).toString());
+  const no = ver === null ? "it names no version" : Update.refused(ver);
+  if (no !== null) {
+    fail(url + " was not run (" + no + "), and nothing changed.");
+  }
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "unii-update-"));
-  const file = path.join(dir, path.basename(url));
+  const file = path.join(dir, name);
   try {
     fs.writeFileSync(file, script);
     const run = WIN ? powershell_exiting_as_installer("iex ([IO.File]::ReadAllText('" + file.replaceAll("'", "''") + "'))") : ["sh", file];

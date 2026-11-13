@@ -50,11 +50,11 @@ Either way you get one `unii` program (in `~/.local/bin`, or `%LOCALAPPDATA%\Pro
 
 Linux, macOS or WSL:
 
-`curl -fsSLO https://github.com/arteeh/uniichat/releases/latest/download/install.sh -O https://github.com/arteeh/uniichat/releases/latest/download/install.sh.sig && echo "unii ssh-ed25519 TODO-the-real-release-key-made-at-release-time" > unii.signers && ssh-keygen -Y verify -f unii.signers -I unii -n unii-release -s install.sh.sig < install.sh && sh install.sh`
+`curl -fsSLO https://github.com/arteeh/uniichat/releases/latest/download/install.sh -O https://github.com/arteeh/uniichat/releases/latest/download/install.sh.sig && echo "unii ssh-ed25519 TODO-the-real-release-key-made-at-release-time" > unii.signers && ssh-keygen -Y verify -f unii.signers -I unii -n unii-install.sh -s install.sh.sig < install.sh && sh install.sh`
 
 Windows (PowerShell):
 
-`$b = "https://github.com/arteeh/uniichat/releases/latest/download"; irm $b/install.ps1 -OutFile install.ps1; irm $b/install.ps1.sig -OutFile install.ps1.sig; Set-Content unii.signers "unii ssh-ed25519 TODO-the-real-release-key-made-at-release-time" -Encoding ascii; cmd /c "ssh-keygen -Y verify -f unii.signers -I unii -n unii-release -s install.ps1.sig < install.ps1"; if ($LASTEXITCODE -eq 0) { iex (Get-Content -Raw install.ps1) }`
+`$b = "https://github.com/arteeh/uniichat/releases/latest/download"; irm $b/install.ps1 -OutFile install.ps1; irm $b/install.ps1.sig -OutFile install.ps1.sig; Set-Content unii.signers "unii ssh-ed25519 TODO-the-real-release-key-made-at-release-time" -Encoding ascii; cmd /c "ssh-keygen -Y verify -f unii.signers -I unii -n unii-install.ps1 -s install.ps1.sig < install.ps1"; if ($LASTEXITCODE -eq 0) { iex (Get-Content -Raw install.ps1) }`
 
 If the key ever changes, a release signed with the old key says so and brings the new one; if the old key leaked, that release's notes tell you to reinstall with the lines above.
 
