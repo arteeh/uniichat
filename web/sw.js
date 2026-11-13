@@ -22,12 +22,12 @@ self.addEventListener("fetch", (ev) => {
   if (req.method !== "GET" || url.origin !== location.origin || !(page || SHELL.includes(url.pathname))) {
     return;
   }
-  ev.respondWith(fresh(req, page ? "/" : url.pathname, page));
+  ev.respondWith(fresh(ev, req, page ? "/" : url.pathname));
 });
 
-// a page whose network hangs (a phone's, just woken) comes from the cache
-// after PAGE_WAIT (#159)
-async function fresh(req, key, page) {
+// a page or shell file whose network hangs (a phone's, just woken) comes
+// from the cache after PAGE_WAIT, and the cache is refreshed after (#159)
+async function fresh(ev, req, key) {
   const cache = await caches.open(CACHE);
   const net = fetch(req.mode === "navigate" ? req.url : req, { cache: "no-cache" }).then(async (res) => {
     if (res.ok) {
@@ -35,9 +35,9 @@ async function fresh(req, key, page) {
     }
     return res;
   });
-  net.catch(() => {});
+  ev.waitUntil(net.catch(() => {}));
   try {
-    const late = page ? new Promise((ok) => setTimeout(ok, PAGE_WAIT, null)) : net;
+    const late = new Promise((ok) => setTimeout(ok, PAGE_WAIT, null));
     const res = (await Promise.race([net, late])) ?? (await cache.match(key)) ?? (await net);
     return res.status < 500 ? res : (await cache.match(key)) ?? res;
   } catch (err) {
