@@ -149,14 +149,15 @@ body.subpage header > .title:not([data-on=""])::after { content: attr(data-on); 
 @keyframes pulse { 0%, 80%, 100% { opacity: .25; } 40% { opacity: 1; } }
 .msg.writing > :last-child::after { content: ""; display: inline-block; width: 2px; height: 1.05em; margin-left: 2px; vertical-align: text-bottom; background: currentColor; opacity: .5; animation: caret 1s steps(1) infinite; }
 @keyframes caret { 50% { opacity: 0; } }
-.msg.tool.line.typing > summary::after { content: ""; flex: none; min-width: 1.2em; color: var(--soft); animation: dots 1.2s steps(1) infinite; }
-.msg.tool.line.running > summary::after { content: ""; flex: none; align-self: center; width: 10px; height: 10px; margin-left: 8px; border: 2px solid var(--soft); border-top-color: transparent; border-radius: 50%; animation: spin .9s linear infinite; }
-.msg.tool.line.running > summary:not(:has(.on, .bad))::after { margin-left: auto; }
+.msg.tool.line .ic { flex: none; width: 1.25em; text-align: center; position: relative; }
+.msg.tool.line:is(.typing, .running) .ic { visibility: hidden; }
+.msg.tool.line.typing .ic::after { visibility: visible; content: ""; position: absolute; inset: 0; overflow: hidden; text-align: left; color: var(--soft); animation: dots 1.2s steps(1) infinite; }
+.msg.tool.line.running .ic::after { visibility: visible; content: ""; position: absolute; inset: 0; margin: auto; width: 10px; height: 10px; border: 2px solid var(--soft); border-top-color: transparent; border-radius: 50%; animation: spin .9s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) {
-  .cap.wait i, .msg.writing > :last-child::after, .msg.tool.line.running > summary::after { animation: none; }
+  .cap.wait i, .msg.writing > :last-child::after, .msg.tool.line.running .ic::after { animation: none; }
   .cap.wait i { opacity: .6; }
-  :is(.cap.think, .msg.tool.line.typing > summary)::after { animation: none; content: "…"; }
+  :is(.cap.think, .msg.tool.line.typing .ic)::after { animation: none; content: "…"; }
 }
 .msg.tool.line { padding: 0; background: none; }
 .msg.tool.line > summary { display: flex; align-items: baseline; gap: 6px; padding: 7px 12px; border-radius: 10px; background: var(--block); cursor: pointer; list-style: none; white-space: nowrap; }
