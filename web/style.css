@@ -390,7 +390,9 @@ header > .imping { display: flex; flex-direction: column; justify-content: cente
 @media (hover: hover) { .msg:hover > .copy, .msg pre:hover > .copy { opacity: 1; } }
 @media (hover: none) {
   .copy { opacity: .6; }
-  #log .msg:has(> .copy) { margin-top: 34px; }
+  #log .msg:not(.mind, .unii):has(> .copy) { margin-top: 34px; }
+  #log :is(.msg.mind, .msg.unii) { padding-right: 34px; }
+  #log :is(.msg.mind, .msg.unii) > .copy { top: calc((var(--row) - 26px) / 2); bottom: auto; }
   .msg pre:has(> .copy) { padding-right: 40px; }
   .msg pre > .copy { top: 9px; right: 9px; }
 }
