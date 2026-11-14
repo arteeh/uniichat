@@ -34,7 +34,9 @@
 # the data needs moving while a server runs on it, or it can't be moved as
 # it is, this says why and stops, with nothing changed and the old version
 # kept. A move stopped halfway (a crash, a full disk) goes on where it
-# stopped when this runs again.
+# stopped when this runs again. Every time, data from an older ki is
+# brought to this version's layout (upgrade.js, by the new ki as bun: each
+# step once, a running server's data too, as every step only adds).
 set -eu
 
 VER="@VER@"
@@ -490,6 +492,9 @@ KI_MIGRATE_JS
 cat > "$tmp/rename.js" <<'KI_RENAME_JS'
 @RENAME_JS@
 KI_RENAME_JS
+cat > "$tmp/upgrade.js" <<'KI_UPGRADE_JS'
+@UPGRADE_JS@
+KI_UPGRADE_JS
 
 # All checked first: what the data needs, and that no server runs on it
 src=""
@@ -653,6 +658,10 @@ if [ -d "$dir/chat" ] && [ ! -e "$dir/agents/unii" ]; then
   cp -Rp "$dir/chat" "$dir/agents/.unii-copy" && mv "$dir/agents/.unii-copy" "$dir/agents/unii" || fail "could not copy $dir/chat to $dir/agents/unii; ki $VER was not installed."
   BUN_BE_BUN=1 "$new_ki" "$tmp/rename.js" "$dir" "$conf" || fail "giving your data in $dir ki's names stopped halfway (see above): run this again. ki $VER was not installed."
   echo "  Copied $dir/chat to $dir/agents/unii, the main agent's memory in the agent team ($dir/chat stays as it was)."
+fi
+# every time: older data to this version's layout, each step once
+if [ -d "$dir" ]; then
+  BUN_BE_BUN=1 "$new_ki" "$tmp/upgrade.js" "$dir" || fail "bringing your data in $dir to ki $VER's layout stopped halfway (see above): run this again. ki $VER was not installed."
 fi
 share="${XDG_DATA_HOME:-$HOME/.local/share}/ki"
 rm -rf "${XDG_DATA_HOME:-$HOME/.local/share}/unii"

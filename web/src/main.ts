@@ -22,15 +22,6 @@ const ME_WAIT = 4000;
 const NOTIFY = "ki.notify";
 const TRAVEL = 1000;
 
-// migration from 39/40.rc, remove in 41: this browser's keys were unii.*
-for (const k of ["intro", "notify", "welcomed"]) {
-  const was = localStorage.getItem("unii." + k);
-  if (was !== null && localStorage.getItem("ki." + k) === null) {
-    localStorage.setItem("ki." + k, was);
-  }
-  localStorage.removeItem("unii." + k);
-}
-
 const NONE   = "No Claude or ChatGPT chats in that folder. Choose ~/.claude or ~/.codex.";
 
 const SCENES = `

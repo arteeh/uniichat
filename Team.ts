@@ -17,7 +17,7 @@ const HEADS = 24;
 
 const LOGO = "logo";
 
-const FIRST_ABOUT = "The user's assistant.";
+const FIRST_ABOUT = "The user's assistant and first point of contact.";
 
 export namespace Team {
 

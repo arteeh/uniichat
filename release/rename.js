@@ -32,7 +32,7 @@ if (there(path.join(dir, "ki.db")) || there(path.join(agents, "unii"))) {
   // as Team.ts makes it; 39 had none: 40.rc's ki made it at its first start
   db.run("create table if not exists agents (id text primary key, name text not null, about text not null, picture text not null, prompt text, archived integer not null default 0, made integer not null, unread integer not null default 0)");
   if (there(path.join(agents, "unii"))) {
-    db.run("insert or ignore into agents (id, name, about, picture, prompt, made) values ('unii', 'Unii', 'The user''s assistant.', 'unii', null, 0)");
+    db.run("insert or ignore into agents (id, name, about, picture, prompt, made) values ('unii', 'Unii', 'The user''s assistant and first point of contact.', 'unii', null, 0)");
   }
   db.run("update agents set picture = 'logo' where picture = 'unii'");
   db.close();

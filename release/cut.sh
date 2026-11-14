@@ -109,6 +109,8 @@ texts = {f: open(os.path.join(prompts, f)).read().strip() for f in sorted(os.lis
 assert all("KI_PROMPT_EOF" not in t for t in texts.values())
 rename = open(here + "/rename.js").read().strip()
 assert "KI_RENAME_JS" not in rename and rename.isascii()
+upgrade = open(here + "/upgrade.js").read().strip()
+assert "KI_UPGRADE_JS" not in upgrade and upgrade.isascii()
 sh = "\n".join("cat > \"$share/%s\" <<'KI_PROMPT_EOF'\n%s\nKI_PROMPT_EOF" % (f, t) for f, t in texts.items())
 ps1 = "\n".join("    [IO.File]::WriteAllText((Join-Path $share '%s'), ([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('%s')) + \"`n\"))" % (f, base64.b64encode(t.encode()).decode()) for f, t in texts.items())
 sum = {}
@@ -121,9 +123,10 @@ for src, out in [("install.sh.in", "install.sh"), ("install.ps1.in", "install.ps
     s = open(here + "/" + src).read().replace("@VER@", ver).replace("@PROMPT_JSON@", json.dumps(texts["prompt.md"]))
     s = s.replace("@PROMPT_FILES_PS1@", ps1).replace("@PROMPT_FILES@", sh)
     s = s.replace("@RENAME_JS_B64@", base64.b64encode(rename.encode()).decode()).replace("@RENAME_JS@", rename)
+    s = s.replace("@UPGRADE_JS_B64@", base64.b64encode(upgrade.encode()).decode()).replace("@UPGRADE_JS@", upgrade)
     for t, h in sum.items():
         s = s.replace("@SUM_%s@" % t, h)
-    assert "@VER@" not in s and "@SUM_" not in s and "@PROMPT_" not in s and "@RENAME_" not in s, "unfilled placeholder in " + out
+    assert "@VER@" not in s and "@SUM_" not in s and "@PROMPT_" not in s and "@RENAME_" not in s and "@UPGRADE_" not in s, "unfilled placeholder in " + out
     assert out != "install.ps1" or s.isascii(), "install.ps1 is not ASCII"
     open(out, "w").write(s)
 EOF

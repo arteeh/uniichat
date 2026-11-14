@@ -37,7 +37,9 @@
 #
 # The first time, it copies ~\.ki\chat to ~\.ki\agents\unii (the main
 # agent's memory in the agent team; chat stays as it was), with the server
-# stopped while it copies.
+# stopped while it copies. Every time, data from an older ki is brought to
+# this version's layout (upgrade.js, by the new ki.exe as bun: each step
+# once, a running server's data too, as every step only adds).
 # It ends setting $LASTEXITCODE (0: installed, 1: not), never `exit`:
 # run by `irm | iex`, an exit would close your PowerShell window.
 
@@ -263,6 +265,8 @@
     if (-not (Test-Path -LiteralPath $exe)) { throw "$name holds no ki.exe; not installed" }
     $rename = Join-Path $tmp 'rename.js'
     [IO.File]::WriteAllText($rename, [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('@RENAME_JS_B64@')))
+    $upgrade = Join-Path $tmp 'upgrade.js'
+    [IO.File]::WriteAllText($upgrade, [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('@UPGRADE_JS_B64@')))
     $named = {
       $env:BUN_BE_BUN = '1'
       try { & $exe $rename $dir $conf } finally { Remove-Item Env:\BUN_BE_BUN -ErrorAction SilentlyContinue }
@@ -390,6 +394,12 @@
       Move-Item -LiteralPath $copy -Destination $main
       & $named
       Write-Host "  Copied $chat to $main, the main agent's memory in the agent team ($chat stays as it was)."
+    }
+    # every time: older data to this version's layout, each step once
+    if (Test-Path -LiteralPath $dir -PathType Container) {
+      $env:BUN_BE_BUN = '1'
+      try { & $exe $upgrade $dir } finally { Remove-Item Env:\BUN_BE_BUN -ErrorAction SilentlyContinue }
+      if ($LASTEXITCODE -ne 0) { throw "bringing your data in $dir to ki $Ver's layout stopped halfway (see above): run this again. ki $Ver was not installed." }
     }
     Remove-Item -LiteralPath (Join-Path $env:LOCALAPPDATA 'unii') -Recurse -Force -ErrorAction SilentlyContinue
     $share = Join-Path $env:LOCALAPPDATA 'ki'

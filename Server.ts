@@ -122,6 +122,9 @@ const HALT       = 5000;
 const SCRATCH_KEPT  = 30 * 24 * 3600e3;
 const SCRATCH_SWEEP = 24 * 3600e3;
 const AGENTS     = config.DIR + "/agents";
+// the data's layout, as release/upgrade.js writes it
+const LAYOUT     = config.DIR + "/layout";
+const LAYOUT_NOW = 41;
 const TALK_FULL  = "Conversation mode switched itself off: it was full.";
 const TALK_SMALL = "Conversation mode switched itself off: too long for {model}.";
 const TALK_LONG  = "Conversation mode switched itself off: {model} refused the turn as too long.";
@@ -2255,8 +2258,6 @@ export namespace Main {
     // the page also names the first agent in the list, so a page cached for another goes
     const first = file === PAGE ? Team.first().id : "";
     const headers = new Headers({ "cache-control": "no-cache", etag: `"${BUILD}${first === "" ? "" : "-" + first}"` });
-    // migration from 39/40.rc, remove in 41
-    Owner.moved(req).forEach((c) => headers.append("set-cookie", c));
     if (req.headers.get("if-none-match") === headers.get("etag")) {
       return new Response(null, { status: 304, headers });
     }
@@ -2472,9 +2473,14 @@ export namespace Main {
     Reap.start();
     await Main.lock();
     const old = fs.existsSync(config.DIR + "/users") || fs.existsSync(config.DIR + "/chat");
-    if ((old && !fs.existsSync(AGENTS)) || fs.existsSync(config.DIR + "/.migrating")) {
+    const agents = fs.existsSync(AGENTS);
+    const layout = Number((fs.existsSync(LAYOUT) ? fs.readFileSync(LAYOUT, "utf8") : "").trim()) || 0;
+    if ((old && !agents) || (agents && layout < LAYOUT_NOW) || fs.existsSync(config.DIR + "/.migrating")) {
       const installer = install_cmd(WIN);
       throw new Error(config.DIR + " holds an older ki's data, not yet (or not all) moved to this version's layout: run the installer (" + installer + ") with no ki server running, then start again");
+    }
+    if (!agents) {
+      fs.writeFileSync(LAYOUT, LAYOUT_NOW + "\n");
     }
     fs.writeFileSync(PID, String(process.pid));
     Owner.open();
