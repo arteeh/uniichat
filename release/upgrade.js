@@ -96,7 +96,7 @@ if (layout < 41 && lead !== undefined) {
 if (layout < 41 && has) db.query("update agents set about = ? where about = ?").run(NEW_ABOUT, OLD_ABOUT);
 
 // 42: each file in the stores of the agents that name it, and only there
-if (lead !== undefined) {
+if (rows.length > 0) {
   const NAME = /[0-9a-f]{16}\.[a-z0-9]{1,10}/g;
   const named = new Map(rows.map((a) => [a.id, new Set()]));
   const scan = (id, text) => {
@@ -110,9 +110,10 @@ if (lead !== undefined) {
     }
   }
   const FILE = /^[0-9a-f]{16}\.[a-z0-9]{1,10}$/;
-  // what became of each name (media/ first: images/ holds the models' copies of its pictures)
+  // what became of each name, and the agents a staying one is with (media/
+  // first: images/ holds the models' copies of its pictures)
   const fate = new Map();
-  const tell = (name, what) => { if (!fate.has(name)) fate.set(name, what); };
+  const tell = (name, what, where = []) => { if (!fate.has(name)) fate.set(name, { what, where }); };
   for (const sub of ["media", "images"]) {
     const at = (id, name) => path.join(agents, id, "docs", sub, name);
     // a picture's file, and in images/ its smaller copy beside it
@@ -122,7 +123,7 @@ if (lead !== undefined) {
       const holders = rows.filter((a) => there(at(a.id, name))).map((a) => a.id);
       const namers = rows.filter((a) => named.get(a.id).has(name)).map((a) => a.id);
       if (namers.length === 0) {
-        if (holders.includes(lead.id)) tell(name, "stayed");
+        tell(name, "stayed", holders);
         continue;
       }
       for (const id of namers) {
@@ -132,18 +133,21 @@ if (lead !== undefined) {
         }
       }
       const extra = holders.filter((id) => !namers.includes(id));
-      if (namers.every((id) => there(at(id, name)))) {
+      const home = namers.every((id) => there(at(id, name)));
+      if (home) {
         for (const id of extra) {
           for (const part of parts(name)) fs.rmSync(at(id, part), { force: true });
         }
       }
       if (namers.length > 1) tell(name, "shared");
-      else if (namers[0] === lead.id) tell(name, "stayed");
-      else if (extra.length > 0) tell(name, "moved");
+      else if (home && extra.length > 0) tell(name, "moved");
+      else tell(name, "stayed", holders);
     }
   }
-  const [moved, shared, stayed] = ["moved", "shared", "stayed"].map((what) => [...fate.values()].filter((f) => f === what).length);
-  if (moved + shared > 0) say("Each agent's pictures and files are in its own store now: " + moved + " moved to the one agent that names them, " + shared + " shared by the agents that name them (each has its own), " + stayed + " stay with " + lead.name + ".");
+  const [moved, shared, stayed] = ["moved", "shared", "stayed"].map((what) => [...fate.values()].filter((f) => f.what === what).length);
+  const where = [...new Set([...fate.values()].flatMap((f) => f.where))].map((id) => rows.find((a) => a.id === id).name);
+  const stay = where.length === 1 ? " stay with " + where[0] : " stay where they were";
+  if (moved + shared > 0) say("Each agent's pictures and files are in its own store now: " + moved + " moved to the one agent that names them, " + shared + " shared by the agents that name them (each has its own), " + stayed + stay + ".");
 }
 db.close();
 
