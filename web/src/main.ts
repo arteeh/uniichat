@@ -104,6 +104,7 @@ const IMPORT = {
   step  : "" as "" | "start" | "send" | "run" | "seen" | "done",
   // the agent it goes into: the one whose settings (or first chat) opened it
   agent : "",
+  asks  : 0,
 };
 
 function $(sel: string): HTMLElement;
@@ -440,7 +441,7 @@ function click(ev: MouseEvent): void {
   el.closest<HTMLElement>(".choices")?.hidePopover();
   const { act: a, copy: text, go: path } = el.dataset;
   if (el.classList.contains("imp")) {
-    void import_open(false);
+    void import_open(FORM.exec(location.pathname)?.[2] ?? v.agent, false);
     return;
   }
   if (path !== undefined) {
@@ -792,28 +793,34 @@ function importer(): void {
   };
   dir.onchange = async () => {
     const all = [...(dir.files ?? [])];
+    const into = IMPORT.found;
     const files = all.filter((f) => Import.import_file(f.webkitRelativePath));
     const found: Import.Session[] = [];
     let moved = 0;
     const reading = (k: number) => "Reading " + k + " of " + files.length + " files…";
     import_draw(reading(1));
     for (const [k, f] of files.entries()) {
-      $("#import .guess").textContent = reading(k + 1);
+      if (into === IMPORT.found) {
+        $("#import .guess").textContent = reading(k + 1);
+      }
       const s = await import_copy(f).then((b) => Import.import_session(b, "log"), () => undefined);
       moved += s === undefined ? 1 : 0;
       found.push(...(s ? [s] : []));
     }
     dir.value = "";
-    import_took(all[0]?.webkitRelativePath.split("/")[0] ?? "", { sessions: found, moved }, found.length > 0 ? "" : NONE);
+    import_took(into, all[0]?.webkitRelativePath.split("/")[0] ?? "", { sessions: found, moved }, found.length > 0 ? "" : NONE);
   };
   zip.onchange = async () => {
+    const into = IMPORT.found;
     for (const f of zip.files ?? []) {
-      import_draw("Reading " + f.name + "…");
+      if (into === IMPORT.found) {
+        import_draw("Reading " + f.name + "…");
+      }
       try {
         const found = await Import.import_export(await import_copy(f));
-        import_took(f.name, { sessions: found, moved: 0 }, found.length > 0 ? "" : "No chats in " + f.name + ".");
+        import_took(into, f.name, { sessions: found, moved: 0 }, found.length > 0 ? "" : "No chats in " + f.name + ".");
       } catch (e) {
-        import_took(f.name, { sessions: [], moved: 0 }, f.name + ": " + (e as Error).message);
+        import_took(into, f.name, { sessions: [], moved: 0 }, f.name + ": " + (e as Error).message);
       }
     }
     zip.value = "";
@@ -828,9 +835,22 @@ function import_flow(): void {
   View.link_send(v, { $: "go", on: Boolean(v.importing?.why) }, (out) => out.error && toast(out.error));
 }
 
-async function import_open(first: boolean): Promise<void> {
-  const agent = v.agent;
-  IMPORT.done = (await fetch("/api/imported?agent=" + encodeURIComponent(agent)).then((res) => res.json()).catch(() => ({}))) as Import.Done;
+// only the last asked opens, and only while its agent's page is open; for
+// another agent than the last, afresh
+async function import_open(agent: string, first: boolean): Promise<void> {
+  const ask = ++IMPORT.asks;
+  const done = (await fetch("/api/imported?agent=" + encodeURIComponent(agent)).then((res) => res.json()).catch(() => ({}))) as Import.Done;
+  if (ask !== IMPORT.asks || agent !== v.agent) {
+    return;
+  }
+  if (agent !== IMPORT.agent) {
+    IMPORT.found = new Map();
+    IMPORT.off = new Set();
+    $("#import form", HTMLFormElement).reset();
+    BACK.min = "0";
+    BACK.value = "0";
+  }
+  IMPORT.done = done;
   $("#import form .skip").textContent = first ? "Start fresh" : "Close";
   IMPORT.step = first ? "start" : IMPORT.step === "done" || IMPORT.agent !== agent ? "" : IMPORT.step;
   IMPORT.agent = agent;
@@ -838,7 +858,12 @@ async function import_open(first: boolean): Promise<void> {
   $("#import").showPopover();
 }
 
-function import_took(name: string, read: Read, status: string): void {
+// into: the window's picks when the files were chosen, gone if it opened
+// afresh since
+function import_took(into: Map<string, Read>, name: string, read: Read, status: string): void {
+  if (into !== IMPORT.found) {
+    return;
+  }
   IMPORT.found.set(name, read);
   BACK.min = "0";
   BACK.value = "0";
@@ -850,23 +875,33 @@ async function import_welcome(): Promise<void> {
   const key = kept("welcomed");
   if (localStorage.getItem(key) === null && v.pick !== null && v.parts.length === View.OPENING && v.importing === null && DESK.matches) {
     localStorage.setItem(key, "1");
-    void import_open(true);
+    void import_open(v.agent, true);
   }
 }
 
 function import_send(): void {
   const picked = import_plan().picked;
+  const [agent, found] = [IMPORT.agent, IMPORT.found];
   IMPORT.step = "send";
   import_draw("");
   const body = async () => new Blob(await Array.fromAsync(Import.import_body(picked), (part) => new Blob([part])));
-  View.link_send(v, { $: "import", body }, import_sent);
+  View.link_send(v, { $: "import", body, agent }, (out) => import_sent(agent, found, out));
 }
 
-function import_sent(out: View.Answer): void {
-  IMPORT.step = out.error !== undefined ? "" : out.going ? "run" : "done";
+// the answer shows in the window it was sent from while its agent's page
+// is open; else an error is a toast
+function import_sent(agent: string, found: Map<string, Read>, out: View.Answer): void {
   if (out.error === undefined) {
-    IMPORT.found.clear();
+    found.clear();
   }
+  if (found !== IMPORT.found || agent !== v.agent) {
+    IMPORT.step = found === IMPORT.found ? "" : IMPORT.step;
+    if (out.error !== undefined) {
+      toast("Not imported into " + (v.team.find((m) => m.id === agent)?.name ?? agent) + ": " + out.error, true);
+    }
+    return;
+  }
+  IMPORT.step = out.error !== undefined ? "" : out.going ? "run" : "done";
   import_draw(out.error === undefined ? "" : "Not imported: " + out.error);
   $("#import").showPopover();
 }

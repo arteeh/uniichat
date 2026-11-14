@@ -147,7 +147,7 @@ type Body   = () => Upload | Promise<Upload>;
 
 export type Client =
   | { $: "say"; sizes: number[]; body: Body; agent?: string }
-  | { $: "import"; body: Body }
+  | { $: "import"; body: Body; agent: string }
   | { $: "voice"; type: string; body: Body }
   | { $: "stop" }
   | { $: "goal"; text: string | null }
@@ -917,7 +917,7 @@ function woken(v: View): boolean {
 }
 
 export function link_send(v: View, msg: Client, done = (a: Answer) => link_note(v, a), said = ""): void {
-  const to = msg.$ === "say" || msg.$ === "import" ? { agent: v.agent } : {};
+  const to = msg.$ === "say" ? { agent: v.agent } : {};
   v.out.push({ msg: { id: uuid(), ...msg, ...to }, ws: null, done, said });
   v.flush();
 }
