@@ -145,7 +145,7 @@ async function boot(): Promise<void> {
   document.body.classList.toggle("start", START);
   setTimeout(() => document.body.classList.remove("start"), START_SHOWN);
   if (await boot_me() === null) {
-    solo("Sign in", View.SIGN_IN, View.SIGN_IN_FORM);
+    solo("Sign in", View.SIGN_IN, View.sign_in_form(location.pathname + location.search));
     return;
   }
   chat();

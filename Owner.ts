@@ -5,7 +5,7 @@ import * as config from "./Config.ts";
 import { Disk } from "./Disk.ts";
 import { get, text_of } from "./Json.ts";
 import { Push } from "./Push.ts";
-import { SIGN_IN, SIGN_IN_FORM } from "./View.ts";
+import { SIGN_IN, sign_in_form } from "./View.ts";
 
 // a device's sign-in (session: the hash of its key), or the browser
 // sign-in code of `ki serve login` (tries: its wrong ones so far)
@@ -179,13 +179,13 @@ export namespace Owner {
           return Owner.confirm(req);
         }
         if (t === "") {
-          return Owner.page_login("");
+          return Owner.page_login("", "/");
         }
         const link = Owner.ticket_read(t, false);
         if (link === null || link.session === null) {
           return Owner.page("This sign-in link expired", "Start the device again for a new one.");
         }
-        return owner ? Owner.page_confirm(t, link.what, "") : Owner.page("Sign in this browser first", "Run <code>ki serve login</code> on the server's computer and type the code it prints on this server's sign-in page, then open this link again.");
+        return owner ? Owner.page_confirm(t, link.what, "") : Owner.page_login("", url.pathname + url.search, "Sign in this browser first");
       }
       case "/api/wait": {
         if (owner) {
@@ -261,7 +261,7 @@ export namespace Owner {
     const t = field("t");
     const typed = field("code").replace(/\D/g, "");
     if (t === "") {
-      return Owner.login(req, typed);
+      return Owner.login(req, typed, Owner.relative(field("to")));
     }
     const link = Owner.ticket_read(t, false);
     if (link === null || link.session === null || !Owner.is(req)) {
@@ -277,9 +277,10 @@ export namespace Owner {
   }
 
   // a browser signs in with the code of `ki serve login`: used once, and
-  // gone after TRIES wrong ones; it stays on the address it came in on. A
-  // wrong code and no code get one answer, so a guess learns nothing
-  export function login(req: Request, typed: string): Response {
+  // gone after TRIES wrong ones; it stays on the address it came in on,
+  // and goes to the path it was going to. A wrong code and no code get one
+  // answer, so a guess learns nothing
+  export function login(req: Request, typed: string, to: string): Response {
     const db = Owner.open();
     const live = db.query("select hash from tickets where expires >= ? and data ->> 'session' is null and data ->> 'tries' is not null").get(Date.now()) as { hash: string } | null;
     const used = live !== null && typed.length === 6 && db.query("delete from tickets where hash = ? and expires >= ? returning 1").get(Owner.hash(LOGIN + typed), Date.now()) !== null;
@@ -287,19 +288,30 @@ export namespace Owner {
       const row = live === null ? null : (db.query("update tickets set data = json_set(data, '$.tries', (data ->> 'tries') + 1) where hash = ? returning data ->> 'tries' as tries").get(live.hash) as { tries: number } | null);
       if (live !== null && row !== null && row.tries >= TRIES) {
         db.query("delete from tickets where hash = ?").run(live.hash);
-        return Owner.page_login(TRIES + " wrong codes: this sign-in code works no more. Run <code>ki serve login</code> again for a new one.");
+        return Owner.page_login(TRIES + " wrong codes: this sign-in code works no more. Run <code>ki serve login</code> again for a new one.", to);
       }
-      return Owner.page_login("That code didn't sign in. Check the code <code>ki serve login</code> printed, or run it again for a new one.");
+      return Owner.page_login("That code didn't sign in. Check the code <code>ki serve login</code> printed, or run it again for a new one.", to);
     }
     db.query("delete from sessions where hash = ?").run(Owner.hash(Owner.token(req)));
     const token = Owner.random();
     db.query("insert into sessions values (?, ?, ?)").run(Owner.hash(token), "a browser", Date.now());
-    return new Response(null, { status: 303, headers: { location: "/", "set-cookie": COOKIE + "=" + token + Owner.cookie(req) } });
+    return new Response(null, { status: 303, headers: { location: to, "set-cookie": COOKIE + "=" + token + Owner.cookie(req) } });
   }
 
-  export function page_login(err: string): Response {
+  // a path of this server, never another site: else /
+  export function relative(to: string): string {
+    const base = "http://ki.invalid";
+    try {
+      const url = new URL(to, base);
+      return to.startsWith("/") && url.origin === base && !url.pathname.startsWith("//") ? url.pathname + url.search : "/";
+    } catch {
+      return "/";
+    }
+  }
+
+  export function page_login(err: string, to: string, title = "Sign in"): Response {
     const note = err === "" ? "" : `<p class="err">${err}</p>`;
-    return Owner.page("Sign in", `${SIGN_IN}</p>${note}${SIGN_IN_FORM}<p>`);
+    return Owner.page(title, `${SIGN_IN}</p>${note}${sign_in_form(to)}<p>`);
   }
 
   export function page_confirm(t: string, what: string, err: string): Response {
