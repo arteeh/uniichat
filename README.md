@@ -43,15 +43,15 @@ Windows (PowerShell, no admin needed):
 
 Either way you get one `ki` program (in `~/.local/bin`, or `%LOCALAPPDATA%\Programs\ki` on Windows). `ki update` installs the newest release and restarts the background services on it.
 
-**Checked install.** The install scripts are signed with our release key, `ssh-ed25519 TODO-the-real-release-key-made-at-release-time`; `ki update` checks it before it runs one. To check yourself first (ssh-keygen comes with Linux, macOS and Windows 10/11):
+**Checked install.** The install scripts are signed with our release key, `ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDi2iNrvJ9QpK2nKoXZd75UgL4VGFmcdGpK6KdlXLHEC`; `ki update` checks it before it runs one. To check yourself first (ssh-keygen comes with Linux, macOS and Windows 10/11):
 
 Linux, macOS or WSL:
 
-`curl -fsSLO https://github.com/arteeh/ki/releases/latest/download/install.sh -O https://github.com/arteeh/ki/releases/latest/download/install.sh.sig && echo "ki ssh-ed25519 TODO-the-real-release-key-made-at-release-time" > ki.signers && ssh-keygen -Y verify -f ki.signers -I ki -n ki-install.sh -s install.sh.sig < install.sh && sh install.sh`
+`curl -fsSLO https://github.com/arteeh/ki/releases/latest/download/install.sh -O https://github.com/arteeh/ki/releases/latest/download/install.sh.sig && echo "ki ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDi2iNrvJ9QpK2nKoXZd75UgL4VGFmcdGpK6KdlXLHEC" > ki.signers && ssh-keygen -Y verify -f ki.signers -I ki -n ki-install.sh -s install.sh.sig < install.sh && sh install.sh`
 
 Windows (PowerShell):
 
-`$b = "https://github.com/arteeh/ki/releases/latest/download"; irm $b/install.ps1 -OutFile install.ps1; irm $b/install.ps1.sig -OutFile install.ps1.sig; Set-Content ki.signers "ki ssh-ed25519 TODO-the-real-release-key-made-at-release-time" -Encoding ascii; cmd /c "ssh-keygen -Y verify -f ki.signers -I ki -n ki-install.ps1 -s install.ps1.sig < install.ps1"; if ($LASTEXITCODE -eq 0) { iex (Get-Content -Raw install.ps1) }`
+`$b = "https://github.com/arteeh/ki/releases/latest/download"; irm $b/install.ps1 -OutFile install.ps1; irm $b/install.ps1.sig -OutFile install.ps1.sig; Set-Content ki.signers "ki ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDi2iNrvJ9QpK2nKoXZd75UgL4VGFmcdGpK6KdlXLHEC" -Encoding ascii; cmd /c "ssh-keygen -Y verify -f ki.signers -I ki -n ki-install.ps1 -s install.ps1.sig < install.ps1"; if ($LASTEXITCODE -eq 0) { iex (Get-Content -Raw install.ps1) }`
 
 If the release key is ever lost or leaked, `ki update` refuses the releases signed with a new one: reinstall with the lines above.
 
