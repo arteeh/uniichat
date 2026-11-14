@@ -683,9 +683,9 @@ function limit_show(limit: Parked, now = Date.now()): string {
 }
 
 // the one usage-limit note: the parked wait's row, a call ended by one
-// (Limit.off)
-export function limit_note(vendor: Vendor, does: string, until: number | null, now = Date.now()): string {
-  return "Usage limit on " + vendor + ", " + (until === null ? "reset time unknown" : does + " at " + clock(until, now));
+// (Limit.off), a subagent's in its spawner's turn (#170)
+export function limit_note(vendor: Vendor, does: string, until: number | null, now = Date.now(), since: number | null = null): string {
+  return "Usage limit on " + vendor + (since === null ? "" : " since " + clock(since, now)) + ", " + (until === null ? "reset time unknown" : does + " at " + clock(until, now));
 }
 
 function clock(at: number, now = Date.now()): string {

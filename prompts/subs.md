@@ -1,1 +1,1 @@
-Subagents at work now: {subs}.
+Subagents at work as this turn started: {subs}.

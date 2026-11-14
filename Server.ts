@@ -908,9 +908,20 @@ export namespace Chat {
       spawn   : (tasks) => Chat.spawn(chat, tasks),
       tell    : (name, text) => Promise.resolve(Chat.tell(chat, name, text)),
       stop    : (name, why) => Chat.sub_stop(chat, name, Chat.name(chat) || "Ki", why),
-      working : () => [...chat.subs.values()].filter((s) => s.run.busy).map((s) => s.name + " (" + s.doing + ", " + Math.round((Date.now() - s.at) / 60e3) + " min)"),
+      working : () => [...chat.subs.values()].filter((s) => s.run.busy).map((s) => s.name + " (" + Chat.sub_doing(s) + ")"),
       show    : (name) => (chat.subs.has(name) || Memory.agent(chat.mem, name) !== null ? Memory.agent_show(chat.mem, name) : null),
     };
+  }
+
+  // how long it has been at it, or the limit it waits for and its reset
+  export function sub_doing(sub: Sub<Msg>, now = Date.now()): string {
+    const limit = sub.run.limit;
+    if (limit !== null) {
+      const note = limit_note(limit.vendor, "resets", limit.known ? limit.until : null, now, sub.doing === "usage limit" ? sub.at : now);
+      return note[0].toLowerCase() + note.slice(1);
+    }
+    const min = Math.floor((now - sub.at) / 60e3);
+    return sub.doing + " for " + (min < 1 ? "under a minute" : min + " min");
   }
 
   export async function sub_view(chat: Chat): Promise<Block[] | string> {
