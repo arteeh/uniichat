@@ -372,10 +372,7 @@
             foreach ($a in @(& $argv ([string]$e.Arguments))) {
               if (($a -match '(^|[\\/])unii\.exe$') -or ($a -ieq $oldBin)) { $a = $bin }
               elseif ($a -like '--env=UNII_DIR=*') { $a = '--env=KI_DIR=' + $dir; $given = $true }
-              elseif ($a -match '^--env=UNII_([A-Za-z0-9_]*)=') {
-                if (($reads + $own) -notcontains $Matches[1]) { continue }
-                $a = '--env=KI_' + $a.Substring('--env=UNII_'.Length)
-              }
+              elseif ($a -like '--env=UNII_*') { continue }
               $parts.Add($a)
             }
             # unii's data moved from the default folder to one ki isn't
