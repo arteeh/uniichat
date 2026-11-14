@@ -131,8 +131,16 @@ export namespace Owner {
   // Secure when the request came over https (or a proxy says it did), as
   // Safari drops a Secure cookie that an http page (127.0.0.1) sets
   export function cookie(req: Request): string {
+    return KEEP + (Owner.https(req) ? "; Secure" : "");
+  }
+
+  export function https(req: Request): boolean {
     const proto = (req.headers.get("x-forwarded-proto") ?? "").split(",")[0].trim().toLowerCase();
-    return KEEP + (new URL(req.url).protocol === "https:" || proto === "https" ? "; Secure" : "");
+    return new URL(req.url).protocol === "https:" || proto === "https";
+  }
+
+  export function origin(req: Request): string {
+    return (Owner.https(req) ? "https://" : "http://") + new URL(req.url).host;
   }
 
   export function act_put(id: string, ans: object): void {
@@ -160,7 +168,10 @@ export namespace Owner {
         }
         const session = Owner.hash(key);
         const what = text_of(get(body, "what"), "a device").replace(/[^\w .,:@()-]/g, "").slice(0, 80);
-        return Response.json({ ticket: Owner.ticket({ session, what }), code: Owner.code(session) });
+        const ticket = Owner.ticket({ session, what });
+        // the whole link, built from where the request came in, for a 41 device
+        const link = Owner.origin(req) + "/auth?t=" + ticket;
+        return Response.json({ ticket, url: link, code: Owner.code(session) });
       }
       case "/auth": {
         const t = url.searchParams.get("t") ?? "";
