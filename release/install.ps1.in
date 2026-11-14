@@ -32,6 +32,8 @@
 # quit). `unii update` runs this from inside a unii task, whose stop would
 # end it: then this starts itself again outside it and says where its
 # output goes. UNII_* settings are KI_* now: this warns about each one.
+# A unii task that runs as administrator (`sudo unii device -d`) is moved
+# only by a run as administrator: any other run stops, changing nothing.
 #
 # The first time, it copies ~\.ki\chat to ~\.ki\agents\unii (the main
 # agent's memory in the agent team; chat stays as it was), with the server
@@ -99,6 +101,13 @@
     }
     $winq = { param($a) if ($a -ne '' -and $a -notmatch '[\s"]') { return $a }; '"' + [regex]::Replace([regex]::Replace($a, '(\\*)"', '$1$1\"'), '(\\+)$', '$1$1') + '"' }
     $samedir = { param($a, $b) ([string]$a).TrimEnd('\', '/') -ieq ([string]$b).TrimEnd('\', '/') }
+    # a download, tried 3 times (a dropped connection)
+    $fetch = {
+      param($w)
+      for ($k = 1; ; $k++) {
+        try { return Invoke-WebRequest -UseBasicParsing @w } catch { if ($k -ge 3) { throw }; Start-Sleep -Seconds 2 }
+      }
+    }
     # the data folder unii's tasks were given (--env=UNII_DIR=), else
     # unii's default: where unii's data is, so ki keeps it there (as when
     # UNII_DIR is set here)
@@ -145,6 +154,13 @@
     # enough)
     $renaming = $moving -or ($olds.Count -gt 0) -or (Test-Path -LiteralPath (Join-Path $cur 'unii.db')) -or (Test-Path -LiteralPath (Join-Path $cur '.renaming')) -or
       ((Test-Path -LiteralPath $oconf) -and -not (Test-Path -LiteralPath $conf)) -or ((Test-Path -LiteralPath $oldBin -PathType Leaf) -and -not ($oldBin -ieq $bin))
+    # unii's tasks that run as administrator (`sudo unii device -d`) can
+    # only be moved by a shell that runs as one too
+    $high = @($olds | Where-Object { [string]$_.Principal.RunLevel -eq 'Highest' })
+    $admin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+    if ($high.Count -gt 0 -and -not $admin) {
+      throw ("unii's task " + (($high | ForEach-Object { $_.TaskName }) -join ', ') + " runs as administrator, and this shell doesn't, so it can't be moved to ki. Nothing changed, and ki $Ver was not installed: run this again as administrator (or with sudo).")
+    }
 
     # a ki (or unii) device or server running (a ki.exe or unii.exe, or one
     # by $bin's name or path) that no service runs: it would keep the old
@@ -206,7 +222,7 @@
         $x = [Environment]::GetEnvironmentVariable($v)
         if ($x) { $set += "`$env:$v = '" + $x.Replace("'", "''") + "'`r`n" }
       }
-      try { $body = (Invoke-WebRequest -UseBasicParsing -Uri $Self).Content } catch { throw "could not download $Self again to run it outside unii's task ($($_.Exception.Message)). Nothing changed: run this installer in a terminal." }
+      try { $body = (& $fetch @{ Uri = $Self }).Content } catch { throw "could not download $Self again to run it outside unii's task ($($_.Exception.Message)). Nothing changed: run this installer in a terminal." }
       if ($body -is [byte[]]) { $body = [Text.Encoding]::UTF8.GetString($body) }
       [IO.File]::WriteAllText($file, $set + $body)
       $line = 'cmd.exe /c powershell.exe -NoProfile -ExecutionPolicy Bypass -File "' + $file + '" > "' + $log + '" 2>&1'
@@ -224,7 +240,7 @@
     $zip = Join-Path $tmp $name
     Write-Host "downloading $Base/$name"
     try {
-      Invoke-WebRequest -UseBasicParsing -Uri "$Base/$name" -OutFile $zip
+      & $fetch @{ Uri = "$Base/$name"; OutFile = $zip } | Out-Null
     } catch {
       throw "the download failed: $name ($($_.Exception.Message))"
     }
@@ -249,13 +265,23 @@
     $copying = (Test-Path -LiteralPath $chat) -and -not (Test-Path -LiteralPath (Join-Path $cur 'agents\unii'))
     if ($renaming -or $copying) {
       $halted = @('serve', 'device' | ForEach-Object { & $task "ki-$_" } | Where-Object { $_ -and ([string]$_.Description -match 'ki-made') -and ([string]$_.State -eq 'Running') })
-      foreach ($t in @($olds | Where-Object { [string]$_.State -eq 'Running' }) + $halted) { Stop-ScheduledTask -TaskName $t.TaskName -TaskPath '\' }
+      $done = @()
+      foreach ($t in @($olds | Where-Object { [string]$_.State -eq 'Running' }) + $halted) {
+        try {
+          Stop-ScheduledTask -TaskName $t.TaskName -TaskPath '\' -ErrorAction Stop
+          $done += $t
+        } catch {
+          $why = $_.Exception.Message
+          foreach ($d in $done) { try { Start-ScheduledTask -TaskName $d.TaskName -TaskPath '\' -ErrorAction Stop } catch {} }
+          throw ("could not stop the task " + $t.TaskName + " ($why). Nothing changed, and ki $Ver was not installed: run this again" + $(if ([string]$t.Principal.RunLevel -eq 'Highest') { ' as administrator' } else { '' }) + ".")
+        }
+      }
       # the one whose pid server.pid holds must be gone (waited for up to
       # 10 s), else nothing changes and the stopped tasks start again
       $live = { $p = 0; try { $p = [int]((Get-Content -LiteralPath (Join-Path $cur 'server.pid') -ErrorAction Stop) | Select-Object -First 1) } catch {}; ($p -gt 0) -and ($null -ne (Get-Process -Id $p -ErrorAction SilentlyContinue)) }
       for ($k = 0; $k -lt 20 -and (& $live); $k++) { Start-Sleep -Milliseconds 500 }
       if (& $live) {
-        foreach ($t in @($olds | Where-Object { [string]$_.State -eq 'Running' }) + $halted) { try { Start-ScheduledTask -TaskName $t.TaskName -TaskPath '\' } catch {} }
+        foreach ($t in @($olds | Where-Object { [string]$_.State -eq 'Running' }) + $halted) { try { Start-ScheduledTask -TaskName $t.TaskName -TaskPath '\' -ErrorAction Stop } catch {} }
         throw "your data must move with no server running, but one still runs on it (its pid is in $cur\server.pid). Nothing changed, and ki $Ver was not installed: stop it, run this again, then start it."
       }
     }
@@ -293,7 +319,7 @@
             # quoted only if it has a space), each part changed, and
             # written back quoted as Service.ts does; the XML by the XML
             # writer, so it is encoded as it should be
-            $doc = [xml](Export-ScheduledTask -TaskName $t.TaskName -TaskPath '\')
+            $doc = [xml](Export-ScheduledTask -TaskName $t.TaskName -TaskPath '\' -ErrorAction Stop)
             $e = $doc.Task.Actions.Exec
             $parts = New-Object System.Collections.Generic.List[string]
             $given = $false
@@ -312,9 +338,10 @@
             }
             $e.Arguments = (@($parts | ForEach-Object { & $winq $_ }) -join ' ')
             $doc.Task.RegistrationInfo.Description = 'ki-made: `ki ' + $part + ' -d` made this task, and makes it again; `ki ' + $part + ' stop` removes it.'
-            Register-ScheduledTask -TaskName $n -TaskPath '\' -Xml $doc.OuterXml | Out-Null
+            Register-ScheduledTask -TaskName $n -TaskPath '\' -Xml $doc.OuterXml -ErrorAction Stop | Out-Null
           } catch {
-            Write-Host ("  Could not make the task $n from " + $t.TaskName + " (" + $_.Exception.Message + "): run " + $(if ([string]$t.Principal.RunLevel -eq 'Highest') { 'sudo ' } else { '' }) + "ki $part -d to.")
+            Write-Host ("  Could not make the task $n from " + $t.TaskName + " (" + $_.Exception.Message + "), so " + $t.TaskName + " stays as it was (stopped): run this again" + $(if ([string]$t.Principal.RunLevel -eq 'Highest') { ' as administrator' } else { '' }) + " to move it.")
+            continue
           }
         }
         $k = & $task $n
@@ -323,7 +350,7 @@
           Add-Content -LiteralPath (Join-Path $dir '.renaming') -Value "start $n"
         }
         try {
-          Unregister-ScheduledTask -TaskName $t.TaskName -TaskPath '\' -Confirm:$false
+          Unregister-ScheduledTask -TaskName $t.TaskName -TaskPath '\' -Confirm:$false -ErrorAction Stop
           Write-Host ("  Removed unii's task " + $t.TaskName + ".")
         } catch {
           Write-Host ("  Could not remove unii's task " + $t.TaskName + " (" + $_.Exception.Message + "): remove it in an elevated shell: schtasks /delete /tn " + $t.TaskName + " /f")
@@ -441,26 +468,26 @@
     $fresh = @($fresh | Where-Object { $k = & $task $_; $k -and ([string]$k.State -ne 'Running') -and (@($made | ForEach-Object { $_.TaskName }) -notcontains $_) })
     foreach ($n in $fresh) {
       try {
-        $doc = [xml](Export-ScheduledTask -TaskName $n -TaskPath '\')
+        $doc = [xml](Export-ScheduledTask -TaskName $n -TaskPath '\' -ErrorAction Stop)
         $e = $doc.Task.Actions.Exec
         $parts = @(& $argv ([string]$e.Arguments))
         $at = [array]::IndexOf(@($parts | ForEach-Object { $_ -match '(^|[\\/])ki\.exe$' }), $true)
         if ($at -ge 0 -and -not ($parts[$at] -ieq $bin)) {
           $parts[$at] = $bin
           $e.Arguments = (@($parts | ForEach-Object { & $winq $_ }) -join ' ')
-          Register-ScheduledTask -TaskName $n -TaskPath '\' -Xml $doc.OuterXml -Force | Out-Null
+          Register-ScheduledTask -TaskName $n -TaskPath '\' -Xml $doc.OuterXml -Force -ErrorAction Stop | Out-Null
         }
       } catch {}
     }
     foreach ($n in @($fresh) + @($halted | ForEach-Object { $_.TaskName })) {
       Write-Host ("  Starting $n, on ki $Ver.")
-      try { Start-ScheduledTask -TaskName $n -TaskPath '\' } catch { Write-Host ("  Could not start ${n}: run ki " + $n.Substring(3) + " -d to.") }
+      try { Start-ScheduledTask -TaskName $n -TaskPath '\' -ErrorAction Stop } catch { Write-Host ("  Could not start ${n}: run ki " + $n.Substring(3) + " -d to.") }
     }
     # the move is done
     Remove-Item -LiteralPath (Join-Path $dir '.renaming') -Force -ErrorAction SilentlyContinue
     foreach ($t in $made) {
       Write-Host ("  Restarting " + $t.TaskName + " on ki $Ver.")
-      try { Start-ScheduledTask -TaskName $t.TaskName -TaskPath '\' } catch { Write-Host ("  Could not restart " + $t.TaskName + ": run " + $(if ([string]$t.Principal.RunLevel -eq 'Highest') { 'sudo ' } else { '' }) + "ki " + $t.TaskName.Substring(3) + " -d to.") }
+      try { Start-ScheduledTask -TaskName $t.TaskName -TaskPath '\' -ErrorAction Stop } catch { Write-Host ("  Could not restart " + $t.TaskName + ": run " + $(if ([string]$t.Principal.RunLevel -eq 'Highest') { 'sudo ' } else { '' }) + "ki " + $t.TaskName.Substring(3) + " -d to.") }
     }
   } catch {
     Write-Host ("ki: " + $_.Exception.Message) -ForegroundColor Red

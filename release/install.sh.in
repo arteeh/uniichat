@@ -41,6 +41,9 @@ VER="@VER@"
 BASE="https://github.com/arteeh/ki/releases/download/$VER"
 OLD_BIN="${UNII_BIN:-$HOME/.local/bin/unii}"
 BIN="${KI_BIN:-$(dirname "$OLD_BIN")/ki}"
+# a dropped connection is tried again (every error, from curl 7.71 on)
+RETRY="--retry 3 --retry-delay 2"
+curl -V 2>/dev/null | awk 'NR == 1 { split($2, v, "."); exit !(v[1] > 7 || (v[1] == 7 && v[2] >= 71)) }' && RETRY="$RETRY --retry-all-errors"
 
 # a failure or any exit after services were stopped starts them again,
 # on the version they ran
@@ -177,7 +180,7 @@ if [ -n "$oldrun" ] && [ -z "${KI_INSTALL_OUTSIDE:-}" ]; then
     if inside "$s" "${odir:-$dir}"; then
       log="${TMPDIR:-/tmp}/ki-install.$$.log"
       self="${TMPDIR:-/tmp}/ki-install.$$.sh"
-      if [ -f "$0" ] && head -c 200 "$0" 2>/dev/null | grep -q 'Installs ki'; then cp "$0" "$self"; else curl --proto '=https' --tlsv1.2 -fsSL -o "$self" "$BASE/install.sh" || fail "could not download $BASE/install.sh again to run it outside $s"; fi
+      if [ -f "$0" ] && head -c 200 "$0" 2>/dev/null | grep -q 'Installs ki'; then cp "$0" "$self"; else curl --proto '=https' --tlsv1.2 $RETRY -fsSL -o "$self" "$BASE/install.sh" || fail "could not download $BASE/install.sh again to run it outside $s"; fi
       # this run's settings, for the run outside, as a script it reads
       # first: each value in '' (spaces and all), not words on a line
       envf="${TMPDIR:-/tmp}/ki-install.$$.env"
@@ -203,7 +206,7 @@ tmp=$(mktemp -d)
 trap 'again; rm -rf "$tmp"' EXIT
 name="ki-$VER-$os-$arch.tar.gz"
 echo "downloading $BASE/$name"
-curl --proto '=https' --tlsv1.2 -fL --progress-bar -o "$tmp/$name" "$BASE/$name" || fail "the download failed: $name"
+curl --proto '=https' --tlsv1.2 $RETRY -fL --progress-bar -o "$tmp/$name" "$BASE/$name" || fail "the download failed: $name"
 if command -v sha256sum >/dev/null 2>&1; then
   echo "$sum  $tmp/$name" | sha256sum -c - >/dev/null 2>&1 || fail "$name does not match its sha256; not installed"
 elif command -v shasum >/dev/null 2>&1; then
