@@ -70,8 +70,9 @@ const MADE = new WeakMap<View.Row, { html: string; names: string }>();
 
 // the names that link to their chat (#141): the team's, and the running
 // subagents' of the chat shown, but not its own. Every name is matched, so
-// one inside a longer one ("Ki" in "Ki Dev") stays part of it
-const NAMES: { key: string; re: RegExp | null; to: Map<string, string> } = { key: "", re: null, to: new Map() };
+// one inside a longer one ("Ki" in "Ki Dev") stays part of it. here: the
+// agent shown, whose store its pictures are in (#169)
+const NAMES: { key: string; re: RegExp | null; to: Map<string, string>; here: string } = { key: "", re: null, to: new Map(), here: "" };
 
 const WORD_END = /[\p{L}\p{N}_]$/u;
 const WORD_START = /^[\p{L}\p{N}_]/u;
@@ -88,12 +89,13 @@ export function names_set(team: View.Mate[], here: string, sub: string | null): 
   const own = sub ?? team.find((m) => m.id === here)?.name ?? "";
   to.delete(own);
   const names = [...new Set([...team.map((m) => m.name), ...subs.map((s) => s.name), own])].filter((n) => n !== "").sort((a, b) => b.length - a.length);
-  const key = JSON.stringify([[...to], names]);
+  const key = JSON.stringify([[...to], names, here]);
   if (key === NAMES.key) {
     return false;
   }
   NAMES.key = key;
   NAMES.to = to;
+  NAMES.here = here;
   NAMES.re = names.length === 0 ? null : new RegExp("(?<![\\p{L}\\p{N}_])(" + names.map((n) => n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|") + ")(?![\\p{L}\\p{N}_])", "u");
   return true;
 }
@@ -192,7 +194,7 @@ function call_html(c: Call.Call): string {
 
 function images_html(names: string[]): string {
   const pics = names.map((name) => {
-    const url = "/image/" + esc(name);
+    const url = "/image/" + esc(NAMES.here) + "/" + esc(name);
     return `<a href="${url}" target="_blank"><img src="${url}" alt="${esc(name)}" loading="lazy"></a>`;
   });
   return names.length === 0 ? "" : `<div class="pics">${pics.join("")}</div>`;
@@ -296,7 +298,7 @@ export function account_html(notify: Notify | null = null): string {
   const acts    = [
     item("This browser", "Signed in to this server.", `<button class="chip out">Sign out</button>`),
     ...(notify === null ? [] : [notify_html(notify)]),
-    item("Export memory", `The chat of <span class="who"></span> and its summaries, in one file.`, `<a class="chip export" href="/export">Download</a>`),
+    item("Export memory", `The chat of <span class="who"></span>, its summaries, pictures and files, in one file.`, `<a class="chip export" href="/export">Download</a>`),
   ];
   const mcp     = section_html("MCP servers", `<div class="mcp"></div>`);
   const history = section_html("History", item("Import history", `Past Claude and ChatGPT chats, into the memory of <span class="who"></span>.`, `<button class="chip imp">Import</button>`));

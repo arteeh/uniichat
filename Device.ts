@@ -164,15 +164,15 @@ async function host(job: Job, url: string, token: string, signal: AbortSignal): 
   const lines: string[] = [];
   let fail = false;
   for (const p of [job.input.paths ?? []].flat().map(String)) {
-    const out = await host_one(Machine.at(cwd, p), p, url, token, signal);
+    const out = await host_one(Machine.at(cwd, p), p, url + "/api/media?who=" + encodeURIComponent(job.cwd) + "&name=", token, signal);
     fail ||= "error" in out;
-    const stored = "error" in out ? "" : "/media/" + out.name;
+    const stored = "error" in out ? "" : out.url;
     lines.push("error" in out ? out.error : (media_kind(stored) === null ? "" : "!") + "[" + path.basename(p).replace(/[[\]\\\n]/g, "") + "](" + stored + ")");
   }
   return { text: lines.join("\n"), fail };
 }
 
-async function host_one(file: string, shown: string, url: string, token: string, signal: AbortSignal): Promise<{ name: string } | { error: string }> {
+async function host_one(file: string, shown: string, url: string, token: string, signal: AbortSignal): Promise<{ url: string } | { error: string }> {
   if (signal.aborted) {
     return { error: "Stopped." };
   }
@@ -181,10 +181,10 @@ async function host_one(file: string, shown: string, url: string, token: string,
     return { error: stat === undefined ? "No file " + shown + "." : shown + " is not a file." };
   }
   try {
-    const res = await fetch(url + "/api/media?name=" + encodeURIComponent(path.basename(file)), { method: "POST", headers: Client.auth(token), body: Bun.file(file), signal });
+    const res = await fetch(url + encodeURIComponent(path.basename(file)), { method: "POST", headers: Client.auth(token), body: Bun.file(file), signal });
     const out: unknown = await res.json().catch(() => null);
     if (typeof out === "object" && out !== null && "name" in out && typeof out.name === "string") {
-      return { name: out.name };
+      return { url: "url" in out && typeof out.url === "string" ? out.url : "/media/" + out.name };
     }
     return { error: typeof out === "object" && out !== null && "error" in out && typeof out.error === "string" ? out.error : "HTTP " + res.status };
   } catch (err) {

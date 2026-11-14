@@ -229,7 +229,7 @@ export namespace Chat {
 
   // hello: the first agent of a new install, which says hello in its empty chat
   export function open(id: string, tools: Tools, hello = false): Chat {
-    const mem = Memory.load(AGENTS + "/" + id, () => ({ system: Prompts.prompt("compact", { Name: Team.get(id)?.name ?? "" }), own: Prompts.prompt("compact-agent", { Name: Team.get(id)?.name ?? "" }), searches: 0, server: "" }), Owner.act_put, AGENTS + "/" + Team.keeper().id);
+    const mem = Memory.load(AGENTS + "/" + id, () => ({ system: Prompts.prompt("compact", { Name: Team.get(id)?.name ?? "" }), own: Prompts.prompt("compact-agent", { Name: Team.get(id)?.name ?? "" }), searches: 0, server: "" }), Owner.act_put);
     const cut = mem.work;
     const main = Run.make<Pending, Msg>(id, {
       pick   : () => chat.pick,
@@ -369,10 +369,10 @@ export namespace Chat {
   }
 
   export async function pictured(chat: Chat, text: string, had: string[]): Promise<string[]> {
-    const names = Md.md_pasted(text).map(([, , , url]) => url.slice("/media/".length)).filter((name) => /\.(?:png|jpeg|gif|webp)$/.test(name));
+    const urls = Md.md_pasted(text).map(([, , , url]) => url).filter((url) => /\.(?:png|jpeg|gif|webp)$/.test(url));
     const out: string[] = [];
-    for (const name of [...new Set(names)].filter((n) => !had.includes(n)).slice(0, PICTURED)) {
-      const file = Memory.media_file(chat.mem, name);
+    for (const url of [...new Set(urls)].filter((u) => !had.includes(u.slice(u.lastIndexOf("/") + 1))).slice(0, PICTURED)) {
+      const file = Main.stored(url);
       const added = file === null ? null : await Memory.image_add(chat.mem, fs.readFileSync(file));
       out.push(...(added === null ? [] : [added]));
     }
@@ -519,7 +519,7 @@ export namespace Chat {
     const server = Tools.at(chat.tools, chat.who);
     chat.eye = Chat.eye(mem, from);
     chat.socks.forEach((sock) => Chat.show(chat, sock));
-    const blocks = [...view, Tools.devices(chat.tools), Tools.skills(chat.tools), Tools.at_work(chat.tools, chat.who), ...Chat.leader_block(chat.leader), { text: Prompts.prompt("turn") + "\n\n" + text, mark: true }];
+    const blocks = [...view, Tools.devices(chat.tools, chat.id, chat.mem.dir), Tools.skills(chat.tools), Tools.at_work(chat.tools, chat.who), ...Chat.leader_block(chat.leader), { text: Prompts.prompt("turn") + "\n\n" + text, mark: true }];
     const model = chat.pick.model;
     const used = (tokens: number) => {
       if (chat.pick.model === model) {
@@ -781,7 +781,7 @@ export namespace Chat {
 
   export function guess(chat: Chat): number {
     const mem = chat.mem;
-    const blocks = [...Memory.view(mem, mem.count, mem.view.parts, mem.talk), Tools.devices(chat.tools), Tools.skills(chat.tools), Tools.at_work(chat.tools, chat.who), ...Chat.leader_block(Chat.leader(chat))];
+    const blocks = [...Memory.view(mem, mem.count, mem.view.parts, mem.talk), Tools.devices(chat.tools, chat.id, chat.mem.dir), Tools.skills(chat.tools), Tools.at_work(chat.tools, chat.who), ...Chat.leader_block(Chat.leader(chat))];
     const texts = [...Object.values(Chat.system(chat)), JSON.stringify(Tools.list()), ...blocks.map((b) => b.text)];
     return Math.ceil(texts.reduce((n, text) => n + Memory.bytes(text), 0) / TOKEN);
   }
@@ -1051,7 +1051,7 @@ export namespace Chat {
     const log = { text: Prompts.prompt("sub-folder", { Name: sub.name }) + "\n\n" + Memory.agent_show(chat.mem, sub.name) + "\n\n", mark: true };
     const agent = Team.get(chat.id);
     const own = agent === null ? "" : Prompts.prompt("sub-prompt", { prompt: Team.prompt(agent) });
-    const blocks = [...sub.view, Tools.devices(chat.tools), Tools.skills(chat.tools), Tools.at_work(chat.tools, sub.name), log];
+    const blocks = [...sub.view, Tools.devices(chat.tools, chat.id, chat.mem.dir), Tools.skills(chat.tools), Tools.at_work(chat.tools, sub.name), log];
     const used = (tokens: number) => {
       [sub.used, sub.used_at] = [tokens, sub.bytes];
       Main.team_soon();
@@ -1921,6 +1921,41 @@ export namespace Main {
     return Main.chats.get(Team.first().id) as Chat;
   }
 
+  // the chat of an agent's seat, or of the agent that spawned a subagent
+  export function by_who(who: string): Chat | undefined {
+    return [...Main.chats.values()].find((c) => c.who === who || c.subs.has(who) || Memory.agent(c.mem, who) !== null);
+  }
+
+  // /media/<agent>/<name> and /image/<agent>/<name>: a file in that agent's
+  // store; the same without the agent (links from before 41): in any
+  // agent's, as a name is its file's hash (#169)
+  export function stored(url: string): string | null {
+    const m = /^\/(media|image)\/(?:([a-z0-9]{1,16})\/)?([^/]+)$/.exec(url);
+    if (m === null) {
+      return null;
+    }
+    const [, kind, id, name] = m;
+    const chats = id === undefined ? Team.all().flatMap((a) => Main.chats.get(a.id) ?? []) : [Main.chats.get(id) ?? []].flat();
+    for (const chat of chats) {
+      const file = kind === "media" ? Memory.media_file(chat.mem, name) : Memory.image_file(chat.mem, name);
+      if (file !== null) {
+        return file;
+      }
+    }
+    return null;
+  }
+
+  // an uploaded picture, kept in the agent's own store: /media/<id>/<name>
+  export function own_picture(chat: Chat, picture: string): string {
+    const name = /^\/media\/(?:[a-z0-9]{1,16}\/)?([^/]+)$/.exec(picture)?.[1];
+    const file = name === undefined ? null : Main.stored(picture);
+    if (name === undefined || file === null) {
+      return picture;
+    }
+    Memory.media_keep(chat.mem, file, name);
+    return "/media/" + chat.id + "/" + name;
+  }
+
   export function chat_of(id: string | null): Chat {
     return (id === null ? undefined : Main.chats.get(id)) ?? Main.first();
   }
@@ -1992,7 +2027,7 @@ export namespace Main {
     }
     if (sock.data.device !== null) {
       const who = msg.$ === "done" ? text_of(msg.agent) : "";
-      const chat = (who === "" ? undefined : [...Main.chats.values()].find((c) => c.who === who || c.subs.has(who) || Memory.agent(c.mem, who) !== null)) ?? Main.first();
+      const chat = (who === "" ? undefined : Main.by_who(who)) ?? Main.first();
       return void Chat.answer(chat, sock, msg);
     }
     const chat = Main.chats.get(sock.data.agent);
@@ -2016,8 +2051,10 @@ export namespace Main {
     if (typeof knobs === "string") {
       return { error: knobs };
     }
-    const agent = Team.add(fields);
-    Main.lead_set(Chat.open(agent.id, Main.tools), knobs);
+    const made = Team.add(fields);
+    const chat = Chat.open(made.id, Main.tools);
+    Main.lead_set(chat, knobs);
+    const agent = Team.set(made.id, { ...fields, picture: Main.own_picture(chat, fields.picture) }) ?? made;
     Main.team_soon();
     return { agent };
   }
@@ -2085,7 +2122,7 @@ export namespace Main {
     if (typeof knobs === "string") {
       return out({ error: knobs });
     }
-    Team.set(id, fields);
+    Team.set(id, { ...fields, picture: Main.own_picture(chat, fields.picture) });
     Main.lead_set(chat, knobs);
     Main.chats.forEach((c) => Chat.change(c));
     return out({});
@@ -2117,9 +2154,6 @@ export namespace Main {
   export async function forget(chat: Chat): Promise<Answer> {
     if (!Chat.archived(chat)) {
       return { error: "Archive " + Chat.name(chat) + " before deleting it." };
-    }
-    if (chat.id === Team.keeper().id) {
-      return { error: Chat.name(chat) + "'s folder keeps the images and files every agent shares, so it can't be deleted; it can stay archived." };
     }
     if (chat.main.busy) {
       return { error: Chat.name(chat) + " is still finishing a turn: delete it once that ends." };
@@ -2303,17 +2337,21 @@ export namespace Main {
         if (req.method !== "POST" || req.body === null) {
           return new Response("a file is posted", { status: 405 });
         }
-        const file = new URL(req.url).searchParams.get("name") ?? "";
+        // a device's upload names the agent or subagent it is for (#169)
+        const q = new URL(req.url).searchParams;
+        const who = q.get("who");
+        const to = (who === null ? undefined : Main.by_who(who)) ?? chat;
+        const file = q.get("name") ?? "";
         const size = req.headers.get("content-length");
         const room = Main.room(file, size === null ? null : Number(size));
-        const out = typeof room === "string" ? { error: room } : await Memory.media_add(mem, req.body, file, room);
-        return Response.json(out, { status: "error" in out ? 400 : 200 });
+        const out = typeof room === "string" ? { error: room } : await Memory.media_add(to.mem, req.body, file, room);
+        return Response.json("error" in out ? out : { ...out, url: "/media/" + to.id + "/" + out.name }, { status: "error" in out ? 400 : 200 });
       }
     }
     if (p.startsWith("/media/")) {
-      return Main.media(Memory.media_file(mem, p.slice("/media/".length)), req);
+      return Main.media(Main.stored(p), req);
     }
-    const file = Memory.image_file(mem, p.slice("/image/".length));
+    const file = Main.stored(p);
     const keep = { "cache-control": "private, max-age=31536000, immutable" };
     return file === null ? new Response("not found", { status: 404 }) : new Response(Bun.file(file), { headers: keep });
   }
@@ -2446,7 +2484,6 @@ export namespace Main {
       note   : (text) => Chat.note(Main.first(), text),
       change : () => Main.chats.forEach((chat) => Chat.change(chat)),
       off    : () => config.MCP_OFF,
-      docs   : AGENTS + "/" + Team.keeper().id,
     });
     Main.tools.owner = (who) => {
       const chat = [...Main.chats.values()].find((c) => c.subs.has(who) || Memory.agent(c.mem, who) !== null);

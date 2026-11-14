@@ -237,7 +237,7 @@ const MEDIA_AS = Md.MEDIA_AS;
 export const STORED = /^[0-9a-f]{16}\.([a-z0-9]{1,10})$/;
 
 export function media_kind(url: string): string | null {
-  const m = /^\/(?:media|image)\/[0-9a-f]{16}\.([a-z0-9]{1,10})$/.exec(url);
+  const m = /^\/(?:media|image)\/(?:[a-z0-9]{1,16}\/)?[0-9a-f]{16}\.([a-z0-9]{1,10})$/.exec(url);
   return m === null ? null : ext_kind(m[1]);
 }
 
@@ -247,7 +247,7 @@ export function ext_kind(ext: string): string | null {
 }
 
 export function store_file(url: string): boolean {
-  return url.startsWith("/media/") && STORED.test(url.slice("/media/".length)) && media_kind(url) === null;
+  return /^\/media\/(?:[a-z0-9]{1,16}\/)?[^/]+$/.test(url) && STORED.test(url.slice(url.lastIndexOf("/") + 1)) && media_kind(url) === null;
 }
 
 export function media_ext(file: string): string {
@@ -1031,7 +1031,7 @@ function entry_rows(id: number | null, kind: Kind, text: string, images: string[
   const body = call === null ? entry_body(kind, report?.text ?? text, label, of.tool) : [];
   const named = body.some((b) => b.$ === "File" && b.k.startsWith(label));
   const who = report?.name ?? WHO[kind] ?? (kind === "echo" && of.apart && !named ? label : "");
-  const pics = images.filter((name) => !text.includes("/media/" + name));
+  const pics = images.filter((name) => !text.includes("/" + name));
   const sent = { ...(from === undefined ? {} : { from }), ...(pair === undefined ? {} : { of: pair }) };
   return call === null && body.length === 0 && pics.length === 0 ? [] : [{ $: "Msg", id, kind, who, text, body, call, images: pics, ...sent }];
 }

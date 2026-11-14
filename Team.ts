@@ -37,12 +37,6 @@ export namespace Team {
     return Owner.open().query("select * from agents order by made, id").all() as Agent[];
   }
 
-  // the agent whose folder keeps the images and media every agent shares:
-  // the first one made, archived or not
-  export function keeper(): Agent {
-    return Team.all()[0];
-  }
-
   export function active(): Agent[] {
     return Team.all().filter((a) => a.archived === 0);
   }
@@ -103,7 +97,7 @@ export namespace Team {
 
   export function picture_ok(picture: string): boolean {
     const head = /^head-(\d\d)$/.exec(picture);
-    return (head !== null && Number(head[1]) >= 1 && Number(head[1]) <= HEADS) || /^\/media\/[0-9a-f]{16}\.(png|jpeg|webp)$/.test(picture) || picture === LOGO;
+    return (head !== null && Number(head[1]) >= 1 && Number(head[1]) <= HEADS) || /^\/media\/(?:[a-z0-9]{1,16}\/)?[0-9a-f]{16}\.(png|jpeg|webp)$/.test(picture) || picture === LOGO;
   }
 
   export function head_random(): string {

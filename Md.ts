@@ -32,8 +32,8 @@ export const MEDIA: ReadonlyMap<string, string> = new Map([
   ["html", "text/html"],
 ]);
 export const MEDIA_AS: ReadonlyMap<string, string> = new Map([["jpg", "jpeg"], ["m4v", "mp4"], ["oga", "ogg"], ["htm", "html"]]);
-const MEDIA_URL = /\/media\/[0-9a-f]{16}\.[a-z0-9]{1,10}(?=\))/y;
-const STORED = /^\/media\/[0-9a-f]{16}\.[a-z0-9]{1,10}$/;
+const MEDIA_URL = /\/media\/(?:[a-z0-9]{1,16}\/)?[0-9a-f]{16}\.[a-z0-9]{1,10}(?=\))/y;
+const STORED = /^\/media\/(?:[a-z0-9]{1,16}\/)?[0-9a-f]{16}\.[a-z0-9]{1,10}$/;
 const LIST  = /^ {0,3}([-*+]|\d{1,9}[.)])(?=[ \t]|$)/;
 const FENCE = /^ {0,3}(`{3,}|~{3,})/;
 const TASK  = /^\[([ xX])\](?=[ \t]|$)[ \t]?/;

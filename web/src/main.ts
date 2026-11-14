@@ -376,7 +376,7 @@ function upload(item: HTMLElement, file: File): void {
   UPS.set(item, xhr);
   Box.item_state(item, "up", "0%");
   item.style.setProperty("--part", "0%");
-  xhr.open("POST", "/api/media?name=" + encodeURIComponent(file.name));
+  xhr.open("POST", "/api/media?agent=" + encodeURIComponent(v.agent) + "&name=" + encodeURIComponent(file.name));
   xhr.upload.onprogress = (ev) => {
     const part = Math.round((ev.lengthComputable ? ev.loaded / ev.total : 0) * 100) + "%";
     Box.item_state(item, "up", part);
@@ -388,8 +388,8 @@ function upload(item: HTMLElement, file: File): void {
       return;
     }
     UPS.delete(item);
-    if ("name" in out) {
-      Box.item_state(item, "ok", "", "/media/" + out.name);
+    if ("url" in out) {
+      Box.item_state(item, "ok", "", out.url);
     } else {
       Box.item_state(item, "bad", "Failed");
       toast(out.error);
@@ -402,13 +402,13 @@ function upload(item: HTMLElement, file: File): void {
   xhr.send(file);
 }
 
-function upload_answer(xhr: XMLHttpRequest): { name: string } | { error: string } {
+function upload_answer(xhr: XMLHttpRequest): { url: string } | { error: string } {
   let out: unknown = null;
   try {
     out = JSON.parse(xhr.responseText);
   } catch {}
-  if (typeof out === "object" && out !== null && "name" in out && typeof out.name === "string") {
-    return { name: out.name };
+  if (typeof out === "object" && out !== null && "url" in out && typeof out.url === "string") {
+    return { url: out.url };
   }
   const why = typeof out === "object" && out !== null && "error" in out && typeof out.error === "string" ? out.error : xhr.status === 0 ? "Can't reach Ki." : "HTTP " + xhr.status;
   return { error: "Could not upload: " + why };
@@ -1505,14 +1505,15 @@ async function picture_up(form: HTMLFormElement, file: File): Promise<void> {
     canvas.width = canvas.height = Math.min(256, side);
     must(canvas.getContext("2d"), "a 2d canvas").drawImage(img, (img.width - side) / 2, (img.height - side) / 2, side, side, 0, 0, canvas.width, canvas.height);
     const blob = await new Promise<Blob | null>((ok) => canvas.toBlob(ok, "image/png"));
-    const res = await fetch("/api/media?name=picture.png", { method: "POST", body: blob });
-    const out = (await res.json()) as { name?: string; error?: string };
-    if (out.name === undefined) {
+    // a new agent's goes to the open chat's agent till it is made, then to its own
+    const res = await fetch("/api/media?name=picture.png&agent=" + encodeURIComponent(FORM.exec(location.pathname)?.[2] ?? v.agent), { method: "POST", body: blob });
+    const out = (await res.json()) as { url?: string; error?: string };
+    if (out.url === undefined) {
       throw new Error(out.error ?? "HTTP " + res.status);
     }
     const faces = must(form.querySelector(".faces"), "the faces");
     faces.querySelector(`[value^="/media/"]`)?.closest("label")?.remove();
-    faces.insertAdjacentHTML("afterbegin", Html.face_pick_html("/media/" + out.name, true));
+    faces.insertAdjacentHTML("afterbegin", Html.face_pick_html(out.url, true));
     RENEW.dirty.add(form);
     why.textContent = "";
     form.dispatchEvent(new Event("change"));

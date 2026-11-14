@@ -57,7 +57,6 @@ type Hub = {
   note   : (text: string) => void;
   change : () => void;
   off    : () => string[];
-  docs   : string;
 };
 
 export type Tools = {
@@ -140,13 +139,14 @@ export namespace Tools {
     return tools.url + who;
   }
 
-  export function devices(tools: Tools): Block {
+  // id, dir: the agent whose store the chat's media are in (#169)
+  export function devices(tools: Tools, id: string, dir: string): Block {
     const work  = (d: Device) => [...d.terms.values()][0]?.work;
     const temp  = (d: Device) => [...d.terms.values()][0]?.scratch ?? work(d);
     const shell = (d: Device) => [...d.terms.values()][0]?.shell;
     const line  = ([name, d]: [string, Device]) => Prompts.prompt("device", { name, work: work(d) ?? "", scratch: temp(d) ?? "" }) + (shell(d) ? Prompts.prompt("device-shell", { shell: shell(d) ?? "" }) : "");
     const lines = Tools.opened(tools).map(line);
-    return { text: Prompts.prompt("devices", { devices: lines.length === 0 ? Prompts.prompt("devices-none") : lines.join("\n"), media: tools.hub.docs + "/docs/media/" }) + "\n\n", mark: false };
+    return { text: Prompts.prompt("devices", { devices: lines.length === 0 ? Prompts.prompt("devices-none") : lines.join("\n"), id, media: dir + "/docs/media/" }) + "\n\n", mark: false };
   }
 
   export function skills(tools: Tools): Block {
