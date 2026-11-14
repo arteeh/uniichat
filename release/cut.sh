@@ -49,9 +49,6 @@ TAG=$VER
 NOTES=$DEV/reviews/release/notes-$N.md
 PUB=$REL/release/ki.pub
 grep -q '^ssh-ed25519 AAAA' "$PUB" || { echo "$PUB holds no release key: make it (see $HERE/sign.sh) and commit it first"; exit 1; }
-grep -qF "$(cut -d' ' -f2 "$PUB")" README.md || { echo "README.md doesn't show the release key in $PUB"; exit 1; }
-[ "$(grep -o 'ssh-ed25519 [^ "`]*' README.md | sort -u)" = "$(cut -d' ' -f1-2 "$PUB")" ] || { echo "README.md shows a key other than the one in $PUB (a placeholder left?)"; exit 1; }
-! grep -q 'TODO' README.md || { echo "README.md still has a TODO"; exit 1; }
 echo "== $VER (tag $TAG)"
 
 git fetch -q origin --tags

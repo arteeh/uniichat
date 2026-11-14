@@ -6,7 +6,7 @@
 # The private key is $KI_KEY (default ~/.config/uniidev/ki.key, mode
 # 600, no passphrase; its backup is in the owner's Bitwarden). Make it once:
 #   ssh-keygen -t ed25519 -N '' -C ki-release -f ~/.config/uniidev/ki.key
-# and put ki.key.pub in the repo as release/ki.pub (and its key in README.md).
+# and put ki.key.pub in the repo as release/ki.pub.
 set -euo pipefail
 what=$1 dir=$2 pub=$3
 KEY=${KI_KEY:-$HOME/.config/uniidev/ki.key}
