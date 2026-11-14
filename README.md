@@ -19,7 +19,7 @@ Features
 - **MCP servers** per device. Ask your agent to set them up on your preferred device.
 - **Skills** read from the ~/.agents/skills folder.
 - **An installable web app (PWA)** on phones and desktops: icons, an offline shell, Web Push for replies, a nav bar that shows on Android; the composer stays above a phone's keyboard.
-- **Don't start from scratch.** Import past conversations from either Claude Code, Codex or another Ki instance into your memory tree.
+- **Don't start from scratch.** Import past conversations from Claude Code or Codex into your memory tree.
 
 Install
 -------
@@ -82,7 +82,7 @@ You enjoy pressing enter?
 
 With Tailscale: ask your agent to set up Tailscale Serve on HTTPS port 443, pointing at `http://127.0.0.1:8788`. Only your own Tailscale devices can reach it, not the whole internet.
 
-**How can i give Ki administrator rights?**
+**How can I give Ki administrator rights?**
 
 - Linux: set up passwordless sudo (run `sudo visudo` and then add the line `your_username ALL=(ALL) NOPASSWD: ALL`).
 - Windows: run `sudo ki device -d` and be sure to enable the sudo option in settings when it prompts you.
