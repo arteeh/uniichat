@@ -277,21 +277,19 @@ export namespace Owner {
   }
 
   // a browser signs in with the code of `ki serve login`: used once, and
-  // gone after TRIES wrong ones; it stays on the address it came in on
+  // gone after TRIES wrong ones; it stays on the address it came in on. A
+  // wrong code and no code get one answer, so a guess learns nothing
   export function login(req: Request, typed: string): Response {
     const db = Owner.open();
     const live = db.query("select hash from tickets where expires >= ? and data ->> 'session' is null and data ->> 'tries' is not null").get(Date.now()) as { hash: string } | null;
-    if (live === null) {
-      return Owner.page_login("No sign-in code is waiting: run <code>ki serve login</code> again for a new one.");
-    }
-    const used = typed.length === 6 && db.query("delete from tickets where hash = ? and expires >= ? returning 1").get(Owner.hash(LOGIN + typed), Date.now()) !== null;
+    const used = live !== null && typed.length === 6 && db.query("delete from tickets where hash = ? and expires >= ? returning 1").get(Owner.hash(LOGIN + typed), Date.now()) !== null;
     if (!used) {
-      const row = db.query("update tickets set data = json_set(data, '$.tries', (data ->> 'tries') + 1) where hash = ? returning data ->> 'tries' as tries").get(live.hash) as { tries: number } | null;
-      if (row !== null && row.tries >= TRIES) {
+      const row = live === null ? null : (db.query("update tickets set data = json_set(data, '$.tries', (data ->> 'tries') + 1) where hash = ? returning data ->> 'tries' as tries").get(live.hash) as { tries: number } | null);
+      if (live !== null && row !== null && row.tries >= TRIES) {
         db.query("delete from tickets where hash = ?").run(live.hash);
         return Owner.page_login(TRIES + " wrong codes: this sign-in code works no more. Run <code>ki serve login</code> again for a new one.");
       }
-      return Owner.page_login("That code didn't match. Check the code <code>ki serve login</code> printed and try again.");
+      return Owner.page_login("That code didn't sign in. Check the code <code>ki serve login</code> printed, or run it again for a new one.");
     }
     db.query("delete from sessions where hash = ?").run(Owner.hash(Owner.token(req)));
     const token = Owner.random();
