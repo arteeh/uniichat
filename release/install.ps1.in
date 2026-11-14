@@ -101,11 +101,23 @@
     }
     $winq = { param($a) if ($a -ne '' -and $a -notmatch '[\s"]') { return $a }; '"' + [regex]::Replace([regex]::Replace($a, '(\\*)"', '$1$1\"'), '(\\+)$', '$1$1') + '"' }
     $samedir = { param($a, $b) ([string]$a).TrimEnd('\', '/') -ieq ([string]$b).TrimEnd('\', '/') }
-    # a download, tried 3 times (a dropped connection)
+    # a download, tried 3 times: a dropped connection, a body cut short of
+    # its Content-Length (Invoke-WebRequest keeps what came) and one $bad
+    # finds fault with (its why, else nothing) are tried again
     $fetch = {
-      param($w)
+      param($w, $bad)
       for ($k = 1; ; $k++) {
-        try { return Invoke-WebRequest -UseBasicParsing @w } catch { if ($k -ge 3) { throw }; Start-Sleep -Seconds 2 }
+        try {
+          $o = @{} + $w
+          if ($o.OutFile) { $o.PassThru = $true }
+          $r = Invoke-WebRequest -UseBasicParsing @o
+          $want = [string]@($r.Headers['Content-Length'])[0]
+          $got = $(if ($o.OutFile) { (Get-Item -LiteralPath $o.OutFile).Length } else { $r.RawContentLength })
+          if ($want -match '^[0-9]+$' -and [long]$want -ne [long]$got) { throw "it was cut short: $got of $want bytes came" }
+          $why = $(if ($bad) { & $bad $r })
+          if ($why) { throw $why }
+          return $r
+        } catch { if ($k -ge 3) { throw }; Start-Sleep -Seconds 2 }
       }
     }
     # the data folder unii's tasks were given (--env=UNII_DIR=), else
@@ -222,8 +234,9 @@
         $x = [Environment]::GetEnvironmentVariable($v)
         if ($x) { $set += "`$env:$v = '" + $x.Replace("'", "''") + "'`r`n" }
       }
-      try { $body = (& $fetch @{ Uri = $Self }).Content } catch { throw "could not download $Self again to run it outside unii's task ($($_.Exception.Message)). Nothing changed: run this installer in a terminal." }
-      if ($body -is [byte[]]) { $body = [Text.Encoding]::UTF8.GetString($body) }
+      $text = { param($r) $c = $r.Content; if ($c -is [byte[]]) { $c = [Text.Encoding]::UTF8.GetString($c) }; $c }
+      $cut = { param($r) if (-not ([string](& $text $r)).TrimEnd().EndsWith('}')) { 'it ends before the installer does' } }
+      try { $body = & $text (& $fetch @{ Uri = $Self } $cut) } catch { throw "could not download $Self again to run it outside unii's task ($($_.Exception.Message)). Nothing changed: run this installer in a terminal." }
       [IO.File]::WriteAllText($file, $set + $body)
       $line = 'cmd.exe /c powershell.exe -NoProfile -ExecutionPolicy Bypass -File "' + $file + '" > "' + $log + '" 2>&1'
       $made = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = $line }
@@ -239,13 +252,11 @@
     New-Item -ItemType Directory -Path $tmp | Out-Null
     $zip = Join-Path $tmp $name
     Write-Host "downloading $Base/$name"
+    $sha = { if ((Get-FileHash -Algorithm SHA256 -LiteralPath $zip).Hash.ToLower() -ne $Sums[$arch]) { 'it does not match its sha256' } }
     try {
-      & $fetch @{ Uri = "$Base/$name"; OutFile = $zip } | Out-Null
+      & $fetch @{ Uri = "$Base/$name"; OutFile = $zip } $sha | Out-Null
     } catch {
-      throw "the download failed: $name ($($_.Exception.Message))"
-    }
-    if ((Get-FileHash -Algorithm SHA256 -LiteralPath $zip).Hash.ToLower() -ne $Sums[$arch]) {
-      throw "$name does not match its sha256; not installed"
+      throw "the download failed: $name ($($_.Exception.Message)); not installed"
     }
     Expand-Archive -LiteralPath $zip -DestinationPath (Join-Path $tmp 'x')
     $exe = Join-Path $tmp 'x\ki.exe'
@@ -265,6 +276,14 @@
     $copying = (Test-Path -LiteralPath $chat) -and -not (Test-Path -LiteralPath (Join-Path $cur 'agents\unii'))
     if ($renaming -or $copying) {
       $halted = @('serve', 'device' | ForEach-Object { & $task "ki-$_" } | Where-Object { $_ -and ([string]$_.Description -match 'ki-made') -and ([string]$_.State -eq 'Running') })
+      # the tasks stopped, started again: "Nothing changed", else which
+      # stay stopped and how to start them
+      $restart = {
+        param($ts)
+        $left = @(foreach ($t in $ts) { try { Start-ScheduledTask -TaskName $t.TaskName -TaskPath '\' -ErrorAction Stop } catch { [pscustomobject]@{ Name = $t.TaskName; Why = $_.Exception.Message; High = ([string]$t.Principal.RunLevel -eq 'Highest') } } })
+        if ($left.Count -eq 0) { return 'Nothing changed' }
+        'Nothing changed but this: ' + (($left | ForEach-Object { $_.Name + ' (' + $_.Why + ')' }) -join ', ') + ' could not start again, so ' + $(if ($left.Count -eq 1) { 'it stays' } else { 'they stay' }) + ' stopped: start ' + $(if ($left.Count -eq 1) { 'it' } else { 'them' }) + ' with ' + (($left | ForEach-Object { 'schtasks /run /tn ' + $_.Name + $(if ($_.High) { ' (as administrator)' } else { '' }) }) -join ', ')
+      }
       $done = @()
       foreach ($t in @($olds | Where-Object { [string]$_.State -eq 'Running' }) + $halted) {
         try {
@@ -272,8 +291,7 @@
           $done += $t
         } catch {
           $why = $_.Exception.Message
-          foreach ($d in $done) { try { Start-ScheduledTask -TaskName $d.TaskName -TaskPath '\' -ErrorAction Stop } catch {} }
-          throw ("could not stop the task " + $t.TaskName + " ($why). Nothing changed, and ki $Ver was not installed: run this again" + $(if ([string]$t.Principal.RunLevel -eq 'Highest') { ' as administrator' } else { '' }) + ".")
+          throw ("could not stop the task " + $t.TaskName + " ($why). " + (& $restart $done) + ", and ki $Ver was not installed: run this again" + $(if ([string]$t.Principal.RunLevel -eq 'Highest') { ' as administrator' } else { '' }) + ".")
         }
       }
       # the one whose pid server.pid holds must be gone (waited for up to
@@ -281,8 +299,7 @@
       $live = { $p = 0; try { $p = [int]((Get-Content -LiteralPath (Join-Path $cur 'server.pid') -ErrorAction Stop) | Select-Object -First 1) } catch {}; ($p -gt 0) -and ($null -ne (Get-Process -Id $p -ErrorAction SilentlyContinue)) }
       for ($k = 0; $k -lt 20 -and (& $live); $k++) { Start-Sleep -Milliseconds 500 }
       if (& $live) {
-        foreach ($t in @($olds | Where-Object { [string]$_.State -eq 'Running' }) + $halted) { try { Start-ScheduledTask -TaskName $t.TaskName -TaskPath '\' -ErrorAction Stop } catch {} }
-        throw "your data must move with no server running, but one still runs on it (its pid is in $cur\server.pid). Nothing changed, and ki $Ver was not installed: stop it, run this again, then start it."
+        throw ("your data must move with no server running, but one still runs on it (its pid is in $cur\server.pid). " + (& $restart (@($olds | Where-Object { [string]$_.State -eq 'Running' }) + $halted)) + ", and ki $Ver was not installed: stop it, run this again, then start it.")
       }
     }
 
