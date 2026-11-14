@@ -12,9 +12,7 @@ export type Row = {
   why     : string;
   from    : config.From;
   env     : string;
-  apply   : "now" | "restart";
   web     : boolean;
-  running : string | null;
 };
 
 export type Key = { name: string; env: string; from: config.From; tail: string };
@@ -57,9 +55,8 @@ export namespace Settings {
       const env = "KI_" + s.key.toUpperCase();
       const from: config.From = process.env[env] !== undefined ? "env" : file[s.key] !== undefined && file[s.key] !== null ? "file" : "default";
       const value = config.config_value(file, s.key);
-      const running = s.apply === "restart" && config.STARTED[s.key] !== value ? config.STARTED[s.key] : null;
       const def = config.config_default(file, s.key);
-      return { key: s.key, value, def: def.value, why: def.why, from, env, apply: s.apply, web: s.server_only === null, running };
+      return { key: s.key, value, def: def.value, why: def.why, from, env, web: s.server_only === null };
     });
     const shown = Object.entries(config.VARS).map(([name, env]): Key => {
       const from = config.config_key_from(name, keys);

@@ -438,11 +438,9 @@ export function list_changed(was: string[], now: string[]): string[] | null {
   return same ? null : [...was.filter((x) => now.includes(x)), ...now.filter((x) => !was.includes(x))];
 }
 
-// a Reset when it isn't the default; a restart's need, once changed
+// a Reset when it isn't the default
 function from_html(r: Row): string {
-  const running = r.running === null ? "" : "Restart the server to use it. ";
-  const reset = r.from === "file" ? `<button type="button" class="reset">Reset</button>` : "";
-  return running === "" && reset === "" ? "" : `<p class="from">${running}${reset}</p>`;
+  return r.from === "file" ? `<p class="from"><button type="button" class="reset">Reset</button></p>` : "";
 }
 
 function key_html(k: Key): string {

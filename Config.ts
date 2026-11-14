@@ -10,7 +10,7 @@ import { write_whole } from "./Write.ts";
 
 type ServerOnly = "runs a command";
 
-export type Setting = { key: string; def: string; apply: "now" | "restart"; server_only: ServerOnly | null };
+export type Setting = { key: string; def: string; server_only: ServerOnly | null };
 
 export type From = "env" | "file" | "default";
 
@@ -46,14 +46,14 @@ export const SHARE = process.platform === "win32" ? (process.env.LOCALAPPDATA ??
 export const KEYS_PATH = DIR + "/keys.json";
 
 export const SETTINGS: Setting[] = [
-  { key: "vendors",   def: "claude-api",                        apply: "now",     server_only: null },
-  { key: "models",    def: LABELS.join(),                       apply: "now",     server_only: null },
-  { key: "pick",      def: "claude-api:sonnet-5.5:medium:slow", apply: "now",     server_only: null },
-  { key: "compactor", def: "claude-api:sonnet-5.5:medium:slow", apply: "now",     server_only: null },
-  { key: "compactor_context", def: "4",                         apply: "now",     server_only: null },
-  { key: "hops",      def: "4",                                 apply: "now",     server_only: null },
-  { key: "thinking",  def: "off",                               apply: "now",     server_only: null },
-  { key: "after",     def: "",                                  apply: "now",     server_only: "runs a command" },
+  { key: "vendors",   def: "claude-api",                        server_only: null },
+  { key: "models",    def: LABELS.join(),                       server_only: null },
+  { key: "pick",      def: "claude-api:sonnet-5.5:medium:slow", server_only: null },
+  { key: "compactor", def: "claude-api:sonnet-5.5:medium:slow", server_only: null },
+  { key: "compactor_context", def: "4",                         server_only: null },
+  { key: "hops",      def: "4",                                 server_only: null },
+  { key: "thinking",  def: "off",                               server_only: null },
+  { key: "after",     def: "",                                  server_only: "runs a command" },
 ];
 
 const USABLE: Record<Vendor, string> = {
@@ -94,8 +94,6 @@ let KEPT: string[] = [];
 export const RELOADED = new Set<() => void>();
 
 const MADE = config_make(FILE);
-
-export const STARTED: Record<string, string> = Object.fromEntries(SETTINGS.map((s) => [s.key, config_value(FILE, s.key)]));
 
 export const OFFER: Offer = MADE.offer;
 

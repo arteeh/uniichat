@@ -2130,7 +2130,6 @@ async function settings_save(form: HTMLFormElement, unset: Set<string>, listed: 
     return;
   }
   const done = out as Page & { saved: string[] };
-  const later = done.saved.filter((key) => page.settings.find((r) => r.key === key)?.apply === "restart");
   SET.page = done;
   unset.clear();
   if (SET.queued === 0) {
@@ -2145,9 +2144,6 @@ async function settings_save(form: HTMLFormElement, unset: Set<string>, listed: 
     settings_redraw(done, { fields, profs: held ? profs : null });
   }
   draw(false);
-  if (later.length > 0) {
-    toast(later.join(", ") + " " + (later.length === 1 ? "applies" : "apply") + " once the server restarts.");
-  }
 }
 
 function renew_due(build: string | undefined): void {
