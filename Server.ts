@@ -569,7 +569,7 @@ export namespace Chat {
       const msg = Memory.at(mem, i);
       return Memory.line({ l: 0, i }, msg.kind + ": " + msg.text) + "\n";
     });
-    const blocks = [...Memory.view(mem, at, Memory.fitted(mem)), { text: tail.join("") + "\n" + Prompts.prompt("goal-ask") + "\n\n" + goal, mark: true }];
+    const blocks = [...Memory.view(mem, at, Memory.fitted(mem)), ...Chat.leader_block(chat.leader), { text: tail.join("") + "\n" + Prompts.prompt("goal-ask") + "\n\n" + goal, mark: true }];
     return { call: AskAI.ask({ ...Chat.share(chat, { system: Prompts.prompt("goal", { Name: Chat.name(chat) }) }), blocks, no_wait: true, limits: Chat.limits(chat), who: "goal" }, () => {}), goal };
   }
 
@@ -2024,11 +2024,15 @@ export namespace Main {
 
   // Leader mode as a form sent it, what it didn't send as it was (#168)
   export function knobs(x: unknown, now: { leader: boolean; lines: number }): { leader: boolean; lines: number } | string {
-    const [leader, lines] = [get(x, "leader"), get(x, "lines") === undefined ? now.lines : Number(get(x, "lines"))];
+    const [on, given] = [get(x, "leader"), get(x, "lines")];
+    const leader = on === undefined ? now.leader : on === true || on === "on";
+    // with Leader mode off, or the field emptied, the lines saved stay
+    const keep = !leader || given === undefined || given === "";
+    const lines = keep ? now.lines : typeof given === "number" || (typeof given === "string" && /^\s*\d+\s*$/.test(given)) ? Number(given) : NaN;
     if (!Number.isInteger(lines) || lines < 1 || lines > LINES_MOST) {
       return "Lines per agent is a whole number from 1 to " + LINES_MOST + ".";
     }
-    return { leader: leader === undefined ? now.leader : leader === true || leader === "on", lines };
+    return { leader, lines };
   }
 
   export function lead_set(chat: Chat, knobs: { leader: boolean; lines: number }): void {

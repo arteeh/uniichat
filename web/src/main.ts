@@ -51,8 +51,10 @@ let START = false;
 const START_SHOWN = 2000;
 let TRIP = 0;
 
-// the first agent in the list: the one / opens (Server stamps it)
+// the first active agent in the list, the one / opens: as Server stamped
+// it till the team comes, then the team's
 const FIRST = document.documentElement.dataset.first ?? "";
+const first = () => v.team.find((m) => m.archived === 0)?.id ?? FIRST;
 
 const AGENT = /^\/a\/([a-z0-9]{1,16})(\/edit)?$/;
 
@@ -733,6 +735,9 @@ function hear(msg: View.Server): void {
   if (msg.$ === "team") {
     Html.team_set(v.team);
     start(v.team);
+    if (location.pathname === "/" && v.agent !== first()) {
+      route();
+    }
     if (location.pathname === "/settings") {
       archived_draw();
       account_who();
@@ -1269,12 +1274,12 @@ function up_from(path: string): string | null {
   const url = new URL(path, location.origin);
   const edit = FORM.exec(url.pathname)?.[2];
   if (url.pathname === TREE) {
-    return "/a/" + (url.searchParams.get("a") ?? FIRST);
+    return "/a/" + (url.searchParams.get("a") ?? first());
   }
   if (edit !== undefined) {
     return "/a/" + edit;
   }
-  return url.pathname === "/" ? null : over_chat(url.pathname) && WIDE.matches && v.agent !== FIRST ? "/a/" + v.agent : "/";
+  return url.pathname === "/" ? null : over_chat(url.pathname) && WIDE.matches && v.agent !== first() ? "/a/" + v.agent : "/";
 }
 
 // a screen that sits over the chat that was open, when wide
@@ -1320,7 +1325,7 @@ function route(): void {
   const chat = !page && !tree && !list;
   const sub = SUB.exec(p);
   const left = !$("#log").hidden && v.page === null;
-  chat_to(AGENT.exec(p)?.[1] ?? sub?.[1] ?? (tree ? new URLSearchParams(location.search).get("a") ?? FIRST : p === "/" ? FIRST : v.agent));
+  chat_to(AGENT.exec(p)?.[1] ?? sub?.[1] ?? (tree ? new URLSearchParams(location.search).get("a") ?? first() : p === "/" ? first() : v.agent));
   sessionStorage.setItem(kept("chat"), v.agent);
   for (const out of View.view_act(v, { $: "Goto", name: sub?.[2] ?? null })) {
     View.link_send(v, out);
@@ -1436,7 +1441,8 @@ async function agent_page(id: string | null): Promise<void> {
     }
   };
   if (a === null) {
-    form.querySelectorAll<HTMLInputElement>("[name=picture]")[Math.floor(Math.random() * 24)].checked = true;
+    const heads = form.querySelectorAll<HTMLInputElement>("[name=picture][value^='head-']");
+    heads[Math.floor(Math.random() * heads.length)].checked = true;
     follow();
   }
   RENEW.dirty.clear();
