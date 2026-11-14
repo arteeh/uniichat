@@ -102,6 +102,8 @@ const IMPORT = {
   done  : {} as Import.Done,
   off   : new Set<string>(),
   step  : "" as "" | "start" | "send" | "run" | "seen" | "done",
+  // the agent it goes into: the one whose settings (or first chat) opened it
+  agent : "",
 };
 
 function $(sel: string): HTMLElement;
@@ -731,7 +733,6 @@ function hear(msg: View.Server): void {
     }
     if (location.pathname === "/settings") {
       archived_draw();
-      account_who();
     }
     const form = document.querySelector<HTMLFormElement>("#account form.agent");
     if (form !== null && (FORM.test(location.pathname) || location.pathname === "/new")) {
@@ -828,9 +829,11 @@ function import_flow(): void {
 }
 
 async function import_open(first: boolean): Promise<void> {
-  IMPORT.done = (await fetch("/api/imported?agent=" + encodeURIComponent(v.agent)).then((res) => res.json()).catch(() => ({}))) as Import.Done;
+  const agent = v.agent;
+  IMPORT.done = (await fetch("/api/imported?agent=" + encodeURIComponent(agent)).then((res) => res.json()).catch(() => ({}))) as Import.Done;
   $("#import form .skip").textContent = first ? "Start fresh" : "Close";
-  IMPORT.step = first ? "start" : IMPORT.step === "done" ? "" : IMPORT.step;
+  IMPORT.step = first ? "start" : IMPORT.step === "done" || IMPORT.agent !== agent ? "" : IMPORT.step;
+  IMPORT.agent = agent;
   import_draw("");
   $("#import").showPopover();
 }
@@ -1298,6 +1301,9 @@ function chat_to(agent: string): void {
   if (agent === v.agent) {
     return;
   }
+  if (agent !== IMPORT.agent && $("#import").matches(":popover-open")) {
+    $("#import").hidePopover();
+  }
   sessionStorage.setItem(kept("draft." + v.agent), Box.box_text());
   for (const msg of View.view_switch(v, agent)) {
     View.link_send(v, msg);
@@ -1550,13 +1556,6 @@ async function agent_save_now(form: HTMLFormElement, a: Html.Agent | null, at: E
   $("header .title").textContent = body.name;
 }
 
-// export and import are of the agent whose chat was open last
-function account_who(): void {
-  const name = v.team.find((m) => m.id === v.agent)?.name ?? "";
-  document.querySelectorAll<HTMLElement>("#account .who").forEach((el) => (el.textContent = name === "" ? "this agent" : name));
-  document.querySelector<HTMLAnchorElement>("#account a.export")?.setAttribute("href", "/export?agent=" + encodeURIComponent(v.agent));
-}
-
 function archived_draw(): void {
   const box = document.querySelector<HTMLElement>("#account .archived");
   if (box === null) {
@@ -1592,7 +1591,6 @@ async function account(): Promise<void> {
   const push = await notify_state().catch(() => null);
   el.innerHTML = Html.account_html(push);
   archived_draw();
-  account_who();
   RENEW.dirty.clear();
   el.oninput = (ev) => {
     const form = (ev.target as Element).closest("form");

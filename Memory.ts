@@ -1173,58 +1173,6 @@ export namespace Memory {
     return Array.from({ length: mem.count.toString(2).length }, (_, l) => l);
   }
 
-  export function* level(mem: Memory, l: number): Generator<[Part, string]> {
-    for (let i = 0; (i + 1) * 2 ** l <= mem.count; i++) {
-      const text = Memory.node(mem, { l, i });
-      if (text !== null) {
-        yield [{ l, i }, text];
-      }
-    }
-  }
-
-  export function* dump(mem: Memory): Generator<string> {
-    const ls = (sub: string) => (fs.existsSync(mem.dir + sub) ? fs.readdirSync(mem.dir + sub).sort() : []);
-    let sep = "\n";
-    yield '{"messages": [';
-    for (let i = 0; i < mem.count; i++) {
-      const { kind, text, date, images, more, page, of, tool } = Memory.at(mem, i);
-      yield (i === 0 ? "\n" : ",\n") + JSON.stringify({ id: i, kind, text, date, images, more, page, of, tool });
-    }
-    yield '],\n"summaries": [';
-    for (const l of Memory.levels(mem)) {
-      for (const [part, text] of Memory.level(mem, l)) {
-        yield sep + JSON.stringify({ id: Memory.span(part)[0], n: 2 ** l, text });
-        sep = ",\n";
-      }
-    }
-    yield '],\n"agents": {';
-    sep = "\n";
-    for (const name of (fs.existsSync(mem.dir + AGENTS) ? fs.readdirSync(mem.dir + AGENTS).sort() : []).map((file) => file.replace(/\.jsonl$/, ""))) {
-      const log = Memory.agent(mem, name);
-      if (log !== null) {
-        yield sep + JSON.stringify(name) + ": " + JSON.stringify(log.map(({ i, kind, text, date, of, tool }) => ({ id: i, kind, text, date, of, tool })));
-        sep = ",\n";
-      }
-    }
-    for (const [key, sub, file_of] of [["images", IMAGES, Memory.image_file], ["media", MEDIA_DIR, (m: Memory, name: string) => (STORED.test(name) ? m.dir + MEDIA_DIR + name : null)]] as const) {
-      yield '},\n"' + key + '": {';
-      sep = "\n";
-      for (const name of ls(sub)) {
-        const file = file_of(mem, name);
-        if (file === null) {
-          continue;
-        }
-        yield sep + JSON.stringify(name) + ': "';
-        for (let at = 0, size = fs.statSync(file).size; at < size; at += 3 * PIECE) {
-          yield Memory.slice(file, at, 3 * PIECE).toString("base64");
-        }
-        yield '"';
-        sep = ",\n";
-      }
-    }
-    yield "}}\n";
-  }
-
   export function meta(mem: Memory): { count: number; has: string[]; parts: [number, number][]; view: { h: string; t: string }[] } {
     const index = Memory.pread(Memory.fd(mem, mem.dir + "/tree.index"), 0, 2 * mem.count * SLOT);
     const built = (at: number) => at + SLOT <= index.length && index.readUInt32LE(at + 8) !== 0;

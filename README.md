@@ -19,7 +19,7 @@ Features
 - **MCP servers** per device. Ask your agent to set them up on your preferred device.
 - **Skills** read from the ~/.agents/skills folder.
 - **An installable web app (PWA)** on phones and desktops: icons, an offline shell, Web Push for replies, a nav bar that shows on Android; the composer stays above a phone's keyboard.
-- **Don't start from scratch.** Import past conversations from Claude Code or Codex into your memory tree.
+- **Don't start from scratch.** Import past conversations from Claude Code or Codex into an agent's memory tree, from its settings.
 
 Install
 -------

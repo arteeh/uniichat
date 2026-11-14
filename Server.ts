@@ -159,9 +159,7 @@ const READ       = 2 ** 20;
 // what a socket may hold unsent (Bun's default, 16 MiB, drops the rest)
 const BUFFER     = 2 ** 31 - 1;
 
-const PIECE      = 2 ** 16;
-
-const OWN        = ["/ws", "/export"];
+const OWN        = ["/ws"];
 
 const HELLO      = hello_md.trim().replace("{install}", config.SITE + "/install.sh");
 const HELLO_LINE = "reply: hello: Ki, one endless chat kept in a memory tree, recent days in more detail; build anything for years; recalls the past (ad2cat.py); a chatbot with a memory system; ki device on the user's computers.";
@@ -2271,30 +2269,6 @@ export namespace Main {
     return new Response(made, { headers });
   }
 
-  export function stream(lines: Iterable<string>): ReadableStream<Uint8Array> {
-    const it = lines[Symbol.iterator]();
-    const utf8 = new TextEncoder();
-    return new ReadableStream({
-      async pull(out) {
-        let piece = "";
-        for (let next = it.next(); ; next = it.next()) {
-          piece += next.done ? "" : next.value;
-          if (next.done || piece.length >= PIECE) {
-            out.enqueue(utf8.encode(piece));
-            if (next.done) {
-              out.close();
-            }
-            break;
-          }
-        }
-        await new Promise((ok) => setImmediate(ok));
-      },
-      cancel() {
-        it.return?.();
-      },
-    });
-  }
-
   export async function page(p: string, req: Request): Promise<Response> {
     const chat = Main.chat_of(new URL(req.url).searchParams.get("agent"));
     const mem = chat.mem;
@@ -2306,11 +2280,6 @@ export namespace Main {
         }
         const get = q.split(",").slice(0, 200);
         return Response.json(get.map((key) => Memory.card(mem, ...(key.split(".").map(Number) as [number, number]))));
-      }
-      case "/export": {
-        const name = (Chat.name(chat).replace(/[^A-Za-z0-9_-]+/g, "-") || "ki") + "-memory-" + new Date().toISOString().slice(0, 10) + ".json";
-        const json = { "content-type": "application/json", "content-disposition": 'attachment; filename="' + name + '"' };
-        return new Response(Main.stream(Memory.dump(mem)), { headers: json });
       }
       case "/api/act": {
         const refused = Main.post_only(req);

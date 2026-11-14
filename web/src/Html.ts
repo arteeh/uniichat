@@ -269,6 +269,7 @@ export function agent_html(a: Agent | null, others: number): string {
   const faces = ["logo"].concat(own, heads).map((f) => face_pick_html(f, f === a?.picture));
   const upload = `<button type="button" class="chip upload">Upload a picture</button><input type="file" class="upfile" accept="image/png,image/jpeg,image/webp,image/gif" hidden>`;
   const set = (key: string, name: string, about: string, control: string) => `<div class="set" data-key="${key}"><label for="ag-${key}">${esc(name)}${about === "" ? "" : `<small>${esc(about)}</small>`}</label><div class="field">${control}</div><p class="err"></p></div>`;
+  const history = a === null ? "" : section_html("History", `<div class="item"><p>Import history<small>Past Claude and ChatGPT chats, into its memory.</small></p><button type="button" class="chip imp">Import</button></div>`);
   const archive = a === null ? "" : section_html("Archive", `<div class="item"><p>Archive ${esc(a.name)}<small>Settings can restore it.</small></p><button type="button" class="chip red archive">Archive</button></div>`);
   // an agent saves as it's edited (#125); a new one is made with Create
   const create = a === null ? `<div class="save"><p class="why"></p><button class="chip go">Create</button></div>` : "";
@@ -280,7 +281,7 @@ export function agent_html(a: Agent | null, others: number): string {
       + set("prompt", "System prompt", "Who it is and what it does.", `<textarea id="ag-prompt" name="prompt" rows="6" spellcheck="true">${esc(a?.prompt ?? "")}</textarea>`)
       + set("leader", "Leader mode", "Each turn, the newest lines of every other agent's memory, to zoom into.", `<label class="opt"><input type="checkbox" id="ag-leader" name="leader"${leader ? " checked" : ""}> On</label>`)
       + `<div class="set lines" data-key="lines"${leader ? "" : " hidden"}><label for="ag-lines">Lines per agent<small class="cost">${esc(leader_cost(lines, others))}</small></label><div class="field"><input id="ag-lines" name="lines" type="number" min="1" max="${View.LINES_MOST}" step="1" value="${lines}"></div><p class="err"></p></div>`)
-    + create + `</form>` + archive;
+    + create + `</form>` + history + archive;
 }
 
 export function face_pick_html(picture: string, on: boolean): string {
@@ -298,11 +299,9 @@ export function account_html(notify: Notify | null = null): string {
   const acts    = [
     item("This browser", "Signed in to this server.", `<button class="chip out">Sign out</button>`),
     ...(notify === null ? [] : [notify_html(notify)]),
-    item("Export memory", `The chat of <span class="who"></span>, its summaries, pictures and files, in one file.`, `<a class="chip export" href="/export">Download</a>`),
   ];
   const mcp     = section_html("MCP servers", `<div class="mcp"></div>`);
-  const history = section_html("History", item("Import history", `Past Claude and ChatGPT chats, into the memory of <span class="who"></span>.`, `<button class="chip imp">Import</button>`));
-  return section_html("This browser", acts.join("")) + history + `<div class="archived"></div>` + mcp + `<div class="owned"></div>`;
+  return section_html("This browser", acts.join("")) + `<div class="archived"></div>` + mcp + `<div class="owned"></div>`;
 }
 
 function notify_html(notify: Notify): string {
