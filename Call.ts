@@ -25,7 +25,7 @@ const READS = new Map<string, (x: Input) => Shown>([
   ["date",     (x) => ({ head: msg_show(x.id, 1), blocks: [] })],
   ["computer", (x) => ({ head: "", blocks: text_block(x.task) })],
   ["spawn",    (x) => ({ head: tasks_show(x.tasks), blocks: list(x.tasks).flatMap(task_block) })],
-  ["tell",     (x) => ({ head: text_of(x.name), blocks: text_block(x.message) })],
+  ["tell",     (x) => ({ head: said_show(x.name, x.message), blocks: text_block(x.message) })],
   ["stop",     (x) => ({ head: text_of(x.name), blocks: text_block(x.why) })],
   ["schedule", (x) => ({ head: (x.cron === undefined ? text_of(x.at) : "cron " + text_of(x.cron, "null")) + " " + text_of(x.zone), blocks: text_block(x.message) })],
 ]);
@@ -84,6 +84,11 @@ function input_shown(input: Input): Shown {
 
 function text_block(x: unknown): Md.Code[] {
   return typeof x === "string" && x !== "" ? [{ $: "Code", k: "", x: x.replace(/\n$/, "") }] : [];
+}
+
+function said_show(name: unknown, message: unknown): string {
+  const first = typeof message === "string" ? message.trim().split("\n")[0] : "";
+  return text_of(name) + (first === "" ? "" : ": " + first);
 }
 
 function tasks_show(tasks: unknown): string {
