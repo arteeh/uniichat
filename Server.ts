@@ -939,7 +939,7 @@ export namespace Chat {
       return { text: view + " Nothing started.", fail: true };
     }
     const names = tasks.map((t) => {
-      const sub = Chat.sub_start(chat, t.role, t.memory, t.task, t.memory ? view : [], null);
+      const sub = Chat.sub_start(chat, t.role, t.memory, t.mcp, t.task, t.memory ? view : [], null);
       void Run.take(sub.run, { text: t.task, imgs: [] });
       const knobs = [t.role.model, t.role.effort === null ? null : "effort " + t.role.effort, t.memory ? null : "no view"].filter((k) => k !== null);
       return sub.name + (knobs.length === 0 ? "" : " (" + knobs.join(", ") + ")");
@@ -948,7 +948,8 @@ export namespace Chat {
   }
 
   // name: one going on after the server's restart, else a new one
-  export function sub_start(chat: Chat, role: Role, memory: boolean, task: string, view: Block[], name: string | null): Sub<Msg> {
+  // mcp false: none of the devices' MCP tools, for its life (#172)
+  export function sub_start(chat: Chat, role: Role, memory: boolean, mcp: boolean, task: string, view: Block[], name: string | null): Sub<Msg> {
     // a name no other agent's subagent has, now or before: it keys the
     // seat at the tools, the jobs' reports and the scratch folder
     const it = name ?? Memory.agent_new(chat.mem, (n) => [...Main.chats.values()].some((c) => c.subs.has(n) || Memory.agent(c.mem, n) !== null));
@@ -957,10 +958,10 @@ export namespace Chat {
     chat.subs.set(it, sub);
     // a job's report reaches it while it runs, else its spawner
     const report = (text: string) => (sub.run.busy && sub.why === null ? void Run.take(sub.run, { text, imgs: [] }) : Chat.report(chat, text.replace("] ", "] " + it + "'s job, "), true));
-    const seat: Seat = { mem: chat.mem, note: (text) => Chat.push(chat, sub.run, "note", text), report, timed: () => {}, message: () => Promise.resolve({ text: "A subagent messages no one.", fail: true }), subs: null };
+    const seat: Seat = { mem: chat.mem, note: (text) => Chat.push(chat, sub.run, "note", text), report, timed: () => {}, message: () => Promise.resolve({ text: "A subagent messages no one.", fail: true }), subs: null, mcp };
     chat.tools.seats.set(it, seat);
     if (name === null) {
-      Chat.push(chat, sub.run, "note", Sub.note(role, memory));
+      Chat.push(chat, sub.run, "note", Sub.note(role, memory, mcp));
     }
     Main.team_soon();
     return sub;
@@ -974,7 +975,7 @@ export namespace Chat {
     if (how === null || typeof view === "string" || chat.subs.has(name)) {
       return;
     }
-    const sub = Chat.sub_start(chat, how.role, how.memory, task, view, name);
+    const sub = Chat.sub_start(chat, how.role, how.memory, how.mcp, task, view, name);
     const told = Memory.agent_held(chat.mem, name);
     void Run.takes(sub.run, [text, ...told].map((t) => ({ text: t, imgs: [] })));
   }

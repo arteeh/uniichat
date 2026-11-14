@@ -12,7 +12,7 @@ import type { Talk } from "./View.ts";
 
 export type Role = { model: string | null; effort: string | null };
 
-export type Spawn = { task: string; role: Role; memory: boolean };
+export type Spawn = { task: string; role: Role; memory: boolean; mcp: boolean };
 
 // doing: what it does now, since at (a tool's name, thinking, a usage limit)
 // used: the tokens of its last request, when its log had used_at bytes of
@@ -41,7 +41,8 @@ const NOTE = "subagent";
 const ON   = " on ";
 const AT   = " at effort ";
 const BARE = " without view";
-const ROLE = new RegExp("^" + NOTE + "(?:" + ON + "(\\S+))?(?:" + AT + "(\\S+))?(" + BARE + ")?$");
+const NO_MCP = " without MCP tools";
+const ROLE = new RegExp("^" + NOTE + "(?:" + ON + "(\\S+))?(?:" + AT + "(\\S+))?(" + BARE + ")?(" + NO_MCP + ")?$");
 
 const TASK_SHOWN = 120;
 
@@ -56,7 +57,7 @@ export namespace Sub {
 
   export function spawns(args: Record<string, unknown>): Spawn[] | string {
     if (Object.keys(args).some((k) => k !== "tasks")) {
-      return "Give model and effort per task, in each of tasks: { task, model?, effort?, memory? }. Nothing started.";
+      return "Give model and effort per task, in each of tasks: { task, model?, effort?, memory?, mcp? }. Nothing started.";
     }
     const models = Sub.models();
     const out: Spawn[] = [];
@@ -69,19 +70,19 @@ export namespace Sub {
       if (bad !== null) {
         return "Task " + (k + 1) + (task === "" ? "" : " (" + JSON.stringify(task.length > 60 ? task.slice(0, 60) + "…" : task) + ")") + ": " + bad + ". Nothing started.";
       }
-      out.push({ task, role: { model, effort }, memory: x.memory !== false });
+      out.push({ task, role: { model, effort }, memory: x.memory !== false, mcp: x.mcp !== false });
     }
     return out.length === 0 ? "No tasks. Nothing started." : out;
   }
 
   // its log's first line, which says how it runs
-  export function note(role: Role, memory: boolean): string {
-    return NOTE + (role.model === null ? "" : ON + role.model) + (role.effort === null ? "" : AT + role.effort) + (memory ? "" : BARE);
+  export function note(role: Role, memory: boolean, mcp: boolean): string {
+    return NOTE + (role.model === null ? "" : ON + role.model) + (role.effort === null ? "" : AT + role.effort) + (memory ? "" : BARE) + (mcp ? "" : NO_MCP);
   }
 
-  export function role(note: string): { role: Role; memory: boolean } | null {
+  export function role(note: string): { role: Role; memory: boolean; mcp: boolean } | null {
     const m = ROLE.exec(note);
-    return m === null ? null : { role: { model: m[1] ?? null, effort: m[2] ?? null }, memory: m[3] === undefined };
+    return m === null ? null : { role: { model: m[1] ?? null, effort: m[2] ?? null }, memory: m[3] === undefined, mcp: m[4] === undefined };
   }
 
   // the spawner's pick, with the task's model and effort

@@ -40,6 +40,7 @@ export type Seat = {
   timed  : () => void;
   message: (to: string, text: string) => Promise<Out>;
   subs   : Subs | null;
+  mcp?   : boolean;
 };
 
 // an agent's subagents
@@ -105,6 +106,7 @@ const BOSS: Spec[] = [
     model  : { type: "string", description: "Its model, one offered here; by default, yours. Set it only when the user asks for that model or vendor, since another vendor may cost more." },
     effort : { type: "string", enum: EFFORTS, description: "How hard it thinks; by default, as hard as you." },
     memory : { type: "boolean", description: "Whether it starts with your view; default true." },
+    mcp    : { type: "boolean", description: "Whether it gets the devices' MCP tools; default true." },
   }, required: ["task"] } } }, ["tasks"]),
   spec("tell", "Send a message to a running subagent, by name: it gets it right after its current tool calls, and its report answers it. A subagent that has reported or was stopped is done: spawn a new one.", { name: STR, message: STR }, ["name", "message"]),
   spec("stop", "Stop a running subagent at once, by name, whatever it is doing (mid-call, waiting on a usage limit, running a tool on a device). Others keep running. It is done then, and its jobs end with it: its report says it was stopped.", { name: STR, why: { type: "string", description: "Why, for its report." } }, ["name"]),
@@ -235,15 +237,16 @@ export namespace Tools {
         return { protocolVersion, capabilities: { tools: {} }, serverInfo: { name: "ki", version: "1" } };
       }
       case "tools/list": {
-        const theirs = await Mcp.list(tools.mcp, Tools.held(tools, who));
-        const notes = Mcp.heard(tools.mcp, Tools.off(tools), who);
+        const bare = tools.seats.get(who)?.mcp === false;
+        const theirs = bare ? [] : await Mcp.list(tools.mcp, Tools.held(tools, who));
+        const notes = bare ? [] : Mcp.heard(tools.mcp, Tools.off(tools), who);
         return { tools: [...Tools.list(tools.seats.get(who)?.subs === null), ...theirs].map((t) => ({ name: t.name, description: t.info, inputSchema: t.schema })), notes };
       }
       case "tools/call": {
         const name = String(params.name);
         const args = rec(params.arguments) ? params.arguments : {};
         const has = Tools.list(tools.seats.get(who)?.subs === null).some((t) => t.name === name);
-        const mcp = has ? null : Mcp.find(Tools.held(tools, who), name);
+        const mcp = has || tools.seats.get(who)?.mcp === false ? null : Mcp.find(Tools.held(tools, who), name);
         Mcp.used(tools.mcp);
         const no: Out = { text: "No tool " + name + ".", fail: true };
         const out = has ? await Tools.call(tools, who, name, args, signal, id) : mcp !== null ? await Mcp.call(tools.mcp, mcp, name, args, signal) : no;
