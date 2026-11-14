@@ -30,7 +30,7 @@ export const OLD = "Nothing new: these chats are in this agent's memory already.
 
 const NOT_EXPORT = "Not a Claude or ChatGPT export.";
 
-export const MIDWAY = "Meanwhile, Ki can answer with a partial tree.";
+export const MIDWAY = "Meanwhile, this agent can answer with a partial tree.";
 
 export const DONE = "Your past chats are in this agent's memory: ask about them any time.";
 
