@@ -25,8 +25,9 @@
 # settings. `unii update` runs this from inside a unii service, whose stop
 # would end it: then this starts itself again outside it (systemd-run;
 # on macOS in a session of its own) and says where its output goes.
-# UNII_* settings are KI_* now: this warns about each one it can see
-# (not the ones unii sets for its own processes).
+# UNII_* settings ki still has are KI_* now, and the rest are gone: this
+# warns about each one it can see (not the ones unii sets for its own
+# processes), and unii's services become ki's with the KI_* ones only.
 #
 # Data an older unii left (uniichat.com's 1.0.138 in ~/.opt, or an arteeh
 # release up to arteeh.16 in ~/.unii) is moved to this version's layout
@@ -42,6 +43,9 @@ set -eu
 VER="@VER@"
 BASE="https://github.com/arteeh/ki/releases/download/$VER"
 OLD_BIN="${UNII_BIN:-$HOME/.local/bin/unii}"
+# the KI_* settings ki reads, and those unii set for its own processes
+KI_READS="URL DIR PROFILES MCP VENDORS MODELS PICK COMPACTOR COMPACTOR_CONTEXT HOPS THINKING SITE AFTER CHATGPT CHATGPT_ISSUER CHATGPT_URL CLAUDE CLAUDE_SUB MEDIA_MB"
+UNII_OWN="BIN UPDATER RUN AGENT SERVICE SUPERVISOR"
 BIN="${KI_BIN:-$(dirname "$OLD_BIN")/ki}"
 # a dropped connection is tried again (every error, from curl 7.71 on)
 RETRY="--retry 3 --retry-delay 2"
@@ -172,7 +176,14 @@ if [ -d "$oconf" ] && [ -e "$conf" ]; then
   echo "  $oconf was not moved: $conf exists already. Move $oconf aside if you don't need it."
 fi
 for v in $(env | sed -n 's/^\(UNII_[A-Za-z0-9_]*\)=.*/\1/p'); do
-  case $v in UNII_BIN|UNII_UPDATER|UNII_RUN|UNII_AGENT|UNII_SERVICE|UNII_SUPERVISOR) ;; UNII_DIR) [ -n "$udir" ] || echo "  $v is set: ki doesn't read it any more; it reads KI_DIR.";; *) echo "  $v is set: ki doesn't read it any more; it reads KI_${v#UNII_}.";; esac
+  case " $UNII_OWN " in *" ${v#UNII_} "*) continue;; esac
+  case $v in
+    UNII_DIR) [ -n "$udir" ] || echo "  $v is set: ki doesn't read it any more; it reads KI_DIR.";;
+    *) case " $KI_READS " in
+         *" ${v#UNII_} "*) echo "  $v is set: ki doesn't read it any more; it reads KI_${v#UNII_}.";;
+         *) echo "  $v is set: it isn't used any more, and can be removed.";;
+       esac;;
+  esac
 done
 
 # `unii update` from a unii service's shell: stopping that service would
@@ -567,21 +578,23 @@ sd_exec() { sd_env "$1" | sed 's/\$/$$/g'; }
 xml() { printf '%s' "$1" | sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g'; }
 # ki's service $3 in file $2 from unii's in $1, the same but: it runs
 # $BIN, its data folder is $dir (KI_DIR, unless ki's default), UNII_*
-# settings are KI_*, and it says it's ki's
+# settings ki has are KI_* and the others gone, and it says it's ki's
 ki_unit() {
   case $os in
-    linux) KI_X_BIN=$(sd_exec "$BIN") KI_X_DIR=$( [ "$dir" = "$HOME/.ki" ] || sd_env "KI_DIR=$dir") KI_X_PART=$3 awk '
-      BEGIN { b = ENVIRON["KI_X_BIN"]; d = ENVIRON["KI_X_DIR"]; p = ENVIRON["KI_X_PART"] }
+    linux) KI_X_BIN=$(sd_exec "$BIN") KI_X_DIR=$( [ "$dir" = "$HOME/.ki" ] || sd_env "KI_DIR=$dir") KI_X_PART=$3 KI_X_KEEP="$KI_READS $UNII_OWN" awk '
+      BEGIN { b = ENVIRON["KI_X_BIN"]; d = ENVIRON["KI_X_DIR"]; p = ENVIRON["KI_X_PART"]; n = split(ENVIRON["KI_X_KEEP"], k, " "); for (i = 1; i <= n; i++) keep[k[i]] = 1 }
       /^# unii-made: / { print "# ki-made: `ki " p " -d` wrote this unit, and writes it again; `ki " p " stop` removes it."; next }
       /^Description=/ { print "Description=Ki " (p == "serve" ? "server" : "device") " (ki " p ")"; next }
       /^ExecStart=/ { if (match($0, /^ExecStart="([^"\\]|\\.)*"/)) $0 = "ExecStart=" b substr($0, RLENGTH + 1); print; if (d != "") print "Environment=" d; next }
       /^Environment="(UNII|KI)_DIR=/ { next }
-      { sub(/^Environment="UNII_/, "Environment=\"KI_"); print }' "$1" > "$2.new" && mv "$2.new" "$2";;
+      /^Environment="UNII_[A-Za-z0-9_]*=/ { v = substr($0, 19); v = substr(v, 1, index(v, "=") - 1); if (!(v in keep)) next; sub(/^Environment="UNII_/, "Environment=\"KI_") }
+      { print }' "$1" > "$2.new" && mv "$2.new" "$2";;
     darwin) d=""; [ "$dir" = "$HOME/.ki" ] || d="<key>KI_DIR</key><string>$(xml "$dir")</string>"
+      keep=""; for n in $KI_READS $UNII_OWN; do keep="${keep:+$keep;}s#<key>UNII_$n</key>#<key>KI_$n</key>#g"; done
       sed -E -e "s#<array><string>[^<]*</string>#<array><string>$(q "$(xml "$BIN")")</string>#" \
         -e "s#<key>Label</key><string>unii-#<key>Label</key><string>ki-#" \
         -e "s#<key>(UNII|KI)_DIR</key><string>[^<]*</string>##g" \
-        -e "s#<key>UNII_#<key>KI_#g" \
+        -e "$keep" -e "s#<key>UNII_[^<]*</key><string>[^<]*</string>##g" \
         -e "s#<key>EnvironmentVariables</key><dict>#&$(q "$d")#" \
         -e "s#<!-- unii-made: .*#<!-- ki-made: \`ki $3 -d\` wrote this, and writes it again; \`ki $3 stop\` removes it. -->#" "$1" > "$2.new" && mv "$2.new" "$2";;
   esac

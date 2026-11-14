@@ -31,7 +31,8 @@
 # exe and its PATH entry go (once the `unii update` that ran this has
 # quit). `unii update` runs this from inside a unii task, whose stop would
 # end it: then this starts itself again outside it and says where its
-# output goes. UNII_* settings are KI_* now: this warns about each one.
+# output goes. UNII_* settings ki still has are KI_* now, and the rest
+# are gone: this warns about each one, and the tasks keep the KI_* ones.
 # A unii task that runs as administrator (`sudo unii device -d`) is moved
 # only by a run as administrator: any other run stops, changing nothing.
 #
@@ -71,6 +72,9 @@
     # unii, as ki was called before: its data, sign-ins, tasks and exe
     $oldBin = $env:UNII_BIN
     if (-not $oldBin) { $oldBin = Join-Path $env:LOCALAPPDATA 'Programs\unii\unii.exe' }
+    # the KI_* settings ki reads, and those unii set for its own processes
+    $reads = @('URL', 'DIR', 'PROFILES', 'MCP', 'VENDORS', 'MODELS', 'PICK', 'COMPACTOR', 'COMPACTOR_CONTEXT', 'HOPS', 'THINKING', 'SITE', 'AFTER', 'CHATGPT', 'CHATGPT_ISSUER', 'CHATGPT_URL', 'CLAUDE', 'CLAUDE_SUB', 'MEDIA_MB')
+    $own = @('BIN', 'UPDATER', 'RUN', 'AGENT', 'SERVICE', 'SUPERVISOR')
     $task = { param($n) try { Get-ScheduledTask -TaskName $n -TaskPath '\' -ErrorAction Stop } catch { $null } }
     $olds = @('serve', 'device' | ForEach-Object { & $task "unii-$_" } | Where-Object { $_ -and ([string]$_.Description -match 'unii-made') })
     # a command line split as Windows splits it (CommandLineToArgvW: a
@@ -155,8 +159,12 @@
     if ((Test-Path -LiteralPath $oconf) -and (Test-Path -LiteralPath $conf)) {
       Write-Host "  $oconf was not moved: $conf exists already. Move $oconf aside if you don't need it."
     }
-    foreach ($v in @(Get-ChildItem env: | Where-Object { $_.Name -like 'UNII_*' -and @('UNII_BIN', 'UNII_UPDATER', 'UNII_RUN', 'UNII_AGENT', 'UNII_SERVICE', 'UNII_SUPERVISOR') -notcontains $_.Name })) {
-      Write-Host ("  " + $v.Name + " is set: ki doesn't read it any more; it reads KI_" + $v.Name.Substring(5) + ".")
+    foreach ($v in @(Get-ChildItem env: | Where-Object { $_.Name -like 'UNII_*' -and $own -notcontains $_.Name.Substring(5) })) {
+      if ($reads -contains $v.Name.Substring(5)) {
+        Write-Host ("  " + $v.Name + " is set: ki doesn't read it any more; it reads KI_" + $v.Name.Substring(5).ToUpper() + ".")
+      } else {
+        Write-Host ("  " + $v.Name + " is set: it isn't used any more, and can be removed.")
+      }
     }
     $cur = $dir
     if ($moving) { $cur = $odir }
@@ -347,7 +355,10 @@
             foreach ($a in @(& $argv ([string]$e.Arguments))) {
               if (($a -match '(^|[\\/])unii\.exe$') -or ($a -ieq $oldBin)) { $a = $bin }
               elseif ($a -like '--env=UNII_DIR=*') { $a = '--env=KI_DIR=' + $dir; $given = $true }
-              elseif ($a -like '--env=UNII_*') { $a = '--env=KI_' + $a.Substring('--env=UNII_'.Length) }
+              elseif ($a -match '^--env=UNII_([A-Za-z0-9_]*)=') {
+                if (($reads + $own) -notcontains $Matches[1]) { continue }
+                $a = '--env=KI_' + $a.Substring('--env=UNII_'.Length)
+              }
               $parts.Add($a)
             }
             # unii's data moved from the default folder to one ki isn't
