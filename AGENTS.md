@@ -16,7 +16,7 @@ podman run -d --name rig --network none -v "$PWD:/src:ro,z" ki-test
 podman logs -f rig                                          # until "rig up"
 ```
 
-It copies your checkout in at every start, so after a change, `podman restart rig`; `podman rm -f rig` forgets the chat and sign-ins. Work inside it with `podman exec -it rig bash`: `ki serve link` prints a sign-in link for `playwright-cli open`; the logs are in `/rig/logs`.
+It copies your checkout in at every start, so after a change, `podman restart rig`; `podman rm -f rig` forgets the chat and sign-ins. Work inside it with `podman exec -it rig bash`: `ki serve login` prints a code to type on the sign-in page (`playwright-cli open http://127.0.0.1:8788`); the logs are in `/rig/logs`.
 
 Steer what the models answer with `fake`, never with test commands in chat messages. Each command applies to the next model call; with nothing queued, a call gets "ok":
 

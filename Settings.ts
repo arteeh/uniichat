@@ -231,14 +231,6 @@ export namespace Settings {
       const error = pick ? config.config_value(file, key) + " isn't offered by the vendors and models checked: pick another." : key === "vendors" ? "There is no vendor " + text.replace(/^vendors can't offer /, "") + "." : text + ".";
       return { error, key };
     }
-    const site = config.config_value(file, "site");
-    let url: URL | null = null;
-    try {
-      url = new URL(site);
-    } catch {}
-    if (changed.has("site") && (url === null || !/^https?:$/.test(url.protocol) || url.pathname.replace(/\/$/, "") !== "" || url.search !== "" || url.hash !== "" || url.username !== "" || url.password !== "")) {
-      return { error: "The site is the address the server is reached at, like https://chat.example.com.", key: "site" };
-    }
     return null;
   }
 

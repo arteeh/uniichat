@@ -199,7 +199,7 @@ const TREE: Cmd = { use: "ki", about: "Ki: open your server's address in a brows
       const Service = await import("./Service.ts");
       await Service.start("serve", port === undefined ? [] : [port], Service.admin("serve"));
     }),
-    { use: "link", about: "a link that signs a browser in", run: async () => { (await import("./Owner.ts")).Owner.cli(); } },
+    { use: "login", about: "a code that signs a browser in", run: async () => { (await import("./Owner.ts")).Owner.cli(); } },
     { use: "sessions", about: "the browsers and devices signed in", run: async () => (await import("./Owner.ts")).Owner.sessions(), kids: [
       { use: "revoke <n>|--all", about: "sign one out, or all", arg: /^(\d+|--all)$/, need: true, run: async (n) => (await import("./Owner.ts")).Owner.sessions(n).catch((err: unknown) => fail(err_why(err))) },
     ] },

@@ -43,7 +43,6 @@ else
 fi
 # whether $REL is $MAIN, the worktree that publishes
 MAINS=""; [ "$(pwd -P)" != "$(cd "$MAIN" 2>/dev/null && pwd -P)" ] || MAINS=1
-grep -q "/releases/download/$VER/install.sh" web/install.sh || { echo "web/install.sh doesn't install $VER"; exit 1; }
 N=$VER
 TAG=$VER
 NOTES=$DEV/reviews/release/notes-$N.md

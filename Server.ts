@@ -37,7 +37,6 @@ import { get, rec, text_of } from "./Json.ts";
 import hello_md from "./prompts/hello.md" with { type: "text" };
 import app_js from "./web/app.js" with { type: "file" };
 import index_html from "./web/index.html" with { type: "file" };
-import install_sh from "./web/install.sh" with { type: "file" };
 import mark_svg from "./web/mark.svg" with { type: "file" };
 import style_css from "./web/style.css" with { type: "file" };
 import manifest from "./web/manifest.webmanifest" with { type: "file" };
@@ -161,7 +160,7 @@ const BUFFER     = 2 ** 31 - 1;
 
 const OWN        = ["/ws"];
 
-const HELLO      = hello_md.trim().replace("{install}", config.SITE + "/install.sh");
+const HELLO      = hello_md.trim().replace("{install}", install_cmd(false));
 const HELLO_LINE = "reply: hello: Ki, one endless chat kept in a memory tree, recent days in more detail; build anything for years; recalls the past (ad2cat.py); a chatbot with a memory system; ki device on the user's computers.";
 
 // the site's page, index.html: imported as a file, a path (Bun's types
@@ -178,7 +177,6 @@ const WEB: Record<string, string> = {
   "/icon-512.png"   : icon_512,
   "/icon-maskable-192.png": icon_mask_192,
   "/icon-maskable-512.png": icon_mask,
-  "/install.sh"     : install_sh,
   "/manifest.webmanifest": manifest,
   "/mark.svg"       : mark_svg,
   "/style.css"      : style_css,
@@ -1562,7 +1560,7 @@ export namespace Chat {
     const run = chat.main;
     const queue: Queued[] = run.queue.map(({ q }) => ({ kind: q.kind, text: shown(q.text) }));
     const sent = run.sent.flatMap(({ m }) => Array.from({ length: m.end - m.id }, (_, k) => m.id + k));
-    return { $: "state", agent: chat.id, busy: run.busy, wait: Chat.waits(chat), pick: chat.pick, ...config.OFFER, importing, limit: run.limit, queue, sent, sums: Chat.sums(chat), again: chat.mem.again, timers, mcp, talk, build: BUILD, site: config.SITE, thinking: config.THINKING };
+    return { $: "state", agent: chat.id, busy: run.busy, wait: Chat.waits(chat), pick: chat.pick, ...config.OFFER, importing, limit: run.limit, queue, sent, sums: Chat.sums(chat), again: chat.mem.again, timers, mcp, talk, build: BUILD, thinking: config.THINKING };
   }
 
   export function sums(chat: Chat): Sums | null {
@@ -2538,7 +2536,7 @@ export namespace Main {
         Memory.stop(chat.mem);
       });
     });
-    console.log("ki: " + config.SITE + ", data in " + config.DIR + ", on 127.0.0.1:" + port);
+    console.log("ki: serving on port " + port + " (127.0.0.1), data in " + config.DIR);
     Service.ready("serve");
     for (const note of [config.MCP_ENV_NOTE, config.MCP_FILE_STARTUP_NOTE]) {
       if (note !== null) {

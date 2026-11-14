@@ -322,7 +322,6 @@ const SETTING: Record<string, [string, string]> = {
   thinking  : ["Show thinking", ""],
   hops      : ["Hop limit", "Agent-to-agent messages in a row; 0: off."],
   compactor_context : ["Compactor context", "KB of chat each summary sees (1–128)."],
-  site      : ["Site", "For sign-in links."],
 };
 
 const KEY: Record<string, [string, string]> = {
@@ -338,7 +337,6 @@ const GROUPS: Array<[string, string[]]> = [
   ["Chat", ["thinking"]],
   ["Agents", ["hops"]],
   ["Models", ["vendors", "pick", "compactor", "compactor_context"]],
-  ["Server", ["site"]],
 ];
 
 // the server's settings, each saved as it's changed (#125)

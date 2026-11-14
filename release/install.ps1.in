@@ -73,7 +73,7 @@
     $oldBin = $env:UNII_BIN
     if (-not $oldBin) { $oldBin = Join-Path $env:LOCALAPPDATA 'Programs\unii\unii.exe' }
     # the KI_* settings ki reads, and those unii set for its own processes
-    $reads = @('URL', 'DIR', 'PROFILES', 'MCP', 'VENDORS', 'MODELS', 'PICK', 'COMPACTOR', 'COMPACTOR_CONTEXT', 'HOPS', 'THINKING', 'SITE', 'AFTER', 'CHATGPT', 'CHATGPT_ISSUER', 'CHATGPT_URL', 'CLAUDE', 'CLAUDE_SUB', 'MEDIA_MB')
+    $reads = @('URL', 'DIR', 'PROFILES', 'MCP', 'VENDORS', 'MODELS', 'PICK', 'COMPACTOR', 'COMPACTOR_CONTEXT', 'HOPS', 'THINKING', 'AFTER', 'CHATGPT', 'CHATGPT_ISSUER', 'CHATGPT_URL', 'CLAUDE', 'CLAUDE_SUB', 'MEDIA_MB')
     $own = @('BIN', 'UPDATER', 'RUN', 'AGENT', 'SERVICE', 'SUPERVISOR')
     $task = { param($n) try { Get-ScheduledTask -TaskName $n -TaskPath '\' -ErrorAction Stop } catch { $null } }
     $olds = @('serve', 'device' | ForEach-Object { & $task "unii-$_" } | Where-Object { $_ -and ([string]$_.Description -match 'unii-made') })

@@ -43,12 +43,14 @@ export async function signed(url: string, token: string | undefined): Promise<bo
 export async function login(url: string, what: string): Promise<string> {
   const key = Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString("base64url");
   const out = await View.post(url + "/api/login", { key, what });
-  const link = get(out, "url");
+  // a server before 42 answers the whole link
+  const ticket = get(out, "ticket");
+  const link = typeof ticket === "string" ? url + "/auth?t=" + ticket : get(out, "url");
   if (typeof link !== "string") {
     fail(text_of(get(out, "error"), "no sign-in from " + url));
   }
   console.log("To sign " + what + " in to " + url + ", open this link in a browser signed in there");
-  console.log("(on the server, `ki serve link` signs a browser in):\n\n  " + link + "\n");
+  console.log("(on the server's computer, `ki serve login` gives a code that signs a browser in):\n\n  " + link + "\n");
   console.log("and type this code: " + String(get(out, "code")) + "\n");
   const wait = { headers: auth(key), timeout: false } as RequestInit;
   while (true) {

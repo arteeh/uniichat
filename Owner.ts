@@ -5,22 +5,27 @@ import * as config from "./Config.ts";
 import { Disk } from "./Disk.ts";
 import { get, text_of } from "./Json.ts";
 import { Push } from "./Push.ts";
+import { SIGN_IN, SIGN_IN_FORM } from "./View.ts";
 
-type Ticket = { session: string | null; what: string };
+// a device's sign-in (session: the hash of its key), or the browser
+// sign-in code of `ki serve login` (tries: its wrong ones so far)
+type Ticket = { session: string | null; what: string; tries?: number };
 
 export const FILE = config.DIR + "/ki.db";
 
 const COOKIE = "ki";
 
-// a session cookie's attributes: Secure only on an https site, as Safari
-// drops a Secure cookie an http one (a server on 127.0.0.1) sets
-const KEEP = "; Path=/; HttpOnly; SameSite=Lax; Max-Age=31536000" + (config.SITE.startsWith("https:") ? "; Secure" : "");
+const KEEP = "; Path=/; HttpOnly; SameSite=Lax; Max-Age=31536000";
 
 const ACTS = 7 * 864e5;
 
 const LINK  = 15 * 60 * 1000;
 const WAIT  = 5 * 60 * 1000;
 const ASKS  = 100;
+
+// a sign-in code's ticket is kept as the hash of this and the code
+const LOGIN = "login ";
+const TRIES = 5;
 
 const WEB_PUSHES = 32;
 
@@ -111,8 +116,20 @@ export namespace Owner {
     console.log(rows.length === 0 ? "No sessions." : "Last use isn't tracked. `ki serve sessions revoke <n>` signs one out; `--all`, all.");
   }
 
+  // one code at a time: a new one replaces the one before
   export function cli(): void {
-    console.log("Open this link in your browser within 15 minutes to sign in (it works once):\n\n  " + config.SITE + "/auth?t=" + Owner.ticket({ session: null, what: "" }) + "\n");
+    const db = Owner.open();
+    const code = String(crypto.randomInt(0, 1e6)).padStart(6, "0");
+    db.query("delete from tickets where expires < ? or data ->> 'session' is null").run(Date.now());
+    db.query("insert into tickets values (?, ?, ?)").run(Owner.hash(LOGIN + code), JSON.stringify({ session: null, what: "", tries: 0 }), Date.now() + LINK);
+    console.log("Sign-in code: " + code + "\n\nType it on this server's sign-in page, at whatever address you open it, within 15 minutes. It works once.");
+  }
+
+  // Secure when the request came over https (or a proxy says it did), as
+  // Safari drops a Secure cookie that an http page (127.0.0.1) sets
+  export function cookie(req: Request): string {
+    const proto = (req.headers.get("x-forwarded-proto") ?? "").split(",")[0].trim().toLowerCase();
+    return KEEP + (new URL(req.url).protocol === "https:" || proto === "https" ? "; Secure" : "");
   }
 
   export function act_put(id: string, ans: object): void {
@@ -140,23 +157,21 @@ export namespace Owner {
         }
         const session = Owner.hash(key);
         const what = text_of(get(body, "what"), "a device").replace(/[^\w .,:@()-]/g, "").slice(0, 80);
-        const link = config.SITE + "/auth?t=" + Owner.ticket({ session, what });
-        return Response.json({ url: link, code: Owner.code(session) });
+        return Response.json({ ticket: Owner.ticket({ session, what }), code: Owner.code(session) });
       }
       case "/auth": {
         const t = url.searchParams.get("t") ?? "";
         if (req.method === "POST") {
           return Owner.confirm(req);
         }
+        if (t === "") {
+          return Owner.page_login("");
+        }
         const link = Owner.ticket_read(t, false);
-        if (link === null) {
-          return Owner.page("This sign-in link expired", "Ask for a new one: run <code>ki serve link</code> on the server, or start the device again.");
+        if (link === null || link.session === null) {
+          return Owner.page("This sign-in link expired", "Start the device again for a new one.");
         }
-        if (link.session !== null) {
-          return owner ? Owner.page_confirm(t, link.what, "") : Owner.page("Sign in this browser first", "Run <code>ki serve link</code> on the server, open the link it prints, then open this link again.");
-        }
-        // a button, so a chat app's preview of the link doesn't use it up
-        return Owner.page("Sign in this browser", `Sign in to this ki server as its owner.</p><form method="post" action="/auth"><input type="hidden" name="t" value="${Owner.safe(t)}"><button type="submit" autofocus>Sign in</button></form><p>`);
+        return owner ? Owner.page_confirm(t, link.what, "") : Owner.page("Sign in this browser first", "Run <code>ki serve login</code> on the server's computer and type the code it prints on this server's sign-in page, then open this link again.");
       }
       case "/api/wait": {
         if (owner) {
@@ -231,15 +246,10 @@ export namespace Owner {
     };
     const t = field("t");
     const typed = field("code").replace(/\D/g, "");
-    const link = Owner.ticket_read(t, false);
-    if (link !== null && link.session === null) {
-      Owner.ticket_read(t, true);
-      const db = Owner.open();
-      db.query("delete from sessions where hash = ?").run(Owner.hash(Owner.token(req)));
-      const token = Owner.random();
-      db.query("insert into sessions values (?, ?, ?)").run(Owner.hash(token), "a browser", Date.now());
-      return new Response(null, { status: 303, headers: { location: config.SITE + "/", "set-cookie": COOKIE + "=" + token + KEEP } });
+    if (t === "") {
+      return Owner.login(req, typed);
     }
+    const link = Owner.ticket_read(t, false);
     if (link === null || link.session === null || !Owner.is(req)) {
       return Owner.page("This sign-in link expired", "Start the device again for a new one.");
     }
@@ -250,6 +260,34 @@ export namespace Owner {
     Owner.ticket_read(t, true);
     WAITS.get(link.session)?.();
     return Owner.page("Signed in", "You can close this tab and go back to " + Owner.safe(link.what) + ".");
+  }
+
+  // a browser signs in with the code of `ki serve login`: used once, and
+  // gone after TRIES wrong ones; it stays on the address it came in on
+  export function login(req: Request, typed: string): Response {
+    const db = Owner.open();
+    const live = db.query("select hash from tickets where expires >= ? and data ->> 'session' is null and data ->> 'tries' is not null").get(Date.now()) as { hash: string } | null;
+    if (live === null) {
+      return Owner.page_login("No sign-in code is waiting: run <code>ki serve login</code> again for a new one.");
+    }
+    const used = typed.length === 6 && db.query("delete from tickets where hash = ? and expires >= ? returning 1").get(Owner.hash(LOGIN + typed), Date.now()) !== null;
+    if (!used) {
+      const row = db.query("update tickets set data = json_set(data, '$.tries', (data ->> 'tries') + 1) where hash = ? returning data ->> 'tries' as tries").get(live.hash) as { tries: number } | null;
+      if (row !== null && row.tries >= TRIES) {
+        db.query("delete from tickets where hash = ?").run(live.hash);
+        return Owner.page_login(TRIES + " wrong codes: this sign-in code works no more. Run <code>ki serve login</code> again for a new one.");
+      }
+      return Owner.page_login("That code didn't match. Check the code <code>ki serve login</code> printed and try again.");
+    }
+    db.query("delete from sessions where hash = ?").run(Owner.hash(Owner.token(req)));
+    const token = Owner.random();
+    db.query("insert into sessions values (?, ?, ?)").run(Owner.hash(token), "a browser", Date.now());
+    return new Response(null, { status: 303, headers: { location: "/", "set-cookie": COOKIE + "=" + token + Owner.cookie(req) } });
+  }
+
+  export function page_login(err: string): Response {
+    const note = err === "" ? "" : `<p class="err">${err}</p>`;
+    return Owner.page("Sign in", `${SIGN_IN}</p>${note}${SIGN_IN_FORM}<p>`);
   }
 
   export function page_confirm(t: string, what: string, err: string): Response {

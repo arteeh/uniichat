@@ -38,7 +38,7 @@ Set up
 ------
 
 1. **Start the server** on the computer (preferably one that's reachable and on 24/7) that keeps your chat: `ki serve -d`. It runs in the background from then on, at http://127.0.0.1:8788, with its data in `~/.ki` (or `$KI_DIR`). See the Q&A if you want to set up a client on another device right away.
-2. **Sign in.** `ki serve link` on that computer prints a link that signs your browser in. Devices sign in with a link and a code you confirm in that browser.
+2. **Sign in.** Open the server's address in your browser and type the code that `ki serve login` prints on that computer. Devices sign in with a link and a code you confirm in that browser.
 3. **Pick a model.** In the web app, Settings (the cogwheel): add API keys. To use your Claude or ChatGPT plan instead, run `ki serve claude login` or `ki serve chatgpt login` on the server's computer, then pick `claude-sub` or `openai-sub`.
 4. **Add your computers.** On each one Ki may work on: `ki device -d https://your-server`. Ki works in `~/.ki/work` there. Want it working on the server's computer too? Run a device there as well.
 

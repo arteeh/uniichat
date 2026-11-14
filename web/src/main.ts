@@ -144,7 +144,7 @@ async function boot(): Promise<void> {
   document.body.classList.toggle("start", START);
   setTimeout(() => document.body.classList.remove("start"), START_SHOWN);
   if (await boot_me() === null) {
-    solo("Sign in", "This Ki server is private. On the computer it runs on, run <code>ki serve link</code> and open the link it prints here.");
+    solo("Sign in", View.SIGN_IN, View.SIGN_IN_FORM);
     return;
   }
   chat();
@@ -212,9 +212,9 @@ function tree_view(): boolean {
   return location.hash.toLowerCase() === "#view";
 }
 
-function solo(title: string, sub: string): void {
+function solo(title: string, sub: string, more = ""): void {
   document.body.className = "solo";
-  document.body.innerHTML = `<main><h1>${title}</h1><p class="sub">${sub}</p></main>`;
+  document.body.innerHTML = `<main><h1>${title}</h1><p class="sub">${sub}</p>${more}</main>`;
 }
 
 function chat(): void {

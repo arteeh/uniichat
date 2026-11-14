@@ -34,15 +34,15 @@ if [ ! -f ~/.ki/config.json ]; then
 fi
 
 setsid ki serve 8788 > $R/logs/serve.log 2>&1 &
-up serve.log "^ki: http"
+up serve.log "^ki: serving"
 
 mkdir -p $R/box/.config/ki $R/box/work
 [ -f $R/box/.config/ki/device.json ] || echo '{ "name": "box", "work": "/rig/box/work" }' > $R/box/.config/ki/device.json
 HOME=$R/box KI_DIR=$R/box/.ki setsid ki device $B > $R/logs/device.log 2>&1 &
 up device.log "type this code\|^ki device"
 if grep -q "type this code" $R/logs/device.log; then
-  t=$(ki serve link | grep -o 'auth?t=[^ ]*' | cut -d= -f2)
-  curl -s -o /dev/null -c $R/jar --data-urlencode "t=$t" $B/auth
+  code=$(ki serve login | grep -o '[0-9]\{6\}' | head -1)
+  curl -s -o /dev/null -c $R/jar --data-urlencode "code=$code" $B/auth
   dt=$(grep -o 'auth?t=[^ ]*' $R/logs/device.log | cut -d= -f2)
   code=$(grep -o 'type this code: [0-9]*' $R/logs/device.log | grep -o '[0-9]*$')
   curl -s -o /dev/null -b $R/jar --data-urlencode "t=$dt" --data-urlencode "code=$code" $B/auth

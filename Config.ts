@@ -53,7 +53,6 @@ export const SETTINGS: Setting[] = [
   { key: "compactor_context", def: "4",                         apply: "now",     server_only: null },
   { key: "hops",      def: "4",                                 apply: "now",     server_only: null },
   { key: "thinking",  def: "off",                               apply: "now",     server_only: null },
-  { key: "site",      def: "http://127.0.0.1:8788",             apply: "restart", server_only: null },
   { key: "after",     def: "",                                  apply: "now",     server_only: "runs a command" },
 ];
 
@@ -98,7 +97,6 @@ const MADE = config_make(FILE);
 
 export const STARTED: Record<string, string> = Object.fromEntries(SETTINGS.map((s) => [s.key, config_value(FILE, s.key)]));
 
-export const SITE    = config_value(FILE, "site").replace(/\/$/, "");
 export const OFFER: Offer = MADE.offer;
 
 export let   AFTER      = MADE.after;

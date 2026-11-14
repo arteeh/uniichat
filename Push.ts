@@ -200,8 +200,10 @@ export namespace Push {
     return "vapid t=" + head + "." + sig.toString("base64url") + ", k=" + keys.public;
   }
 
+  // a fixed sender every push service takes (Apple's refuses one at
+  // localhost or with no scheme, RFC 8292 asks for https: or mailto:)
   export function subject(): string {
-    return config.SITE.startsWith("https:") ? config.SITE : "mailto:noreply@" + new URL(config.SITE).hostname;
+    return "https://github.com/arteeh/ki";
   }
 
   // a message to a browser: the push service's answer's status (201:

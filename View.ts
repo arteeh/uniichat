@@ -82,7 +82,6 @@ type ServerSays = {
   agent?    : string;
   thinking? : boolean;
   build?    : string;
-  site?     : string;
 };
 
 type State = Turning & ByRun & Offered & ChatSet & ServerSays;
@@ -214,6 +213,10 @@ export const USE_PING = 20000;
 export const FRAME = 2 ** 22;
 
 export const HINT = "Message Ki";
+
+// a browser's sign-in, on the app's page and the server's own
+export const SIGN_IN = "This Ki server is private. On the computer it runs on, run <code>ki serve login</code> and type the code it prints here.";
+export const SIGN_IN_FORM = `<form class="code" method="post" action="/auth"><input name="code" inputmode="numeric" maxlength="6" autocomplete="one-time-code" autofocus aria-label="Sign-in code"><button type="submit">Sign in</button></form>`;
 
 const WAIT = "compressing…";
 const SUMS = "compressing earlier messages…";

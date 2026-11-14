@@ -66,6 +66,10 @@ textarea { text-wrap: wrap; }
 body.guest :is(.net, .attach, .mic, #pick, #list, header > :not(.net)) { display: none !important; }
 body.solo main { width: min(420px, 100% - 48px); margin: 18vh auto; text-align: center; }
 body.solo h1 { margin: 0; font: 400 46px/1.05 var(--serif); letter-spacing: -.015em; }
+body.solo form { display: flex; gap: 8px; justify-content: center; margin: 22px 0 0; }
+body.solo form input:not([type=hidden]) { box-sizing: border-box; width: 9em; height: 40px; padding: 0 10px; border: 1px solid var(--frame); border-radius: 9px; background: var(--paper); color: var(--ink); font: 18px var(--sans); letter-spacing: .12em; text-align: center; font-variant-numeric: tabular-nums; }
+body.solo form button { height: 40px; padding: 0 16px; border-radius: 9px; background: var(--block); font: 500 14px var(--sans); }
+body.solo .err { margin: 18px 0 0; color: var(--red); font-size: 14.5px; }
 .sub { margin: 18px 0 0; color: var(--mid); font-size: 14.5px; }
 
 header { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; gap: 6px; height: var(--head); padding: 0 max(20px, env(safe-area-inset-right)) 0 max(20px, env(safe-area-inset-left)); background: var(--paper); border-bottom: 1px solid var(--hair); }

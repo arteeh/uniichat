@@ -19,5 +19,5 @@ How? No new model. No magic. Just a regular chatbot with a neat memory system.
 I can also work on your computers: install ki there and run `ki device`.
 
 ```
-curl -fsSL {install} | sh
+{install}
 ```
