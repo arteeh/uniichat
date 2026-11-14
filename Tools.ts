@@ -51,7 +51,8 @@ export type Subs = {
   show    : (name: string) => string | null;
 };
 
-// what the agents share: their notes on devices and MCP servers go to the main agent
+// what the agents share: their notes on devices and MCP servers go to the
+// oldest active agent
 type Hub = {
   note   : (text: string) => void;
   change : () => void;
@@ -629,11 +630,11 @@ export namespace Tools {
   }
 
   // a job's report goes to the agent that started it, a done subagent's to
-  // its spawner, or to the main agent if that one is gone
+  // its spawner, or to the oldest active agent if that one is gone
   export function report(tools: Tools, who: string, text: string): void {
     const seat = tools.seats.get(who);
     const owner = seat === undefined ? tools.owner(who) : undefined;
-    (seat ?? owner ?? tools.seats.get(Team.lead().id))?.report(owner === undefined ? text : text.replace("] ", "] " + who + "'s job, "));
+    (seat ?? owner ?? tools.seats.get(Team.first().id))?.report(owner === undefined ? text : text.replace("] ", "] " + who + "'s job, "));
   }
 
 }

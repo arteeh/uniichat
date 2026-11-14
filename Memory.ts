@@ -9,13 +9,13 @@ import * as Names from "./Names.ts";
 import { Pick } from "./Pick.ts";
 import * as Prompts from "./Prompts.ts";
 import type { Timer } from "./Timer.ts";
-import { FIT, HEAD, IMAGE, image_kind, MEDIA, media_ext, PIXELS, STORED, TOKEN, type Pending } from "./View.ts";
+import { FIT, HEAD, IMAGE, image_kind, LINES, MEDIA, media_ext, PIXELS, STORED, TOKEN, type Pending } from "./View.ts";
 import { move_over } from "./Write.ts";
 
 export type Root = Msg & { i: number; size: number; date: string };
 
 // from: the agent whose message it is, by id; copy: a team line's
-// message there
+// message there (a copy made before 41)
 export type Msg = { kind: Kind; text: string; date?: string; images?: string[]; imported?: boolean; line?: string; more?: boolean; page?: boolean; act?: string; from?: string; copy?: number } & Pair;
 
 export type Pair = { of?: string; tool?: string };
@@ -37,7 +37,7 @@ type End = [number, number];
 
 type Kept = { parts: Array<[number, number]>; batch: boolean };
 
-type Saved = Kept & { seen?: Kept; main: End; tree: End; pick: object | null; goal?: string | null; work?: string[]; timers?: Timer[]; off?: string[]; talk?: number | null; used?: number | null; used_at?: number; hop?: number; origin?: string | null };
+type Saved = Kept & { seen?: Kept; main: End; tree: End; pick: object | null; goal?: string | null; work?: string[]; timers?: Timer[]; talk?: number | null; leader?: boolean; lines?: number; used?: number | null; used_at?: number; hop?: number; origin?: string | null };
 
 // main: the run's inbox, as it was last; held: what came for an archived
 // agent, delivered on its restore
@@ -57,11 +57,13 @@ type Logs = {
   ends   : Record<Stream, End>;
 };
 
+// leader: each turn sees lines of the other agents' memories, this many (#168)
 type Chosen = {
   pick   : object | null;
   goal   : string | null;
-  off    : string[];
   talk   : number | null;
+  leader : boolean;
+  lines  : number;
   talked : Map<number, number>;
   used   : number | null;
   used_at: number;
@@ -90,11 +92,9 @@ type Tree = {
   again  : Again | null;
 };
 
-// reuse: a node's line made elsewhere, or "wait" till it is (#149)
 type Hooks = {
   share  : () => Omit<Share, keyof Pick>;
   made?  : (l: number, i: number) => void;
-  reuse? : (l: number, i: number) => { text: string } | "wait" | null;
   name?  : () => string;
   acted  : (id: string, ans: object) => void;
 };
@@ -109,7 +109,7 @@ const LOGGED = 60e3;
 
 const FAILED = new Map<string, number>();
 const TRIES = 5;
-export const VIEW_HIGH = 128000;
+const VIEW_HIGH = 128000;
 
 const TALK_SHARE_OF_WINDOW = 3 / 4;
 const BLOCK = 4;
@@ -145,15 +145,16 @@ export namespace Memory {
   export function load(dir: string, share: Memory["share"], acted: Memory["acted"] = () => {}, docs = dir): Memory {
     fs.mkdirSync(dir, { recursive: true });
     const mem: Memory = {
-      dir, docs, fds: new Map(), count: 0, open: 0, pick: null, goal: null, off: [], talk: null, talked: new Map(), used: null, used_at: 0, work: [], timers: [], hop: 0, origin: null, queue: [], held: [], nodes: new Map(), ready: [[], []], ends: { main: [0, 0], tree: [0, 0] },
+      dir, docs, fds: new Map(), count: 0, open: 0, pick: null, goal: null, talk: null, leader: false, lines: LINES, talked: new Map(), used: null, used_at: 0, work: [], timers: [], hop: 0, origin: null, queue: [], held: [], nodes: new Map(), ready: [[], []], ends: { main: [0, 0], tree: [0, 0] },
       view: { parts: [], size: 0, batch: false, high: VIEW_HIGH }, seen: { parts: [], size: 0, batch: false, high: config.COMPACTOR_CONTEXT },
       busy: new Map(), sides: new Map(), calls: new Map(), hold: [null, "paused"], done: false, wait: new Set(), share, acted, again: null,
     };
     const saved = Memory.saved(dir);
     mem.pick = saved?.pick ?? null;
     mem.goal = saved?.goal ?? null;
-    mem.off  = saved?.off ?? [];
     mem.talk = saved?.talk ?? null;
+    mem.leader = saved?.leader ?? false;
+    mem.lines = saved?.lines ?? LINES;
     mem.used = saved?.used ?? null;
     mem.work = saved?.work ?? [];
     mem.timers = saved?.timers ?? [];
@@ -195,7 +196,7 @@ export namespace Memory {
   export function save(mem: Memory): void {
     const file = mem.dir + "/view.json";
     const [chat, seen] = [mem.view, mem.seen].map((view): Kept => ({ parts: view.parts.map((part) => [part.l, part.i]), batch: view.batch }));
-    fs.writeFileSync(file + ".new", JSON.stringify({ ...chat, seen, pick: mem.pick, goal: mem.goal, off: mem.off, talk: mem.talk, used: mem.used, used_at: mem.used_at, work: mem.work, timers: mem.timers, hop: mem.hop, origin: mem.origin, ...mem.ends }));
+    fs.writeFileSync(file + ".new", JSON.stringify({ ...chat, seen, pick: mem.pick, goal: mem.goal, talk: mem.talk, leader: mem.leader, lines: mem.lines, used: mem.used, used_at: mem.used_at, work: mem.work, timers: mem.timers, hop: mem.hop, origin: mem.origin, ...mem.ends }));
     move_over(file + ".new", file);
     void Disk.wrote(file);
   }
@@ -674,13 +675,7 @@ export namespace Memory {
           break;
         }
         const text = mem.busy.has(Memory.slot(l, i)) ? null : Memory.source(mem, l, i);
-        const reused = text === null || l === 0 ? null : mem.reuse?.(l, i) ?? null;
-        if (reused === "wait") {
-          continue;
-        }
-        if (reused !== null) {
-          free.push({ l, i, text: reused.text });
-        } else if (text !== null && Memory.bytes(text) <= NODE) {
+        if (text !== null && Memory.bytes(text) <= NODE) {
           free.push({ l, i, text });
         } else if (text !== null) {
           Memory.job(mem, l, i, text);
@@ -1017,6 +1012,24 @@ export namespace Memory {
     return Memory.ref(part) + "|" + Memory.flat(text);
   }
 
+  // the newest n lines of a memory, oldest first: walking back from its
+  // newest message, each the biggest line made that ends where the one
+  // after it begins, at most a level above that one; a message with no
+  // line yet is its start (#168)
+  export function tail(mem: Memory, n: number): string[] {
+    const out: string[] = [];
+    for (let [end, l] = [mem.count, -1]; out.length < n && end > 0; ) {
+      let up = l + 1;
+      while (up > 0 && (end % 2 ** up !== 0 || Memory.node(mem, { l: up, i: end / 2 ** up - 1 }) === null)) {
+        up--;
+      }
+      const part = { l: up, i: end / 2 ** up - 1 };
+      out.push(Memory.line(part, Memory.node(mem, part) ?? Memory.cut(Memory.flat(Memory.show(Memory.at(mem, end - 1))))));
+      [end, l] = [end - 2 ** up, up];
+    }
+    return out.reverse();
+  }
+
   export function before(view: Part[], end: number): Part[] {
     return view.filter((part) => Memory.span(part)[1] < end);
   }
@@ -1158,8 +1171,8 @@ export namespace Memory {
     }
   }
 
-  // the images: all of the store for the agent it is kept with (the main agent), only
-  // its own messages' for another
+  // the images: all of the store for the agent it is kept with (Team.keeper),
+  // only its own messages' for another
   export function* dump(mem: Memory): Generator<string> {
     const ls = (sub: string) => (fs.existsSync(mem.docs + sub) ? fs.readdirSync(mem.docs + sub).sort() : []);
     const own = new Set<string>();

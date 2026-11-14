@@ -23,8 +23,8 @@ Each message has a kind:
 - work: another agent's message to you, starting "[Name]", a scheduled
   message from the timer (your schedule tool), starting "[Timer id]", or a
   job's report, starting "[Job id]"
-- team (the main agent only): a line copied from another agent's memory, starting "[Name]";
-  zoom(id, 1) gives its message whole, from that agent's chat
+- team: in an older chat, a line copied from another agent's memory, starting
+  "[Name]"; zoom(id, 1) gives its message whole, from that agent's chat
 - ai: another AI's replies and tool calls, from an imported chat; not yours
 - note: the app's own notes, and memories from before this chat
 

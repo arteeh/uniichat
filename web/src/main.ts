@@ -51,8 +51,8 @@ let START = false;
 const START_SHOWN = 2000;
 let TRIP = 0;
 
-// the agent that sees every chat: the one / opens (Server stamps it)
-const LEAD = document.documentElement.dataset.lead ?? "";
+// the first agent in the list: the one / opens (Server stamps it)
+const FIRST = document.documentElement.dataset.first ?? "";
 
 const AGENT = /^\/a\/([a-z0-9]{1,16})(\/edit)?$/;
 
@@ -64,7 +64,7 @@ const PAGES = ["/settings", "/account"];
 // a reloaded screen over a chat (#164) starts on that chat's agent, or on
 // the last chat open in this tab, whatever width the chain was laid at
 const OVER = get(history.state, "chain");
-const v = View.view_new(AGENT.exec(location.pathname)?.[1] ?? (Array.isArray(OVER) ? AGENT.exec(String(OVER.at(-2)))?.[1] : undefined) ?? ([...PAGES, "/new"].includes(location.pathname) ? sessionStorage.getItem(kept("chat")) : null) ?? LEAD);
+const v = View.view_new(AGENT.exec(location.pathname)?.[1] ?? (Array.isArray(OVER) ? AGENT.exec(String(OVER.at(-2)))?.[1] : undefined) ?? ([...PAGES, "/new"].includes(location.pathname) ? sessionStorage.getItem(kept("chat")) : null) ?? FIRST);
 
 const BOX = $(".composer .field", HTMLElement);
 
@@ -735,6 +735,11 @@ function hear(msg: View.Server): void {
     start(v.team);
     if (location.pathname === "/settings") {
       archived_draw();
+      account_who();
+    }
+    const form = document.querySelector<HTMLFormElement>("#account form.agent");
+    if (form !== null && (FORM.test(location.pathname) || location.pathname === "/new")) {
+      leader_draw(form, FORM.exec(location.pathname)?.[2] ?? null);
     }
   }
   if (AGENT.test(location.pathname) && !FORM.test(location.pathname) && AGENT.exec(location.pathname)?.[1] !== v.agent) {
@@ -827,7 +832,7 @@ function import_flow(): void {
 }
 
 async function import_open(first: boolean): Promise<void> {
-  IMPORT.done = (await fetch("/api/imported").then((res) => res.json()).catch(() => ({}))) as Import.Done;
+  IMPORT.done = (await fetch("/api/imported?agent=" + encodeURIComponent(v.agent)).then((res) => res.json()).catch(() => ({}))) as Import.Done;
   $("#import form .skip").textContent = first ? "Start fresh" : "Close";
   IMPORT.step = first ? "start" : IMPORT.step === "done" ? "" : IMPORT.step;
   import_draw("");
@@ -1264,12 +1269,12 @@ function up_from(path: string): string | null {
   const url = new URL(path, location.origin);
   const edit = FORM.exec(url.pathname)?.[2];
   if (url.pathname === TREE) {
-    return "/a/" + (url.searchParams.get("a") ?? LEAD);
+    return "/a/" + (url.searchParams.get("a") ?? FIRST);
   }
   if (edit !== undefined) {
     return "/a/" + edit;
   }
-  return url.pathname === "/" ? null : over_chat(url.pathname) && WIDE.matches && v.agent !== LEAD ? "/a/" + v.agent : "/";
+  return url.pathname === "/" ? null : over_chat(url.pathname) && WIDE.matches && v.agent !== FIRST ? "/a/" + v.agent : "/";
 }
 
 // a screen that sits over the chat that was open, when wide
@@ -1315,7 +1320,7 @@ function route(): void {
   const chat = !page && !tree && !list;
   const sub = SUB.exec(p);
   const left = !$("#log").hidden && v.page === null;
-  chat_to(AGENT.exec(p)?.[1] ?? sub?.[1] ?? (tree ? new URLSearchParams(location.search).get("a") ?? LEAD : p === "/" ? LEAD : v.agent));
+  chat_to(AGENT.exec(p)?.[1] ?? sub?.[1] ?? (tree ? new URLSearchParams(location.search).get("a") ?? FIRST : p === "/" ? FIRST : v.agent));
   sessionStorage.setItem(kept("chat"), v.agent);
   for (const out of View.view_act(v, { $: "Goto", name: sub?.[2] ?? null })) {
     View.link_send(v, out);
@@ -1421,7 +1426,7 @@ async function agent_page(id: string | null): Promise<void> {
     return;
   }
   $("header .title").textContent = a?.name ?? "New agent";
-  el.innerHTML = Html.agent_html(a);
+  el.innerHTML = Html.agent_html(a, leader_others(id));
   const form = find(el, "form", HTMLFormElement);
   const [name, prompt] = [find(form, "[name=name]", HTMLInputElement), find(form, "[name=prompt]", HTMLTextAreaElement)];
   const was = { prompt: a?.own === true ? null : a?.template ?? all.template };
@@ -1443,6 +1448,7 @@ async function agent_page(id: string | null): Promise<void> {
     } else if (t === name) {
       follow();
     }
+    leader_draw(form, id);
   };
   form.onsubmit = (ev) => {
     ev.preventDefault();
@@ -1466,6 +1472,20 @@ async function agent_page(id: string | null): Promise<void> {
       void View.post("/api/agents/" + a.id + "/archive", {}).then((out) => (out.error === undefined ? go("/") : toast(text_of(out.error))));
     }
   });
+}
+
+// the active agents but this one, whose lines Leader mode would show
+function leader_others(id: string | null): number {
+  return v.team.filter((m) => m.archived === 0 && m.id !== id).length;
+}
+
+// Lines per agent shows while Leader mode is on, with what it costs
+function leader_draw(form: HTMLFormElement, id: string | null): void {
+  const on = find(form, "[name=leader]", HTMLInputElement).checked;
+  const lines = find(form, "[name=lines]", HTMLInputElement);
+  find(form, ".set.lines", HTMLElement).hidden = !on;
+  const n = Number(lines.value);
+  find(form, ".cost", HTMLElement).textContent = Number.isInteger(n) && n >= 1 ? Html.leader_cost(n, leader_others(id)) : "";
 }
 
 // an upload, cropped square to 256 px, into the media store, picked
@@ -1509,7 +1529,8 @@ async function agent_save_now(form: HTMLFormElement, a: Html.Agent | null, at: E
     return;
   }
   const data = new FormData(form);
-  const body = Object.fromEntries(["name", "about", "picture", "prompt"].map((k) => [k, text_of(data.get(k))]));
+  const text = (k: string) => text_of(data.get(k));
+  const body = { name: text("name"), about: text("about"), picture: text("picture"), prompt: text("prompt"), lines: text("lines"), leader: data.get("leader") === "on" };
   const why = at.closest(".set")?.querySelector(".err") ?? form.querySelector(".save .why") ?? form.querySelector(".up .why");
   form.querySelectorAll(".err").forEach((e) => (e.textContent = ""));
   RENEW.saving++;
@@ -1529,6 +1550,13 @@ async function agent_save_now(form: HTMLFormElement, a: Html.Agent | null, at: E
     return;
   }
   $("header .title").textContent = body.name;
+}
+
+// export and import are of the agent whose chat was open last
+function account_who(): void {
+  const name = v.team.find((m) => m.id === v.agent)?.name ?? "";
+  document.querySelectorAll<HTMLElement>("#account .who").forEach((el) => (el.textContent = name === "" ? "this agent" : name));
+  document.querySelector<HTMLAnchorElement>("#account a.export")?.setAttribute("href", "/export?agent=" + encodeURIComponent(v.agent));
 }
 
 function archived_draw(): void {
@@ -1566,6 +1594,7 @@ async function account(): Promise<void> {
   const push = await notify_state().catch(() => null);
   el.innerHTML = Html.account_html(push);
   archived_draw();
+  account_who();
   RENEW.dirty.clear();
   el.oninput = (ev) => {
     const form = (ev.target as Element).closest("form");

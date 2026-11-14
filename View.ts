@@ -42,6 +42,10 @@ const PACE = 1e-4;
 
 export const OPENING = 1;
 
+// Leader mode's lines per agent: the default, the most (#168)
+export const LINES = 6;
+export const LINES_MOST = 30;
+
 export const SUMMARIES = "summaries";
 export type Wait = string;
 
@@ -634,7 +638,7 @@ function running(rows: Row[], from: number): Row[] {
 // hidden thinking that just ended (#163) stays "Thinking" until what the
 // model goes on with comes
 function thought_last(v: View): boolean {
-  const last = v.parts.findLast(([at]) => v.whole.get(at)?.kind !== "team");
+  const last = v.parts.at(-1);
   return last !== undefined && v.minds.has(last[0] + last[1] - 1);
 }
 
@@ -754,7 +758,7 @@ function view_entry(v: View, msg: Server & { $: "entry" }): void {
   if (sent === true && id !== undefined) {
     v.sent = [...v.sent, id];
   }
-  const last = v.parts.findLast(([at]) => v.whole.get(at)?.kind !== "team");
+  const last = v.parts.at(-1);
   if (id !== undefined) {
     view_whole(v, id, entry);
     for (let k = 0; k < (entry.pages ?? 1); k++) {
@@ -910,7 +914,7 @@ function woken(v: View): boolean {
 }
 
 export function link_send(v: View, msg: Client, done = (a: Answer) => link_note(v, a), said = ""): void {
-  const to = msg.$ === "say" ? { agent: v.agent } : {};
+  const to = msg.$ === "say" || msg.$ === "import" ? { agent: v.agent } : {};
   v.out.push({ msg: { id: uuid(), ...msg, ...to }, ws: null, done, said });
   v.flush();
 }
@@ -936,8 +940,8 @@ export async function post(url: string, body: object, auth: Record<string, strin
 }
 
 // one message is shown as itself, never as a fold of one (#120), a team
-// copy not at all (#134); two and more are a fold till opened, which
-// shows its two halves
+// copy from before 41 as its line; two and more are a fold till opened,
+// which shows its two halves
 // a message split in memory shows whole, once, at the first of its pages
 // shown whole (drawn: those shown so far); a fold counts messages (#151)
 function part_rows(v: View, id: number, n: number, t: number, drawn: Set<number>): Row[] {
@@ -946,7 +950,7 @@ function part_rows(v: View, id: number, n: number, t: number, drawn: Set<number>
   const entry = v.whole.get(at);
   const half  = n / 2;
   if (n === 1 && entry?.kind === "team") {
-    return [];
+    return sum_rows(id, 1, 1, v.nodes.get(key));
   }
   if (n === 1 && entry !== undefined) {
     const minds = id < t || v.thinking === false ? [] : v.minds.get(id) ?? [];

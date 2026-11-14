@@ -31,7 +31,7 @@ import SUBS from "./prompts/subs.md" with { type: "text" };
 import TALKING from "./prompts/talking.md" with { type: "text" };
 import TEAM from "./prompts/team.md" with { type: "text" };
 import TURN from "./prompts/turn.md" with { type: "text" };
-import LEAD from "./prompts/lead.md" with { type: "text" };
+import LEADER from "./prompts/leader.md" with { type: "text" };
 import YOU from "./prompts/you.md" with { type: "text" };
 
 // the fixed prompts, each read from its file in config.SHARE, which the
@@ -39,10 +39,9 @@ import YOU from "./prompts/you.md" with { type: "text" };
 // every agent's system prompt (prompt), the compaction prompt, every
 // summary's and nothing else (compact; after upstream #37 by @tinqr: with
 // one prompt for both, a turn sometimes came back a summary), the parts
-// the system prompt is laid out with, the main agent's and other agents' default
-// prompts, the goal check's, and the fixed text of each turn's and each
-// compaction's request
-const BUILT = { agent: AGENT, compact: COMPACT, "compact-agent": COMPACT_AGENT, continue: CONTINUE, device: DEVICE, "device-shell": DEVICE_SHELL, devices: DEVICES, "devices-none": DEVICES_NONE, "go-on": GO_ON, goal: GOAL, "goal-ask": GOAL_ASK, "goal-no": GOAL_NO, jobs: JOBS, leaf: LEAF, merge: MERGE, message: MESSAGE, "message-working": MESSAGE_WORKING, "not-summarized": NOT_SUMMARIZED, over: OVER, prompt: PROMPT, restarted: RESTARTED, senders: SENDERS, skills: SKILLS, steer: STEER, sub: SUB, "sub-folder": SUB_FOLDER, "sub-prompt": SUB_PROMPT, subs: SUBS, talking: TALKING, team: TEAM, turn: TURN, lead: LEAD, you: YOU };
+// the system prompt is laid out with, an agent's default prompt, the goal
+// check's, and the fixed text of each turn's and each compaction's request
+const BUILT = { agent: AGENT, compact: COMPACT, "compact-agent": COMPACT_AGENT, continue: CONTINUE, device: DEVICE, "device-shell": DEVICE_SHELL, devices: DEVICES, "devices-none": DEVICES_NONE, "go-on": GO_ON, goal: GOAL, "goal-ask": GOAL_ASK, "goal-no": GOAL_NO, jobs: JOBS, leaf: LEAF, merge: MERGE, message: MESSAGE, "message-working": MESSAGE_WORKING, "not-summarized": NOT_SUMMARIZED, over: OVER, prompt: PROMPT, restarted: RESTARTED, senders: SENDERS, skills: SKILLS, steer: STEER, sub: SUB, "sub-folder": SUB_FOLDER, "sub-prompt": SUB_PROMPT, subs: SUBS, talking: TALKING, team: TEAM, turn: TURN, leader: LEADER, you: YOU };
 
 export type Which = keyof typeof BUILT;
 

@@ -26,13 +26,13 @@ const COMPACTION_MICRO_USD_FIT = { base: 187, per_source_doubling: 735, per_summ
 
 const PIECE_KEPT_AS_BLOB = 2 ** 20;
 
-export const OLD = "Nothing new: these chats are in the main agent's memory already.";
+export const OLD = "Nothing new: these chats are in this agent's memory already.";
 
 const NOT_EXPORT = "Not a Claude or ChatGPT export.";
 
 export const MIDWAY = "Meanwhile, Ki can answer with a partial tree.";
 
-export const DONE = "Your past chats are in the main agent's memory: ask about them any time.";
+export const DONE = "Your past chats are in this agent's memory: ask about them any time.";
 
 const DAY   = new Intl.DateTimeFormat("en-US", { month: "short", day: "2-digit", year: "numeric" });
 const COUNT = new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 0 });

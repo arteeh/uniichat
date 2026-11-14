@@ -1,10 +1,9 @@
 // The installers run this with the new ki as bun (BUN_BE_BUN=1), with no
 // server on DIR, after unii's data moved there: it gives the data ki's
 // names. unii.db becomes ki.db; the main agent keeps its id unii and its
-// folder agents/unii, and gets the lead field (it sees every agent's chat),
-// its picture "unii" becomes "logo"; in every agent's memory the kind
-// "unii" becomes "reply" (in ki's own files only: the user's are left as
-// they are). Memory indexes of changed streams are removed:
+// folder agents/unii, and its picture "unii" becomes "logo"; in every
+// agent's memory the kind "unii" becomes "reply" (in ki's own files only:
+// the user's are left as they are). Memory indexes of changed streams are removed:
 // ki rebuilds them at its next start. Each step is skipped once done, so a
 // run stopped halfway goes on where it stopped. With CONF (ki's config
 // folder), a device's saved work folder that was unii's default moves too.
@@ -31,14 +30,10 @@ const agents = path.join(dir, "agents");
 if (there(path.join(dir, "ki.db")) || there(path.join(agents, "unii"))) {
   const db = new Database(path.join(dir, "ki.db"));
   // as Team.ts makes it; 39 had none: 40.rc's ki made it at its first start
-  db.run("create table if not exists agents (id text primary key, name text not null, about text not null, picture text not null, prompt text, lead integer not null default 0, archived integer not null default 0, made integer not null, unread integer not null default 0)");
-  if (!db.query("pragma table_info(agents)").all().some((c) => c.name === "lead")) {
-    db.run("alter table agents add column lead integer not null default 0");
-  }
+  db.run("create table if not exists agents (id text primary key, name text not null, about text not null, picture text not null, prompt text, archived integer not null default 0, made integer not null, unread integer not null default 0)");
   if (there(path.join(agents, "unii"))) {
-    db.run("insert or ignore into agents (id, name, about, picture, prompt, made) values ('unii', 'Unii', 'Executive assistant: automatically keeps track of the whole team.', 'unii', null, 0)");
+    db.run("insert or ignore into agents (id, name, about, picture, prompt, made) values ('unii', 'Unii', 'The user''s assistant.', 'unii', null, 0)");
   }
-  db.run("update agents set lead = 1 where id = 'unii' and not exists (select 1 from agents where lead = 1)");
   db.run("update agents set picture = 'logo' where picture = 'unii'");
   db.close();
 }

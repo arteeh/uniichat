@@ -6,6 +6,7 @@ import type { Vendor } from "./AskAI.ts";
 import { err_code, err_why } from "./Err.ts";
 import { get, list as items, rec, text_of } from "./Json.ts";
 import { EFFORTS, LABELS, VENDORS, Pick, type Fall, type Offer } from "./Pick.ts";
+import { write_whole } from "./Write.ts";
 
 type ServerOnly = "runs a command";
 
@@ -21,6 +22,7 @@ type Made = {
   after     : string;
   hops      : number;
   thinking  : boolean;
+  off       : string[];
 };
 
 export type McpServer = {
@@ -106,6 +108,8 @@ export let   PICK       = MADE.pick;
 
 export let   COMPACTOR  = MADE.compactor;
 export let   COMPACTOR_CONTEXT = MADE.context;
+// the MCP servers switched off in Settings, for every agent (config.json's mcp_off)
+export let   MCP_OFF    = MADE.off;
 
 
 export const MEDIA_MAX  = (Number(config_get("media_mb", "")) || 1024) * 2 ** 20;
@@ -295,7 +299,20 @@ export function config_make(file: Record<string, unknown>): Made {
     after     : config_value(file, "after"),
     hops      : config_hops(config_value(file, "hops")),
     thinking  : config_value(file, "thinking") === "on",
+    off       : items(file.mcp_off).filter((name): name is string => typeof name === "string"),
   };
+}
+
+export function config_mcp_off(off: string[]): void {
+  const next = { ...config_file() };
+  if (off.length === 0) {
+    delete next.mcp_off;
+  } else {
+    next.mcp_off = off;
+  }
+  const mode = fs.existsSync(FILE_PATH) ? fs.statSync(FILE_PATH).mode & 0o777 : 0o600;
+  write_whole(FILE_PATH, JSON.stringify(next, null, 2) + "\n", mode);
+  config_reload();
 }
 
 function config_hops(text: string): number {
@@ -455,6 +472,7 @@ export function config_reload(): void {
   AFTER = made.after;
   HOPS = made.hops;
   THINKING = made.thinking;
+  MCP_OFF = made.off;
   Object.assign(KEYS, keys);
   RELOADED.forEach((f) => f());
 }
