@@ -1,6 +1,7 @@
 - **No unit tests.** Don't add `*.test.ts` files or a test runner.
 - **Test like a user.** Run your change the way a real user would use it: run ki in an isolated container, with the user's state copied over (NOT mounted) if needed, and use the software there. Test the web UI using [playwright-cli](https://www.npmjs.com/package/@playwright/cli).
 - `bun run check` (tsc, eslint, knip) must finish with 0 errors.
+- **No dead code.** What your change leaves unused (code, a setting, a type's case, a text, a CSS rule, a file) goes in the same commit. Dead code or a bug you come across anywhere is fixed in the version you work on, not left for a later one. knip finds unused exports and namespace members, not an option no caller passes or a rule no page uses: look for those yourself.
 - The first commit of every version updates every dependency to its latest version: `package.json` and `bun.lock`, and Bun itself (`testing/Containerfile`, the release builds).
 - `web/app.js` is generated and not committed: run `bun run web` after changing `web/src`.
 - Don't write docs into the codebase. The readme and code speak for themselves. The README is for users: what Ki does and how to use it. Don't describe the codebase. Change it only when using the app changes, and keep that to a line or two.
