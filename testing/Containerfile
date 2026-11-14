@@ -1,12 +1,12 @@
 FROM docker.io/library/ubuntu:24.04
 ENV DEBIAN_FRONTEND=noninteractive
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl unzip xz-utils openssl git procps tmux \
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl unzip xz-utils openssl git procps tmux libatomic1 \
     && rm -rf /var/lib/apt/lists/*
 RUN arch=$(dpkg --print-architecture | sed 's/amd64/x64/') \
-    && curl -fsSL https://nodejs.org/dist/v22.23.3/node-v22.23.3-linux-$arch.tar.xz | tar -xJ -C /usr/local --strip-components=1
+    && curl -fsSL https://nodejs.org/dist/v26.13.1/node-v26.13.1-linux-$arch.tar.xz | tar -xJ -C /usr/local --strip-components=1
 ENV BUN_INSTALL=/opt/bun PATH=/opt/bun/bin:$PATH PLAYWRIGHT_BROWSERS_PATH=/opt/pw
 RUN curl -fsSL https://bun.sh/install | bash -s bun-v1.4.4
-RUN npm install -g @playwright/cli@0.1.23 && npx -y playwright install-deps chromium && playwright-cli install-browser chromium
+RUN npm install -g @playwright/cli@0.1.24 && npx -y playwright install-deps chromium && playwright-cli install-browser chromium
 WORKDIR /deps
 COPY package.json bun.lock ./
 RUN bun install --frozen-lockfile
