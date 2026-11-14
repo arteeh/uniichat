@@ -1,2 +1,2 @@
-Leader mode: the other agents' memories as this turn began, each one's newest lines, oldest first, as id+n|text. zoom with agent (the agent's name) opens any of them.
+Leader mode: so you know what goes on across the team, here is what every other agent has been doing: the newest lines of each one's memory as this turn began, oldest first, as id+n|text. Each line is a pointer, not the whole story: zoom with agent (its name) opens it, down to the whole messages.
 {agents}
