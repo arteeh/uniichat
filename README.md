@@ -9,14 +9,15 @@ Features
 - **A memory system that keeps everything.** Messages are summarized into a tree that the agent sees every turn: recent messages in detail, older ones more broadly. It can zoom into any line, down to the original message.
 - **All your computers.** Run `ki device` on a machine and the agent can run commands and edit files there.
 - **Claude and ChatGPT plans** as vendors (`claude-sub`, `openai-sub`) beside API keys; profiles that fall back to the next model when one is out; auto-resume after hitting usage limits.
-- **Multiple agents** so each one can have specific knowledge
-- **Memory tree viewer** to browse what your agent knows.
-- **MCP servers** per device.
-- **Skills** read from the ~/.agents/skills folder.
+- **Multiple agents** so each one can have specific knowledge.
+- **Subagents** to delegate grunt work while the agent keeps the big picture.
 - **Scheduling tools** to give your agent future or repeating tasks.
+- **Memory tree viewer** to browse what your agent knows.
 - **Image and video viewing tools** to let the agent see images and video files.
 - **Images, video, audio and HTML pages inline** for the agent to show you things, or for you to show the agent.
 - **Conversation mode** for when you want a short continuous back-and-forth without the agent forgetting anything you said (shout out to /grill-me!).
+- **MCP servers** per device. Ask your agent to set them up on your preferred device.
+- **Skills** read from the ~/.agents/skills folder.
 - **An installable web app (PWA)** on phones and desktops: icons, an offline shell, Web Push for replies, a nav bar that shows on Android; the composer stays above a phone's keyboard.
 - **Don't start from scratch.** Import past conversations from either Claude Code, Codex or another Ki instance into your memory tree.
 
@@ -36,7 +37,7 @@ Either way you get one `ki` program (in `~/.local/bin`, or `%LOCALAPPDATA%\Progr
 Set up
 ------
 
-1. **Start the server** on the computer (preferably one that's reachable and on 24/7) that keeps your chat: `ki serve -d`. It runs in the background from then on, at http://127.0.0.1:8788, with its data in `~/.ki` (or `$KI_DIR`).
+1. **Start the server** on the computer (preferably one that's reachable and on 24/7) that keeps your chat: `ki serve -d`. It runs in the background from then on, at http://127.0.0.1:8788, with its data in `~/.ki` (or `$KI_DIR`). See the Q&A if you want to set up a client on another device right away.
 2. **Sign in.** `ki serve link` on that computer prints a link that signs your browser in. Devices sign in with a link and a code you confirm in that browser.
 3. **Pick a model.** In the web app, Settings (the cogwheel): add API keys. To use your Claude or ChatGPT plan instead, run `ki serve claude login` or `ki serve chatgpt login` on the server's computer, then pick `claude-sub` or `openai-sub`.
 4. **Add your computers.** On each one Ki may work on: `ki device -d https://your-server`. Ki works in `~/.ki/work` there. Want it working on the server's computer too? Run a device there as well.
@@ -48,7 +49,7 @@ Use
 
 - **Web UI:** open the server's address. Install it as an app from your browser to get notifications when Ki replies.
 - **Agents:** **+** in the chat list makes another agent, with its own chat, memory and editable system prompt.
-- **Leader:** If you want an agent that automatically knows everything that goes on between all agents, go to the agent's settings and enable Leader Mode.
+- **Leader:** If you want an agent that automatically knows where the other agents are at, go to the agent's settings and enable Leader Mode. A leader will see the most recent memory of each agent.
 - **Conversation mode:** the mode menu left of the model picker. From then on, your and the agent's messages stay word for word in its context, for a real back-and-forth. It costs more per turn and turns itself off when the model's context window fills up.
 - `ki help` lists every command.
 
@@ -92,9 +93,9 @@ Be aware of the risks. Your agent will have the power to break your computer, an
 
 No: a server has one owner. Anthropic and OpenAI don't allow sharing a subscription.
 
-**Coming from UniiChat (`unii`)?**
+**Coming from UniiChat?**
 
-We've accounted for some migrations from other versions, but too much has changed under the hood for it to be a simple `unii update`. Ask your agent to do the migration for you.
+We've accounted for some migrations from other versions (especially older versions of this fork), but too much has changed under the hood for it to be a simple `unii update`. Ask your agent to do the migration for you.
 
 License
 -------
