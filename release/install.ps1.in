@@ -40,7 +40,7 @@
 # agent's memory in the agent team; chat stays as it was), with the server
 # stopped while it copies. Every time, data from an older ki is brought to
 # this version's layout (upgrade.js, by the new ki.exe as bun: each step
-# once, a running server's data too, as every step only adds).
+# once, with ki's server stopped meanwhile, and started again after).
 # It ends setting $LASTEXITCODE (0: installed, 1: not), never `exit`:
 # run by `irm | iex`, an exit would close your PowerShell window.
 
@@ -286,8 +286,19 @@
     $halted = @()
     $chat = Join-Path $cur 'chat'
     $copying = (Test-Path -LiteralPath $chat) -and -not (Test-Path -LiteralPath (Join-Path $cur 'agents\unii'))
-    if ($renaming -or $copying) {
-      $halted = @('serve', 'device' | ForEach-Object { & $task "ki-$_" } | Where-Object { $_ -and ([string]$_.Description -match 'ki-made') -and ([string]$_.State -eq 'Running') })
+    $upgrading = $false
+    if (Test-Path -LiteralPath $cur -PathType Container) {
+      $env:BUN_BE_BUN = '1'
+      try { & $exe $upgrade check $cur } finally { Remove-Item Env:\BUN_BE_BUN -ErrorAction SilentlyContinue }
+      if ($LASTEXITCODE -eq 3) { $upgrading = $true } elseif ($LASTEXITCODE -ne 0) { throw "nothing changed; ki $Ver was not installed." }
+    }
+    if ($renaming -or $copying -or $upgrading) {
+      # a layout step alone stops the server only: a device keeps no data there
+      $which = $(if ($renaming -or $copying) { @('serve', 'device') } else { @('serve') })
+      if (-not ($renaming -or $copying) -and ($mine -match '\s"?serve"?(\s|$)')) {
+        throw "your data must move with no ki server running, and this runs in a shell of ki-serve, which stopping would end. Nothing changed, and ki $Ver was not installed: run this installer in a terminal."
+      }
+      $halted = @($which | ForEach-Object { & $task "ki-$_" } | Where-Object { $_ -and ([string]$_.Description -match 'ki-made') -and ([string]$_.State -eq 'Running') })
       # the tasks stopped, started again: "Nothing changed", else which
       # stay stopped and how to start them
       $restart = {

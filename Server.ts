@@ -124,7 +124,7 @@ const SCRATCH_SWEEP = 24 * 3600e3;
 const AGENTS     = config.DIR + "/agents";
 // the data's layout, as release/upgrade.js writes it
 const LAYOUT     = config.DIR + "/layout";
-const LAYOUT_NOW = 41;
+const LAYOUT_NOW = 42;
 const TALK_FULL  = "Conversation mode switched itself off: it was full.";
 const TALK_SMALL = "Conversation mode switched itself off: too long for {model}.";
 const TALK_LONG  = "Conversation mode switched itself off: {model} refused the turn as too long.";
@@ -1931,15 +1931,16 @@ export namespace Main {
   }
 
   // /media/<agent>/<name> and /image/<agent>/<name>: a file in that agent's
-  // store; the same without the agent (links from before 41): in any
-  // agent's, as a name is its file's hash (#169)
+  // store, else in any agent's (that agent deleted, or the file is with the
+  // agent whose memory has the link, #174), as a name is its file's hash;
+  // without the agent (links from before 41): in any agent's (#169)
   export function stored(url: string): string | null {
     const m = /^\/(media|image)\/(?:([a-z0-9]{1,16})\/)?([^/]+)$/.exec(url);
     if (m === null) {
       return null;
     }
     const [, kind, id, name] = m;
-    const chats = id === undefined ? Team.all().flatMap((a) => Main.chats.get(a.id) ?? []) : [Main.chats.get(id) ?? []].flat();
+    const chats = [...(id === undefined ? [] : [Main.chats.get(id) ?? []].flat()), ...Team.all().flatMap((a) => Main.chats.get(a.id) ?? [])];
     for (const chat of chats) {
       const file = kind === "media" ? Memory.media_file(chat.mem, name) : Memory.image_file(chat.mem, name);
       if (file !== null) {

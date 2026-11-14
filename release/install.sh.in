@@ -37,7 +37,7 @@
 # kept. A move stopped halfway (a crash, a full disk) goes on where it
 # stopped when this runs again. Every time, data from an older ki is
 # brought to this version's layout (upgrade.js, by the new ki as bun: each
-# step once, a running server's data too, as every step only adds).
+# step once, with ki's server stopped meanwhile, and started again after).
 set -eu
 
 VER="@VER@"
@@ -542,17 +542,30 @@ if [ -n "$renaming" ]; then
 fi
 copying=""
 if [ -d "$cur/chat" ] && [ ! -e "$cur/agents/unii" ]; then copying=1; fi
+upgrading=""
+if [ -d "$cur" ]; then
+  rc=0
+  BUN_BE_BUN=1 "$new_ki" "$tmp/upgrade.js" check "$cur" || rc=$?
+  case $rc in
+    0) ;;
+    3) upgrading=1;;
+    *) fail "nothing changed; ki $VER was not installed.";;
+  esac
+fi
 
 # no server may run on the data while it moves: the services that run
 # stop till it's done (not ki's own from its own shell: that stop would
-# end this; unii's are left above)
-if [ -n "$need$renaming$copying" ]; then
-  for s in $made; do
+# end this; unii's are left above). A layout step alone stops the server
+# only: a device keeps no data there
+if [ -n "$need$renaming$copying$upgrading" ]; then
+  halt=$made
+  [ -n "$need$renaming$copying" ] || halt=$(for s in $made; do [ "$s" != ki-serve ] || printf ' %s' "$s"; done)
+  for s in $halt; do
     if inside "$s" "$dir"; then
       fail "your data must move with no ki server running, and this runs in a shell of $s, which stopping would end. Nothing changed, and ki $VER was not installed: run this installer in a terminal."
     fi
   done
-  stopped_list="$oldrun $made"
+  stopped_list="$oldrun $halt"
   if [ -n "${stopped_list# }" ]; then
     stopped=1
     svc stop $stopped_list
@@ -722,10 +735,14 @@ rm -f "$dir/.renaming"
 first="" last=""
 for s in $made; do if inside "$s" "$dir"; then last="$last $s"; else first="$first $s"; fi; done
 made="$first$last"
+back="" rest=""
+for s in $made; do case " ${stopped:+$stopped_list} " in *" $s "*) back="$back $s";; *) rest="$rest $s";; esac; done
 if [ -n "$made" ]; then
-  if [ -n "$stopped" ]; then w=start; echo "  Starting$made again, on ki $VER."; else w=restart; echo "  Restarting$made on ki $VER."; fi
+  [ -z "$back" ] || echo "  Starting$back again, on ki $VER."
+  [ -z "$rest" ] || echo "  Restarting$rest on ki $VER."
   stopped=""
   rm -rf "$tmp"
-  svc $w $made || echo "  Could not $w$made: run ki serve -d (or ki device -d) to."
+  [ -z "$back" ] || svc start $back || echo "  Could not start$back: run ki serve -d (or ki device -d) to."
+  [ -z "$rest" ] || svc restart $rest || echo "  Could not restart$rest: run ki serve -d (or ki device -d) to."
 fi
 stopped=""
