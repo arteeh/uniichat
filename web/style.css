@@ -407,7 +407,6 @@ header > .imping { display: flex; flex-direction: column; justify-content: cente
 @media (pointer: coarse) {
   :is(header > :is(button, a), #pick > button, #tree .tab) { position: relative; }
   :is(header > :is(button, a), #pick > button, #tree .tab, .mine, .down, .copy)::after { content: ""; position: absolute; left: 50%; top: 50%; width: max(100%, 44px); height: max(100%, 44px); transform: translate(-50%, -50%); }
-  .foot a { padding: 14px 0; }
   .chip { height: 44px; }
   [popover] > button { min-height: 44px; }
   [popover] > a { padding: 11px 4px; }
@@ -497,9 +496,6 @@ header > .imping { display: flex; flex-direction: column; justify-content: cente
 .item small { display: block; font-size: 13.5px; font-weight: 400; color: var(--mid); overflow-wrap: anywhere; }
 #account .notify:disabled { opacity: .4; cursor: default; }
 .prompt.bad .why { color: var(--red); }
-#account .foot { margin: 24px 0 0; font-size: 13px; color: var(--mid); }
-#account .foot a { text-decoration: none; }
-@media (hover: hover) { #account .foot a:hover { text-decoration: underline; } } @media (hover: none) { #account .foot a:active { text-decoration: underline; } }
 
 #intro { position: fixed; inset: 0; z-index: 9; display: grid; place-items: center; background: var(--paper); color: var(--ink); cursor: pointer; transition: opacity .6s ease; animation: hold 3.05s; }
 #intro.out { opacity: 0; pointer-events: none; }

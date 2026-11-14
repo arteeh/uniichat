@@ -318,10 +318,6 @@ export namespace Memory {
     return data.split("\n").flatMap((line) => (Memory.parse(line, file) as Root | null) ?? []);
   }
 
-  export function file_text(file: string): string {
-    return fs.existsSync(file) ? fs.readFileSync(file, "utf8").trim() : "";
-  }
-
   export function parse(line: string, file: string): unknown {
     try {
       return JSON.parse(line) as unknown;

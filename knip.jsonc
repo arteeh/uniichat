@@ -3,6 +3,8 @@
   // what Build.ts compiles, the page's script (bun run web), and the test rig's fake models; Build.ts itself comes from the build script
   "entry": ["Cli.ts", "web/src/main.ts", "testing/fake/server.ts", "testing/fake/fake.ts"],
   "project": ["*.ts", "web/src/*.ts", "testing/fake/*.ts"],
+  // the default leaves out a namespace's members, and every module's functions are in one
+  "include": ["files", "dependencies", "devDependencies", "unlisted", "binaries", "unresolved", "exports", "nsExports", "types", "nsTypes", "enumMembers", "namespaceMembers", "duplicates"],
   // macOS's own: Device.ts asks it the computer's name
   "ignoreBinaries": ["scutil"]
 }
