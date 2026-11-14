@@ -1,34 +1,24 @@
-Ki
-==
+<img width="1266" height="663" alt="ki-screenshot" src="https://github.com/user-attachments/assets/35b5c75d-cae8-4892-8a49-30f25cf53880" />
 
-Ki is an AI agent with one chat that never ends. There is no "new chat" button: you talk to the same agent for days, weeks, years, and it remembers.
-
-Ki started from [Victor Taelin's UniiChat](https://github.com/VictorTaelin/uniichat).
+Ki is an AI agent with one chat that never ends. There is no "new chat" button: you talk to the same agent for days, weeks, years, and it remembers. Ki is a fork of [Victor Taelin's UniiChat](https://github.com/VictorTaelin/uniichat).
 
 Features
 --------
 
-- **One chat, forever.** No new chats or sessions. Every tab and phone shows the same live chat.
+- **One chat, forever.** Forget about sessions or context engineering. Just talk to your agent, from any device.
 - **A memory system that keeps everything.** Messages are summarized into a tree that the agent sees every turn: recent messages in detail, older ones more broadly. It can zoom into any line, down to the original message.
 - **All your computers.** Run `ki device` on a machine and the agent can run commands and edit files there.
-- **Goals.** `/goal` keeps Ki working until something is done.
-- **Don't start from scratch.** Import past conversations from either Claude Code, Codex or another Ki instance into your memory tree.
 - **Claude and ChatGPT plans** as vendors (`claude-sub`, `openai-sub`) beside API keys; profiles that fall back to the next model when one is out; auto-resume after hitting usage limits.
-- **Native Windows**: server and devices, with a one-line PowerShell install.
+- **Multiple agents** so each one can have specific knowledge
+- **Memory tree viewer** to browse what your agent knows.
 - **MCP servers** per device.
 - **Skills** read from the ~/.agents/skills folder.
 - **Scheduling tools** to give your agent future or repeating tasks.
-- **Image and video viewing tools** to let it see images and video files.
-- **Settings page** for the server's models, keys and profiles.
-- **Improved memory tree viewer** to browse what your agent knows.
-- **Full markdown** as GitHub draws it.
+- **Image and video viewing tools** to let the agent see images and video files.
 - **Images, video, audio and HTML pages inline** for the agent to show you things, or for you to show the agent.
-- **Conversation mode** for when you want a short continuous back-and-forth without the agent forgetting anything you said.
+- **Conversation mode** for when you want a short continuous back-and-forth without the agent forgetting anything you said (shout out to /grill-me!).
 - **An installable web app (PWA)** on phones and desktops: icons, an offline shell, Web Push for replies, a nav bar that shows on Android; the composer stays above a phone's keyboard.
-- **One owner per server**, no accounts, email or billing; `ki serve sessions` and `ki serve sessions revoke` to sign a lost device out.
-- **Background services** (`-d`, `stop`, `logs`) that updates restart.
-- **No telemetry or update checker**: `ki update` when you want it.
-- **Better defaults**: Sonnet 5.5 medium does the compaction, seeing 4 KB of chat around each message (was Haiku 5.5 high with 32 KB), so summaries make up less.
+- **Don't start from scratch.** Import past conversations from either Claude Code, Codex or another Ki instance into your memory tree.
 
 Install
 -------
@@ -43,51 +33,23 @@ Windows (PowerShell, no admin needed):
 
 Either way you get one `ki` program (in `~/.local/bin`, or `%LOCALAPPDATA%\Programs\ki` on Windows). `ki update` installs the newest release and restarts the background services on it.
 
-**Checked install.** The install scripts are signed with our release key, `ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDi2iNrvJ9QpK2nKoXZd75UgL4VGFmcdGpK6KdlXLHEC`; `ki update` checks it before it runs one. To check yourself first (ssh-keygen comes with Linux, macOS and Windows 10/11):
-
-Linux, macOS or WSL:
-
-`curl -fsSLO https://github.com/arteeh/ki/releases/latest/download/install.sh -O https://github.com/arteeh/ki/releases/latest/download/install.sh.sig && echo "ki ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDi2iNrvJ9QpK2nKoXZd75UgL4VGFmcdGpK6KdlXLHEC" > ki.signers && ssh-keygen -Y verify -f ki.signers -I ki -n ki-install.sh -s install.sh.sig < install.sh && sh install.sh`
-
-Windows (PowerShell):
-
-`$b = "https://github.com/arteeh/ki/releases/latest/download"; irm $b/install.ps1 -OutFile install.ps1; irm $b/install.ps1.sig -OutFile install.ps1.sig; Set-Content ki.signers "ki ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDi2iNrvJ9QpK2nKoXZd75UgL4VGFmcdGpK6KdlXLHEC" -Encoding ascii; cmd /c "ssh-keygen -Y verify -f ki.signers -I ki -n ki-install.ps1 -s install.ps1.sig < install.ps1"; if ($LASTEXITCODE -eq 0) { iex (Get-Content -Raw install.ps1) }`
-
-If the release key is ever lost or leaked, `ki update` refuses the releases signed with a new one: reinstall with the lines above.
-
 Set up
 ------
 
-1. **Start the server** on the computer that keeps your chat: `ki serve -d`. It runs in the background from then on, at http://127.0.0.1:8788, with its data in `~/.ki` (or `$KI_DIR`). To use it from other devices, put it behind HTTPS (see Q&A) and set `site` in Settings to that address.
+1. **Start the server** on the computer (preferably one that's reachable and on 24/7) that keeps your chat: `ki serve -d`. It runs in the background from then on, at http://127.0.0.1:8788, with its data in `~/.ki` (or `$KI_DIR`).
 2. **Sign in.** `ki serve link` on that computer prints a link that signs your browser in. Devices sign in with a link and a code you confirm in that browser.
 3. **Pick a model.** In the web app, Settings (the cogwheel): add API keys. To use your Claude or ChatGPT plan instead, run `ki serve claude login` or `ki serve chatgpt login` on the server's computer, then pick `claude-sub` or `openai-sub`.
 4. **Add your computers.** On each one Ki may work on: `ki device -d https://your-server`. Ki works in `~/.ki/work` there. Want it working on the server's computer too? Run a device there as well.
 
-**MCP servers** belong to a device: list them in that device's `~/.ki/config.json`, in the same shape as Claude's `mcpServers`:
-
-```json
-{
-  "mcp": {
-    "blender": {
-      "command": "uvx",
-      "args": ["blender-mcp"]
-    }
-  }
-}
-```
-
-Ki sees them from its next turn, no restart. Switch them on or off in Settings.
-
-**In the background**, `-d` runs the server or a device as a service of your user (systemd on Linux, a Scheduled Task on Windows, a LaunchAgent on macOS): it starts at login and restarts if it crashes. `ki serve stop` / `ki device stop` removes it, `logs -f` follows its output. On Linux, `loginctl enable-linger` keeps it running while you're logged out. On Windows, `sudo ki device -d` offers to run it as administrator, so Ki can control apps that run as admin; then `sudo ki device stop` removes it.
-
-**Settings** are mostly on the Settings page. They're kept in `~/.ki/config.json`, where `KI_<KEY>` environment variables override them. One lives only there: `after`, a shell command to run after each turn.
+**In the background**, `-d` runs the server or a device as a service as your user (systemd on Linux, a Scheduled Task on Windows, a LaunchAgent on macOS): it starts at login and restarts if it crashes. `ki serve stop` / `ki device stop` removes it, `logs -f` follows its output. On Linux, `loginctl enable-linger` keeps it running while you're logged out. On Windows, `sudo ki device -d` offers to run it as administrator, so Ki can control apps that run as admin; then `sudo ki device stop` removes it.
 
 Use
 ---
 
-- **Web:** open the server's address. Install it as an app from your browser to get notifications when Ki replies.
-- **Agents:** **+** in the chat list makes another agent, with its own chat, memory and prompt; agents can message each other, and one in Leader mode (in its settings) sees what all the others do. Each agent can spawn subagents for one-off tasks (a review, a search): they show under it in the chat list, report back once, and are done.
-- **Conversation mode:** the mode menu left of the model picker. From then on, your and Ki's messages stay word for word in Ki's memory, for a real discussion. It costs more per turn and turns itself off when the model's context window fills up.
+- **Web UI:** open the server's address. Install it as an app from your browser to get notifications when Ki replies.
+- **Agents:** **+** in the chat list makes another agent, with its own chat, memory and editable system prompt.
+- **Leader:** If you want an agent that automatically knows everything that goes on between all agents, go to the agent's settings and enable Leader Mode.
+- **Conversation mode:** the mode menu left of the model picker. From then on, your and the agent's messages stay word for word in its context, for a real back-and-forth. It costs more per turn and turns itself off when the model's context window fills up.
 - `ki help` lists every command.
 
 From source (Bun): `bun install`, `bun run web`, `bun Cli.ts <command>`, `bun run build` for a single `ki` program.
@@ -117,24 +79,22 @@ You enjoy pressing enter?
 
 **How can I reach Ki from outside my home network?**
 
-With Tailscale: ask Ki to set up Tailscale Serve on HTTPS port 443, pointing at `ki serve`. Only your own Tailscale devices can reach it, not the whole internet.
+With Tailscale: ask your agent to set up Tailscale Serve on HTTPS port 443, pointing at `http://127.0.0.1:8788`. Only your own Tailscale devices can reach it, not the whole internet.
 
 **How can i give Ki administrator rights?**
 
 - Linux: set up passwordless sudo (run `sudo visudo` and then add the line `your_username ALL=(ALL) NOPASSWD: ALL`).
 - Windows: run `sudo ki device -d` and be sure to enable the sudo option in settings when it prompts you.
 
+Be aware of the risks. Your agent will have the power to break your computer, and potential vulnerabilities in Ki will leave your devices more exposed.
+
 **Can others use my server?**
 
-No: a server has one owner. Anthropic and OpenAI don't allow sharing a plan, either.
+No: a server has one owner. Anthropic and OpenAI don't allow sharing a subscription.
 
 **Coming from UniiChat (`unii`)?**
 
-Run the install line (or `unii update`) on every computer that has it: it stops and removes the `unii` services, moves `~/.unii` to `~/.ki` and `~/.config/unii` to `~/.config/ki`, replaces `unii` with `ki` and starts the `ki` services where `unii` ones ran. Your agents keep their names. Settings given as `UNII_*` environment variables are read as `KI_*` now. An installed phone or desktop app keeps its old name until you install it again; its notifications keep working.
-
-**Upgrading from arteeh.16 or older?**
-
-Stop the server first (`systemctl --user stop unii-serve`), run the installer, then start it again: it moves your data to the new layout. Run `ki device` on each computer Ki should work on.
+We've accounted for some migrations from other versions, but too much has changed under the hood for it to be a simple `unii update`. Ask your agent to do the migration for you.
 
 License
 -------
