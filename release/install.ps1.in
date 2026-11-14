@@ -52,6 +52,8 @@
   $Sums = @{ 'x64' = '@SUM_windows-x64@'; 'arm64' = '@SUM_windows-arm64@' }
   $Self = "$Base/install.ps1"
   $tmp = $null
+  # the tasks this stopped, which a failure starts again (as install.sh does)
+  $stopped = @()
   try {
     if ([Environment]::OSVersion.Platform -ne 'Win32NT') {
       throw "this installer is Windows'; on Linux or macOS: curl -fsSL $Base/install.sh | sh"
@@ -324,6 +326,7 @@
       if (& $live) {
         throw ("your data must move with no server running, but one still runs on it (its pid is in $cur\server.pid). " + (& $restart (@($olds | Where-Object { [string]$_.State -eq 'Running' }) + $halted)) + ", and ki $Ver was not installed: stop it, run this again, then start it.")
       }
+      $stopped = @($done)
     }
 
     # unii's own become ki's: the data and sign-ins move, unii's tasks give
@@ -342,6 +345,9 @@
         New-Item -ItemType Directory -Force -Path $cur | Out-Null
         New-Item -ItemType File -Path $mark | Out-Null
       }
+      # unii's never start again once its data moves: a run again starts
+      # the ki tasks made from them ($fresh)
+      $stopped = @($stopped | Where-Object { @($olds | ForEach-Object { $_.TaskName }) -notcontains $_.TaskName })
       if ($moving) {
         Move-Item -LiteralPath $odir -Destination $dir
         Write-Host "  Moved $odir to $dir."
@@ -528,6 +534,7 @@
         }
       } catch {}
     }
+    $stopped = @()
     foreach ($n in @($fresh) + @($halted | ForEach-Object { $_.TaskName })) {
       Write-Host ("  Starting $n, on ki $Ver.")
       try { Start-ScheduledTask -TaskName $n -TaskPath '\' -ErrorAction Stop } catch { Write-Host ("  Could not start ${n}: run ki " + $n.Substring(3) + " -d to.") }
@@ -540,6 +547,14 @@
     }
   } catch {
     Write-Host ("ki: " + $_.Exception.Message) -ForegroundColor Red
+    foreach ($t in $stopped) {
+      try {
+        Start-ScheduledTask -TaskName $t.TaskName -TaskPath '\' -ErrorAction Stop
+        Write-Host ("  Started " + $t.TaskName + " again.")
+      } catch {
+        Write-Host ("  Could not start " + $t.TaskName + " again (" + $_.Exception.Message + "): start it with schtasks /run /tn " + $t.TaskName + $(if ([string]$t.Principal.RunLevel -eq 'Highest') { ' (as administrator)' } else { '' }) + ".")
+      }
+    }
     $global:LASTEXITCODE = 1
   } finally {
     if ($tmp) { Remove-Item -LiteralPath $tmp -Recurse -Force -ErrorAction SilentlyContinue }
