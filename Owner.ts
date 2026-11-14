@@ -116,12 +116,15 @@ export namespace Owner {
     console.log(rows.length === 0 ? "No sessions." : "Last use isn't tracked. `ki serve sessions revoke <n>` signs one out; `--all`, all.");
   }
 
-  // one code at a time: a new one replaces the one before
+  // one code at a time: a new one replaces the one before, in one write
+  // that another `ki serve login` waits for
   export function cli(): void {
     const db = Owner.open();
     const code = String(crypto.randomInt(0, 1e6)).padStart(6, "0");
-    db.query("delete from tickets where expires < ? or data ->> 'session' is null").run(Date.now());
-    db.query("insert into tickets values (?, ?, ?)").run(Owner.hash(LOGIN + code), JSON.stringify({ session: null, what: "", tries: 0 }), Date.now() + LINK);
+    db.transaction(() => {
+      db.query("delete from tickets where expires < ? or data ->> 'session' is null").run(Date.now());
+      db.query("insert into tickets values (?, ?, ?)").run(Owner.hash(LOGIN + code), JSON.stringify({ session: null, what: "", tries: 0 }), Date.now() + LINK);
+    }).immediate();
     console.log("Sign-in code: " + code + "\n\nType it on this server's sign-in page, at whatever address you open it, within 15 minutes. It works once.");
   }
 
